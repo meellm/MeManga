@@ -2,177 +2,131 @@
 
 **Automatic manga downloader with Kindle support.**
 
-Download manga chapters as PDFs, optionally send them directly to your Kindle via email.
+Track manga from multiple sources, download chapters as PDFs, and optionally send them directly to your Kindle via email.
 
 ## ✨ Features
 
-- 📚 **Track multiple manga** from different sources
-- 🔍 **Automatic chapter detection** - knows what you've already downloaded
-- 📄 **PDF output** - optimized for e-readers
-- 📧 **Email to Kindle** - automatic delivery (optional)
-- ⏰ **Cron scheduling** - daily automatic checks
-
-## 🌐 Supported Sources
-
-| Source | Type | Best For |
-|--------|------|----------|
-| **tcbonepiecechapters.com** | Requests | Jump manga (One Piece, JJK, MHA, Black Clover) |
-| **weebcentral.com** | Hybrid | Large library (1000+ manga series) |
-| **asuracomic.net** | Playwright | Manhwa / Webtoons (Solo Leveling, etc.) |
-| **mangakatana.com** | Playwright | General manga library |
-| **mangadex.org** | API | Fan translations (skip official Shueisha) |
-| **mangapill.com** | Requests | Large library, fast (no Cloudflare) |
-| **mangataro.org** | Requests | ComicK replacement, large library |
-| **mangareader.to** | Requests | Large library, clean UI |
-| **mangabuddy.com** | Requests | Popular aggregator |
-| **mangakakalot.com** | Requests | Huge library |
-| **manganato.com** | Requests | Same network as Mangakakalot |
-
-All sources tested and working as of February 2026.
-
-**Note:** MangaFire (mangafire.to) has heavy DRM protection and is not supported.
+- 📚 **Track multiple manga** from 10+ sources
+- 🔍 **Automatic updates** — knows what you've already downloaded
+- 📄 **PDF/EPUB output** — optimized for e-readers
+- 📧 **Kindle delivery** — automatic email to your device
+- ⏰ **Scheduled checks** — daily cron job support
+- 🖥️ **Cross-platform** — Windows, macOS, Linux, Raspberry Pi
 
 ## 🚀 Quick Start
 
-### Installation
-
 ```bash
+git clone https://github.com/meellm/MeManga.git
 cd MeManga
-./setup.sh
+python setup.py
 ```
 
-This creates a virtual environment and installs all dependencies including Playwright browsers.
-
-### Basic Usage
-
+Then:
 ```bash
-# Launch interactive TUI
-./run.sh
-
-# Or use CLI commands
-./run.sh add -i                    # Add manga interactively
-./run.sh list                      # List tracked manga
-./run.sh check                     # Check for new chapters
-./run.sh check --auto              # Auto-download without prompts
+./scripts/run.sh add -i      # Add manga interactively
+./scripts/run.sh check       # Check for new chapters
+./scripts/run.sh             # Launch interactive TUI
 ```
+
+> **Windows:** Use `scripts\windows\run.bat` instead of `./scripts/run.sh`
+
+## 🌐 Supported Sources
+
+| Source | Type | Notes |
+|--------|------|-------|
+| mangadex.org | API | Fan translations, largest library |
+| tcbonepiecechapters.com | Requests | Jump manga (One Piece, JJK, etc.) |
+| weebcentral.com | Hybrid | 1000+ series |
+| mangapill.com | Requests | Fast, no Cloudflare |
+| mangakatana.com | Playwright | General library |
+| mangareader.to | Requests | Clean UI |
+| asuracomic.net | Playwright | Manhwa/Webtoons |
+| mangabuddy.com | Requests | Popular aggregator |
+| mangakakalot.com | Requests | Huge library |
+| manganato.com | Requests | Mangakakalot network |
+| mangataro.org | Requests | ComicK alternative |
+
+> **Want another source?** Open an issue or reach out — happy to add more!
 
 ## 📋 Commands
 
 | Command | Description |
 |---------|-------------|
-| `./run.sh` | Launch interactive TUI |
-| `./run.sh list` | Show all tracked manga |
-| `./run.sh add -i` | Add manga interactively |
-| `./run.sh add -t "Title" -u URL` | Add manga directly |
-| `./run.sh remove <#/title>` | Remove manga from tracking |
-| `./run.sh check` | Check for new chapters |
-| `./run.sh check --auto` | Auto-download all new chapters |
-| `./run.sh status` | Show configuration status |
-| `./run.sh config` | Configure settings (delivery mode, email) |
-| `./run.sh cron install` | Set up daily automatic checks |
-| `./run.sh cron status` | Check cron job status |
-| `./run.sh sources` | List supported sources |
+| `run` | Interactive TUI |
+| `run list` | Show tracked manga |
+| `run add -i` | Add manga interactively |
+| `run check` | Check for new chapters |
+| `run check --auto` | Auto-download all new |
+| `run config` | Configure settings |
+| `run cron install` | Set up daily checks |
+| `run sources` | List all sources |
 
 ## ⚙️ Configuration
+
+Config files are stored in `~/.config/memanga/`. See `examples/` folder for templates:
+- `examples/config.example.yaml` — configuration template
+- `examples/state.example.json` — state file format
 
 ### Delivery Modes
 
 **Local (default):**
-- Downloads PDFs to `~/.config/memanga/downloads/`
-- No additional setup needed
+Downloads to `~/.config/memanga/downloads/`
 
 **Email to Kindle:**
 1. Get a [Gmail App Password](https://support.google.com/accounts/answer/185833)
-2. Add your Gmail to Amazon's [Approved Email List](https://www.amazon.com/hz/mycd/myx#/home/settings/payment)
-3. Run `./run.sh config` and enter your details
+2. Add your Gmail to [Amazon's Approved List](https://www.amazon.com/hz/mycd/myx#/home/settings/payment)
+3. Run `run config` and enter your details
 
-### Automatic Checking (Cron)
+### Automatic Checking
 
 ```bash
-# Install daily check at 6:00 AM
-./run.sh cron install
-
-# Custom time
-./run.sh cron install --time 07:30
-
-# Check status
-./run.sh cron status
-
-# Remove
-./run.sh cron remove
+./scripts/run.sh cron install           # Daily at 06:00
+./scripts/run.sh cron install --time 07:30  # Custom time
+./scripts/run.sh cron status            # Check status
 ```
 
-## 📁 File Locations
+> **Windows:** Use Task Scheduler instead of cron.
 
-| File | Location |
-|------|----------|
-| Config | `~/.config/memanga/config.yaml` |
-| State | `~/.config/memanga/state.json` |
-| Downloads | `~/.config/memanga/downloads/` |
-| Logs | `~/clawd/MeManga/memanga.log` |
-
-## 🔧 How It Works
-
-### Architecture
+## 🏗️ Project Structure
 
 ```
 MeManga/
-├── memanga.py      # Main CLI application
-├── config.py       # Configuration management
-├── state.py        # Download state tracking
-├── downloader.py   # Chapter download + PDF creation
-├── emailer.py      # Email-to-Kindle delivery
-└── scrapers/       # Source-specific scrapers
-    ├── base.py           # Base scraper class
-    ├── tcbscans.py       # TCB Scans (requests)
-    ├── weebcentral.py    # WeebCentral (cloudscraper + Playwright)
-    ├── asurascans.py     # Asura Scans (Playwright)
-    ├── mangakatana.py    # Mangakatana (Playwright)
-    ├── mangadex.py       # MangaDex (API)
-    ├── mangapill.py      # Mangapill (requests)
-    ├── mangataro.py      # MangaTaro (requests) - ComicK replacement
-    └── ...               # + more scrapers
+├── memanga/              # Core package
+│   ├── cli.py            # CLI application
+│   ├── config.py         # Configuration
+│   ├── downloader.py     # Download + PDF creation
+│   ├── emailer.py        # Kindle email delivery
+│   └── scrapers/         # Source scrapers
+├── scripts/
+│   ├── run.sh            # Linux/macOS launcher
+│   ├── linux/setup.sh    # Linux setup
+│   └── windows/          # Windows scripts
+├── examples/             # Example config files
+│   ├── config.example.yaml
+│   └── state.example.json
+├── setup.py              # Cross-platform setup
+└── requirements.txt
 ```
 
-### Scraper Types
+## 🛠️ Adding a Source
 
-- **Requests**: Simple HTTP requests (fastest, for sites without protection)
-- **Playwright**: Browser automation (for JavaScript-rendered sites)
-- **Hybrid**: Combination of both (cloudscraper for chapters, Playwright for images)
-- **API**: Direct API calls (most reliable when available)
-
-### Download Flow
-
-1. **Check for updates** - Compare available chapters vs downloaded
-2. **Download images** - Fetch all pages for new chapters
-3. **Create PDF** - Convert images to Kindle-optimized PDF
-4. **Send to Kindle** - Email PDF (if configured)
-5. **Update state** - Mark chapter as downloaded
-
-## 🛠️ Development
-
-### Adding a New Source
-
-1. Create `scrapers/newsite.py` inheriting from `BaseScraper`
-2. Implement `search()`, `get_chapters()`, `get_pages()`
-3. Register in `scrapers/__init__.py`
-
-### Running Tests
-
-```bash
-source venv/bin/activate
-python3 -c "from scrapers.tcbscans import TCBScansScraper; s = TCBScansScraper(); print(len(s.get_chapters('https://tcbonepiecechapters.com/mangas/5/one-piece')))"
-```
+1. Create `memanga/scrapers/newsite.py`
+2. Inherit from `BaseScraper`
+3. Implement `search()`, `get_chapters()`, `get_pages()`
+4. Register in `memanga/scrapers/__init__.py`
 
 ## 📝 Notes
 
-- **Playwright scrapers** require Xvfb on headless systems (installed by setup.sh)
-- **WeebCentral** uses a hybrid approach because images are lazy-loaded
-- **MangaDex** skips chapters with external URLs (Shueisha manga on MangaPlus)
-- **TCBScans** is the fastest source (no browser automation needed)
+- Playwright scrapers need Xvfb on headless Linux (auto-installed)
+- MangaDex skips chapters with external URLs (official Shueisha)
+- TCBScans is fastest (no browser automation)
+
+## 💬 Contact
+
+Have a manga source you'd like supported? Found a bug?
+
+Open an [issue](https://github.com/meellm/MeManga/issues) or reach out!
 
 ## 📄 License
 
 MIT
-
----

@@ -1,12 +1,15 @@
 #!/bin/bash
-# MeManga setup script
+# MeManga setup script for Linux (Debian/Ubuntu/Raspberry Pi)
 
 set -e
 
+# Navigate to project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+cd "$PROJECT_DIR"
 
 echo "📖 Setting up MeManga..."
+echo "   Project: $PROJECT_DIR"
 echo ""
 
 # Check for system dependencies
@@ -41,7 +44,7 @@ echo ""
 echo "✅ Setup complete!"
 echo ""
 echo "Quick start:"
-echo "  ./run.sh              # Launch interactive TUI"
-echo "  ./run.sh add -i       # Add manga to track"
-echo "  ./run.sh check        # Check for new chapters"
-echo "  ./run.sh --help       # See all commands"
+echo "  ./scripts/run.sh              # Launch interactive TUI"
+echo "  ./scripts/run.sh add -i       # Add manga to track"
+echo "  ./scripts/run.sh check        # Check for new chapters"
+echo "  ./scripts/run.sh --help       # See all commands"

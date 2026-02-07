@@ -18,10 +18,10 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import box
 
-from config import Config
-from state import State
-from downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError
-from emailer import send_to_kindle, EmailError
+from .config import Config
+from .state import State
+from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError
+from .emailer import send_to_kindle, EmailError
 
 console = Console()
 config = Config()
@@ -384,8 +384,8 @@ def cmd_config(args):
 
 def cmd_cron(args):
     """Manage cron job for automatic checking."""
-    script_path = Path(__file__).resolve()
-    project_dir = script_path.parent
+    # cli.py is in memanga/, so project root is parent
+    project_dir = Path(__file__).resolve().parent.parent
     python_path = project_dir / "venv" / "bin" / "python3"
     
     if args.action == "status":
@@ -423,7 +423,7 @@ def cmd_cron(args):
             return 1
         
         # Build cron line
-        cron_cmd = f"cd {project_dir} && {python_path} {script_path} check --auto --quiet"
+        cron_cmd = f"cd {project_dir} && {python_path} -m memanga check --auto --quiet"
         cron_line = f"{minute} {hour} * * * {cron_cmd} >> {project_dir}/memanga.log 2>&1"
         
         # Get existing crontab

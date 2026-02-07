@@ -1,0 +1,25 @@
+{
+  "_comment": "MeManga State Example - Copy to ~/.config/memanga/state.json",
+  "manga": {
+    "One Piece": {
+      "url": "https://tcbonepiecechapters.com/mangas/5/one-piece",
+      "source": "tcbonepiecechapters.com",
+      "last_check": "2026-02-07T12:00:00",
+      "downloaded_chapters": [
+        "1130",
+        "1131",
+        "1132"
+      ]
+    },
+    "Solo Leveling": {
+      "url": "https://weebcentral.com/series/01J76XY3AT9SP84Z61DXS2V1FC/Solo-Leveling",
+      "source": "weebcentral.com",
+      "last_check": "2026-02-07T12:00:00",
+      "downloaded_chapters": [
+        "1",
+        "2",
+        "3"
+      ]
+    }
+  }
+}

@@ -19,9 +19,9 @@ import img2pdf
 from PIL import Image
 from ebooklib import epub
 
-from state import State
-from scrapers import get_scraper, list_supported_sources
-from scrapers.base import Chapter
+from .state import State
+from .scrapers import get_scraper, list_supported_sources
+from .scrapers.base import Chapter
 
 OutputFormat = Literal["pdf", "epub"]
 
