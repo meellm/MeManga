@@ -46,8 +46,6 @@ Then:
 | manganato.com | Requests | Mangakakalot network |
 | mangataro.org | Requests | ComicK alternative |
 
-> **Want another source?** Open an issue or reach out — happy to add more!
-
 ## 📋 Commands
 
 | Command | Description |
@@ -87,27 +85,6 @@ Downloads to `~/.config/memanga/downloads/`
 
 > **Windows:** Use Task Scheduler instead of cron.
 
-## 🏗️ Project Structure
-
-```
-MeManga/
-├── memanga/              # Core package
-│   ├── cli.py            # CLI application
-│   ├── config.py         # Configuration
-│   ├── downloader.py     # Download + PDF creation
-│   ├── emailer.py        # Kindle email delivery
-│   └── scrapers/         # Source scrapers
-├── scripts/
-│   ├── run.sh            # Linux/macOS launcher
-│   ├── linux/setup.sh    # Linux setup
-│   └── windows/          # Windows scripts
-├── examples/             # Example config files
-│   ├── config.example.yaml
-│   └── state.example.json
-├── setup.py              # Cross-platform setup
-└── requirements.txt
-```
-
 ## 🛠️ Adding a Source
 
 1. Create `memanga/scrapers/newsite.py`
@@ -123,9 +100,7 @@ MeManga/
 
 ## 💬 Contact
 
-Have a manga source you'd like supported? Found a bug?
-
-Open an [issue](https://github.com/meellm/MeManga/issues) or reach out!
+Feel free to suggest new manga sources.
 
 ## 📄 License
 
