@@ -1,0 +1,31 @@
+# MeManga Configuration Example
+# Copy to ~/.config/memanga/config.yaml
+
+# Tracked manga list
+manga:
+  - title: "One Piece"
+    source: "tcbonepiecechapters.com"
+    url: "https://tcbonepiecechapters.com/mangas/5/one-piece"
+  
+  - title: "Solo Leveling"
+    source: "weebcentral.com"
+    url: "https://weebcentral.com/series/01J76XY3AT9SP84Z61DXS2V1FC/Solo-Leveling"
+
+# Delivery settings
+delivery:
+  mode: local  # "local" or "email"
+  download_dir: ~/.config/memanga/downloads
+  delete_after_send: false  # Delete PDF after sending to Kindle (email mode only)
+
+# Email settings (only needed if delivery.mode = "email")
+email:
+  kindle_email: ""        # your-kindle@kindle.com
+  sender_email: ""        # your-email@gmail.com
+  smtp_server: smtp.gmail.com
+  smtp_port: 587
+  app_password: ""        # Gmail App Password (NOT your regular password)
+
+# Cron settings
+cron:
+  enabled: false
+  time: "06:00"

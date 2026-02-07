@@ -1,0 +1,18 @@
+# Core
+rich>=13.0.0
+pyyaml>=6.0
+requests>=2.28.0
+
+# PDF generation
+img2pdf>=0.5.0
+Pillow>=10.0.0
+
+# EPUB generation
+ebooklib>=0.18
+
+# Scrapers
+beautifulsoup4>=4.12.0
+playwright>=1.40.0
+cloudscraper>=1.2.71
+
+# Email (stdlib, no extra deps needed)
