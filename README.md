@@ -9,6 +9,8 @@ Track manga from multiple sources, download chapters as PDFs, and optionally sen
 - 📚 **Track multiple manga** from 15 sources
 - 🔍 **Automatic updates** — knows what you've already downloaded
 - 🔄 **Backup sources** — fallback to secondary sources after N days
+- 📊 **Status tracking** — reading, on-hold, dropped, completed
+- 📥 **Bulk downloads** — download from chapter 1 with `--from` flag
 - 📄 **PDF/EPUB output** — optimized for e-readers
 - 📧 **Kindle delivery** — automatic email to your device
 - ⏰ **Scheduled checks** — daily cron job support
@@ -58,13 +60,42 @@ Then:
 | Command | Description |
 |---------|-------------|
 | `run` | Interactive TUI |
-| `run list` | Show tracked manga |
+| `run list` | Show tracked manga with status |
 | `run add -i` | Add manga interactively |
+| `run add -t "Title" -u URL -b BACKUP` | Add with backup source |
 | `run check` | Check for new chapters |
 | `run check --auto` | Auto-download all new |
+| `run check -t "Title" --from 1 --auto --safe` | Download from chapter 1 |
+| `run set "Title" on-hold` | Set manga status |
+| `run remove "Title"` | Remove manga |
 | `run config` | Configure settings |
 | `run cron install` | Set up daily checks |
 | `run sources` | List all sources |
+
+### Status System
+
+Track your reading progress:
+
+```bash
+run set "Manga Title" reading     # Currently reading (checked daily)
+run set "Manga Title" on-hold     # Paused (skipped during check)
+run set "Manga Title" dropped     # Dropped (skipped during check)
+run set "Manga Title" completed   # Finished (skipped during check)
+```
+
+### Bulk Downloads
+
+Download a manga from scratch:
+
+```bash
+# Download all chapters from beginning
+run check -t "Manga Title" --from 1 --auto --safe
+
+# Start from specific chapter
+run check -t "Manga Title" --from 50 --auto --safe
+```
+
+> **Note:** Use `--safe` for bulk downloads — it restarts the browser every 3 chapters to prevent memory issues.
 
 ## ⚙️ Configuration
 
