@@ -32,6 +32,21 @@ state = State()
 # CLI Commands
 # ============================================================================
 
+VALID_STATUSES = ["reading", "on-hold", "dropped", "completed"]
+
+
+def _get_status_display(manga: Dict[str, Any]) -> str:
+    """Get formatted status display."""
+    status = manga.get("status", "reading")
+    colors = {
+        "reading": "green",
+        "on-hold": "yellow",
+        "dropped": "red",
+        "completed": "cyan",
+    }
+    return f"[{colors.get(status, 'white')}]{status}[/]"
+
+
 def _get_sources_display(manga: Dict[str, Any]) -> str:
     """Get display string for manga sources."""
     from urllib.parse import urlparse
@@ -68,35 +83,26 @@ def cmd_list(args):
     )
     table.add_column("#", style="dim", width=3, justify="right")
     table.add_column("Title", style="cyan bold")
+    table.add_column("Status", justify="center")
     table.add_column("Source", style="green")
     table.add_column("Last Ch.", style="yellow", justify="center")
     table.add_column("Downloaded", style="magenta", justify="center")
-    table.add_column("Pending", style="dim", justify="center")
     
     for i, manga in enumerate(manga_list, 1):
         title = manga["title"]
         last_ch = state.get_last_chapter(title)
         downloaded = state.get_downloaded_chapters(title)
-        pending = state.get_all_pending_backups(title)
-        
-        # Show pending backup count
-        pending_str = str(len(pending)) if pending else "—"
         
         table.add_row(
             str(i),
             title,
+            _get_status_display(manga),
             _get_sources_display(manga),
             str(last_ch) if last_ch else "—",
             str(len(downloaded)) if downloaded else "0",
-            pending_str,
         )
     
     console.print(table)
-    
-    # Show legend if there are pending backups
-    total_pending = sum(len(state.get_all_pending_backups(m["title"])) for m in manga_list)
-    if total_pending > 0:
-        console.print(f"\n[dim]Pending: {total_pending} chapter(s) seen on backup, waiting for primary[/dim]")
 
 
 def cmd_add(args):
@@ -236,6 +242,55 @@ def cmd_remove(args):
         console.print(f"[red]🗑️  Removed:[/red] {found['title']}")
 
 
+def cmd_set_status(args):
+    """Set manga status (reading, on-hold, dropped, completed)."""
+    manga_list = config.get("manga", [])
+    
+    if not manga_list:
+        console.print("[yellow]No manga tracked.[/yellow]")
+        return
+    
+    target = args.target
+    new_status = args.status.lower()
+    
+    if new_status not in VALID_STATUSES:
+        console.print(f"[red]Invalid status:[/red] {new_status}")
+        console.print(f"[dim]Valid: {', '.join(VALID_STATUSES)}[/dim]")
+        return
+    
+    # Find manga
+    found = None
+    found_idx = None
+    
+    try:
+        idx = int(target) - 1
+        if 0 <= idx < len(manga_list):
+            found = manga_list[idx]
+            found_idx = idx
+    except ValueError:
+        for i, m in enumerate(manga_list):
+            if target.lower() in m["title"].lower():
+                found = m
+                found_idx = i
+                break
+    
+    if not found:
+        console.print(f"[red]Not found:[/red] {target}")
+        return
+    
+    old_status = found.get("status", "reading")
+    manga_list[found_idx]["status"] = new_status
+    config.set("manga", manga_list)
+    config.save()
+    
+    # Status colors
+    colors = {"reading": "green", "on-hold": "yellow", "dropped": "red", "completed": "cyan"}
+    old_color = colors.get(old_status, "white")
+    new_color = colors.get(new_status, "white")
+    
+    console.print(f"[cyan]{found['title']}[/cyan]: [{old_color}]{old_status}[/] → [{new_color}]{new_status}[/]")
+
+
 def cmd_check(args):
     """Check for new chapters and download."""
     manga_list = config.get("manga", [])
@@ -269,6 +324,13 @@ def cmd_check(args):
     
     for manga in manga_list:
         title = manga["title"]
+        status = manga.get("status", "reading")
+        
+        # Skip non-reading manga unless explicitly specified by title
+        if status != "reading" and not args.title:
+            console.print(f"[dim]Skipping:[/dim] [cyan]{title}[/cyan] [{status}]")
+            continue
+        
         console.print(f"[dim]Checking:[/dim] [cyan]{title}[/cyan]...")
         
         try:
@@ -683,6 +745,12 @@ Examples:
     p_add.add_argument("--fallback-days", type=int, default=2, help="Days to wait before using backup (default: 2)")
     p_add.add_argument("-i", "--interactive", action="store_true", help="Interactive mode")
     p_add.set_defaults(func=cmd_add)
+    
+    # set (change manga status)
+    p_set = subparsers.add_parser("set", help="Set manga status (reading/on-hold/dropped/completed)")
+    p_set.add_argument("target", help="Manga # or title")
+    p_set.add_argument("status", choices=VALID_STATUSES, help="New status")
+    p_set.set_defaults(func=cmd_set_status)
     
     # remove
     p_remove = subparsers.add_parser("remove", aliases=["rm"], help="Remove a manga")
