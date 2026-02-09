@@ -251,7 +251,11 @@ def cmd_check(args):
             console.print(f"[red]Not found:[/red] {args.title}")
             return
     
-    console.print(Panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
+    from_chapter = getattr(args, 'from_chapter', None)
+    if from_chapter:
+        console.print(Panel(f"[bold]📥 Downloading from Chapter {from_chapter}[/bold]", border_style="green"))
+    else:
+        console.print(Panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
     console.print()
     
     state.update_last_check()
@@ -268,6 +272,9 @@ def cmd_check(args):
         console.print(f"[dim]Checking:[/dim] [cyan]{title}[/cyan]...")
         
         try:
+            # Get from_chapter if specified
+            from_chapter = getattr(args, 'from_chapter', None)
+            
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -275,7 +282,7 @@ def cmd_check(args):
                 transient=True,
             ) as progress:
                 task = progress.add_task("Fetching chapters...", total=None)
-                new_chapters = check_for_updates(manga, state)
+                new_chapters = check_for_updates(manga, state, from_chapter=from_chapter)
             
             if not new_chapters:
                 console.print("  [dim]└─ No new chapters[/dim]")
@@ -686,6 +693,7 @@ Examples:
     # check
     p_check = subparsers.add_parser("check", help="Check for new chapters")
     p_check.add_argument("-t", "--title", help="Check specific manga only")
+    p_check.add_argument("-f", "--from", dest="from_chapter", type=float, help="Start from chapter N (for fresh downloads)")
     p_check.add_argument("-a", "--auto", action="store_true", help="Auto-download without prompts")
     p_check.add_argument("-y", "--yes", action="store_true", help="Say yes to all prompts")
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")
