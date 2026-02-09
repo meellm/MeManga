@@ -3,19 +3,26 @@
 
 # Tracked manga list
 manga:
+  # Simple format (single source)
   - title: "One Piece"
     source: "tcbonepiecechapters.com"
     url: "https://tcbonepiecechapters.com/mangas/5/one-piece"
   
+  # Multi-source format (with backup)
+  # Primary source is checked first. If only backup has a new chapter,
+  # MeManga waits fallback_delay_days before downloading from backup.
   - title: "Solo Leveling"
-    source: "weebcentral.com"
-    url: "https://weebcentral.com/series/01J76XY3AT9SP84Z61DXS2V1FC/Solo-Leveling"
+    fallback_delay_days: 2  # Wait 2 days before using backup (default: 2)
+    sources:
+      - url: "https://mangafire.to/manga/solo-leveling.xxx"      # Primary
+      - url: "https://mangadex.org/title/uuid-here"              # Backup
 
 # Delivery settings
 delivery:
   mode: local  # "local" or "email"
   download_dir: ~/.config/memanga/downloads
   delete_after_send: false  # Delete PDF after sending to Kindle (email mode only)
+  output_format: pdf  # "pdf" or "epub"
 
 # Email settings (only needed if delivery.mode = "email")
 email:

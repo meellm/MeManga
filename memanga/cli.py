@@ -101,6 +101,11 @@ def cmd_list(args):
 
 def cmd_add(args):
     """Add a manga to track."""
+    from urllib.parse import urlparse
+    
+    backup_url = None
+    fallback_days = 2
+    
     if args.interactive:
         # Interactive mode
         console.print("\n[bold green]➕ Add New Manga[/bold green]\n")
@@ -112,19 +117,26 @@ def cmd_add(args):
         if not title:
             return
         
-        url = Prompt.ask("🔗 Source URL (full URL to manga page)")
+        url = Prompt.ask("🔗 Primary source URL")
         if not url:
             return
+        
+        # Ask for backup source
+        if Confirm.ask("Add a backup source?", default=False):
+            backup_url = Prompt.ask("🔗 Backup source URL (e.g., MangaDex)")
+            if backup_url:
+                fallback_days = int(Prompt.ask("⏱️  Fallback delay (days)", default="2"))
     else:
         title = args.title
         url = args.url
+        backup_url = getattr(args, 'backup', None)
+        fallback_days = getattr(args, 'fallback_days', 2) or 2
         
         if not title or not url:
             console.print("[red]Error:[/red] --title and --url required (or use --interactive)")
             return 1
     
     # Extract source from URL
-    from urllib.parse import urlparse
     parsed = urlparse(url)
     source = parsed.netloc.replace("www.", "")
     
@@ -137,12 +149,24 @@ def cmd_add(args):
         if not Confirm.ask("Add anyway?"):
             return
     
-    # Add to config
-    manga_entry = {
-        "title": title,
-        "source": source,
-        "url": url,
-    }
+    # Build manga entry
+    if backup_url:
+        # New multi-source format
+        manga_entry = {
+            "title": title,
+            "fallback_delay_days": fallback_days,
+            "sources": [
+                {"url": url},
+                {"url": backup_url},
+            ],
+        }
+    else:
+        # Simple single-source format
+        manga_entry = {
+            "title": title,
+            "source": source,
+            "url": url,
+        }
     
     manga_list = config.get("manga", [])
     
@@ -156,7 +180,13 @@ def cmd_add(args):
     config.set("manga", manga_list)
     config.save()
     
-    console.print(f"\n[green]✅ Added:[/green] {title} ({source})")
+    if backup_url:
+        backup_source = urlparse(backup_url).netloc.replace("www.", "")
+        console.print(f"\n[green]✅ Added:[/green] {title}")
+        console.print(f"   [dim]Primary:[/dim] {source}")
+        console.print(f"   [dim]Backup:[/dim] {backup_source} (after {fallback_days} days)")
+    else:
+        console.print(f"\n[green]✅ Added:[/green] {title} ({source})")
 
 
 def cmd_remove(args):
@@ -641,7 +671,9 @@ Examples:
     # add
     p_add = subparsers.add_parser("add", help="Add a manga to track")
     p_add.add_argument("-t", "--title", help="Manga title")
-    p_add.add_argument("-u", "--url", help="Source URL")
+    p_add.add_argument("-u", "--url", help="Primary source URL")
+    p_add.add_argument("-b", "--backup", help="Backup source URL")
+    p_add.add_argument("--fallback-days", type=int, default=2, help="Days to wait before using backup (default: 2)")
     p_add.add_argument("-i", "--interactive", action="store_true", help="Interactive mode")
     p_add.set_defaults(func=cmd_add)
     
