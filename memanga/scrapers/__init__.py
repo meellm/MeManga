@@ -17,9 +17,7 @@ Working sources:
 - Manganato (manganato.com) - Same network as Kakalot
 - Mangago (mangago.me) - Large yaoi/shoujo collection
 - MangaTaro (mangataro.org) - ComicK replacement, popular aggregator
-
-Non-working (DRM protected):
-- MangaFire (mangafire.to) - DRM with image scrambling + Cloudflare Turnstile
+- MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
 """
 
 from .base import BaseScraper, Chapter, Manga
@@ -132,5 +130,5 @@ def list_supported_sources():
         "manganato.com",
         "mangago.me",
         "mangataro.org",  # ComicK replacement
-        # "mangafire.to",  # DRM protected - doesn't work
+        "mangafire.to",   # VRF bypass + descrambling (Playwright required)
     ]
