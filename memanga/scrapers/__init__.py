@@ -12,7 +12,6 @@ Working sources:
 - MangaSee (mangasee123.com) - High quality scans
 - MangaBuddy (mangabuddy.com) - Popular aggregator
 - Bato.to (bato.to) - Community-driven
-- MangaPark (mangapark.io) - Vast collection (Playwright)
 - Mangakakalot (mangakakalot.com) - Huge library
 - Manganato (manganato.com) - Same network as Kakalot
 - Mangago (mangago.me) - Large yaoi/shoujo collection
@@ -32,7 +31,6 @@ from .mangafire import MangaFireScraper
 from .mangasee import MangaSeeScraper
 from .mangabuddy import MangaBuddyScraper
 from .batoto import BatoToScraper
-from .mangapark import MangaParkScraper
 from .mangakakalot import MangakakalotScraper
 from .manganato import ManganatoScraper
 from .mangago import MangagoScraper
@@ -47,12 +45,12 @@ SCRAPERS = {
     # WeebCentral - Large library (hybrid: cloudscraper + Playwright)
     "weebcentral.com": WeebCentralScraper,
     
-    # Asura Scans - Manhwa (Playwright)
+    # Asura Scans - Manhwa (Playwright/Firefox)
     "asuracomic.net": AsuraScansScraper,
     "asurascans.com": AsuraScansScraper,
     "asuratoon.com": AsuraScansScraper,
     
-    # Mangakatana - General (Playwright)
+    # Mangakatana - General (Playwright/Firefox)
     "mangakatana.com": MangakatanataScraper,
     
     # MangaDex - Community (API)
@@ -62,40 +60,36 @@ SCRAPERS = {
     # Mangapill - Large library (no Cloudflare, simple requests)
     "mangapill.com": MangapillScraper,
     
-    # NEW: MangaReader.to
+    # MangaReader.to
     "mangareader.to": MangaReaderScraper,
     
-    # NEW: MangaFire.to
+    # MangaFire.to (Firefox + VRF bypass + descrambling)
     "mangafire.to": MangaFireScraper,
     
-    # NEW: MangaSee123
+    # MangaSee123
     "mangasee123.com": MangaSeeScraper,
     
-    # NEW: MangaBuddy
+    # MangaBuddy
     "mangabuddy.com": MangaBuddyScraper,
     
-    # NEW: Bato.to
+    # Bato.to
     "bato.to": BatoToScraper,
     "batoto.to": BatoToScraper,
     
-    # NEW: MangaPark (Playwright)
-    "mangapark.io": MangaParkScraper,
-    "mangapark.net": MangaParkScraper,
-    
-    # NEW: Mangakakalot
+    # Mangakakalot
     "mangakakalot.com": MangakakalotScraper,
     "mangakakalot.to": MangakakalotScraper,
     
-    # NEW: Manganato
+    # Manganato
     "manganato.com": ManganatoScraper,
     "chapmanganato.to": ManganatoScraper,
     "readmanganato.com": ManganatoScraper,
     
-    # NEW: Mangago
+    # Mangago
     "mangago.me": MangagoScraper,
     "www.mangago.me": MangagoScraper,
     
-    # NEW: MangaTaro (ComicK replacement)
+    # MangaTaro (ComicK replacement)
     "mangataro.org": MangaTaroScraper,
 }
 
@@ -122,13 +116,12 @@ def list_supported_sources():
         "mangadex.org",
         "mangapill.com",
         "mangareader.to",
+        "mangafire.to",
         "mangasee123.com",
         "mangabuddy.com",
         "bato.to",
-        "mangapark.io",
         "mangakakalot.com",
         "manganato.com",
         "mangago.me",
-        "mangataro.org",  # ComicK replacement
-        "mangafire.to",   # VRF bypass + descrambling (Playwright required)
+        "mangataro.org",
     ]
