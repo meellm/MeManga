@@ -98,6 +98,53 @@ class State:
         """Check if a chapter has been downloaded."""
         return str(chapter) in self.get_downloaded_chapters(manga_title)
     
+    # ========================================================================
+    # Backup Source Tracking
+    # ========================================================================
+    
+    def get_pending_backup(self, manga_title: str, chapter: str) -> Optional[Dict[str, Any]]:
+        """Get pending backup info for a chapter (if waiting for primary to catch up)."""
+        manga_state = self.get_manga_state(manga_title)
+        pending = manga_state.get("pending_backup", {})
+        return pending.get(str(chapter))
+    
+    def set_pending_backup(self, manga_title: str, chapter: str, backup_source: str, backup_url: str):
+        """Mark a chapter as seen on backup source, start the waiting period."""
+        self._ensure_manga_entry(manga_title)
+        
+        if "pending_backup" not in self._data["manga"][manga_title]:
+            self._data["manga"][manga_title]["pending_backup"] = {}
+        
+        chapter_str = str(chapter)
+        if chapter_str not in self._data["manga"][manga_title]["pending_backup"]:
+            self._data["manga"][manga_title]["pending_backup"][chapter_str] = {
+                "first_seen": datetime.now().isoformat(),
+                "backup_source": backup_source,
+                "backup_url": backup_url,
+            }
+            self.save()
+    
+    def clear_pending_backup(self, manga_title: str, chapter: str):
+        """Clear pending backup for a chapter (downloaded from primary or backup)."""
+        manga_state = self.get_manga_state(manga_title)
+        pending = manga_state.get("pending_backup", {})
+        
+        chapter_str = str(chapter)
+        if chapter_str in pending:
+            del self._data["manga"][manga_title]["pending_backup"][chapter_str]
+            self.save()
+    
+    def clear_all_pending_backups(self, manga_title: str):
+        """Clear all pending backups for a manga."""
+        if manga_title in self._data.get("manga", {}):
+            self._data["manga"][manga_title]["pending_backup"] = {}
+            self.save()
+    
+    def get_all_pending_backups(self, manga_title: str) -> Dict[str, Dict[str, Any]]:
+        """Get all pending backup chapters for a manga."""
+        manga_state = self.get_manga_state(manga_title)
+        return manga_state.get("pending_backup", {})
+    
     def _ensure_manga_entry(self, manga_title: str):
         """Ensure manga entry exists in state."""
         if "manga" not in self._data:

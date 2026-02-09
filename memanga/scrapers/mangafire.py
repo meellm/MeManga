@@ -388,41 +388,56 @@ class MangaFireScraper(BaseScraper):
         return manga_id, lang, chap_num
     
     def search(self, query: str) -> List[Manga]:
-        """Search for manga."""
+        """Search for manga using Firefox and the search bar."""
+        from playwright.sync_api import sync_playwright
+        
         results = []
         
-        # Use filter page for searching
-        url = f"{self.base_url}/filter"
-        params = {
-            'keyword': query,
-            'language[]': 'en',
-            'sort': 'most_relevance',
-        }
-        
         try:
-            response = self.session.get(url, params=params, timeout=30)
-            response.raise_for_status()
+            with sync_playwright() as p:
+                browser = p.firefox.launch(headless=True)
+                page = browser.new_page()
+                
+                # Go to homepage
+                page.goto(self.base_url, wait_until='domcontentloaded', timeout=60000)
+                page.wait_for_timeout(2000)
+                
+                # Type in search box
+                search_input = page.locator('input[placeholder*="Search"], input[name="keyword"]').first
+                search_input.fill(query)
+                search_input.press('Enter')
+                
+                # Wait for results
+                page.wait_for_timeout(5000)
+                
+                content = page.content()
+                browser.close()
             
-            soup = BeautifulSoup(response.text, 'html.parser')
+            soup = BeautifulSoup(content, 'html.parser')
             
-            for item in soup.select('.original.card-lg .unit .inner'):
-                info_link = item.select_one('.info > a')
-                if not info_link:
+            # Find manga links inside .info elements (these have titles)
+            seen_urls = set()
+            for link in soup.select('.info a[href*="/manga/"]'):
+                href = link.get('href', '')
+                title = link.get_text(strip=True)
+                
+                if not title or len(title) < 2:
                     continue
-                
-                href = info_link.get('href', '')
-                title = info_link.get_text(strip=True)
-                
-                img = item.select_one('img')
-                cover_url = img.get('src') if img else None
                 
                 full_url = href if href.startswith('http') else f"{self.base_url}{href}"
                 
-                results.append(Manga(
-                    title=title,
-                    url=full_url,
-                    cover_url=cover_url,
-                ))
+                if full_url not in seen_urls:
+                    seen_urls.add(full_url)
+                    
+                    # Try to find cover image in sibling .inner element
+                    cover_url = None
+                    parent = link.find_parent(class_='unit')
+                    if parent:
+                        img = parent.select_one('.inner img')
+                        if img:
+                            cover_url = img.get('src')
+                    
+                    results.append(Manga(title=title, url=full_url, cover_url=cover_url))
             
         except Exception as e:
             print(f"[MangaFire] Search error: {e}")

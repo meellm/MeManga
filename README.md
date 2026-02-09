@@ -8,6 +8,7 @@ Track manga from multiple sources, download chapters as PDFs, and optionally sen
 
 - 📚 **Track multiple manga** from 15 sources
 - 🔍 **Automatic updates** — knows what you've already downloaded
+- 🔄 **Backup sources** — fallback to secondary sources after N days
 - 📄 **PDF/EPUB output** — optimized for e-readers
 - 📧 **Kindle delivery** — automatic email to your device
 - ⏰ **Scheduled checks** — daily cron job support
@@ -70,6 +71,28 @@ Then:
 Config files are stored in `~/.config/memanga/`. See `examples/` folder for templates:
 - `examples/config.example.yaml` — configuration template
 - `examples/state.example.json` — state file format
+
+### Backup Sources
+
+Configure primary and backup sources for each manga. If the primary source is slow, MeManga will automatically fall back to the backup after a configurable delay:
+
+```yaml
+manga:
+- title: My Manga
+  fallback_delay_days: 2  # Wait 2 days before using backup
+  sources:
+    - url: https://mangafire.to/manga/my-manga.xxx    # Primary
+    - url: https://mangadex.org/title/uuid-here       # Backup
+```
+
+**How it works:**
+1. Check primary source for new chapters
+2. If primary has it → download from primary
+3. If only backup has it → start waiting (note the date)
+4. After `fallback_delay_days` → download from backup
+5. If primary catches up within the delay → prefer primary
+
+This ensures you get the best quality (usually primary) while not missing chapters if your preferred source is slow.
 
 ### Delivery Modes
 
