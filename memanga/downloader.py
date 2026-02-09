@@ -84,7 +84,11 @@ def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
     }]
 
 
-def check_for_updates(manga: Dict[str, Any], state: State) -> List[ChapterWithSource]:
+def check_for_updates(
+    manga: Dict[str, Any], 
+    state: State,
+    from_chapter: Optional[float] = None,
+) -> List[ChapterWithSource]:
     """
     Check if a manga has new chapters, with backup source support.
     
@@ -102,6 +106,7 @@ def check_for_updates(manga: Dict[str, Any], state: State) -> List[ChapterWithSo
     Args:
         manga: Manga entry from config with title, sources (or url/source)
         state: State manager to check last downloaded chapter
+        from_chapter: Override starting chapter (for downloading from scratch)
     
     Returns:
         List of ChapterWithSource objects (includes source info)
@@ -113,9 +118,13 @@ def check_for_updates(manga: Dict[str, Any], state: State) -> List[ChapterWithSo
     if not sources:
         raise DownloaderError(f"No sources configured for '{title}'")
     
-    # Get last downloaded chapter
-    last_chapter = state.get_last_chapter(title)
-    last_num = float(last_chapter) if last_chapter else 0.0
+    # Get starting chapter - use from_chapter if provided, else last downloaded
+    if from_chapter is not None:
+        # Subtract small amount so --from 1 includes chapter 1
+        last_num = from_chapter - 0.001
+    else:
+        last_chapter = state.get_last_chapter(title)
+        last_num = float(last_chapter) if last_chapter else 0.0
     
     # Results to return
     chapters_to_download: List[ChapterWithSource] = []
