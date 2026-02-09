@@ -21,7 +21,7 @@ from rich import box
 
 from .config import Config
 from .state import State
-from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource
+from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers
 from .emailer import send_to_kindle, EmailError
 
 console = Console()
@@ -404,6 +404,11 @@ def cmd_check(args):
                     state.clear_pending_backup(title, ch.number)
                     total_downloaded += 1
                     
+                    # Safe mode: restart browser every 3 chapters to free memory
+                    safe_mode = getattr(args, 'safe', False)
+                    if safe_mode and total_downloaded % 3 == 0:
+                        restart_browsers()
+                    
                 except DownloaderError as e:
                     console.print(f"     [red]❌ Failed: {e}[/red]")
                     
@@ -765,6 +770,7 @@ Examples:
     p_check.add_argument("-a", "--auto", action="store_true", help="Auto-download without prompts")
     p_check.add_argument("-y", "--yes", action="store_true", help="Say yes to all prompts")
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")
+    p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
     p_check.set_defaults(func=cmd_check)
     
     # status

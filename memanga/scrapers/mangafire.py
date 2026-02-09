@@ -295,6 +295,14 @@ class VRFGenerator:
                 self._playwright = None
         except Exception:
             pass
+        
+        # Clear cache to free memory
+        self._pages_data_cache.clear()
+    
+    def restart(self):
+        """Restart browser (close and clear state so next call re-opens)."""
+        print("[MangaFire] Restarting browser to free memory...")
+        self.close()
 
 
 # Global VRF generator instance

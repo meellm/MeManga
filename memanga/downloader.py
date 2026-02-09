@@ -26,6 +26,15 @@ from .state import State
 from .scrapers import get_scraper, list_supported_sources
 from .scrapers.base import Chapter
 
+
+def restart_browsers():
+    """Restart any browser instances to free memory."""
+    try:
+        from .scrapers.mangafire import VRFGenerator
+        VRFGenerator().restart()
+    except Exception:
+        pass
+
 OutputFormat = Literal["pdf", "epub"]
 
 # Default days to wait before falling back to backup source
