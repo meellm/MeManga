@@ -27,17 +27,11 @@ class PlaywrightScraper(BaseScraper):
             from playwright.sync_api import sync_playwright
             
             _thread_local.playwright = sync_playwright().start()
-            _thread_local.browser = _thread_local.playwright.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                ]
-            )
+            # Use Firefox - better at bypassing bot detection than Chromium
+            _thread_local.browser = _thread_local.playwright.firefox.launch(headless=True)
             _thread_local.context = _thread_local.browser.new_context(
                 viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
             )
         return _thread_local.browser, _thread_local.context
     
