@@ -6,7 +6,7 @@ Track manga from multiple sources, download chapters as PDFs, and optionally sen
 
 ## ✨ Features
 
-- 📚 **Track multiple manga** from 10+ sources
+- 📚 **Track multiple manga** from 15 sources
 - 🔍 **Automatic updates** — knows what you've already downloaded
 - 📄 **PDF/EPUB output** — optimized for e-readers
 - 📧 **Kindle delivery** — automatic email to your device
@@ -36,15 +36,21 @@ Then:
 |--------|------|-------|
 | mangadex.org | API | Fan translations, largest library |
 | tcbonepiecechapters.com | Requests | Jump manga (One Piece, JJK, etc.) |
-| weebcentral.com | Hybrid | 1000+ series |
+| weebcentral.com | Playwright | 1000+ series, Quick Search |
 | mangapill.com | Requests | Fast, no Cloudflare |
 | mangakatana.com | Playwright | General library |
 | mangareader.to | Requests | Clean UI |
+| mangafire.to | Playwright | VRF bypass + image descrambling |
+| mangasee123.com | Requests | High quality scans |
 | asuracomic.net | Playwright | Manhwa/Webtoons |
 | mangabuddy.com | Requests | Popular aggregator |
+| bato.to | Requests | Community-driven |
 | mangakakalot.com | Requests | Huge library |
 | manganato.com | Requests | Mangakakalot network |
+| mangago.me | Requests | Yaoi/Shoujo collection |
 | mangataro.org | Requests | ComicK alternative |
+
+> **Note:** Playwright scrapers use Firefox headless browser for JavaScript rendering and bot detection bypass.
 
 ## 📋 Commands
 
@@ -94,9 +100,10 @@ Downloads to `~/.config/memanga/downloads/`
 
 ## 📝 Notes
 
-- Playwright scrapers need Xvfb on headless Linux (auto-installed)
+- Playwright scrapers use Firefox (better at bypassing bot detection)
 - MangaDex skips chapters with external URLs (official Shueisha)
 - TCBScans is fastest (no browser automation)
+- MangaFire includes image descrambling for protected content
 
 ## 💬 Contact
 
