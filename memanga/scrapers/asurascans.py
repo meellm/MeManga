@@ -50,28 +50,39 @@ class AsuraScansScraper(BaseScraper):
         soup = BeautifulSoup(html, "html.parser")
         
         results = []
-        for item in soup.select(".grid > a, .series-item, [href*='/series/']"):
-            if item.name != 'a':
-                item = item.select_one('a')
-            if not item:
-                continue
-            
+        seen_urls = set()
+        
+        for item in soup.select("[href*='/series/']"):
             manga_url = item.get("href", "")
+            if not manga_url or "/series/random" in manga_url:
+                continue
             if not manga_url.startswith("http"):
                 manga_url = self.base_url + manga_url
             
-            title_el = item.select_one(".title, h3, h2, span")
-            title = title_el.get_text(strip=True) if title_el else "Unknown"
+            # Skip if already seen (avoid duplicates)
+            if manga_url in seen_urls:
+                continue
+            
+            # Get title from the link text or nested elements
+            title = item.get_text(strip=True)
+            if not title:
+                title_el = item.select_one(".title, h3, h2, span")
+                title = title_el.get_text(strip=True) if title_el else ""
+            
+            # Skip links without titles (icon links, etc.)
+            if not title or len(title) < 2:
+                continue
+            
+            seen_urls.add(manga_url)
             
             cover_el = item.select_one("img")
             cover_url = cover_el.get("src") or cover_el.get("data-src") if cover_el else None
             
-            if title and "/series/" in manga_url:
-                results.append(Manga(
-                    title=title,
-                    url=manga_url,
-                    cover_url=cover_url,
-                ))
+            results.append(Manga(
+                title=title,
+                url=manga_url,
+                cover_url=cover_url,
+            ))
         
         return results[:10]
     
