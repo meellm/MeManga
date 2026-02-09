@@ -23,7 +23,7 @@ class AsuraScansScraper(BaseScraper):
         if self._browser is None:
             from playwright.sync_api import sync_playwright
             self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(headless=True)
+            self._browser = self._playwright.firefox.launch(headless=True)
         return self._browser
     
     def _get_page_content(self, url: str) -> str:

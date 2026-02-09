@@ -34,7 +34,7 @@ class MangakatanataScraper(BaseScraper):
         if not hasattr(_thread_local, 'mk_playwright'):
             from playwright.sync_api import sync_playwright
             _thread_local.mk_playwright = sync_playwright().start()
-            _thread_local.mk_browser = _thread_local.mk_playwright.chromium.launch(headless=True)
+            _thread_local.mk_browser = _thread_local.mk_playwright.firefox.launch(headless=True)
         return _thread_local.mk_browser
     
     def _fetch_page_content(self, url: str) -> str:
