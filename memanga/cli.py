@@ -10,6 +10,7 @@ import sys
 import subprocess
 from pathlib import Path
 from datetime import datetime
+from typing import Dict, Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -20,7 +21,7 @@ from rich import box
 
 from .config import Config
 from .state import State
-from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError
+from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource
 from .emailer import send_to_kindle, EmailError
 
 console = Console()
@@ -30,6 +31,27 @@ state = State()
 # ============================================================================
 # CLI Commands
 # ============================================================================
+
+def _get_sources_display(manga: Dict[str, Any]) -> str:
+    """Get display string for manga sources."""
+    from urllib.parse import urlparse
+    
+    if "sources" in manga:
+        sources = []
+        for s in manga["sources"]:
+            if isinstance(s, dict):
+                url = s.get("url", "")
+                source = s.get("source") or urlparse(url).netloc.replace("www.", "") or "?"
+                sources.append(source)
+            elif isinstance(s, str):
+                sources.append(urlparse(s).netloc.replace("www.", ""))
+        if len(sources) == 1:
+            return sources[0]
+        elif len(sources) > 1:
+            return f"{sources[0]} (+{len(sources)-1})"
+        return "?"
+    return manga.get("source", "unknown")
+
 
 def cmd_list(args):
     """List all tracked manga."""
@@ -49,21 +71,32 @@ def cmd_list(args):
     table.add_column("Source", style="green")
     table.add_column("Last Ch.", style="yellow", justify="center")
     table.add_column("Downloaded", style="magenta", justify="center")
+    table.add_column("Pending", style="dim", justify="center")
     
     for i, manga in enumerate(manga_list, 1):
         title = manga["title"]
         last_ch = state.get_last_chapter(title)
         downloaded = state.get_downloaded_chapters(title)
+        pending = state.get_all_pending_backups(title)
+        
+        # Show pending backup count
+        pending_str = str(len(pending)) if pending else "—"
         
         table.add_row(
             str(i),
             title,
-            manga.get("source", "unknown"),
+            _get_sources_display(manga),
             str(last_ch) if last_ch else "—",
             str(len(downloaded)) if downloaded else "0",
+            pending_str,
         )
     
     console.print(table)
+    
+    # Show legend if there are pending backups
+    total_pending = sum(len(state.get_all_pending_backups(m["title"])) for m in manga_list)
+    if total_pending > 0:
+        console.print(f"\n[dim]Pending: {total_pending} chapter(s) seen on backup, waiting for primary[/dim]")
 
 
 def cmd_add(args):
@@ -235,7 +268,12 @@ def cmd_check(args):
                     continue
                 
                 try:
-                    console.print(f"     [dim]⬇️  Downloading {ch_label}...[/dim]")
+                    # Show source info if from backup
+                    source_info = ""
+                    if isinstance(ch, ChapterWithSource) and ch.is_backup:
+                        source_info = f" [yellow](from backup: {ch.source})[/yellow]"
+                    
+                    console.print(f"     [dim]⬇️  Downloading {ch_label}...{source_info}[/dim]")
                     file_path = download_chapter(manga, ch, download_dir, output_format)
                     console.print(f"     [green]✅ Saved: {file_path.name}[/green]")
                     
@@ -263,6 +301,8 @@ def cmd_check(args):
                     
                     # Update state
                     state.add_downloaded_chapter(title, ch.number)
+                    # Clear pending backup if this was from backup (or if primary caught up)
+                    state.clear_pending_backup(title, ch.number)
                     total_downloaded += 1
                     
                 except DownloaderError as e:

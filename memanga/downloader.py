@@ -6,6 +6,7 @@ Handles:
 2. Downloading chapter images
 3. Converting to PDF or EPUB
 4. Cleanup
+5. Backup source fallback (wait N days before using backup)
 """
 
 import io
@@ -13,7 +14,9 @@ import tempfile
 import shutil
 import uuid
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any, Literal, Tuple
+from datetime import datetime, timedelta
+from urllib.parse import urlparse
 
 import img2pdf
 from PIL import Image
@@ -25,51 +28,171 @@ from .scrapers.base import Chapter
 
 OutputFormat = Literal["pdf", "epub"]
 
+# Default days to wait before falling back to backup source
+DEFAULT_FALLBACK_DELAY_DAYS = 2
+
 
 class DownloaderError(Exception):
     """Base exception for downloader errors."""
     pass
 
 
-def check_for_updates(manga: Dict[str, Any], state: State) -> List[Chapter]:
+class ChapterWithSource(Chapter):
+    """Chapter with source info for multi-source support."""
+    
+    def __init__(self, chapter: Chapter, source: str, source_url: str, is_backup: bool = False):
+        super().__init__(
+            number=chapter.number,
+            title=chapter.title,
+            url=chapter.url,
+        )
+        self.source = source
+        self.source_url = source_url
+        self.is_backup = is_backup
+
+
+def _extract_source(url: str) -> str:
+    """Extract source domain from URL."""
+    parsed = urlparse(url)
+    return parsed.netloc.replace("www.", "")
+
+
+def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
     """
-    Check if a manga has new chapters.
+    Get list of sources from manga config.
+    Supports both old format (single source) and new format (sources array).
+    
+    Returns: List of dicts with 'source' and 'url' keys
+    """
+    # New format: sources array
+    if "sources" in manga:
+        sources = []
+        for s in manga["sources"]:
+            if isinstance(s, dict):
+                url = s.get("url", "")
+                source = s.get("source") or _extract_source(url)
+                sources.append({"source": source, "url": url})
+            elif isinstance(s, str):
+                # Just a URL string
+                sources.append({"source": _extract_source(s), "url": s})
+        return sources
+    
+    # Old format: single source/url
+    return [{
+        "source": manga.get("source", ""),
+        "url": manga.get("url", ""),
+    }]
+
+
+def check_for_updates(manga: Dict[str, Any], state: State) -> List[ChapterWithSource]:
+    """
+    Check if a manga has new chapters, with backup source support.
+    
+    Logic:
+    1. Check primary source first
+    2. If new chapter on primary → return it
+    3. If no new chapter → check backup source(s)
+    4. If backup has new chapter:
+       - Already in pending_backup? Check if fallback_delay passed
+         - Yes → return it (download from backup)
+         - No → skip (still waiting)
+       - Not in pending_backup? Add it, skip (start waiting)
+    5. If primary gets the chapter later, we prefer primary
     
     Args:
-        manga: Manga entry from config with title, url, source
+        manga: Manga entry from config with title, sources (or url/source)
         state: State manager to check last downloaded chapter
     
     Returns:
-        List of new Chapter objects
+        List of ChapterWithSource objects (includes source info)
     """
     title = manga["title"]
-    url = manga.get("url", "")
-    source = manga.get("source", "")
+    sources = _get_sources_from_manga(manga)
+    fallback_delay_days = manga.get("fallback_delay_days", DEFAULT_FALLBACK_DELAY_DAYS)
     
-    # Get scraper for this source
-    try:
-        scraper = get_scraper(source)
-    except ValueError as e:
-        raise DownloaderError(f"Unsupported source '{source}': {e}")
+    if not sources:
+        raise DownloaderError(f"No sources configured for '{title}'")
     
     # Get last downloaded chapter
     last_chapter = state.get_last_chapter(title)
     last_num = float(last_chapter) if last_chapter else 0.0
     
-    # Fetch all chapters
-    try:
-        all_chapters = scraper.get_chapters(url)
-    except Exception as e:
-        raise DownloaderError(f"Failed to fetch chapters for '{title}': {e}")
+    # Results to return
+    chapters_to_download: List[ChapterWithSource] = []
     
-    # Filter to new chapters (newer than last AND not already downloaded)
-    # Double-check against downloaded list to prevent duplicates from race conditions
-    new_chapters = [
-        ch for ch in all_chapters 
-        if ch.numeric > last_num and not state.is_chapter_downloaded(title, ch.number)
-    ]
+    # Track what we found on each source
+    primary_chapters: Dict[str, Chapter] = {}  # chapter_num -> Chapter
+    backup_chapters: Dict[str, Tuple[Chapter, str, str]] = {}  # chapter_num -> (Chapter, source, url)
     
-    return sorted(new_chapters)
+    # Check each source
+    for i, src in enumerate(sources):
+        source = src["source"]
+        url = src["url"]
+        is_primary = (i == 0)
+        
+        try:
+            scraper = get_scraper(source)
+            all_chapters = scraper.get_chapters(url)
+        except ValueError as e:
+            # Unsupported source - skip but warn
+            print(f"  [Warning] Unsupported source '{source}': {e}")
+            continue
+        except Exception as e:
+            # Failed to fetch - skip but warn
+            print(f"  [Warning] Failed to fetch from {source}: {e}")
+            continue
+        
+        # Filter to new chapters
+        new_chapters = [
+            ch for ch in all_chapters
+            if ch.numeric > last_num and not state.is_chapter_downloaded(title, ch.number)
+        ]
+        
+        for ch in new_chapters:
+            ch_num = ch.number
+            
+            if is_primary:
+                primary_chapters[ch_num] = ch
+            else:
+                # Only track if not already on primary
+                if ch_num not in primary_chapters:
+                    backup_chapters[ch_num] = (ch, source, url)
+    
+    # Process primary chapters first (always download these)
+    for ch_num, ch in primary_chapters.items():
+        primary_src = sources[0]
+        chapters_to_download.append(
+            ChapterWithSource(ch, primary_src["source"], primary_src["url"], is_backup=False)
+        )
+        # Clear any pending backup for this chapter (primary caught up)
+        state.clear_pending_backup(title, ch_num)
+    
+    # Process backup chapters
+    now = datetime.now()
+    for ch_num, (ch, backup_source, backup_url) in backup_chapters.items():
+        # Skip if we're already downloading from primary
+        if ch_num in primary_chapters:
+            continue
+        
+        pending = state.get_pending_backup(title, ch_num)
+        
+        if pending:
+            # Check if fallback delay has passed
+            first_seen = datetime.fromisoformat(pending["first_seen"])
+            days_waiting = (now - first_seen).days
+            
+            if days_waiting >= fallback_delay_days:
+                # Delay passed, download from backup
+                chapters_to_download.append(
+                    ChapterWithSource(ch, backup_source, backup_url, is_backup=True)
+                )
+                # Note: We'll clear pending_backup after successful download
+            # else: still waiting, do nothing
+        else:
+            # First time seeing this on backup, start waiting
+            state.set_pending_backup(title, ch_num, backup_source, ch.url)
+    
+    return sorted(chapters_to_download)
 
 
 def download_chapter(
@@ -77,21 +200,31 @@ def download_chapter(
     chapter: Chapter,
     output_dir: Path,
     output_format: OutputFormat = "pdf",
+    state: Optional[State] = None,
 ) -> Optional[Path]:
     """
     Download a chapter and convert to PDF or EPUB.
     
     Args:
         manga: Manga entry from config
-        chapter: Chapter to download
+        chapter: Chapter to download (can be ChapterWithSource)
         output_dir: Directory to save the file
         output_format: "pdf" or "epub"
+        state: State manager (for clearing pending backup after download)
     
     Returns:
         Path to downloaded file, or None if failed
     """
     title = manga["title"]
-    source = manga.get("source", "")
+    
+    # Get source from chapter if available (ChapterWithSource), else from manga config
+    if isinstance(chapter, ChapterWithSource):
+        source = chapter.source
+        is_backup = chapter.is_backup
+    else:
+        sources = _get_sources_from_manga(manga)
+        source = sources[0]["source"] if sources else ""
+        is_backup = False
     
     # Get scraper
     try:
