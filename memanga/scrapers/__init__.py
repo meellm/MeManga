@@ -79,6 +79,19 @@ from .mangafoxfun import MangaFoxFunScraper
 from .mangahubus import MangaHubUsScraper
 from .onemanga import OneMangaScraper
 from .mangafreak import MangaFreakScraper
+from .comick import ComickScraper
+from .fanfox import FanFoxScraper
+from .toonily import ToonilyScraper
+from .omegascans import OmegaScansScraper
+from .manga4life import Manga4LifeScraper
+from .isekaiscan import IsekaiScanScraper
+from .zinmanga import ZinMangaScraper
+from .mangaclash import MangaClashScraper
+from .kunmanga import KunMangaScraper
+from .manytoon import ManyToonScraper
+from .pururin import PururinScraper
+from .hentairead import HentaiReadScraper
+from .manganato_gg import ManganatoGGScraper
 
 SCRAPERS = {
     # TCB Scans - Jump manga (no Cloudflare, simple requests)
@@ -280,6 +293,48 @@ SCRAPERS = {
     "mangafreak.ws": MangaFreakScraper,
     "mangafreak.me": MangaFreakScraper,
     "ww2.mangafreak.me": MangaFreakScraper,
+    
+    # ComicK - Popular manga aggregator (Playwright + Cloudflare bypass)
+    "comick.io": ComickScraper,
+    "comick.dev": ComickScraper,
+    
+    # FanFox (MangaFox) - Large manga library (Playwright)
+    "fanfox.net": FanFoxScraper,
+    "mangafox.me": FanFoxScraper,
+    
+    # Toonily - Korean manhwa/webtoon (Playwright)
+    "toonily.me": ToonilyScraper,
+    
+    # Omega Scans - Manhwa/webtoon (Playwright)
+    "omegascans.org": OmegaScansScraper,
+    
+    # Manga4Life / MangaLife - Large library (Playwright + JS)
+    "manga4life.com": Manga4LifeScraper,
+    "mangalife.us": Manga4LifeScraper,
+    
+    # IsekaiScan - Isekai manga/manhwa (Playwright + Madara)
+    "isekaiscan.com": IsekaiScanScraper,
+    
+    # ZinManga - Manga aggregator (Playwright + Madara)
+    "zinmanga.com": ZinMangaScraper,
+    
+    # MangaClash - Manga aggregator (Playwright + Madara + CF)
+    "mangaclash.com": MangaClashScraper,
+    
+    # KunManga - Manga aggregator (Playwright + Madara + CF)
+    "kunmanga.com": KunMangaScraper,
+    
+    # ManyToon - Adult manhwa (Playwright + JS chapters)
+    "manytoon.com": ManyToonScraper,
+    
+    # Pururin - Doujin gallery (Playwright + JS)
+    "pururin.to": PururinScraper,
+    
+    # HentaiRead - Hentai manga (Playwright)
+    "hentairead.com": HentaiReadScraper,
+    
+    # Manganato.gg - New domain with Cloudflare (Playwright)
+    "manganato.gg": ManganatoGGScraper,
 }
 
 
