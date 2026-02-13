@@ -6,7 +6,7 @@ Track manga from multiple sources, download chapters as PDFs, and optionally sen
 
 ## ✨ Features
 
-- 📚 **Track multiple manga** from 50+ sources
+- 📚 **Track multiple manga** from 90+ sources
 - 🔍 **Automatic updates** — knows what you've already downloaded
 - 🔄 **Backup sources** — fallback to secondary sources after N days
 - 📊 **Status tracking** — reading, on-hold, dropped, completed
@@ -33,7 +33,7 @@ Then:
 
 > **Windows:** Use `scripts\windows\run.bat` instead of `./scripts/run.sh`
 
-## 🌐 Supported Sources (50+)
+## 🌐 Supported Sources (90+)
 
 ### Primary Sources
 | Source | Type | Notes |
@@ -42,57 +42,82 @@ Then:
 | mangafire.to | Playwright | VRF bypass + image descrambling |
 | weebcentral.com | Playwright | 1000+ series |
 | mangapill.com | Requests | Fast, no Cloudflare |
-| mangahub.io | Requests | Large library |
-| bato.to | Requests | Community-driven |
-| comick.io | Requests | Clean API |
+| mangahub.io, mangahub.us | Requests | Large library |
+| bato.to, batoto.to | Requests | Community-driven |
+| comick.io, comick.dev | Requests | Clean API |
 
 ### Scan Groups
 | Source | Type | Notes |
 |--------|------|-------|
-| tcbscans.com | Requests | Jump manga (One Piece, JJK, etc.) |
-| asuracomic.net | Playwright | Manhwa/Webtoons |
+| tcbscans.com, tcbscans.me | Requests | Jump manga (One Piece, JJK, etc.) |
+| asuracomic.net, asuratoon.com | Playwright | Manhwa/Webtoons |
 | omegascans.org | Playwright | Manhwa translations |
 | flamecomics.xyz | Requests | Manhwa translations |
 | luminousscans.com | Requests | Manhwa translations |
-| hivetoons.org | Playwright | Void Scans network |
+| hivetoons.org, hivetoon.com | Playwright | Void Scans network |
 
-### Aggregators
+### Large Aggregators
 | Source | Type | Notes |
 |--------|------|-------|
-| mangakakalot.com | Requests | Huge library |
-| manganato.com | Requests | Mangakakalot network |
-| mangasee123.com | Requests | High quality scans |
+| mangakakalot.com, mangakakalot.to | Requests | Huge library |
+| manganato.com, manganato.gg, chapmanganato.to | Requests | Mangakakalot network |
+| mangasee123.com, manga4life.com, mangalife.us | Requests | High quality scans |
 | mangabuddy.com | Requests | Popular aggregator |
 | mangago.me | Requests | Yaoi/Shoujo collection |
 | mangakatana.com | Playwright | General library |
 | mangareader.to | Requests | Clean UI |
-| mangahere.onl | Playwright | Large library |
+| mangahere.onl, mangahere.cc | Playwright/Requests | Large library |
 | manhuafast.com | Requests | Manhua focused |
 | manhwatop.com | Requests | Manhwa focused |
-| coffeemanga.io | Requests | General library |
-| mangafox.fun | Requests | MangaHub network |
-| mangayy.org | Playwright | WordPress Madara |
+| mangaeffect.com | Requests | General library |
+
+### WordPress Madara Sites
+| Source | Type | Notes |
+|--------|------|-------|
+| mangayy.org, likemanga.io | Playwright | General library |
 | manytoon.com | Playwright | Webtoons/Manhwa |
 | toonily.me | Requests | Manhwa focused |
-| hiperdex.com | Requests | WordPress Madara |
+| hiperdex.com | Requests | General library |
 | zinmanga.com | Requests | General library |
 | kunmanga.com | Requests | General library |
 | isekaiscan.com | Requests | Isekai focused |
+| coffeemanga.io | Requests | General library |
+| mangaclash.com | Requests | General library |
+| mangadistrict.com | Requests | General library |
+| manhuaplus.org, manhuaus.org | Requests | Manhua focused |
+
+### MangaHub Network
+| Source | Type | Notes |
+|--------|------|-------|
+| mangafox.fun, mangafox.me, fanfox.net | Requests | MangaHub CDN |
+| mangapanda.onl | Requests | MangaHub CDN |
+| mangaread.org | Requests | MangaHub CDN |
+| mangatown.com | Requests | MangaHub CDN |
+
+### Other Aggregators
+| Source | Type | Notes |
+|--------|------|-------|
 | truemanga.com | Requests | General library |
-| s2manga.com | Requests | General library |
+| s2manga.com, s2manga.io | Requests | General library |
 | mgeko.cc | Requests | General library |
+| mangabolt.com | Requests | General library |
+| mangamonk.com | Requests | General library |
+| mangaforfree.net | Requests | General library |
+| mangataro.org | Requests | ComicK alternative |
+| mangafreak.me, mangafreak.ws | Requests | General library |
+| azmanga.com | Requests | AZ sorted library |
 
 ### Title-Specific Readers
 | Source | Notes |
 |--------|-------|
-| readonepiece.com | One Piece chapters |
-| readnaruto.com | Naruto chapters |
-| readmha.com | My Hero Academia |
+| readonepiece.com (+ mirrors) | One Piece chapters |
+| readnaruto.com (+ mirrors) | Naruto chapters |
+| readmha.com (+ mirrors) | My Hero Academia |
 | readjujutsukaisen.com | Jujutsu Kaisen |
 | readchainsawman.com | Chainsaw Man |
 | readberserk.com | Berserk |
-| readblackclover.com | Black Clover |
-| readfairytail.com | Fairy Tail |
+| readblackclover.com (+ mirrors) | Black Clover |
+| readfairytail.com (+ mirrors) | Fairy Tail |
 | readhaikyuu.com | Haikyuu |
 | readsnk.com | Attack on Titan |
 
