@@ -72,6 +72,13 @@ from .readnaruto import ReadNarutoScraper
 from .readmha import ReadMHAScraper
 from .readfairytail import ReadFairyTailScraper
 from .readblackclover import ReadBlackCloverScraper
+from .mangapanda import MangaPandaScraper
+from .mangabolt import MangaBoltScraper
+from .mangaforfree import MangaForFreeScraper
+from .mangafoxfun import MangaFoxFunScraper
+from .mangahubus import MangaHubUsScraper
+from .onemanga import OneMangaScraper
+from .mangafreak import MangaFreakScraper
 
 SCRAPERS = {
     # TCB Scans - Jump manga (no Cloudflare, simple requests)
@@ -250,6 +257,29 @@ SCRAPERS = {
     # ReadBlackClover - Black Clover dedicated (WordPress + CDN)
     "readblackclover.com": ReadBlackCloverScraper,
     "ww7.readblackclover.com": ReadBlackCloverScraper,
+    
+    # MangaPanda - MangaHub network (cloudscraper)
+    "mangapanda.onl": MangaPandaScraper,
+    
+    # MangaBolt - Jump manga aggregator
+    "mangabolt.com": MangaBoltScraper,
+    
+    # MangaForFree - WordPress Madara
+    "mangaforfree.net": MangaForFreeScraper,
+    
+    # MangaFox.fun - MangaHub network (cloudscraper)
+    "mangafox.fun": MangaFoxFunScraper,
+    
+    # MangaHub.us - MangaHub network (cloudscraper)
+    "mangahub.us": MangaHubUsScraper,
+    
+    # 1Manga.co - Large library (MangaHub CDN)
+    "1manga.co": OneMangaScraper,
+    
+    # MangaFreak.ws - Large manga library
+    "mangafreak.ws": MangaFreakScraper,
+    "mangafreak.me": MangaFreakScraper,
+    "ww2.mangafreak.me": MangaFreakScraper,
 }
 
 
