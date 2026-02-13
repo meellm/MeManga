@@ -35,6 +35,43 @@ from .mangakakalot import MangakakalotScraper
 from .manganato import ManganatoScraper
 from .mangago import MangagoScraper
 from .mangataro import MangaTaroScraper
+from .flamecomics import FlameComicsScraper
+from .luminousscans import LuminousScansScraper
+from .mangahere import MangaHereScraper
+from .hentai20 import Hentai20Scraper
+from .readcomiconline import ReadComicOnlineScraper
+from .coffeemanga import CoffeeMangaScraper
+from .mgeko import MGekoScraper
+from .manhuafast import ManhuaFastScraper
+from .mangaeffect import MangaReadScraper
+from .manhuaplus import ManhuaPlusScraper
+from .manhwa18 import Manhwa18Scraper
+from .mangahub import MangaHubScraper
+from .mangatown import MangaTownScraper
+from .hiperdex import HiperDexScraper
+from .mangaread import MangaReadOrgScraper
+from .s2manga import S2MangaScraper
+from .manhwatop import ManhwaTopScraper
+from .manhuaus import ManhuaUsScraper
+from .truemanga import TrueMangaScraper
+from .mangadistrict import MangaDistrictScraper
+from .manga18fx import Manga18fxScraper
+from .nhentai import NHentaiScraper
+from .hentaifox import HentaiFoxScraper
+from .imhentai import IMHentaiScraper
+from .ehentai import EHentaiScraper
+from .readmanga_base import ReadMangaBaseScraper
+from .readsnk import ReadSNKScraper
+from .readberserk import ReadBerserkScraper
+from .readhaikyuu import ReadHaikyuuScraper
+from .readjujutsukaisen import ReadJujutsuKaisenScraper
+from .readchainsawman import ReadChainsawManScraper
+from .azmanga import AZMangaScraper
+from .readonepiece import ReadOnePieceScraper
+from .readnaruto import ReadNarutoScraper
+from .readmha import ReadMHAScraper
+from .readfairytail import ReadFairyTailScraper
+from .readblackclover import ReadBlackCloverScraper
 
 SCRAPERS = {
     # TCB Scans - Jump manga (no Cloudflare, simple requests)
@@ -91,6 +128,128 @@ SCRAPERS = {
     
     # MangaTaro (ComicK replacement)
     "mangataro.org": MangaTaroScraper,
+    
+    # FlameComics
+    "flamecomics.xyz": FlameComicsScraper,
+    
+    # LuminousScans
+    "luminousscans.com": LuminousScansScraper,
+    
+    # MangaHere
+    "mangahere.cc": MangaHereScraper,
+    
+    # Hentai20 (NSFW)
+    "hentai20.io": Hentai20Scraper,
+    
+    # ReadComicOnline (Comics)
+    "readcomiconline.li": ReadComicOnlineScraper,
+    
+    # CoffeeManga
+    "coffeemanga.io": CoffeeMangaScraper,
+    
+    # MGeko
+    "mgeko.cc": MGekoScraper,
+    
+    # ManhuaFast
+    "manhuafast.com": ManhuaFastScraper,
+    
+    # MangaRead/MangaEffect
+    "mangaeffect.com": MangaReadScraper,
+    
+    # ManhuaPlus
+    "manhuaplus.org": ManhuaPlusScraper,
+    
+    # Manhwa18
+    "manhwa18.cc": Manhwa18Scraper,
+    
+    # MangaHub
+    "mangahub.io": MangaHubScraper,
+    
+    # MangaTown
+    "mangatown.com": MangaTownScraper,
+    "www.mangatown.com": MangaTownScraper,
+    
+    # HiperDex
+    "hiperdex.com": HiperDexScraper,
+    
+    # MangaRead.org
+    "mangaread.org": MangaReadOrgScraper,
+    "www.mangaread.org": MangaReadOrgScraper,
+    
+    # S2Manga
+    "s2manga.com": S2MangaScraper,
+    "s2manga.io": S2MangaScraper,
+    
+    # ManhwaTop
+    "manhwatop.com": ManhwaTopScraper,
+    
+    # ManhuaUs
+    "manhuaus.org": ManhuaUsScraper,
+    
+    # TrueManga / MangaMonk
+    "truemanga.com": TrueMangaScraper,
+    "mangamonk.com": TrueMangaScraper,
+    
+    # MangaDistrict
+    "mangadistrict.com": MangaDistrictScraper,
+    
+    # Manga18fx (WordPress Madara - NSFW)
+    "manga18fx.com": Manga18fxScraper,
+    
+    # NHentai (Doujin gallery)
+    "nhentai.net": NHentaiScraper,
+    
+    # HentaiFox (Doujin gallery)
+    "hentaifox.com": HentaiFoxScraper,
+    
+    # IMHentai (Doujin gallery)
+    "imhentai.xxx": IMHentaiScraper,
+    
+    # E-Hentai (Doujin gallery)
+    "e-hentai.org": EHentaiScraper,
+    "exhentai.org": EHentaiScraper,
+    
+    # ReadSNK - Attack on Titan dedicated (WordPress + CDN)
+    "readsnk.com": ReadSNKScraper,
+    
+    # ReadBerserk - Berserk dedicated (WordPress + CDN)
+    "readberserk.com": ReadBerserkScraper,
+    
+    # ReadHaikyuu - Haikyuu!! dedicated (WordPress + CDN)
+    "readhaikyuu.com": ReadHaikyuuScraper,
+    
+    # ReadJujutsuKaisen - JJK dedicated (WordPress + CDN)
+    "readjujutsukaisen.com": ReadJujutsuKaisenScraper,
+    
+    # ReadChainsawMan - Chainsaw Man dedicated (WordPress + CDN)
+    "readchainsawman.com": ReadChainsawManScraper,
+    
+    # AZManga - Manga/manhwa aggregator (WordPress Madara)
+    "azmanga.com": AZMangaScraper,
+    
+    # ReadOnePiece - One Piece dedicated (WordPress + CDN)
+    "readonepiece.com": ReadOnePieceScraper,
+    "ww8.readonepiece.com": ReadOnePieceScraper,
+    "ww12.readonepiece.com": ReadOnePieceScraper,
+    
+    # ReadNaruto - Naruto dedicated (WordPress + CDN)
+    "readnaruto.com": ReadNarutoScraper,
+    "ww8.readnaruto.com": ReadNarutoScraper,
+    "ww10.readnaruto.com": ReadNarutoScraper,
+    "ww11.readnaruto.com": ReadNarutoScraper,
+    
+    # ReadMHA - My Hero Academia dedicated (WordPress + CDN)
+    "readmha.com": ReadMHAScraper,
+    "ww8.readmha.com": ReadMHAScraper,
+    "ww10.readmha.com": ReadMHAScraper,
+    
+    # ReadFairyTail - Fairy Tail dedicated (WordPress + CDN)
+    "readfairytail.com": ReadFairyTailScraper,
+    "ww7.readfairytail.com": ReadFairyTailScraper,
+    
+    # ReadBlackClover - Black Clover dedicated (WordPress + CDN)
+    "readblackclover.com": ReadBlackCloverScraper,
+    "ww7.readblackclover.com": ReadBlackCloverScraper,
 }
 
 
@@ -108,20 +267,13 @@ def get_scraper(source: str) -> BaseScraper:
 
 def list_supported_sources():
     """List all supported source domains."""
-    return [
-        "tcbonepiecechapters.com",
-        "weebcentral.com",
-        "asuracomic.net",
-        "mangakatana.com",
-        "mangadex.org",
-        "mangapill.com",
-        "mangareader.to",
-        "mangafire.to",
-        "mangasee123.com",
-        "mangabuddy.com",
-        "bato.to",
-        "mangakakalot.com",
-        "manganato.com",
-        "mangago.me",
-        "mangataro.org",
-    ]
+    # Return unique main domains from SCRAPERS
+    seen = set()
+    sources = []
+    for domain in SCRAPERS.keys():
+        # Get base domain without www
+        base = domain.replace("www.", "")
+        if base not in seen:
+            seen.add(base)
+            sources.append(base)
+    return sorted(sources)
