@@ -6,7 +6,7 @@ Track manga from multiple sources, download chapters as PDFs, and optionally sen
 
 ## ✨ Features
 
-- 📚 **Track multiple manga** from 15 sources
+- 📚 **Track multiple manga** from 50+ sources
 - 🔍 **Automatic updates** — knows what you've already downloaded
 - 🔄 **Backup sources** — fallback to secondary sources after N days
 - 📊 **Status tracking** — reading, on-hold, dropped, completed
@@ -33,25 +33,73 @@ Then:
 
 > **Windows:** Use `scripts\windows\run.bat` instead of `./scripts/run.sh`
 
-## 🌐 Supported Sources
+## 🌐 Supported Sources (50+)
 
+### Primary Sources
 | Source | Type | Notes |
 |--------|------|-------|
 | mangadex.org | API | Fan translations, largest library |
-| tcbonepiecechapters.com | Requests | Jump manga (One Piece, JJK, etc.) |
-| weebcentral.com | Playwright | 1000+ series, Quick Search |
-| mangapill.com | Requests | Fast, no Cloudflare |
-| mangakatana.com | Playwright | General library |
-| mangareader.to | Requests | Clean UI |
 | mangafire.to | Playwright | VRF bypass + image descrambling |
-| mangasee123.com | Requests | High quality scans |
-| asuracomic.net | Playwright | Manhwa/Webtoons |
-| mangabuddy.com | Requests | Popular aggregator |
+| weebcentral.com | Playwright | 1000+ series |
+| mangapill.com | Requests | Fast, no Cloudflare |
+| mangahub.io | Requests | Large library |
 | bato.to | Requests | Community-driven |
+| comick.io | Requests | Clean API |
+
+### Scan Groups
+| Source | Type | Notes |
+|--------|------|-------|
+| tcbscans.com | Requests | Jump manga (One Piece, JJK, etc.) |
+| asuracomic.net | Playwright | Manhwa/Webtoons |
+| omegascans.org | Playwright | Manhwa translations |
+| flamecomics.xyz | Requests | Manhwa translations |
+| luminousscans.com | Requests | Manhwa translations |
+| hivetoons.org | Playwright | Void Scans network |
+
+### Aggregators
+| Source | Type | Notes |
+|--------|------|-------|
 | mangakakalot.com | Requests | Huge library |
 | manganato.com | Requests | Mangakakalot network |
+| mangasee123.com | Requests | High quality scans |
+| mangabuddy.com | Requests | Popular aggregator |
 | mangago.me | Requests | Yaoi/Shoujo collection |
-| mangataro.org | Requests | ComicK alternative |
+| mangakatana.com | Playwright | General library |
+| mangareader.to | Requests | Clean UI |
+| mangahere.onl | Playwright | Large library |
+| manhuafast.com | Requests | Manhua focused |
+| manhwatop.com | Requests | Manhwa focused |
+| coffeemanga.io | Requests | General library |
+| mangafox.fun | Requests | MangaHub network |
+| mangayy.org | Playwright | WordPress Madara |
+| manytoon.com | Playwright | Webtoons/Manhwa |
+| toonily.me | Requests | Manhwa focused |
+| hiperdex.com | Requests | WordPress Madara |
+| zinmanga.com | Requests | General library |
+| kunmanga.com | Requests | General library |
+| isekaiscan.com | Requests | Isekai focused |
+| truemanga.com | Requests | General library |
+| s2manga.com | Requests | General library |
+| mgeko.cc | Requests | General library |
+
+### Title-Specific Readers
+| Source | Notes |
+|--------|-------|
+| readonepiece.com | One Piece chapters |
+| readnaruto.com | Naruto chapters |
+| readmha.com | My Hero Academia |
+| readjujutsukaisen.com | Jujutsu Kaisen |
+| readchainsawman.com | Chainsaw Man |
+| readberserk.com | Berserk |
+| readblackclover.com | Black Clover |
+| readfairytail.com | Fairy Tail |
+| readhaikyuu.com | Haikyuu |
+| readsnk.com | Attack on Titan |
+
+### Comics
+| Source | Type | Notes |
+|--------|------|-------|
+| readcomiconline.li | Requests | Western comics |
 
 > **Note:** Playwright scrapers use Firefox headless browser for JavaScript rendering and bot detection bypass.
 
@@ -148,7 +196,7 @@ Downloads to `~/.config/memanga/downloads/`
 ## 🛠️ Adding a Source
 
 1. Create `memanga/scrapers/newsite.py`
-2. Inherit from `BaseScraper`
+2. Inherit from `BaseScraper` or `PlaywrightScraper`
 3. Implement `search()`, `get_chapters()`, `get_pages()`
 4. Register in `memanga/scrapers/__init__.py`
 

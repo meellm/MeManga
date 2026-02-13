@@ -83,6 +83,8 @@ from .comick import ComickScraper
 from .fanfox import FanFoxScraper
 from .toonily import ToonilyScraper
 from .omegascans import OmegaScansScraper
+from .hivetoons import HivetoonsScraper
+from .mangayy import MangaYYScraper
 from .manga4life import Manga4LifeScraper
 from .isekaiscan import IsekaiScanScraper
 from .zinmanga import ZinMangaScraper
@@ -92,6 +94,7 @@ from .manytoon import ManyToonScraper
 from .pururin import PururinScraper
 from .hentairead import HentaiReadScraper
 from .manganato_gg import ManganatoGGScraper
+from .mangahereonl import MangaHereOnlScraper
 
 SCRAPERS = {
     # TCB Scans - Jump manga (no Cloudflare, simple requests)
@@ -307,6 +310,12 @@ SCRAPERS = {
     
     # Omega Scans - Manhwa/webtoon (Playwright)
     "omegascans.org": OmegaScansScraper,
+    # Hivetoons - Void Scans network (Playwright)
+    "hivetoons.org": HivetoonsScraper,
+    "hivetoon.com": HivetoonsScraper,  # Redirects to hivetoons.org
+    # MangaYY - WordPress Madara (Playwright)
+    "mangayy.org": MangaYYScraper,
+    "likemanga.io": MangaYYScraper,  # Redirects to mangayy.org
     
     # Manga4Life / MangaLife - Large library (Playwright + JS)
     "manga4life.com": Manga4LifeScraper,
@@ -335,6 +344,9 @@ SCRAPERS = {
     
     # Manganato.gg - New domain with Cloudflare (Playwright)
     "manganato.gg": ManganatoGGScraper,
+    
+    # MangaHere.onl - Images from mghcdn.com (Playwright)
+    "mangahere.onl": MangaHereOnlScraper,
 }
 
 
