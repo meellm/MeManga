@@ -123,6 +123,10 @@ from .hajimenoippoonline import HajimeNoIppoOnlineScraper
 from .hajimnoippo import HajimNoIppoScraper
 from .hajimenoippoblogger import HajimeNoIppoBloggerScraper
 from .bluelockreadonline import BlueLockReadOnlineScraper
+from .akiramanga import AkiraMangaScraper
+from .tomiemanga import TomieMangaScraper
+from .kaijimanga import KaijiMangaScraper
+from .berserkmanga import BerserkMangaScraper
 
 SCRAPERS = {
     # TCB Scans - Jump manga (no Cloudflare, simple requests)
@@ -472,6 +476,22 @@ SCRAPERS = {
     
     # BlueLockReadOnline - Blue Lock dedicated (WordPress + wp-content)
     "bluelockread.online": BlueLockReadOnlineScraper,
+    
+    # AkiraManga - Akira dedicated (WordPress Comic Easel + Blogger CDN)
+    "akiramanga.com": AkiraMangaScraper,
+    
+    # TomieManga - Tomie (Junji Ito) dedicated (WordPress Comic Easel + img.mangarchive.com)
+    "tomie-manga.com": TomieMangaScraper,
+    "w12.tomie-manga.com": TomieMangaScraper,
+    
+    # KaijiManga - Kaiji dedicated (WordPress Comic Easel + Blogger CDN)
+    "kaijimanga.com": KaijiMangaScraper,
+    "w9.kaijimanga.com": KaijiMangaScraper,
+    
+    # BerserkManga - Berserk dedicated (WordPress Comic Easel + cdn3.mangaclash.com)
+    "berserk-manga.com": BerserkMangaScraper,
+    "w3.berserk-manga.com": BerserkMangaScraper,
+    "w4.berserk-manga.com": BerserkMangaScraper,
 }
 
 
