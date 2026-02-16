@@ -95,6 +95,34 @@ from .pururin import PururinScraper
 from .hentairead import HentaiReadScraper
 from .manganato_gg import ManganatoGGScraper
 from .mangahereonl import MangaHereOnlScraper
+from .trigunmanga import TrigunMangaScraper
+from .beastarsmanga import BeastarsMangaScraper
+from .vagabondmanga import VagabondMangaScraper
+from .monstermanga import MonsterMangaScraper
+from .bleachread import BleachReadScraper
+from .deathnotemanga import DeathNoteMangaScraper
+from .tgmanga import TGMangaScraper
+from .readichithewitch import ReadIchiTheWitchScraper
+from .demonslayermanga import DemonSlayerMangaScraper
+from .drstonemanga import DrStoneMangaScraper
+from .sakamotomanga import SakamotoMangaScraper
+from .elusivesamurai import ElusiveSamuraiScraper
+from .readbluelockorg import ReadBlueLockOrgScraper
+from .bocchitherockmanga import BocchiTheRockMangaScraper
+from .sxfmanga import SXFMangaScraper
+from .spyxfamilymanga import SpyXFamilyMangaScraper
+from .mashlemanga import MashleMangaScraper
+from .blueexorcistmanga import BlueExorcistMangaScraper
+from .frierenmanga import FrierenMangaScraper
+from .punpunmanga import PunpunMangaScraper
+from .furierenmanga import FurierenMangaScraper
+from .kokounohitomanga import KokouNoHitoMangaScraper
+from .madeabyssmanga import MadeAbyssMangaScraper
+from .ajimenoippo import AjimeNoIppoScraper
+from .hajimenoippoonline import HajimeNoIppoOnlineScraper
+from .hajimnoippo import HajimNoIppoScraper
+from .hajimenoippoblogger import HajimeNoIppoBloggerScraper
+from .bluelockreadonline import BlueLockReadOnlineScraper
 
 SCRAPERS = {
     # TCB Scans - Jump manga (no Cloudflare, simple requests)
@@ -347,6 +375,103 @@ SCRAPERS = {
     
     # MangaHere.onl - Images from mghcdn.com (Playwright)
     "mangahere.onl": MangaHereOnlScraper,
+    
+    # TrigunManga - Trigun dedicated (WordPress + Blogger CDN)
+    "trigunmanga.com": TrigunMangaScraper,
+    
+    # BeastarsManga - Beastars dedicated (WordPress + cdn.readkakegurui.com)
+    "beastarsmanga.com": BeastarsMangaScraper,
+    
+    # VagabondManga - Vagabond dedicated (WordPress + cdn.mangaclash.com)
+    "vagabondmanga.org": VagabondMangaScraper,
+    "www.vagabondmanga.org": VagabondMangaScraper,
+    
+    # MonsterManga - Monster (Naoki Urasawa) dedicated (WordPress + official.lowee.us)
+    "monstermanga.org": MonsterMangaScraper,
+    "www.monstermanga.org": MonsterMangaScraper,
+    
+    # BleachRead - Bleach dedicated (WordPress + Blogger CDN)
+    "bleach-read.com": BleachReadScraper,
+    "w38.bleach-read.com": BleachReadScraper,
+    
+    # DeathNoteManga - Death Note dedicated (WordPress + Blogger CDN)
+    "death-note-manga.com": DeathNoteMangaScraper,
+    "w13.death-note-manga.com": DeathNoteMangaScraper,
+    
+    # TGManga - Tokyo Ghoul dedicated (WordPress + wp-content)
+    "tgmanga.com": TGMangaScraper,
+    
+    # ReadIchiTheWitch - Ichi the Witch dedicated (cdn.readichithewitch.com)
+    "readichithewitch.com": ReadIchiTheWitchScraper,
+    "ww1.readichithewitch.com": ReadIchiTheWitchScraper,
+    
+    # DemonSlayerManga - Demon Slayer / Kimetsu no Yaiba dedicated (cdn.demonslayermanga.com)
+    "demonslayermanga.com": DemonSlayerMangaScraper,
+    "ww9.demonslayermanga.com": DemonSlayerMangaScraper,
+    
+    # DrStoneManga - Dr. Stone dedicated (assets.drstonemanga.com)
+    "drstonemanga.com": DrStoneMangaScraper,
+    
+    # SakamotoManga - Sakamoto Days dedicated (cdn3.mangaclash.com)
+    "sakamotomanga.com": SakamotoMangaScraper,
+    
+    # ElusiveSamurai - The Elusive Samurai dedicated (pic.readkakegurui.com)
+    "elusive-samurai.com": ElusiveSamuraiScraper,
+    "w4.elusive-samurai.com": ElusiveSamuraiScraper,
+    
+    # ReadBlueLockOrg - Blue Lock dedicated (images.asuratoon.top)
+    "readbluelock.org": ReadBlueLockOrgScraper,
+    
+    # BocchiTheRockManga - Bocchi the Rock! dedicated (cdn.black-clover.org)
+    "bocchitherockmanga.com": BocchiTheRockMangaScraper,
+    "w5.bocchitherockmanga.com": BocchiTheRockMangaScraper,
+    
+    # SXFManga - Spy x Family dedicated (WordPress Madara + img.spoilerhat.com proxy)
+    "sxfmanga.net": SXFMangaScraper,
+    "ww2.sxfmanga.net": SXFMangaScraper,
+    "www.sxfmanga.net": SXFMangaScraper,
+    
+    # SpyXFamilyManga - Spy x Family dedicated (cdn3.mangaclash.com)
+    "spyxfamilymanga.org": SpyXFamilyMangaScraper,
+    
+    # MashleManga - Mashle dedicated (WordPress Madara + img.spoilerhat.com proxy)
+    "mashlemanga.net": MashleMangaScraper,
+    "www.mashlemanga.net": MashleMangaScraper,
+    
+    # BlueExorcistManga - Blue Exorcist / Ao no Exorcist dedicated (cdn.readkakegurui.com)
+    "blueexorcistmanga.com": BlueExorcistMangaScraper,
+    
+    # FrierenManga - Frieren: Beyond Journey's End dedicated (WordPress Comic Easel + img.spoilerhat.com proxy)
+    "frieren-manga.com": FrierenMangaScraper,
+    
+    # PunpunManga - Goodnight Punpun dedicated (Nuxt SSR + assets.punpunmanga.com)
+    "punpunmanga.com": PunpunMangaScraper,
+    
+    # FurierenManga - Frieren: Beyond Journey's End dedicated (Nuxt SSR + assets.furieren.com)
+    "furieren.com": FurierenMangaScraper,
+    
+    # KokouNoHitoManga - The Climber dedicated (Nuxt SSR + assets.kokounohito.com)
+    "kokounohito.com": KokouNoHitoMangaScraper,
+    
+    # MadeAbyssManga - Made in Abyss dedicated (Nuxt SSR + assets.madeabyss.com)
+    "madeabyss.com": MadeAbyssMangaScraper,
+    
+    # AjimeNoIppo - Hajime no Ippo dedicated (WordPress + cdn.mangaclash.com)
+    "ajimenoippo.com": AjimeNoIppoScraper,
+    "www.ajimenoippo.com": AjimeNoIppoScraper,
+    
+    # HajimeNoIppoOnline - Hajime no Ippo dedicated (WordPress + laiond.com)
+    "hajime-no-ippo-manga.online": HajimeNoIppoOnlineScraper,
+    
+    # HajimNoIppo - Hajime no Ippo dedicated (WordPress + planeptune.us)
+    "hajimnoippo.com": HajimNoIppoScraper,
+    
+    # HajimeNoIppoBlogger - Hajime no Ippo dedicated (WordPress + Blogger CDN)
+    "hajime-noippo.com": HajimeNoIppoBloggerScraper,
+    "w22.hajime-noippo.com": HajimeNoIppoBloggerScraper,
+    
+    # BlueLockReadOnline - Blue Lock dedicated (WordPress + wp-content)
+    "bluelockread.online": BlueLockReadOnlineScraper,
 }
 
 
