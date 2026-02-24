@@ -31,6 +31,9 @@ try:
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
+    Browser = None
+    BrowserContext = None
+    Page = None
 
 # Try cloudscraper
 try:

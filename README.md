@@ -6,7 +6,7 @@ Track manga from multiple sources, download chapters as PDFs, and optionally sen
 
 ## ✨ Features
 
-- 📚 **Track multiple manga** from 15 sources
+- 📚 **Track multiple manga** from 260+ scrapers / 300+ domains
 - 🔍 **Automatic updates** — knows what you've already downloaded
 - 🔄 **Backup sources** — fallback to secondary sources after N days
 - 📊 **Status tracking** — reading, on-hold, dropped, completed
@@ -33,25 +33,22 @@ Then:
 
 > **Windows:** Use `scripts\windows\run.bat` instead of `./scripts/run.sh`
 
-## 🌐 Supported Sources
+## 🌐 Popular Sources
 
 | Source | Type | Notes |
 |--------|------|-------|
-| mangadex.org | API | Fan translations, largest library |
-| tcbonepiecechapters.com | Requests | Jump manga (One Piece, JJK, etc.) |
-| weebcentral.com | Playwright | 1000+ series, Quick Search |
-| mangapill.com | Requests | Fast, no Cloudflare |
-| mangakatana.com | Playwright | General library |
-| mangareader.to | Requests | Clean UI |
+| mangadex.org | API | Largest fan translation library |
+| weebcentral.com | Playwright | 1000+ series, fast search |
 | mangafire.to | Playwright | VRF bypass + image descrambling |
-| mangasee123.com | Requests | High quality scans |
-| asuracomic.net | Playwright | Manhwa/Webtoons |
-| mangabuddy.com | Requests | Popular aggregator |
+| mangapill.com | Requests | Fast, no Cloudflare |
 | bato.to | Requests | Community-driven |
+| comick.io | Requests | Clean API |
+| tcbscans.com | Requests | Jump manga (One Piece, JJK) |
+| asuracomic.net | Playwright | Manhwa/Webtoons |
 | mangakakalot.com | Requests | Huge library |
-| manganato.com | Requests | Mangakakalot network |
-| mangago.me | Requests | Yaoi/Shoujo collection |
-| mangataro.org | Requests | ComicK alternative |
+| mangasee123.com | Requests | High quality scans |
+
+**[→ Full list of 300+ supported domains](docs/SUPPORTED_SOURCES.md)**
 
 > **Note:** Playwright scrapers use Firefox headless browser for JavaScript rendering and bot detection bypass.
 
@@ -105,7 +102,7 @@ Config files are stored in `~/.config/memanga/`. See `examples/` folder for temp
 
 ### Backup Sources
 
-Configure primary and backup sources for each manga. If the primary source is slow, MeManga will automatically fall back to the backup after a configurable delay:
+Configure primary and backup sources for each manga:
 
 ```yaml
 manga:
@@ -115,15 +112,6 @@ manga:
     - url: https://mangafire.to/manga/my-manga.xxx    # Primary
     - url: https://mangadex.org/title/uuid-here       # Backup
 ```
-
-**How it works:**
-1. Check primary source for new chapters
-2. If primary has it → download from primary
-3. If only backup has it → start waiting (note the date)
-4. After `fallback_delay_days` → download from backup
-5. If primary catches up within the delay → prefer primary
-
-This ensures you get the best quality (usually primary) while not missing chapters if your preferred source is slow.
 
 ### Delivery Modes
 
@@ -143,12 +131,10 @@ Downloads to `~/.config/memanga/downloads/`
 ./scripts/run.sh cron status            # Check status
 ```
 
-> **Windows:** Use Task Scheduler instead of cron.
-
 ## 🛠️ Adding a Source
 
 1. Create `memanga/scrapers/newsite.py`
-2. Inherit from `BaseScraper`
+2. Inherit from `BaseScraper` or `PlaywrightScraper`
 3. Implement `search()`, `get_chapters()`, `get_pages()`
 4. Register in `memanga/scrapers/__init__.py`
 
@@ -158,10 +144,6 @@ Downloads to `~/.config/memanga/downloads/`
 - MangaDex skips chapters with external URLs (official Shueisha)
 - TCBScans is fastest (no browser automation)
 - MangaFire includes image descrambling for protected content
-
-## 💬 Contact
-
-Feel free to suggest new manga sources.
 
 ## 📄 License
 
