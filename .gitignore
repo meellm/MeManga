@@ -18,6 +18,11 @@ config.yaml
 state.json
 downloads/
 
+# Personal queue scripts
+download_queue.sh
+run_queue.sh
+*_queue.sh
+
 # Logs
 *.log
 
