@@ -459,6 +459,91 @@ _cfg_aquamanga = {
     "image_cdn_filters": ["aquareader.net"],
 }
 
+# ── Haruneko Madara additions ──
+
+_cfg_apollcomics = {
+    "base_url": "https://apollcomics.es",
+    "uses_ajax": True,
+}
+
+_cfg_bokugents = {
+    "base_url": "https://bokugents.com",
+    "uses_ajax": True,
+}
+
+_cfg_dragontranslation = {
+    "base_url": "https://dragontranslation.org",
+    "uses_ajax": True,
+}
+
+_cfg_hipercool = {
+    "base_url": "https://hipercool.net",
+    "uses_ajax": True,
+}
+
+_cfg_mangasehri = {
+    "base_url": "https://mangasehri.com",
+    "uses_ajax": True,
+}
+
+_cfg_mangawow = {
+    "base_url": "https://mangawow.com",
+    "uses_ajax": True,
+    "image_cdn_filters": ["mangawow.com"],
+}
+
+_cfg_pawmanga = {
+    "base_url": "https://pawmanga.com",
+    "uses_ajax": True,
+    "image_cdn_filters": ["pawmanga.com"],
+}
+
+_cfg_rawxz = {
+    "base_url": "https://rawjx.net",
+    "uses_ajax": True,
+    "image_cdn_filters": ["rawxz.xyz"],
+}
+
+_cfg_resetscans = {
+    "base_url": "https://reset-scans.org",
+    "uses_ajax": True,
+}
+
+_cfg_ruyamanga = {
+    "base_url": "https://www.ruyamanga2.com",
+    "uses_ajax": True,
+    "image_cdn_filters": ["cdnformanga.xyz"],
+}
+
+_cfg_shinobiscans = {
+    "base_url": "https://shinobiscans.com",
+    "uses_ajax": True,
+}
+
+_cfg_tortugaceviri = {
+    "base_url": "https://tortugaceviri.com",
+    "uses_ajax": True,
+    "image_cdn_filters": ["mangawow.com"],
+}
+
+_cfg_vermanhwa = {
+    "base_url": "https://vermanhwa.com",
+    "uses_ajax": True,
+    "image_cdn_filters": ["vermanhwa.com"],
+}
+
+_cfg_yakshascans = {
+    "base_url": "https://yakshascans.com",
+    "uses_ajax": True,
+    "image_cdn_filters": ["yakshascans.com"],
+}
+
+_cfg_zinmanga = {
+    "base_url": "https://mangazin.org",
+    "uses_ajax": True,
+    "image_cdn_filters": ["mangazin.org"],
+}
+
 # ═══════════════════════════════════════════════════════════════════
 # Laiond CDN configs
 # ═══════════════════════════════════════════════════════════════════
@@ -692,6 +777,24 @@ TEMPLATE_SCRAPERS = {
     "mangadistrict.com": (WordPressMadaraScraper, _cfg_mangadistrict),
     "manga18fx.com": (WordPressMadaraScraper, _cfg_manga18fx),
     "aquareader.net": (WordPressMadaraScraper, _cfg_aquamanga),
+    
+    # ── Haruneko Madara additions ──
+    "apollcomics.es": (WordPressMadaraScraper, _cfg_apollcomics),
+    "bokugents.com": (WordPressMadaraScraper, _cfg_bokugents),
+    "dragontranslation.org": (WordPressMadaraScraper, _cfg_dragontranslation),
+    "hipercool.net": (WordPressMadaraScraper, _cfg_hipercool),
+    "mangasehri.com": (WordPressMadaraScraper, _cfg_mangasehri),
+    "mangawow.com": (WordPressMadaraScraper, _cfg_mangawow),
+    "pawmanga.com": (WordPressMadaraScraper, _cfg_pawmanga),
+    "rawjx.net": (WordPressMadaraScraper, _cfg_rawxz),
+    "reset-scans.org": (WordPressMadaraScraper, _cfg_resetscans),
+    "ruyamanga2.com": (WordPressMadaraScraper, _cfg_ruyamanga),
+    "www.ruyamanga2.com": (WordPressMadaraScraper, _cfg_ruyamanga),
+    "shinobiscans.com": (WordPressMadaraScraper, _cfg_shinobiscans),
+    "tortugaceviri.com": (WordPressMadaraScraper, _cfg_tortugaceviri),
+    "vermanhwa.com": (WordPressMadaraScraper, _cfg_vermanhwa),
+    "yakshascans.com": (WordPressMadaraScraper, _cfg_yakshascans),
+    "mangazin.org": (WordPressMadaraScraper, _cfg_zinmanga),
 
     # ── Laiond CDN ──
     "overlord-manga.online": (LaiondCDNScraper, _cfg_overlord),
