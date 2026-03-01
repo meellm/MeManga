@@ -9,6 +9,7 @@ General manga/manhwa aggregator with clean image CDN.
 import re
 import logging
 import cloudscraper
+from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -23,6 +24,7 @@ class MangaDNAScraper(BaseScraper):
     SOURCE_NAME = "MangaDNA"
     
     def __init__(self):
+        super().__init__()
         self.scraper = cloudscraper.create_scraper(
             browser={
                 'browser': 'chrome',
@@ -59,16 +61,11 @@ class MangaDNAScraper(BaseScraper):
                     
                     img = item.select_one('img')
                     cover = img.get('src', '') if img else ''
-                    
-                    # Get slug from URL
-                    slug = href.rstrip('/').split('/')[-1]
-                    
+
                     results.append(Manga(
                         title=title,
                         url=urljoin(self.BASE_URL, href),
                         cover_url=cover,
-                        source=self.SOURCE_NAME,
-                        slug=slug
                     ))
                 except Exception as e:
                     logger.debug(f"Error parsing search result: {e}")
@@ -97,10 +94,7 @@ class MangaDNAScraper(BaseScraper):
             # Get description
             desc_elem = soup.select_one('.desc, .description, .summary, [class*="synopsis"]')
             description = desc_elem.get_text(strip=True) if desc_elem else ''
-            
-            # Get slug
-            slug = manga_url.rstrip('/').split('/')[-1]
-            
+
             # Get chapters
             chapters = self.get_chapters(manga_url)
             
@@ -109,8 +103,6 @@ class MangaDNAScraper(BaseScraper):
                 url=manga_url,
                 cover_url=cover,
                 description=description,
-                source=self.SOURCE_NAME,
-                slug=slug,
                 chapters=chapters
             )
             
@@ -202,17 +194,22 @@ class MangaDNAScraper(BaseScraper):
             logger.error(f"Error getting chapter pages: {e}")
             return []
     
-    def download_image(self, image_url: str, headers: dict = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download image with appropriate headers."""
-        default_headers = {
-            'Referer': self.BASE_URL + '/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
-        }
-        
-        if headers:
-            default_headers.update(headers)
-        
-        response = self.scraper.get(image_url, headers=default_headers, timeout=60)
-        response.raise_for_status()
-        return response.content
+        try:
+            headers = {
+                'Referer': self.BASE_URL + '/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+            }
+            response = self.scraper.get(url, headers=headers, timeout=60)
+            response.raise_for_status()
+            if len(response.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to download {url}: {e}")
+            return False

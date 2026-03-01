@@ -9,6 +9,7 @@ Dedicated Kingdom manga reader site with WordPress.
 
 import re
 import logging
+from pathlib import Path
 from typing import List, Optional
 from bs4 import BeautifulSoup
 import cloudscraper
@@ -125,26 +126,27 @@ class ReadKingdomFreeScraper(BaseScraper):
             logger.error(f"Failed to get pages: {e}")
             return []
     
-    def download_image(self, url: str, save_path: str) -> bool:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image."""
         try:
             headers = {
                 'Referer': f'{self.BASE_URL}/',
                 'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
             }
-            
+
             response = self.session.get(url, headers=headers, timeout=30)
             response.raise_for_status()
-            
+
             if len(response.content) < 1000:
                 logger.warning(f"Image too small ({len(response.content)} bytes): {url}")
                 return False
-            
-            with open(save_path, 'wb') as f:
+
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
                 f.write(response.content)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to download image: {e}")
             return False

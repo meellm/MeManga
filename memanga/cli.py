@@ -5,7 +5,9 @@ A friendly CLI for tracking and downloading manga chapters.
 """
 
 import argparse
+import json
 import os
+import platform
 import sys
 import subprocess
 from pathlib import Path
@@ -19,9 +21,10 @@ from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import box
 
-from .config import Config
+from .config import Config, get_app_password, set_app_password
 from .state import State
 from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers
+from .scrapers import get_scraper
 from .emailer import send_to_kindle, EmailError
 
 console = Console()
@@ -136,7 +139,9 @@ def cmd_add(args):
         title = args.title
         url = args.url
         backup_url = getattr(args, 'backup', None)
-        fallback_days = getattr(args, 'fallback_days', 2) or 2
+        fallback_days = getattr(args, 'fallback_days', None)
+        if fallback_days is None:
+            fallback_days = 2
         
         if not title or not url:
             console.print("[red]Error:[/red] --title and --url required (or use --interactive)")
@@ -144,11 +149,13 @@ def cmd_add(args):
     
     # Extract source from URL
     parsed = urlparse(url)
-    source = parsed.netloc.replace("www.", "")
-    
-    # Check if source is supported
+    source = parsed.netloc.lower()
+    if source.startswith("www."):
+        source = source[4:]
+
+    # Check if source is supported (exact or subdomain match)
     supported = get_supported_sources()
-    source_ok = any(s in source for s in supported)
+    source_ok = any(source == s or source.endswith("." + s) for s in supported)
     if not source_ok:
         console.print(f"[yellow]⚠️  Warning:[/yellow] '{source}' might not be supported.")
         console.print(f"[dim]Supported: {', '.join(supported)}[/dim]")
@@ -174,13 +181,33 @@ def cmd_add(args):
             "url": url,
         }
     
+    # Try to fetch cover URL from the manga page
+    if source_ok:
+        try:
+            scraper = get_scraper(source)
+            cover_url = scraper.get_cover_url(url)
+            if cover_url:
+                manga_entry["cover_url"] = cover_url
+        except Exception:
+            pass
+
     manga_list = config.get("manga", [])
-    
-    # Check for duplicate
+
+    # Check for exact duplicate
     for m in manga_list:
         if m["title"].lower() == title.lower():
             console.print(f"[yellow]⚠️  '{title}' already exists![/yellow]")
             return
+
+    # Check for similar titles (substring match)
+    new_lower = title.lower()
+    for m in manga_list:
+        existing_lower = m["title"].lower()
+        if (new_lower in existing_lower or existing_lower in new_lower) and new_lower != existing_lower:
+            console.print(f"[yellow]⚠️  Similar manga already tracked: [cyan]{m['title']}[/cyan][/yellow]")
+            if not Confirm.ask("Add anyway?", default=False):
+                return
+            break
     
     manga_list.append(manga_entry)
     config.set("manga", manga_list)
@@ -195,45 +222,41 @@ def cmd_add(args):
         console.print(f"\n[green]✅ Added:[/green] {title} ({source})")
 
 
-def cmd_remove(args):
-    """Remove a manga from tracking."""
-    manga_list = config.get("manga", [])
-    
-    if not manga_list:
-        console.print("[yellow]No manga to remove.[/yellow]")
-        return
-    
-    # Find manga by title or number
-    target = args.target
-    found = None
-    found_idx = None
-    
-    # Try as number first
+def _find_manga(target: str, manga_list: list):
+    """Find manga by number or partial title match. Returns (manga, index) or (None, None)."""
     try:
         idx = int(target) - 1
         if 0 <= idx < len(manga_list):
-            found = manga_list[idx]
-            found_idx = idx
+            return manga_list[idx], idx
     except ValueError:
-        # Search by title (partial match)
         for i, m in enumerate(manga_list):
             if target.lower() in m["title"].lower():
-                found = m
-                found_idx = i
-                break
-    
+                return m, i
+    return None, None
+
+
+def cmd_remove(args):
+    """Remove a manga from tracking."""
+    manga_list = config.get("manga", [])
+
+    if not manga_list:
+        console.print("[yellow]No manga to remove.[/yellow]")
+        return
+
+    found, found_idx = _find_manga(args.target, manga_list)
+
     if not found:
-        console.print(f"[red]Not found:[/red] {target}")
+        console.print(f"[red]Not found:[/red] {args.target}")
         console.print("[dim]Use 'memanga list' to see tracked manga.[/dim]")
         return
-    
+
     if args.yes or Confirm.ask(f"Remove [cyan]{found['title']}[/cyan]?"):
         manga_list.pop(found_idx)
         config.set("manga", manga_list)
         config.save()
         
         # Also remove from state?
-        if Confirm.ask("Also remove download history?", default=False):
+        if args.yes or Confirm.ask("Also remove download history?", default=False):
             manga_state = state.get("manga", {})
             if found["title"] in manga_state:
                 del manga_state[found["title"]]
@@ -250,34 +273,19 @@ def cmd_set_status(args):
         console.print("[yellow]No manga tracked.[/yellow]")
         return
     
-    target = args.target
     new_status = args.status.lower()
-    
+
     if new_status not in VALID_STATUSES:
         console.print(f"[red]Invalid status:[/red] {new_status}")
         console.print(f"[dim]Valid: {', '.join(VALID_STATUSES)}[/dim]")
         return
-    
-    # Find manga
-    found = None
-    found_idx = None
-    
-    try:
-        idx = int(target) - 1
-        if 0 <= idx < len(manga_list):
-            found = manga_list[idx]
-            found_idx = idx
-    except ValueError:
-        for i, m in enumerate(manga_list):
-            if target.lower() in m["title"].lower():
-                found = m
-                found_idx = i
-                break
-    
+
+    found, found_idx = _find_manga(args.target, manga_list)
+
     if not found:
-        console.print(f"[red]Not found:[/red] {target}")
+        console.print(f"[red]Not found:[/red] {args.target}")
         return
-    
+
     old_status = found.get("status", "reading")
     manga_list[found_idx]["status"] = new_status
     config.set("manga", manga_list)
@@ -289,6 +297,78 @@ def cmd_set_status(args):
     new_color = colors.get(new_status, "white")
     
     console.print(f"[cyan]{found['title']}[/cyan]: [{old_color}]{old_status}[/] → [{new_color}]{new_status}[/]")
+
+
+def cmd_update(args):
+    """Update manga details (URL, backup, title)."""
+    from urllib.parse import urlparse
+
+    manga_list = config.get("manga", [])
+
+    if not manga_list:
+        console.print("[yellow]No manga tracked.[/yellow]")
+        return
+
+    found, found_idx = _find_manga(args.target, manga_list)
+
+    if not found:
+        console.print(f"[red]Not found:[/red] {args.target}")
+        console.print("[dim]Use 'memanga list' to see tracked manga.[/dim]")
+        return
+
+    old_title = found["title"]
+    changes = []
+
+    # Update URL
+    if args.url:
+        new_source = urlparse(args.url).netloc.replace("www.", "")
+        if "sources" in found:
+            found["sources"][0] = {"url": args.url, "source": new_source}
+        else:
+            found["source"] = new_source
+            found["url"] = args.url
+        changes.append(f"URL → {new_source}")
+
+    # Update backup
+    if args.backup:
+        backup_source = urlparse(args.backup).netloc.replace("www.", "")
+        if "sources" in found:
+            if len(found["sources"]) > 1:
+                found["sources"][1] = {"url": args.backup, "source": backup_source}
+            else:
+                found["sources"].append({"url": args.backup, "source": backup_source})
+        else:
+            # Convert to multi-source format
+            primary_url = found.pop("url", "")
+            primary_source = found.pop("source", "")
+            found["sources"] = [
+                {"url": primary_url, "source": primary_source},
+                {"url": args.backup, "source": backup_source},
+            ]
+            found.setdefault("fallback_delay_days", 2)
+        changes.append(f"Backup → {backup_source}")
+
+    # Rename title
+    if args.title:
+        found["title"] = args.title
+        # Migrate state (download history) to new title
+        manga_state = state.get("manga", {})
+        if old_title in manga_state:
+            manga_state[args.title] = manga_state.pop(old_title)
+            state.set("manga", manga_state)
+        changes.append(f"Title → {args.title}")
+
+    if not changes:
+        console.print("[yellow]No changes specified. Use --url, --backup, or --title.[/yellow]")
+        return
+
+    manga_list[found_idx] = found
+    config.set("manga", manga_list)
+    config.save()
+
+    console.print(f"[green]Updated [cyan]{old_title}[/cyan]:[/green]")
+    for c in changes:
+        console.print(f"  {c}")
 
 
 def cmd_check(args):
@@ -307,13 +387,16 @@ def cmd_check(args):
             return
     
     from_chapter = getattr(args, 'from_chapter', None)
-    if from_chapter:
+    dry_run = getattr(args, 'dry_run', False)
+
+    if dry_run:
+        console.print(Panel("[bold]🔍 Dry Run — Checking for New Chapters[/bold]", border_style="yellow"))
+    elif from_chapter:
         console.print(Panel(f"[bold]📥 Downloading from Chapter {from_chapter}[/bold]", border_style="green"))
     else:
         console.print(Panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
     console.print()
     
-    state.update_last_check()
     total_new = 0
     total_downloaded = 0
     
@@ -334,9 +417,6 @@ def cmd_check(args):
         console.print(f"[dim]Checking:[/dim] [cyan]{title}[/cyan]...")
         
         try:
-            # Get from_chapter if specified
-            from_chapter = getattr(args, 'from_chapter', None)
-            
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -357,15 +437,24 @@ def cmd_check(args):
                 ch_label = f"Chapter {ch.number}"
                 if ch.title:
                     ch_label += f": {ch.title}"
-                
+
+                # Dry run: just list chapters
+                if dry_run:
+                    source_info = ""
+                    if isinstance(ch, ChapterWithSource) and ch.is_backup:
+                        source_info = f" [yellow](backup: {ch.source})[/yellow]"
+                    console.print(f"     [dim][DRY RUN][/dim] {ch_label}{source_info}")
+                    total_downloaded += 1
+                    continue
+
                 # Download automatically or prompt
                 should_download = args.auto or args.yes
                 if not should_download and not args.quiet:
                     should_download = Confirm.ask(f"     Download {ch_label}?", default=True)
-                
+
                 if not should_download:
                     continue
-                
+
                 try:
                     # Show source info if from backup
                     source_info = ""
@@ -386,7 +475,7 @@ def cmd_check(args):
                                 sender_email=email_cfg["sender_email"],
                                 smtp_server=email_cfg.get("smtp_server", "smtp.gmail.com"),
                                 smtp_port=email_cfg.get("smtp_port", 587),
-                                app_password=email_cfg["app_password"],
+                                app_password=get_app_password(config),
                             )
                             console.print(f"     [green]📬 Sent to Kindle![/green]")
                             
@@ -417,10 +506,15 @@ def cmd_check(args):
         except Exception as e:
             console.print(f"  [red]└─ Unexpected error: {e}[/red]")
     
+    # Record check history with actual counts
+    state.update_last_check(new_chapters=total_new, downloaded=total_downloaded)
+
     # Summary
     console.print()
     if total_new == 0:
         console.print("[dim]No new chapters found.[/dim]")
+    elif dry_run:
+        console.print(f"[yellow]📊 Dry run: {total_new} chapter(s) available for download[/yellow]")
     else:
         console.print(f"[green]📊 Summary: {total_downloaded}/{total_new} chapters downloaded[/green]")
         if delivery_mode == "local":
@@ -469,10 +563,15 @@ def cmd_status(args):
 def cmd_config(args):
     """Configure MeManga settings."""
     if args.show:
-        # Show current config
+        # Show current config (mask sensitive fields)
+        import copy
         import yaml
+        display = copy.deepcopy(config._data)
+        pw = display.get("email", {}).get("app_password", "")
+        if pw:
+            display["email"]["app_password"] = "****"
         console.print(Panel("[bold]Current Configuration[/bold]", border_style="cyan"))
-        console.print(yaml.dump(config._data, default_flow_style=False))
+        console.print(yaml.dump(display, default_flow_style=False))
         return
     
     console.print(Panel("[bold]⚙️  Configure MeManga[/bold]", border_style="yellow"))
@@ -514,7 +613,7 @@ def cmd_config(args):
         
         if Confirm.ask("Update app password?"):
             app_password = Prompt.ask("App password", password=True)
-            config.set("email.app_password", app_password)
+            set_app_password(config, app_password)
         
         delete_after = Confirm.ask(
             "Delete PDFs after sending to Kindle?",
@@ -527,23 +626,30 @@ def cmd_config(args):
 
 
 def cmd_cron(args):
-    """Manage cron job for automatic checking."""
-    # cli.py is in memanga/, so project root is parent
+    """Manage scheduled task for automatic checking."""
+    if platform.system() == "Windows":
+        _cmd_cron_windows(args)
+    else:
+        _cmd_cron_unix(args)
+
+
+def _cmd_cron_unix(args):
+    """Manage cron job (macOS/Linux)."""
+    import sys
     project_dir = Path(__file__).resolve().parent.parent
     python_path = project_dir / "venv" / "bin" / "python3"
-    
+    if not python_path.exists():
+        python_path = Path(sys.executable)
+
     if args.action == "status":
-        # Check if cron job exists
         result = subprocess.run(
             ["crontab", "-l"],
             capture_output=True,
             text=True,
         )
-        
+
         if "memanga" in result.stdout.lower():
             console.print("[green]✅ Cron job is installed[/green]")
-            
-            # Find and show the line
             for line in result.stdout.split("\n"):
                 if "memanga" in line.lower():
                     console.print(f"[dim]{line}[/dim]")
@@ -551,34 +657,29 @@ def cmd_cron(args):
             console.print("[yellow]⚠️  No cron job found[/yellow]")
             console.print("[dim]Use 'memanga cron install' to set up automatic checking.[/dim]")
         return
-    
+
     elif args.action == "install":
-        # Get desired time
         time_str = args.time or config.get("cron.time", "06:00")
-        
+
         if not args.time:
             time_str = Prompt.ask("Check time (HH:MM)", default=time_str)
-        
+
         try:
             hour, minute = time_str.split(":")
             hour, minute = int(hour), int(minute)
         except ValueError:
             console.print("[red]Invalid time format. Use HH:MM[/red]")
             return 1
-        
-        # Build cron line
+
         cron_cmd = f"cd {project_dir} && {python_path} -m memanga check --auto --quiet"
         cron_line = f"{minute} {hour} * * * {cron_cmd} >> {project_dir}/memanga.log 2>&1"
-        
-        # Get existing crontab
+
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         existing = result.stdout if result.returncode == 0 else ""
-        
-        # Remove old memanga entries
+
         lines = [l for l in existing.split("\n") if l and "memanga" not in l.lower()]
         lines.append(cron_line)
-        
-        # Install new crontab
+
         new_crontab = "\n".join(lines) + "\n"
         process = subprocess.Popen(
             ["crontab", "-"],
@@ -586,45 +687,119 @@ def cmd_cron(args):
             text=True,
         )
         process.communicate(input=new_crontab)
-        
+
         if process.returncode == 0:
             config.set("cron.enabled", True)
             config.set("cron.time", time_str)
             config.save()
-            
+
             console.print(f"[green]✅ Cron job installed! Will check daily at {time_str}[/green]")
             console.print(f"[dim]{cron_line}[/dim]")
         else:
             console.print("[red]Failed to install cron job[/red]")
             return 1
-    
+
     elif args.action == "remove":
-        # Get existing crontab
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         if result.returncode != 0:
             console.print("[yellow]No crontab found[/yellow]")
             return
-        
-        # Remove memanga entries
+
         lines = [l for l in result.stdout.split("\n") if l and "memanga" not in l.lower()]
-        
+
         if len(lines) == len(result.stdout.strip().split("\n")):
             console.print("[yellow]No MeManga cron job found[/yellow]")
             return
-        
-        # Install cleaned crontab
+
         new_crontab = "\n".join(lines) + "\n" if lines else ""
-        
+
         if not lines:
             subprocess.run(["crontab", "-r"], capture_output=True)
         else:
             process = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
             process.communicate(input=new_crontab)
-        
+
         config.set("cron.enabled", False)
         config.save()
-        
+
         console.print("[green]✅ Cron job removed[/green]")
+
+
+def _cmd_cron_windows(args):
+    """Manage Windows Task Scheduler task."""
+    task_name = "MeManga_AutoCheck"
+    project_dir = Path(__file__).resolve().parent.parent
+    python_path = project_dir / "venv" / "Scripts" / "python.exe"
+    if not python_path.exists():
+        python_path = sys.executable
+
+    if args.action == "status":
+        result = subprocess.run(
+            ["schtasks", "/query", "/tn", task_name],
+            capture_output=True, text=True,
+        )
+        if result.returncode == 0:
+            console.print("[green]✅ Scheduled task is installed[/green]")
+            for line in result.stdout.strip().split("\n"):
+                if line.strip():
+                    console.print(f"[dim]{line.strip()}[/dim]")
+        else:
+            console.print("[yellow]⚠️  No scheduled task found[/yellow]")
+            console.print("[dim]Use 'memanga cron install' to set up automatic checking.[/dim]")
+
+    elif args.action == "install":
+        time_str = args.time or config.get("cron.time", "06:00")
+
+        if not args.time:
+            time_str = Prompt.ask("Check time (HH:MM)", default=time_str)
+
+        try:
+            hour, minute = time_str.split(":")
+            int(hour), int(minute)
+        except ValueError:
+            console.print("[red]Invalid time format. Use HH:MM[/red]")
+            return 1
+
+        # Delete existing task if present
+        subprocess.run(
+            ["schtasks", "/delete", "/tn", task_name, "/f"],
+            capture_output=True, text=True,
+        )
+
+        cmd = f'"{python_path}" -m memanga check --auto --quiet'
+        result = subprocess.run(
+            [
+                "schtasks", "/create",
+                "/tn", task_name,
+                "/tr", cmd,
+                "/sc", "daily",
+                "/st", time_str,
+                "/f",
+            ],
+            capture_output=True, text=True,
+        )
+
+        if result.returncode == 0:
+            config.set("cron.enabled", True)
+            config.set("cron.time", time_str)
+            config.save()
+            console.print(f"[green]✅ Scheduled task installed! Will check daily at {time_str}[/green]")
+        else:
+            console.print(f"[red]Failed to create scheduled task: {result.stderr.strip()}[/red]")
+            return 1
+
+    elif args.action == "remove":
+        result = subprocess.run(
+            ["schtasks", "/delete", "/tn", task_name, "/f"],
+            capture_output=True, text=True,
+        )
+
+        if result.returncode == 0:
+            config.set("cron.enabled", False)
+            config.save()
+            console.print("[green]✅ Scheduled task removed[/green]")
+        else:
+            console.print("[yellow]No MeManga scheduled task found[/yellow]")
 
 
 def cmd_sources(args):
@@ -650,6 +825,93 @@ def cmd_sources(args):
     console.print(f"[dim]Total: {len(sources)} sources • All tested and working![/dim]")
 
 
+def cmd_export(args):
+    """Export manga list and download state to JSON."""
+    manga_list = config.get("manga", [])
+    manga_state = state.get("manga", {})
+
+    export_data = {
+        "version": 1,
+        "exported_at": datetime.now().isoformat(),
+        "manga": manga_list,
+        "state": manga_state,
+    }
+
+    output_file = args.file or "memanga_export.json"
+    output_path = Path(output_file)
+
+    with open(output_path, "w") as f:
+        json.dump(export_data, f, indent=2, default=str)
+
+    console.print(f"[green]Exported {len(manga_list)} manga to [cyan]{output_path}[/cyan][/green]")
+
+
+def cmd_import(args):
+    """Import manga list and download state from JSON."""
+    import_path = Path(args.file)
+
+    if not import_path.exists():
+        console.print(f"[red]File not found:[/red] {import_path}")
+        return 1
+
+    with open(import_path, "r") as f:
+        import_data = json.load(f)
+
+    if "manga" not in import_data:
+        console.print("[red]Invalid export file (missing 'manga' key)[/red]")
+        return 1
+
+    imported_manga = import_data["manga"]
+    imported_state = import_data.get("state", {})
+
+    if args.replace:
+        # Full replace
+        config.set("manga", imported_manga)
+        config.save()
+        state.set("manga", imported_state)
+        console.print(f"[green]Replaced with {len(imported_manga)} manga from import[/green]")
+    else:
+        # Merge mode: skip duplicates, merge chapter lists
+        existing_manga = config.get("manga", [])
+        existing_titles = {m["title"].lower() for m in existing_manga}
+        existing_state = state.get("manga", {})
+
+        added = 0
+        skipped = 0
+        for m in imported_manga:
+            if m["title"].lower() in existing_titles:
+                skipped += 1
+                continue
+            existing_manga.append(m)
+            existing_titles.add(m["title"].lower())
+            added += 1
+
+        # Merge state (downloaded chapter lists)
+        for title, s in imported_state.items():
+            if title in existing_state:
+                # Merge downloaded lists
+                existing_downloaded = set(existing_state[title].get("downloaded", []))
+                imported_downloaded = set(s.get("downloaded", []))
+                def _sort_key(x):
+                    try:
+                        return float(x)
+                    except (ValueError, TypeError):
+                        return 0.0
+                merged = sorted(
+                    existing_downloaded | imported_downloaded,
+                    key=_sort_key,
+                )
+                existing_state[title]["downloaded"] = merged
+            else:
+                existing_state[title] = s
+
+        config.set("manga", existing_manga)
+        config.save()
+        state.set("manga", existing_state)
+
+        console.print(f"[green]Imported: {added} added, {skipped} skipped (duplicate)[/green]")
+
+
 def cmd_tui(args):
     """Run interactive TUI."""
     while True:
@@ -669,6 +931,9 @@ def cmd_tui(args):
             ("5", "⚙️  Configure", "Change settings"),
             ("6", "⏰ Cron", "Manage auto-check schedule"),
             ("7", "📊 Status", "View status & config"),
+            ("8", "✏️  Update Manga", "Change URL, backup, or title"),
+            ("9", "📤 Export", "Export manga list to JSON"),
+            ("0", "📥 Import", "Import manga list from JSON"),
             ("q", "🚪 Quit", "Exit"),
         ]
         
@@ -683,7 +948,7 @@ def cmd_tui(args):
         console.print(table)
         console.print()
         
-        choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "5", "6", "7", "q"], default="4")
+        choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "q"], default="4")
         
         if choice == "q":
             console.print("[dim]Goodbye! 📖[/dim]")
@@ -711,7 +976,23 @@ def cmd_tui(args):
             cmd_cron(argparse.Namespace(action=action, time=None))
         elif choice == "7":
             cmd_status(argparse.Namespace())
-        
+        elif choice == "8":
+            cmd_list(argparse.Namespace())
+            target = Prompt.ask("\nEnter # or title to update (or 'b' to go back)")
+            if target != 'b':
+                url = Prompt.ask("New primary URL (leave blank to skip)", default="") or None
+                backup = Prompt.ask("New backup URL (leave blank to skip)", default="") or None
+                new_title = Prompt.ask("New title (leave blank to skip)", default="") or None
+                cmd_update(argparse.Namespace(target=target, url=url, backup=backup, title=new_title))
+        elif choice == "9":
+            file_path = Prompt.ask("Export file", default="memanga_export.json")
+            cmd_export(argparse.Namespace(file=file_path))
+        elif choice == "0":
+            file_path = Prompt.ask("Import file path")
+            if file_path:
+                replace = Confirm.ask("Replace all data? (No = merge)", default=False)
+                cmd_import(argparse.Namespace(file=file_path, replace=replace))
+
         console.print()
         Prompt.ask("[dim]Press Enter to continue[/dim]")
 
@@ -762,7 +1043,15 @@ Examples:
     p_remove.add_argument("target", help="Manga # or title")
     p_remove.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
     p_remove.set_defaults(func=cmd_remove)
-    
+
+    # update
+    p_update = subparsers.add_parser("update", help="Update manga details (URL, backup, title)")
+    p_update.add_argument("target", help="Manga # or title")
+    p_update.add_argument("-u", "--url", help="New primary source URL")
+    p_update.add_argument("-b", "--backup", help="New backup source URL")
+    p_update.add_argument("-t", "--title", help="Rename manga title")
+    p_update.set_defaults(func=cmd_update)
+
     # check
     p_check = subparsers.add_parser("check", help="Check for new chapters")
     p_check.add_argument("-t", "--title", help="Check specific manga only")
@@ -771,6 +1060,7 @@ Examples:
     p_check.add_argument("-y", "--yes", action="store_true", help="Say yes to all prompts")
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")
     p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
+    p_check.add_argument("-n", "--dry-run", action="store_true", help="List new chapters without downloading")
     p_check.set_defaults(func=cmd_check)
     
     # status
@@ -791,7 +1081,18 @@ Examples:
     # sources
     p_sources = subparsers.add_parser("sources", help="List supported sources")
     p_sources.set_defaults(func=cmd_sources)
-    
+
+    # export
+    p_export = subparsers.add_parser("export", help="Export manga list and state to JSON")
+    p_export.add_argument("file", nargs="?", default="memanga_export.json", help="Output file (default: memanga_export.json)")
+    p_export.set_defaults(func=cmd_export)
+
+    # import
+    p_import = subparsers.add_parser("import", help="Import manga list and state from JSON")
+    p_import.add_argument("file", help="JSON file to import")
+    p_import.add_argument("--replace", action="store_true", help="Replace all data instead of merging")
+    p_import.set_defaults(func=cmd_import)
+
     # tui (default if no command)
     p_tui = subparsers.add_parser("tui", help="Interactive terminal UI")
     p_tui.set_defaults(func=cmd_tui)

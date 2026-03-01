@@ -8,6 +8,7 @@ One Punch Man Read (onepunchmanread.com)
 import re
 import logging
 import cloudscraper
+from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
 
@@ -39,7 +40,7 @@ class OnePunchManReadScraper(BaseScraper):
             )]
         return []
     
-    def get_chapters(self, manga_id: str) -> list[Chapter]:
+    def get_chapters(self, manga_url: str) -> list[Chapter]:
         """Get all chapters for One Punch Man."""
         chapters = []
         
@@ -81,12 +82,8 @@ class OnePunchManReadScraper(BaseScraper):
         unique_chapters.sort(key=lambda x: float(x.number) if x.number.replace('.','').isdigit() else 0)
         return unique_chapters
     
-    def get_pages(self, chapter_number: str, chapter_url: str = None) -> list[str]:
+    def get_pages(self, chapter_url: str) -> list[str]:
         """Get all page images for a chapter."""
-        if not chapter_url:
-            # Build URL from chapter number
-            chapter_url = f"{self.BASE_URL}/manga/one-punch-man-chapter-{chapter_number}/"
-        
         response = self.session.get(chapter_url)
         if response.status_code != 200:
             logger.error(f"Failed to fetch chapter: {response.status_code}")
@@ -112,16 +109,22 @@ class OnePunchManReadScraper(BaseScraper):
         logger.info(f"Found {len(pages)} pages in {chapter_url}")
         return pages
     
-    def download_image(self, url: str, headers: dict = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image with proper headers."""
-        req_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": self.BASE_URL,
-            "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-        }
-        if headers:
-            req_headers.update(headers)
-        
-        response = self.session.get(url, headers=req_headers)
-        response.raise_for_status()
-        return response.content
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": self.BASE_URL,
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            }
+            response = self.session.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            if len(response.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            return False

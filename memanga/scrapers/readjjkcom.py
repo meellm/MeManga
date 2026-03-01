@@ -9,6 +9,7 @@ JJK (Jujutsu Kaisen) dedicated manga site.
 
 import re
 import cloudscraper
+from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
 
@@ -110,17 +111,22 @@ class ReadJJKComScraper(BaseScraper):
         
         return pages
     
-    def download_image(self, url: str, headers: dict = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download image with proper headers."""
-        default_headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": self.base_url,
-            "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-        }
-        if headers:
-            default_headers.update(headers)
-        
-        resp = self.session.get(url, headers=default_headers)
-        if resp.status_code == 200:
-            return resp.content
-        raise Exception(f"Failed to download image: {resp.status_code}")
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": self.base_url,
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            }
+            resp = self.session.get(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            if len(resp.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(resp.content)
+            return True
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            return False

@@ -10,6 +10,7 @@ Chapters: 205+
 
 import re
 import requests
+from pathlib import Path
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from .base import BaseScraper, Chapter, Manga
@@ -33,7 +34,7 @@ class DemonSlayerOnlineScraper(BaseScraper):
             return [Manga(
                 title="Demon Slayer: Kimetsu no Yaiba",
                 url=self.base_url + "/",
-                cover="https://demon-slayer.online/wp-content/uploads/2021/10/Demon-Slayer-Kimetsu-No-Yaiba.jpg"
+                cover_url="https://demon-slayer.online/wp-content/uploads/2021/10/Demon-Slayer-Kimetsu-No-Yaiba.jpg"
             )]
         return []
 
@@ -99,16 +100,22 @@ class DemonSlayerOnlineScraper(BaseScraper):
         
         return pages
 
-    def download_image(self, url: str, headers: dict = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image with proper headers."""
-        img_headers = {
-            "User-Agent": self.session.headers["User-Agent"],
-            "Referer": "https://demon-slayer.online/",
-            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
-        }
-        if headers:
-            img_headers.update(headers)
-        
-        response = self.session.get(url, headers=img_headers)
-        response.raise_for_status()
-        return response.content
+        try:
+            headers = {
+                "User-Agent": self.session.headers["User-Agent"],
+                "Referer": "https://demon-slayer.online/",
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+            }
+            response = self.session.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            if len(response.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            return False

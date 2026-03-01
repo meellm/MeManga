@@ -3,6 +3,8 @@ State management for MeManga - tracks downloaded chapters and check history
 """
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -40,9 +42,18 @@ class State:
         }
     
     def save(self):
-        """Save state to file."""
-        with open(self.state_path, "w") as f:
-            json.dump(self._data, f, indent=2, default=str)
+        """Save state to file atomically (write to temp, then rename)."""
+        fd, tmp_path = tempfile.mkstemp(dir=self.config_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(self._data, f, indent=2, default=str)
+            os.replace(tmp_path, self.state_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     
     def get(self, key: str, default=None):
         """Get a state value."""
@@ -88,7 +99,12 @@ class State:
         chapter_str = str(chapter)
         if chapter_str not in self._data["manga"][manga_title]["downloaded"]:
             self._data["manga"][manga_title]["downloaded"].append(chapter_str)
-            self._data["manga"][manga_title]["downloaded"].sort(key=lambda x: float(x) if x.replace('.', '').isdigit() else 0)
+            def _sort_key(x):
+                try:
+                    return float(x)
+                except (ValueError, TypeError):
+                    return 0.0
+            self._data["manga"][manga_title]["downloaded"].sort(key=_sort_key)
         
         self._data["manga"][manga_title]["last_chapter"] = chapter_str
         self._data["manga"][manga_title]["last_updated"] = datetime.now().isoformat()

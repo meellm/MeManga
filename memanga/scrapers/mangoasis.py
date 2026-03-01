@@ -10,6 +10,7 @@ A multilingual manga aggregator with WordPress MangaVerse theme.
 
 import re
 import logging
+from pathlib import Path
 from typing import List, Optional
 from bs4 import BeautifulSoup
 import cloudscraper
@@ -57,25 +58,19 @@ class MangOasisScraper(BaseScraper):
                 if '/manga/' in href and href.endswith('.html'):
                     title = link.get_text(strip=True)
                     if title and len(title) > 2:
-                        # Extract slug from URL
-                        match = re.search(r'/manga/([^/]+)\.html', href)
-                        if match:
-                            slug = match.group(1)
-                            results.append(Manga(
-                                title=title,
-                                url=href,
-                                slug=slug,
-                                source='mangoasis.com'
-                            ))
-            
-            # Deduplicate by slug
+                        results.append(Manga(
+                            title=title,
+                            url=href,
+                        ))
+
+            # Deduplicate by url
             seen = set()
             unique = []
             for manga in results:
-                if manga.slug not in seen:
-                    seen.add(manga.slug)
+                if manga.url not in seen:
+                    seen.add(manga.url)
                     unique.append(manga)
-            
+
             return unique[:20]  # Limit to 20 results
             
         except Exception as e:
@@ -165,26 +160,27 @@ class MangOasisScraper(BaseScraper):
             logger.error(f"Failed to get pages: {e}")
             return []
     
-    def download_image(self, url: str, save_path: str) -> bool:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image from the CDN."""
         try:
             headers = {
                 'Referer': 'https://www.mangoasis.com/',
                 'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
             }
-            
+
             response = self.session.get(url, headers=headers, timeout=30)
             response.raise_for_status()
-            
+
             if len(response.content) < 1000:
                 logger.warning(f"Image too small ({len(response.content)} bytes): {url}")
                 return False
-            
-            with open(save_path, 'wb') as f:
+
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
                 f.write(response.content)
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to download image: {e}")
             return False

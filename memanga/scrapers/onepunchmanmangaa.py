@@ -6,6 +6,7 @@ One Punch Man dedicated manga reader
 
 import re
 import logging
+from pathlib import Path
 from typing import List, Optional
 from bs4 import BeautifulSoup
 import requests
@@ -183,23 +184,22 @@ class OnePunchManMangaaScraper(BaseScraper):
             logger.error(f"Error getting pages from {chapter_url}: {e}")
             return []
     
-    def download_image(self, url: str, headers: dict = None) -> Optional[bytes]:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download image with proper headers."""
-        if headers is None:
+        try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
                 "Referer": self.base_url,
             }
-        
-        try:
             response = self.session.get(url, headers=headers, timeout=30)
             response.raise_for_status()
-            
-            if len(response.content) > 1000:
-                return response.content
-            return None
-            
+            if len(response.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
         except Exception as e:
-            logger.error(f"Error downloading image {url}: {e}")
-            return None
+            logger.error(f"Failed to download {url}: {e}")
+            return False
