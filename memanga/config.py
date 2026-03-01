@@ -30,10 +30,13 @@ class Config:
             for key, value in defaults.items():
                 if key not in data:
                     data[key] = value
-                elif isinstance(value, dict):
+                elif isinstance(value, dict) and isinstance(data[key], dict):
                     for k, v in value.items():
                         if k not in data[key]:
                             data[key][k] = v
+                elif isinstance(value, dict) and not isinstance(data[key], dict):
+                    # User config has wrong type — replace with default
+                    data[key] = value
             return data
         return self._default_config()
     
@@ -78,7 +81,7 @@ class Config:
         keys = key.split(".")
         data = self._data
         for k in keys[:-1]:
-            if k not in data:
+            if k not in data or not isinstance(data[k], dict):
                 data[k] = {}
             data = data[k]
         data[keys[-1]] = value
@@ -109,3 +112,36 @@ class Config:
     @property
     def output_format(self):
         return self.get("delivery.output_format", "pdf")
+
+
+_KEYRING_SERVICE = "memanga"
+_KEYRING_KEY = "app_password"
+
+
+def get_app_password(cfg: Config) -> str:
+    """Get app password from keyring, falling back to config file."""
+    try:
+        import keyring
+        password = keyring.get_password(_KEYRING_SERVICE, _KEYRING_KEY)
+        if password:
+            return password
+    except Exception:
+        pass
+    return cfg.get("email.app_password", "")
+
+
+def set_app_password(cfg: Config, password: str):
+    """Store app password in keyring, falling back to config file. Saves config."""
+    try:
+        import keyring
+        keyring.set_password(_KEYRING_SERVICE, _KEYRING_KEY, password)
+        # Clear plaintext from config if keyring succeeded
+        if cfg.get("email.app_password"):
+            cfg.set("email.app_password", "")
+            cfg.save()
+        return
+    except Exception:
+        pass
+    # Fallback: store in config
+    cfg.set("email.app_password", password)
+    cfg.save()

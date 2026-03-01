@@ -9,6 +9,7 @@ CDN: Blogger CDN (blogger.googleusercontent.com)
 import re
 import logging
 import requests
+from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -118,16 +119,22 @@ class ReadSNKMangaScraper(BaseScraper):
         
         return pages
     
-    def download_image(self, url: str, headers: Optional[dict] = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image with proper headers."""
-        dl_headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-            'Referer': self.base_url,
-        }
-        if headers:
-            dl_headers.update(headers)
-        
-        response = self.session.get(url, headers=dl_headers, timeout=30)
-        response.raise_for_status()
-        return response.content
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Referer': self.base_url,
+            }
+            response = self.session.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            if len(response.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            return False

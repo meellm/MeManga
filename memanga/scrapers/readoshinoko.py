@@ -7,6 +7,7 @@ Architecture: WordPress + mangaread.org CDN
 
 import re
 import requests
+from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
 from typing import List, Optional
@@ -125,15 +126,22 @@ class ReadOshiNoKoScraper(BaseScraper):
         
         return images
 
-    def download_image(self, url: str, headers: Optional[dict] = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download image from mangaread.org CDN"""
-        if headers is None:
+        try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
                 'Referer': 'https://w13.readoshinoko.com/',
             }
-        
-        resp = self.session.get(url, headers=headers, timeout=30)
-        resp.raise_for_status()
-        return resp.content
+            resp = self.session.get(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            if len(resp.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(resp.content)
+            return True
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            return False

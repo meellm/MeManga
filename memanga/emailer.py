@@ -4,12 +4,14 @@ Email handler for MeManga - sends PDFs to Kindle
 Automatically splits large PDFs that exceed Gmail's 25MB limit.
 """
 
+import shutil
 import smtplib
 import tempfile
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
+from email.utils import encode_rfc2231
 from pathlib import Path
 from typing import Optional, List
 import pikepdf
@@ -131,7 +133,13 @@ def send_to_kindle(
     is_epub = pdf_path.suffix.lower() == '.epub'
     
     if is_epub:
-        # EPUB: send as-is (no splitting)
+        # EPUB: check size (cannot split EPUBs)
+        epub_size = pdf_path.stat().st_size
+        if epub_size > MAX_ATTACHMENT_SIZE:
+            raise EmailError(
+                f"EPUB file is {epub_size / (1024*1024):.1f}MB, exceeding the 25MB email limit. "
+                f"EPUBs cannot be split. Use PDF format instead (set in 'memanga config')."
+            )
         parts = [pdf_path]
         is_split = False
     else:
@@ -159,13 +167,11 @@ def send_to_kindle(
         )
     
     # Cleanup temp files if split
-    if is_split:
-        for part_path in parts:
-            try:
-                part_path.unlink()
-                part_path.parent.rmdir()  # Remove temp dir if empty
-            except:
-                pass
+    if is_split and parts:
+        try:
+            shutil.rmtree(parts[0].parent)
+        except Exception:
+            pass
     
     return True
 
@@ -202,7 +208,8 @@ def _send_single_email(
         encoders.encode_base64(part)
         part.add_header(
             "Content-Disposition",
-            f"attachment; filename={pdf_path.name}"
+            "attachment",
+            filename=pdf_path.name,
         )
         msg.attach(part)
     

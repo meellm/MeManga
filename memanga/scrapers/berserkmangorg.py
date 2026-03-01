@@ -4,6 +4,7 @@ WordPress theme + mangaread.org CDN.
 """
 
 import re
+from pathlib import Path
 from urllib.parse import urljoin
 import cloudscraper
 from bs4 import BeautifulSoup
@@ -18,6 +19,7 @@ class BerserkMangOrgScraper(BaseScraper):
     base_url = "https://www.berserkmang.org"
     
     def __init__(self):
+        super().__init__()
         self.session = cloudscraper.create_scraper(
             browser={
                 'browser': 'chrome',
@@ -38,15 +40,13 @@ class BerserkMangOrgScraper(BaseScraper):
         
         if 'berserk' in query_lower or 'guts' in query_lower:
             return [Manga(
-                id="berserk",
                 title="Berserk",
                 url=f"{self.base_url}/",
-                cover=""
             )]
         
         return []
     
-    def get_chapters(self, manga_id: str) -> list[Chapter]:
+    def get_chapters(self, manga_url: str) -> list[Chapter]:
         """Get list of chapters for a manga."""
         url = f"{self.base_url}/"
         response = self.session.get(url, timeout=30)
@@ -85,11 +85,9 @@ class BerserkMangOrgScraper(BaseScraper):
         chapters.sort(key=lambda c: c.number)
         return chapters
     
-    def get_pages(self, manga_id: str, chapter_number: str) -> list[str]:
+    def get_pages(self, chapter_url: str) -> list[str]:
         """Get list of page image URLs for a chapter."""
-        url = f"{self.base_url}/manga/berserk-chapter-{chapter_number}/"
-        
-        response = self.session.get(url, timeout=30)
+        response = self.session.get(chapter_url, timeout=30)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -103,14 +101,22 @@ class BerserkMangOrgScraper(BaseScraper):
         
         return pages
     
-    def download_image(self, url: str, chapter_url: str = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image with proper headers."""
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-            'Referer': self.base_url
-        }
-        
-        response = self.session.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.content
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Referer': self.base_url
+            }
+            response = self.session.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            if len(response.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            return False

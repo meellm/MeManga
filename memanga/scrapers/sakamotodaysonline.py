@@ -7,6 +7,7 @@ Architecture: PHP with attachment CDN
 
 import re
 import requests
+from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
 
@@ -100,15 +101,16 @@ class SakamotoDaysOnlineScraper(BaseScraper):
         
         return pages
     
-    def download_image(self, url: str, path: str) -> bool:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image to the specified path."""
         try:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
-            
+
             if len(response.content) < 1000:
                 return False
-            
+
+            path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "wb") as f:
                 f.write(response.content)
             return True
