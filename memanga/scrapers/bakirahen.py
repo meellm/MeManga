@@ -8,6 +8,7 @@ WordPress ifenzi-v2 theme + cdn.readkakegurui.com CDN.
 import re
 import logging
 import requests
+from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -36,7 +37,6 @@ class BakiRahenScraper(BaseScraper):
         query_lower = query.lower()
         if any(term in query_lower for term in ["baki", "rahen", "baki rahen"]):
             return [Manga(
-                id="baki-rahen",
                 title="Baki Rahen",
                 url=self.base_url,
                 cover_url="https://bakirahen.com/wp-content/uploads/2024/04/Baki-Rahen-Manga.webp"
@@ -129,23 +129,23 @@ class BakiRahenScraper(BaseScraper):
             logger.error(f"Failed to get chapter images: {e}")
             return []
     
-    def download_image(self, image_url: str, chapter_url: str = None) -> Optional[bytes]:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image with proper headers."""
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
-                "Referer": chapter_url or self.base_url,
+                "Referer": self.base_url,
             }
-            
-            response = requests.get(image_url, headers=headers, timeout=30)
+            response = self.session.get(url, headers=headers, timeout=30)
             response.raise_for_status()
-            
-            if len(response.content) > 1000:  # Basic validation
-                return response.content
-            return None
-            
+            if len(response.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
         except Exception as e:
-            logger.error(f"Failed to download image {image_url}: {e}")
-            return None
+            logger.error(f"Failed to download {url}: {e}")
+            return False

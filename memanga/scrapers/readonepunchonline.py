@@ -7,6 +7,7 @@ WordPress + cache.imagemanga.online CDN
 
 import re
 import cloudscraper
+from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from .base import BaseScraper, Chapter, Manga
@@ -30,10 +31,8 @@ class ReadOnePunchOnlineScraper(BaseScraper):
         query_lower = query.lower()
         if any(term in query_lower for term in ['one punch', 'opm', 'one-punch', 'saitama', 'onepunch']):
             return [Manga(
-                id="one-punch-man",
                 title="One-Punch Man",
                 url=self.base_url,
-                cover="",
             )]
         return []
     
@@ -88,12 +87,21 @@ class ReadOnePunchOnlineScraper(BaseScraper):
         
         return pages
     
-    def download_image(self, url: str, chapter_url: str = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download image with proper headers."""
-        headers = {
-            'Referer': chapter_url or self.base_url,
-            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-        }
-        resp = self.session.get(url, headers=headers, timeout=30)
-        resp.raise_for_status()
-        return resp.content
+        try:
+            headers = {
+                'Referer': self.base_url,
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+            }
+            resp = self.session.get(url, headers=headers, timeout=30)
+            resp.raise_for_status()
+            if len(resp.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(resp.content)
+            return True
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            return False

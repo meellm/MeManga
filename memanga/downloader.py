@@ -10,9 +10,11 @@ Handles:
 """
 
 import io
+import atexit
 import tempfile
 import shutil
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Literal, Tuple
 from datetime import datetime, timedelta
@@ -35,6 +37,20 @@ def restart_browsers():
     except Exception:
         pass
 
+    try:
+        from .scrapers.playwright_base import PlaywrightScraper
+        PlaywrightScraper.cleanup()
+    except Exception:
+        pass
+
+
+def _cleanup_at_exit():
+    """Clean up browser resources on exit."""
+    restart_browsers()
+
+
+atexit.register(_cleanup_at_exit)
+
 OutputFormat = Literal["pdf", "epub"]
 
 # Default days to wait before falling back to backup source
@@ -54,6 +70,7 @@ class ChapterWithSource(Chapter):
             number=chapter.number,
             title=chapter.title,
             url=chapter.url,
+            date=chapter.date,
         )
         self.source = source
         self.source_url = source_url
@@ -63,7 +80,10 @@ class ChapterWithSource(Chapter):
 def _extract_source(url: str) -> str:
     """Extract source domain from URL."""
     parsed = urlparse(url)
-    return parsed.netloc.replace("www.", "")
+    netloc = parsed.netloc.lower()
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return netloc
 
 
 def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -263,31 +283,70 @@ def download_chapter(
         if not page_urls:
             raise DownloaderError("No pages found for chapter")
         
-        # Download images
+        # Download images concurrently
         image_paths = []
+        download_tasks = []
         for i, url in enumerate(page_urls):
             ext = _get_extension(url)
             img_path = temp_path / f"page_{i:03d}{ext}"
-            
-            if scraper.download_image(url, img_path):
-                image_paths.append(img_path)
-            else:
-                print(f"  Warning: Failed to download page {i+1}")
+            download_tasks.append((i, url, img_path))
+
+        results: Dict[int, Path] = {}
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {
+                executor.submit(scraper.download_image, url, img_path): (idx, img_path)
+                for idx, url, img_path in download_tasks
+            }
+            for future in as_completed(futures):
+                idx, img_path = futures[future]
+                try:
+                    if future.result():
+                        results[idx] = img_path
+                    else:
+                        print(f"  Warning: Failed to download page {idx+1}")
+                except Exception:
+                    print(f"  Warning: Failed to download page {idx+1}")
+
+        # Preserve page order
+        image_paths = [results[i] for i in sorted(results)]
         
         if not image_paths:
             raise DownloaderError("Failed to download any pages")
-        
+
+        # Download cover image for EPUB
+        cover_path = None
+        if output_format == "epub":
+            cover_url = manga.get("cover_url")
+            if not cover_url:
+                # Try to fetch cover from the manga page
+                try:
+                    manga_url = manga.get("url", "")
+                    if not manga_url:
+                        sources = _get_sources_from_manga(manga)
+                        manga_url = sources[0]["url"] if sources else ""
+                    if manga_url:
+                        cover_url = scraper.get_cover_url(manga_url)
+                except Exception:
+                    pass
+            if cover_url:
+                cover_path = temp_path / "cover_art.jpg"
+                try:
+                    if not scraper.download_image(cover_url, cover_path):
+                        cover_path = None
+                except Exception:
+                    cover_path = None
+
         # Convert to output format
         output_dir.mkdir(parents=True, exist_ok=True)
         safe_title = _sanitize_filename(title)
-        
+
         # Zero-pad chapter numbers for proper sorting
         chapter_str = _format_chapter_number(chapter.number)
-        
+
         if output_format == "epub":
             output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.epub"
             try:
-                _images_to_epub(image_paths, output_path, title, chapter.number)
+                _images_to_epub(image_paths, output_path, title, chapter.number, cover_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create EPUB: {e}")
         else:
@@ -300,156 +359,173 @@ def download_chapter(
         return output_path
 
 
-def _images_to_epub(image_paths: List[Path], output_path: Path, title: str, chapter_num: str):
-    """Convert a list of images to a fixed-layout EPUB with cover."""
+def _image_to_jpeg_bytes(img_path: Path) -> tuple:
+    """Convert any image to JPEG bytes suitable for EPUB/Kindle.
+
+    Returns (jpeg_bytes, width, height).
+    """
+    img = Image.open(img_path)
+    try:
+        width, height = img.size
+        # Flatten transparency onto white background
+        if img.mode in ('RGBA', 'P', 'LA', 'PA'):
+            rgba = img.convert('RGBA')
+            bg = Image.new('RGB', img.size, (255, 255, 255))
+            bg.paste(rgba, mask=rgba.split()[3])
+            rgba.close()
+            img.close()
+            img = bg
+        elif img.mode != 'RGB':
+            converted = img.convert('RGB')
+            img.close()
+            img = converted
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG', quality=95)
+        return buf.getvalue(), width, height
+    finally:
+        img.close()
+
+
+def _images_to_epub(
+    image_paths: List[Path],
+    output_path: Path,
+    title: str,
+    chapter_num: str,
+    cover_image_path: Optional[Path] = None,
+):
+    """Convert images to a fixed-layout EPUB compatible with Kindle.
+
+    Args:
+        image_paths: Ordered list of page image paths.
+        output_path: Where to write the .epub file.
+        title: Manga title.
+        chapter_num: Chapter number string.
+        cover_image_path: Optional separate cover image. Falls back to first page.
+    """
     book = epub.EpubBook()
-    
-    # Set metadata
+
+    # ── Metadata ──
     book_id = str(uuid.uuid4())
     book.set_identifier(book_id)
-    book.set_title(f"{title} - Chapter {chapter_num}")
+    full_title = f"{title} - Chapter {chapter_num}"
+    book.set_title(full_title)
     book.set_language('en')
-    book.add_author(title)  # Use manga title as author for organization
-    
-    # Add cover image (first page)
-    if image_paths:
-        cover_path = image_paths[0]
-        with Image.open(cover_path) as img:
-            # Convert to JPEG for cover
-            buf = io.BytesIO()
-            if img.mode in ('RGBA', 'P', 'LA'):
-                rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                if img.mode == 'P':
-                    img = img.convert('RGBA')
-                rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                rgb_img.save(buf, format='JPEG', quality=95)
-            else:
-                img.convert('RGB').save(buf, format='JPEG', quality=95)
-            
-            book.set_cover("cover.jpg", buf.getvalue())
-    
-    # Create spine and pages
-    spine = ['nav']
-    
+    book.add_author(title)
+
+    # Fixed-layout metadata (required for Kindle to render as image pages)
+    book.add_metadata(None, 'meta', 'pre-paginated', {'property': 'rendition:layout'})
+    book.add_metadata(None, 'meta', 'auto', {'property': 'rendition:orientation'})
+    book.add_metadata(None, 'meta', 'none', {'property': 'rendition:spread'})
+
+    # ── Cover image ──
+    cover_src = cover_image_path if cover_image_path and cover_image_path.exists() else (
+        image_paths[0] if image_paths else None
+    )
+    if cover_src:
+        cover_data, cw, ch = _image_to_jpeg_bytes(cover_src)
+        # Manually add cover item with proper metadata for Kindle
+        cover_item = epub.EpubItem(
+            uid='cover-image',
+            file_name='images/cover.jpg',
+            media_type='image/jpeg',
+            content=cover_data,
+        )
+        book.add_item(cover_item)
+        # Kindle recognises this meta tag to find the cover
+        book.add_metadata('OPF', 'meta', '', {
+            'name': 'cover',
+            'content': 'cover-image',
+        })
+
+        # Cover XHTML page
+        cover_html = epub.EpubHtml(
+            title='Cover',
+            file_name='cover.xhtml',
+            lang='en',
+        )
+        cover_html.content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Cover</title>
+<meta name="viewport" content="width={cw}, height={ch}"/>
+<style>html,body{{margin:0;padding:0;width:100%;height:100%}}
+img{{width:100%;height:auto;display:block}}</style></head>
+<body><img src="images/cover.jpg" alt="Cover"/></body></html>'''.encode('utf-8')
+        book.add_item(cover_html)
+
+    # ── Page images ──
+    spine = []
+    if cover_src:
+        spine.append(cover_html)
+
     for i, img_path in enumerate(image_paths):
-        # Read and process image
-        with Image.open(img_path) as img:
-            width, height = img.size
-            
-            # Convert to JPEG/PNG bytes
-            buf = io.BytesIO()
-            if img.mode in ('RGBA', 'P', 'LA'):
-                # Keep transparency for PNG
-                img.save(buf, format='PNG')
-                img_format = 'png'
-                media_type = 'image/png'
-            else:
-                img.convert('RGB').save(buf, format='JPEG', quality=95)
-                img_format = 'jpg'
-                media_type = 'image/jpeg'
-            
-            img_data = buf.getvalue()
-        
-        # Create image item
-        img_name = f"page_{i:03d}.{img_format}"
+        img_data, width, height = _image_to_jpeg_bytes(img_path)
+
+        img_name = f"page_{i:03d}.jpg"
         img_item = epub.EpubItem(
             uid=f"img_{i}",
             file_name=f"images/{img_name}",
-            media_type=media_type,
-            content=img_data
+            media_type='image/jpeg',
+            content=img_data,
         )
         book.add_item(img_item)
-        
-        # Create HTML page for this image (fixed layout)
-        html_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+
+        page_html = f'''<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
-<head>
-    <title>Page {i + 1}</title>
-    <meta name="viewport" content="width={width}, height={height}"/>
-    <style>
-        html, body {{
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-        }}
-        img {{
-            width: 100%;
-            height: auto;
-            display: block;
-        }}
-    </style>
-</head>
-<body>
-    <img src="images/{img_name}" alt="Page {i + 1}"/>
-</body>
-</html>'''
-        
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Page {i + 1}</title>
+<meta name="viewport" content="width={width}, height={height}"/>
+<style>html,body{{margin:0;padding:0;width:100%;height:100%}}
+img{{width:100%;height:auto;display:block}}</style></head>
+<body><img src="images/{img_name}" alt="Page {i + 1}"/></body></html>'''
+
         page = epub.EpubHtml(
             title=f'Page {i + 1}',
             file_name=f'page_{i:03d}.xhtml',
-            lang='en'
+            lang='en',
         )
-        page.content = html_content.encode('utf-8')
+        page.content = page_html.encode('utf-8')
         book.add_item(page)
         spine.append(page)
-    
-    # Add navigation
+
+    # ── Navigation ──
     book.toc = []
     book.add_item(epub.EpubNcx())
-    book.add_item(epub.EpubNav())
-    
-    # Set spine
-    book.spine = spine
-    
-    # Write EPUB
+    nav = epub.EpubNav()
+    book.add_item(nav)
+
+    # Spine: nav hidden, then pages in order
+    book.spine = [nav] + spine
+
     epub.write_epub(str(output_path), book)
 
 
 def _images_to_pdf(image_paths: List[Path], output_path: Path):
     """Convert a list of images to a single PDF."""
-    # Convert images to RGB if needed (img2pdf doesn't support all formats)
     processed_images = []
-    
+
     for img_path in image_paths:
         try:
-            with Image.open(img_path) as img:
-                # Convert to RGB if necessary
-                if img.mode in ('RGBA', 'P', 'LA'):
-                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                    if img.mode == 'P':
-                        img = img.convert('RGBA')
-                    rgb_img.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                    
-                    # Save to bytes
-                    buf = io.BytesIO()
-                    rgb_img.save(buf, format='JPEG', quality=95)
-                    processed_images.append(buf.getvalue())
-                elif img.mode != 'RGB':
-                    rgb_img = img.convert('RGB')
-                    buf = io.BytesIO()
-                    rgb_img.save(buf, format='JPEG', quality=95)
-                    processed_images.append(buf.getvalue())
-                else:
-                    processed_images.append(img_path.read_bytes())
+            jpeg_data, _, _ = _image_to_jpeg_bytes(img_path)
+            processed_images.append(jpeg_data)
         except Exception as e:
             print(f"  Warning: Could not process {img_path}: {e}")
-    
+
     if not processed_images:
         raise DownloaderError("No images could be processed")
-    
-    # Create PDF
+
     pdf_bytes = img2pdf.convert(processed_images)
     output_path.write_bytes(pdf_bytes)
 
 
 def _get_extension(url: str) -> str:
-    """Get file extension from URL."""
-    url_lower = url.lower().split('?')[0]
-    for ext in ['.webp', '.png', '.jpg', '.jpeg', '.gif']:
-        if ext in url_lower:
-            return ext
+    """Get file extension from URL path (not substring match)."""
+    from posixpath import splitext
+    path = url.split('?')[0].split('#')[0]
+    _, ext = splitext(path)
+    ext = ext.lower()
+    if ext in ('.webp', '.png', '.jpg', '.jpeg', '.gif'):
+        return ext
     return '.jpg'
 
 

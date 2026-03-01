@@ -4,6 +4,7 @@ Custom theme + cdn.bluelockread.com CDN.
 """
 
 import re
+from pathlib import Path
 from urllib.parse import urljoin
 import cloudscraper
 from bs4 import BeautifulSoup
@@ -18,6 +19,7 @@ class BlueLockReadWW2Scraper(BaseScraper):
     base_url = "https://ww2.bluelockread.com"
     
     def __init__(self):
+        super().__init__()
         self.session = cloudscraper.create_scraper(
             browser={
                 'browser': 'chrome',
@@ -40,45 +42,42 @@ class BlueLockReadWW2Scraper(BaseScraper):
         
         if 'blue lock' in query_lower or 'bluelock' in query_lower:
             results.append(Manga(
-                id="blue-lock",
                 title="Blue Lock",
                 url=f"{self.base_url}/",
-                cover="https://i.imgur.com/U3gLdw0.png"
+                cover_url="https://i.imgur.com/U3gLdw0.png"
             ))
-        
+
         if 'nagi' in query_lower or 'episode nagi' in query_lower:
             results.append(Manga(
-                id="blue-lock-episode-nagi",
                 title="Blue Lock: Episode Nagi",
                 url=f"{self.base_url}/",
-                cover=""
             ))
-        
+
         if not results and ('blue' in query_lower or 'lock' in query_lower):
             results = [
-                Manga(id="blue-lock", title="Blue Lock", url=f"{self.base_url}/", cover=""),
-                Manga(id="blue-lock-episode-nagi", title="Blue Lock: Episode Nagi", url=f"{self.base_url}/", cover="")
+                Manga(title="Blue Lock", url=f"{self.base_url}/"),
+                Manga(title="Blue Lock: Episode Nagi", url=f"{self.base_url}/")
             ]
         
         return results
     
-    def get_chapters(self, manga_id: str) -> list[Chapter]:
+    def get_chapters(self, manga_url: str) -> list[Chapter]:
         """Get list of chapters for a manga."""
         # Use the manga page which has the full chapter list
-        if 'nagi' in manga_id:
+        if 'nagi' in manga_url:
             url = f"{self.base_url}/manga/blue-lock-episode-nagi/"
         else:
             url = f"{self.base_url}/manga/blue-lock/"
-        
+
         response = self.session.get(url, timeout=30)
         response.raise_for_status()
-        
+
         soup = BeautifulSoup(response.text, 'html.parser')
         chapters = []
         seen_urls = set()
-        
+
         # Determine which series we're looking for
-        is_nagi = 'nagi' in manga_id
+        is_nagi = 'nagi' in manga_url
         
         # Find chapter links
         for link in soup.find_all('a', href=True):
@@ -114,15 +113,9 @@ class BlueLockReadWW2Scraper(BaseScraper):
         chapters.sort(key=lambda c: c.number)
         return chapters
     
-    def get_pages(self, manga_id: str, chapter_number: str) -> list[str]:
+    def get_pages(self, chapter_url: str) -> list[str]:
         """Get list of page image URLs for a chapter."""
-        # Build URL based on series
-        if 'nagi' in manga_id:
-            url = f"{self.base_url}/chapter/blue-lock-episode-nagi-chapter-{chapter_number}/"
-        else:
-            url = f"{self.base_url}/chapter/blue-lock-chapter-{chapter_number}/"
-        
-        response = self.session.get(url, timeout=30)
+        response = self.session.get(chapter_url, timeout=30)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -138,14 +131,22 @@ class BlueLockReadWW2Scraper(BaseScraper):
         
         return pages
     
-    def download_image(self, url: str, chapter_url: str = None) -> bytes:
+    def download_image(self, url: str, path: Path) -> bool:
         """Download an image with proper headers."""
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
-            'Referer': self.base_url
-        }
-        
-        response = self.session.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.content
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Referer': self.base_url
+            }
+            response = self.session.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+            if len(response.content) < 1000:
+                return False
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'wb') as f:
+                f.write(response.content)
+            return True
+        except Exception as e:
+            print(f"Failed to download {url}: {e}")
+            return False
