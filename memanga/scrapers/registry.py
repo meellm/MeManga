@@ -453,6 +453,12 @@ _cfg_manga18fx = {
     "image_cdn_filters": ["manga18fx"],
 }
 
+_cfg_aquamanga = {
+    "base_url": "https://aquareader.net",
+    "uses_ajax": True,
+    "image_cdn_filters": ["aquareader.net"],
+}
+
 # ═══════════════════════════════════════════════════════════════════
 # Laiond CDN configs
 # ═══════════════════════════════════════════════════════════════════
@@ -685,6 +691,7 @@ TEMPLATE_SCRAPERS = {
     "manhwatop.com": (WordPressMadaraScraper, _cfg_manhwatop),
     "mangadistrict.com": (WordPressMadaraScraper, _cfg_mangadistrict),
     "manga18fx.com": (WordPressMadaraScraper, _cfg_manga18fx),
+    "aquareader.net": (WordPressMadaraScraper, _cfg_aquamanga),
 
     # ── Laiond CDN ──
     "overlord-manga.online": (LaiondCDNScraper, _cfg_overlord),
