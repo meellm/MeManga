@@ -92,29 +92,29 @@ class OGImageMetaScraper(BaseScraper):
         return chapters
 
     def get_pages(self, chapter_url: str) -> List[str]:
-        """Get page images from og:image meta tags and img tags."""
+        """Get page images from img tags and og:image meta tags."""
         html = self._get_html(chapter_url)
         soup = BeautifulSoup(html, "html.parser")
 
         pages = []
         seen = set()
 
-        # 1. Extract from og:image and twitter:image meta tags
-        for prop in ("og:image", "twitter:image"):
-            for meta in soup.select(f'meta[property="{prop}"], meta[name="{prop}"]'):
-                url = meta.get("content", "")
-                if url and self._is_cdn_image(url) and url not in seen:
-                    seen.add(url)
-                    pages.append(self._normalize_url(url))
+        # 1. Primary: scan img tags (most reliable for actual chapter pages)
+        for img in soup.find_all("img"):
+            url = (img.get("data-lazy-src") or img.get("data-src")
+                   or img.get("src") or "")
+            if url and self._is_cdn_image(url) and url not in seen:
+                seen.add(url)
+                pages.append(self._normalize_url(url))
 
-        # 2. Fallback: scan img tags in content area
+        # 2. Fallback: og:image/twitter:image meta tags (some sites use these)
         if not pages:
-            for img in soup.find_all("img"):
-                url = (img.get("data-lazy-src") or img.get("data-src")
-                       or img.get("src") or "")
-                if url and self._is_cdn_image(url) and url not in seen:
-                    seen.add(url)
-                    pages.append(self._normalize_url(url))
+            for prop in ("og:image", "twitter:image"):
+                for meta in soup.select(f'meta[property="{prop}"], meta[name="{prop}"]'):
+                    url = meta.get("content", "")
+                    if url and self._is_cdn_image(url) and url not in seen:
+                        seen.add(url)
+                        pages.append(self._normalize_url(url))
 
         return pages
 
