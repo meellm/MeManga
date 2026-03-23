@@ -2,7 +2,7 @@
 
 **Automatic manga downloader with Kindle support.**
 
-Track manga from multiple sources, download chapters as PDFs, and optionally send them directly to your Kindle via email.
+Track manga from multiple sources, download chapters as PDF/EPUB/CBZ, and optionally send them directly to your Kindle via email.
 
 ## ✨ Features
 
@@ -11,7 +11,7 @@ Track manga from multiple sources, download chapters as PDFs, and optionally sen
 - 🔄 **Backup sources** — fallback to secondary sources after N days
 - 📊 **Status tracking** — reading, on-hold, dropped, completed
 - 📥 **Bulk downloads** — download from chapter 1 with `--from` flag
-- 📄 **PDF/EPUB output** — optimized for e-readers
+- 📄 **PDF/EPUB/CBZ output** — optimized for e-readers and comic book viewers
 - 📧 **Kindle delivery** — automatic email to your device
 - ⏰ **Scheduled checks** — daily cron job support
 - 🖥️ **Cross-platform** — Windows, macOS, Linux, Raspberry Pi

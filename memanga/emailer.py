@@ -129,16 +129,18 @@ def send_to_kindle(
     if not app_password:
         raise EmailError("App password not configured")
     
-    # Check file type - only split PDFs, send EPUBs as-is
-    is_epub = pdf_path.suffix.lower() == '.epub'
-    
-    if is_epub:
-        # EPUB: check size (cannot split EPUBs)
-        epub_size = pdf_path.stat().st_size
-        if epub_size > MAX_ATTACHMENT_SIZE:
+    # Check file type - only split PDFs, send EPUBs/CBZs as-is
+    suffix = pdf_path.suffix.lower()
+    is_single_file = suffix in ('.epub', '.cbz')
+
+    if is_single_file:
+        # EPUB/CBZ: check size (cannot split these formats)
+        file_size = pdf_path.stat().st_size
+        if file_size > MAX_ATTACHMENT_SIZE:
+            fmt = suffix.lstrip('.').upper()
             raise EmailError(
-                f"EPUB file is {epub_size / (1024*1024):.1f}MB, exceeding the 25MB email limit. "
-                f"EPUBs cannot be split. Use PDF format instead (set in 'memanga config')."
+                f"{fmt} file is {file_size / (1024*1024):.1f}MB, exceeding the 25MB email limit. "
+                f"{fmt} files cannot be split. Use PDF format instead (set in 'memanga config')."
             )
         parts = [pdf_path]
         is_split = False
@@ -193,13 +195,12 @@ def _send_single_email(
     msg["Subject"] = subject
     
     # Detect MIME type based on extension
-    is_epub = pdf_path.suffix.lower() == '.epub'
-    if is_epub:
-        mime_main = "application"
-        mime_sub = "epub+zip"
-    else:
-        mime_main = "application"
-        mime_sub = "pdf"
+    suffix = pdf_path.suffix.lower()
+    mime_types = {
+        '.epub': ('application', 'epub+zip'),
+        '.cbz': ('application', 'vnd.comicbook+zip'),
+    }
+    mime_main, mime_sub = mime_types.get(suffix, ('application', 'pdf'))
     
     # Attach file
     with open(pdf_path, "rb") as f:

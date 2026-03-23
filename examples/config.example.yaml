@@ -22,7 +22,7 @@ delivery:
   mode: local  # "local" or "email"
   download_dir: ~/.config/memanga/downloads
   delete_after_send: false  # Delete PDF after sending to Kindle (email mode only)
-  output_format: pdf  # "pdf" or "epub"
+  output_format: pdf  # "pdf", "epub", or "cbz"
 
 # Email settings (only needed if delivery.mode = "email")
 email:
