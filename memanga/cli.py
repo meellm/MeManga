@@ -402,7 +402,7 @@ def cmd_check(args):
     
     delivery_mode = config.delivery_mode
     download_dir = config.download_dir
-    output_format = config.output_format
+    output_format = getattr(args, 'format', None) or config.output_format
     email_cfg = config.get("email", {})
     
     for manga in manga_list:
@@ -535,6 +535,7 @@ def cmd_status(args):
     delivery_mode = config.delivery_mode
     
     table.add_row("Manga tracked", f"[cyan]{len(manga_list)}[/cyan]")
+    table.add_row("Output format", f"[cyan]{config.output_format}[/cyan]")
     table.add_row("Delivery mode", f"[yellow]{delivery_mode}[/yellow]")
     
     if delivery_mode == "local":
@@ -591,14 +592,14 @@ def cmd_config(args):
             default=str(config.download_dir)
         )
         config.set("delivery.download_dir", download_dir)
-        
+
     elif mode_choice == "2":
         config.set("delivery.mode", "email")
-        
+
         console.print("\n[bold]Email Configuration[/bold]")
         console.print("[dim]You need a Gmail account with an App Password.[/dim]")
         console.print("[dim]Kindle email must be whitelisted in Amazon settings.[/dim]\n")
-        
+
         kindle_email = Prompt.ask(
             "Kindle email (@kindle.com)",
             default=config.get("email.kindle_email", "")
@@ -607,20 +608,35 @@ def cmd_config(args):
             "Sender Gmail",
             default=config.get("email.sender_email", "")
         )
-        
+
         config.set("email.kindle_email", kindle_email)
         config.set("email.sender_email", sender_email)
-        
+
         if Confirm.ask("Update app password?"):
             app_password = Prompt.ask("App password", password=True)
             set_app_password(config, app_password)
-        
+
         delete_after = Confirm.ask(
-            "Delete PDFs after sending to Kindle?",
+            "Delete files after sending to Kindle?",
             default=config.get("delivery.delete_after_send", False)
         )
         config.set("delivery.delete_after_send", delete_after)
-    
+
+    # Output format
+    current_format = config.output_format
+    console.print(f"\n[bold]Output Format[/bold] (current: [cyan]{current_format}[/cyan])")
+    console.print("  [1] pdf   - Portable Document Format")
+    console.print("  [2] epub  - E-reader format (Kindle optimized)")
+    console.print("  [3] cbz   - Comic Book ZIP archive")
+    fmt_choice = Prompt.ask("Select format", choices=["1", "2", "3", ""], default="")
+
+    if fmt_choice == "1":
+        config.set("delivery.output_format", "pdf")
+    elif fmt_choice == "2":
+        config.set("delivery.output_format", "epub")
+    elif fmt_choice == "3":
+        config.set("delivery.output_format", "cbz")
+
     config.save()
     console.print("\n[green]✅ Configuration saved![/green]")
 
@@ -1061,6 +1077,7 @@ Examples:
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")
     p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
     p_check.add_argument("-n", "--dry-run", action="store_true", help="List new chapters without downloading")
+    p_check.add_argument("--format", choices=["pdf", "epub", "cbz"], help="Output format (overrides config)")
     p_check.set_defaults(func=cmd_check)
     
     # status
