@@ -4,7 +4,7 @@ Downloader for MeManga
 Handles:
 1. Checking sources for new chapters using scrapers
 2. Downloading chapter images
-3. Converting to PDF or EPUB
+3. Converting to PDF, EPUB, or CBZ
 4. Cleanup
 5. Backup source fallback (wait N days before using backup)
 """
@@ -51,7 +51,7 @@ def _cleanup_at_exit():
 
 atexit.register(_cleanup_at_exit)
 
-OutputFormat = Literal["pdf", "epub"]
+OutputFormat = Literal["pdf", "epub", "cbz"]
 
 # Default days to wait before falling back to backup source
 DEFAULT_FALLBACK_DELAY_DAYS = 2
@@ -349,6 +349,12 @@ def download_chapter(
                 _images_to_epub(image_paths, output_path, title, chapter.number, cover_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create EPUB: {e}")
+        elif output_format == "cbz":
+            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.cbz"
+            try:
+                _images_to_cbz(image_paths, output_path)
+            except Exception as e:
+                raise DownloaderError(f"Failed to create CBZ: {e}")
         else:
             output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.pdf"
             try:
@@ -516,6 +522,23 @@ def _images_to_pdf(image_paths: List[Path], output_path: Path):
 
     pdf_bytes = img2pdf.convert(processed_images)
     output_path.write_bytes(pdf_bytes)
+
+
+def _images_to_cbz(image_paths: List[Path], output_path: Path):
+    """Convert a list of images to a CBZ (Comic Book ZIP) archive.
+
+    Images are stored as-is (no re-encoding) with sequential names
+    for correct reading order.
+    """
+    import zipfile
+
+    if not image_paths:
+        raise DownloaderError("No images to archive")
+
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_STORED) as cbz:
+        for i, img_path in enumerate(image_paths):
+            ext = img_path.suffix.lower() or '.jpg'
+            cbz.write(img_path, f"page_{i:03d}{ext}")
 
 
 def _get_extension(url: str) -> str:
