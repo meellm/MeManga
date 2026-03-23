@@ -11,7 +11,7 @@ Track manga from multiple sources, download chapters as PDF/EPUB/CBZ, and option
 - 🔄 **Backup sources** — fallback to secondary sources after N days
 - 📊 **Status tracking** — reading, on-hold, dropped, completed
 - 📥 **Bulk downloads** — download from chapter 1 with `--from` flag
-- 📄 **PDF/EPUB/CBZ output** — optimized for e-readers and comic book viewers
+- 📄 **PDF/EPUB/CBZ/ZIP/JPG/PNG/WEBP output** — for e-readers, comic viewers, and local reading
 - 📧 **Kindle delivery** — automatic email to your device
 - ⏰ **Scheduled checks** — daily cron job support
 - 🖥️ **Cross-platform** — Windows, macOS, Linux, Raspberry Pi

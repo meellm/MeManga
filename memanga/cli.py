@@ -455,29 +455,37 @@ def cmd_check(args):
                     
                     console.print(f"     [dim]⬇️  Downloading {ch_label}...{source_info}[/dim]")
                     file_path = download_chapter(manga, ch, download_dir, output_format)
-                    console.print(f"     [green]✅ Saved: {file_path.name}[/green]")
-                    
-                    # Email if configured
+                    is_image_folder = file_path.is_dir()
+
+                    if is_image_folder:
+                        console.print(f"     [green]✅ Saved: {file_path.parent.name}/{file_path.name}/[/green]")
+                    else:
+                        console.print(f"     [green]✅ Saved: {file_path.name}[/green]")
+
+                    # Email if configured (skip for image folders)
                     if delivery_mode == "email" and email_cfg.get("kindle_email"):
-                        console.print(f"     [dim]📧 Sending to Kindle...[/dim]")
-                        try:
-                            send_to_kindle(
-                                pdf_path=file_path,
-                                kindle_email=email_cfg["kindle_email"],
-                                sender_email=email_cfg["sender_email"],
-                                smtp_server=email_cfg.get("smtp_server", "smtp.gmail.com"),
-                                smtp_port=email_cfg.get("smtp_port", 587),
-                                app_password=get_app_password(config),
-                            )
-                            console.print(f"     [green]📬 Sent to Kindle![/green]")
-                            
-                            # Delete after send if configured
-                            if config.get("delivery.delete_after_send", False):
-                                file_path.unlink()
-                                console.print(f"     [dim]🗑️  Deleted local copy[/dim]")
-                                
-                        except EmailError as e:
-                            console.print(f"     [red]📧 Email failed: {e}[/red]")
+                        if is_image_folder:
+                            console.print(f"     [dim]📧 Skipped email (image folders cannot be emailed)[/dim]")
+                        else:
+                            console.print(f"     [dim]📧 Sending to Kindle...[/dim]")
+                            try:
+                                send_to_kindle(
+                                    pdf_path=file_path,
+                                    kindle_email=email_cfg["kindle_email"],
+                                    sender_email=email_cfg["sender_email"],
+                                    smtp_server=email_cfg.get("smtp_server", "smtp.gmail.com"),
+                                    smtp_port=email_cfg.get("smtp_port", 587),
+                                    app_password=get_app_password(config),
+                                )
+                                console.print(f"     [green]📬 Sent to Kindle![/green]")
+
+                                # Delete after send if configured
+                                if config.get("delivery.delete_after_send", False):
+                                    file_path.unlink()
+                                    console.print(f"     [dim]🗑️  Deleted local copy[/dim]")
+
+                            except EmailError as e:
+                                console.print(f"     [red]📧 Email failed: {e}[/red]")
                     
                     # Update state
                     state.add_downloaded_chapter(title, ch.number)
@@ -620,7 +628,11 @@ def cmd_config(args):
     console.print("  [1] pdf   - Portable Document Format")
     console.print("  [2] epub  - E-reader format (Kindle optimized)")
     console.print("  [3] cbz   - Comic Book ZIP archive")
-    fmt_choice = Prompt.ask("Select format", choices=["1", "2", "3", ""], default="")
+    console.print("  [4] zip   - ZIP archive of images")
+    console.print("  [5] jpg   - JPEG images (folder per chapter)")
+    console.print("  [6] png   - PNG images (folder per chapter)")
+    console.print("  [7] webp  - WebP images (folder per chapter)")
+    fmt_choice = Prompt.ask("Select format", choices=["1", "2", "3", "4", "5", "6", "7", ""], default="")
 
     if fmt_choice == "1":
         config.set("delivery.output_format", "pdf")
@@ -628,6 +640,14 @@ def cmd_config(args):
         config.set("delivery.output_format", "epub")
     elif fmt_choice == "3":
         config.set("delivery.output_format", "cbz")
+    elif fmt_choice == "4":
+        config.set("delivery.output_format", "zip")
+    elif fmt_choice == "5":
+        config.set("delivery.output_format", "jpg")
+    elif fmt_choice == "6":
+        config.set("delivery.output_format", "png")
+    elif fmt_choice == "7":
+        config.set("delivery.output_format", "webp")
 
     config.save()
     console.print("\n[green]✅ Configuration saved![/green]")
@@ -1008,10 +1028,10 @@ def cmd_tui(args):
 
                 # Format override?
                 fmt_input = Prompt.ask(
-                    "Output format? (Enter for default, or type pdf/epub/cbz)",
+                    "Output format? (Enter for default, or type pdf/epub/cbz/zip/jpg/png/webp)",
                     default="",
                 )
-                fmt = fmt_input.strip().lower() if fmt_input.strip().lower() in ("pdf", "epub", "cbz") else None
+                fmt = fmt_input.strip().lower() if fmt_input.strip().lower() in ("pdf", "epub", "cbz", "zip", "jpg", "png", "webp") else None
 
                 cmd_check(argparse.Namespace(
                     title=title,
@@ -1117,7 +1137,7 @@ Examples:
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")
     p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
     p_check.add_argument("-n", "--dry-run", action="store_true", help="List new chapters without downloading")
-    p_check.add_argument("--format", choices=["pdf", "epub", "cbz"], help="Output format (overrides config)")
+    p_check.add_argument("--format", choices=["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"], help="Output format (overrides config)")
     p_check.set_defaults(func=cmd_check)
     
     # status
