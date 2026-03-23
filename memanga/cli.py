@@ -18,7 +18,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich import box
 
 from .config import Config, get_app_password, set_app_password
@@ -417,14 +416,7 @@ def cmd_check(args):
         console.print(f"[dim]Checking:[/dim] [cyan]{title}[/cyan]...")
         
         try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True,
-            ) as progress:
-                task = progress.add_task("Fetching chapters...", total=None)
-                new_chapters = check_for_updates(manga, state, from_chapter=from_chapter)
+            new_chapters = check_for_updates(manga, state, from_chapter=from_chapter)
             
             if not new_chapters:
                 console.print("  [dim]└─ No new chapters[/dim]")
@@ -982,7 +974,55 @@ def cmd_tui(args):
             if target != 'b':
                 cmd_remove(argparse.Namespace(target=target, yes=False))
         elif choice == "4":
-            cmd_check(argparse.Namespace(title=None, auto=False, yes=False, quiet=False))
+            cmd_list(argparse.Namespace())
+            console.print()
+            # Which manga?
+            target = Prompt.ask("Check which manga? ([cyan]a[/cyan]=all, or enter # / title)", default="a")
+            title = None
+            if target.lower() != "a":
+                manga_list_ref = config.get("manga", [])
+                found, _ = _find_manga(target, manga_list_ref)
+                if not found:
+                    console.print(f"[red]Not found:[/red] {target}")
+                else:
+                    title = found["title"]
+
+            if target.lower() == "a" or title:
+                # Auto-download?
+                auto = Confirm.ask("Auto-download new chapters?", default=True)
+
+                # Start from chapter?
+                from_input = Prompt.ask(
+                    "Start from chapter? (Enter for latest, or type a number)",
+                    default="",
+                )
+                from_chapter = None
+                if from_input.strip():
+                    try:
+                        from_chapter = float(from_input)
+                    except ValueError:
+                        console.print("[red]Invalid chapter number, using latest.[/red]")
+
+                # Safe mode auto-enabled for bulk downloads
+                safe = from_chapter is not None
+
+                # Format override?
+                fmt_input = Prompt.ask(
+                    "Output format? (Enter for default, or type pdf/epub/cbz)",
+                    default="",
+                )
+                fmt = fmt_input.strip().lower() if fmt_input.strip().lower() in ("pdf", "epub", "cbz") else None
+
+                cmd_check(argparse.Namespace(
+                    title=title,
+                    auto=auto,
+                    yes=False,
+                    quiet=False,
+                    from_chapter=from_chapter,
+                    safe=safe,
+                    dry_run=False,
+                    format=fmt,
+                ))
         elif choice == "5":
             cmd_config(argparse.Namespace(show=False))
         elif choice == "6":
