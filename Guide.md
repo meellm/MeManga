@@ -1,6 +1,6 @@
 # MeManga Setup & Usage Guide
 
-Automatic manga downloader with Kindle support. Track manga from 260+ scrapers / 300+ domains, download chapters as PDF/EPUB/CBZ, and optionally send them directly to your Kindle.
+Automatic manga downloader with Kindle support. Track manga from 260+ scrapers / 300+ domains, download chapters as PDF/EPUB/CBZ/ZIP/JPG/PNG/WEBP, and optionally send them directly to your Kindle.
 
 ---
 
@@ -334,7 +334,7 @@ Run `run` and select option **[4] Check Now**. The menu walks you through everyt
 Check which manga? (a=all, or enter # / title) [a]: a
 Auto-download new chapters? [Y/n]: y
 Start from chapter? (Enter for latest, or type a number):
-Output format? (Enter for default, or type pdf/epub/cbz):
+Output format? (Enter for default, or type pdf/epub/cbz/zip/jpg/png/webp):
 ```
 
 That's it — MeManga checks all your manga and downloads new chapters automatically.
@@ -364,7 +364,7 @@ Run `run`, select **[4] Check Now**, then:
 Check which manga? (a=all, or enter # / title) [a]: 1
 Auto-download new chapters? [Y/n]: y
 Start from chapter? (Enter for latest, or type a number): 1
-Output format? (Enter for default, or type pdf/epub/cbz):
+Output format? (Enter for default, or type pdf/epub/cbz/zip/jpg/png/webp):
 ```
 
 That's all you need. MeManga downloads every chapter from chapter 1 onward. Safe mode (browser restarts every 3 chapters to save memory) is enabled automatically when you type a starting chapter.
@@ -400,7 +400,7 @@ Run `run`, select **[4] Check Now**, then:
 Check which manga? (a=all, or enter # / title) [a]: One Piece
 Auto-download new chapters? [Y/n]: y
 Start from chapter? (Enter for latest, or type a number): 50
-Output format? (Enter for default, or type pdf/epub/cbz):
+Output format? (Enter for default, or type pdf/epub/cbz/zip/jpg/png/webp):
 ```
 
 This downloads chapter 50, 51, 52, etc. Chapters you already have are automatically skipped. Safe mode is enabled automatically.
@@ -474,13 +474,19 @@ You can also use partial title matching — `run set "Solo" completed` will matc
 
 ## Changing Output Format
 
-MeManga supports three formats:
+MeManga supports seven formats:
 
-| Format | Extension | Best for |
-|--------|-----------|----------|
-| **PDF** | `.pdf` | Kindle, general reading. Auto-splits large files for email. |
-| **EPUB** | `.epub` | Kindle, e-readers. Fixed-layout with cover art. |
-| **CBZ** | `.cbz` | Comic book readers (CDisplayEx, YACReader, etc.) |
+| Format | Output | Best for |
+|--------|--------|----------|
+| **PDF** | `.pdf` file | Kindle, general reading. Auto-splits large files for email. |
+| **EPUB** | `.epub` file | Kindle, e-readers. Fixed-layout with cover art. |
+| **CBZ** | `.cbz` file | Comic book readers (CDisplayEx, YACReader, Tachiyomi). |
+| **ZIP** | `.zip` file | Same as CBZ but with standard .zip extension. Works with any archive tool. |
+| **JPG** | folder of `.jpg` | Local viewing. One folder per chapter with JPEG images. |
+| **PNG** | folder of `.png` | Local viewing. Lossless quality, larger file sizes. |
+| **WEBP** | folder of `.webp` | Local viewing. Modern format, smaller than JPEG at similar quality. |
+
+Image formats (JPG/PNG/WEBP) save chapters as folders: `downloads/Manga Title/Chapter 001/000.jpg, 001.jpg, ...`
 
 ### Change the default format
 
@@ -490,7 +496,7 @@ Run the config wizard:
 run config
 ```
 
-When prompted for output format, enter `pdf`, `epub`, or `cbz`.
+Select from the numbered menu (1-7).
 
 Or edit `~/.config/memanga/config.yaml` directly:
 
@@ -504,7 +510,7 @@ delivery:
 When using the menu (**[4] Check Now**), you'll be asked:
 
 ```
-Output format? (Enter for default, or type pdf/epub/cbz): epub
+Output format? (Enter for default, or type pdf/epub/cbz/zip/jpg/png/webp): epub
 ```
 
 Or from the command line:
@@ -578,6 +584,8 @@ Set delivery mode to `local`. Downloaded chapters will be saved to `~/.config/me
 - **PDF:** Auto-splits if over 23MB. Best choice for email delivery.
 - **EPUB:** Sent as-is. Kindle supports EPUB natively. Cannot be split — if over 25MB, switch to PDF.
 - **CBZ:** Kindle does not support CBZ. Use PDF or EPUB for email delivery.
+- **ZIP:** Sent as-is. Cannot be split — if over 25MB, switch to PDF.
+- **JPG/PNG/WEBP:** Cannot be emailed (saved as image folders). Use PDF, EPUB, or CBZ for email delivery.
 
 ---
 

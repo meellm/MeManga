@@ -51,7 +51,7 @@ def _cleanup_at_exit():
 
 atexit.register(_cleanup_at_exit)
 
-OutputFormat = Literal["pdf", "epub", "cbz"]
+OutputFormat = Literal["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"]
 
 # Default days to wait before falling back to backup source
 DEFAULT_FALLBACK_DELAY_DAYS = 2
@@ -355,6 +355,19 @@ def download_chapter(
                 _images_to_cbz(image_paths, output_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create CBZ: {e}")
+        elif output_format == "zip":
+            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.zip"
+            try:
+                _images_to_cbz(image_paths, output_path)  # Reuse CBZ logic (same ZIP format)
+            except Exception as e:
+                raise DownloaderError(f"Failed to create ZIP: {e}")
+        elif output_format in ("jpg", "png", "webp"):
+            chapter_folder = output_dir / safe_title / f"Chapter {chapter_str}"
+            try:
+                _images_to_folder(image_paths, chapter_folder, output_format)
+            except Exception as e:
+                raise DownloaderError(f"Failed to save images: {e}")
+            output_path = chapter_folder  # Return the directory path
         else:
             output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.pdf"
             try:
@@ -539,6 +552,53 @@ def _images_to_cbz(image_paths: List[Path], output_path: Path):
         for i, img_path in enumerate(image_paths):
             ext = img_path.suffix.lower() or '.jpg'
             cbz.write(img_path, f"page_{i:03d}{ext}")
+
+
+def _images_to_folder(image_paths: List[Path], output_dir: Path, img_format: str):
+    """Save images to a folder, converting to the specified format.
+
+    Args:
+        image_paths: Downloaded source images
+        output_dir: Chapter folder to save into (e.g., downloads/Manga/Chapter 001/)
+        img_format: Target format - "jpg", "png", or "webp"
+    """
+    if not image_paths:
+        raise DownloaderError("No images to save")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    pillow_format_map = {
+        "jpg": ("JPEG", ".jpg", {"quality": 95}),
+        "png": ("PNG", ".png", {}),
+        "webp": ("WEBP", ".webp", {"quality": 90}),
+    }
+
+    pil_format, ext, save_kwargs = pillow_format_map[img_format]
+
+    for i, img_path in enumerate(image_paths):
+        img = Image.open(img_path)
+        try:
+            # JPEG requires RGB (no alpha channel)
+            if pil_format == "JPEG" and img.mode in ('RGBA', 'P', 'LA', 'PA'):
+                rgba = img.convert('RGBA')
+                bg = Image.new('RGB', img.size, (255, 255, 255))
+                bg.paste(rgba, mask=rgba.split()[3])
+                rgba.close()
+                img.close()
+                img = bg
+            elif pil_format == "JPEG" and img.mode != 'RGB':
+                converted = img.convert('RGB')
+                img.close()
+                img = converted
+            elif pil_format in ("PNG", "WEBP") and img.mode not in ('RGB', 'RGBA'):
+                converted = img.convert('RGB')
+                img.close()
+                img = converted
+
+            out_path = output_dir / f"{i:03d}{ext}"
+            img.save(out_path, format=pil_format, **save_kwargs)
+        finally:
+            img.close()
 
 
 def _get_extension(url: str) -> str:

@@ -48,7 +48,7 @@ class Config:
                 "mode": "local",  # "local" or "email"
                 "download_dir": str(self.config_dir / "downloads"),
                 "delete_after_send": False,  # Delete file after sending to Kindle
-                "output_format": "pdf",  # "pdf", "epub", or "cbz"
+                "output_format": "pdf",  # "pdf", "epub", "cbz", "zip", "jpg", "png", or "webp"
             },
             "email": {
                 "kindle_email": "",
