@@ -129,9 +129,9 @@ def send_to_kindle(
     if not app_password:
         raise EmailError("App password not configured")
     
-    # Check file type - only split PDFs, send EPUBs/CBZs as-is
+    # Check file type - only split PDFs, send EPUBs/CBZs/ZIPs as-is
     suffix = pdf_path.suffix.lower()
-    is_single_file = suffix in ('.epub', '.cbz')
+    is_single_file = suffix in ('.epub', '.cbz', '.zip')
 
     if is_single_file:
         # EPUB/CBZ: check size (cannot split these formats)
@@ -199,6 +199,7 @@ def _send_single_email(
     mime_types = {
         '.epub': ('application', 'epub+zip'),
         '.cbz': ('application', 'vnd.comicbook+zip'),
+        '.zip': ('application', 'zip'),
     }
     mime_main, mime_sub = mime_types.get(suffix, ('application', 'pdf'))
     
