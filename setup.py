@@ -72,6 +72,12 @@ def main():
     run(f'"{python_exe}" -m playwright install chromium firefox')
     print()
 
+    # Linux: Install Playwright system dependencies (shared libraries for browsers)
+    if is_linux:
+        print("Installing Playwright system dependencies...")
+        run(f'"{python_exe}" -m playwright install-deps')
+        print()
+
     # Create config directory
     config_dir = Path.home() / ".config" / "memanga" / "downloads"
     config_dir.mkdir(parents=True, exist_ok=True)
