@@ -222,6 +222,6 @@ class DownloadsPage(BasePage):
                 self.app.worker.download_chapter(
                     manga=manga, chapter=ch,
                     output_dir=output_dir, output_format=output_format,
-                    state=self.app.state, kindle_cfg=kindle_cfg,
+                    state=self.app.app_state, kindle_cfg=kindle_cfg,
                     naming_template=naming_template,
                 )

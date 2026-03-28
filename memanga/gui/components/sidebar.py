@@ -152,7 +152,7 @@ class Sidebar(ctk.CTkFrame):
     def _show_notifications(self):
         from .notification import NotificationPanel
         NotificationPanel(self, self.app)
-        self.app.state.mark_notifications_read()
+        self.app.app_state.mark_notifications_read()
         self._update_badge()
 
     def _update_badge(self):
@@ -160,7 +160,7 @@ class Sidebar(ctk.CTkFrame):
         try:
             if not self.winfo_exists():
                 return
-            count = self.app.state.get_unread_count()
+            count = self.app.app_state.get_unread_count()
             if count > 0:
                 self._badge_label.configure(text=str(min(count, 99)))
                 self._badge_label.place(relx=1.0, x=-30, y=6)

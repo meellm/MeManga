@@ -57,7 +57,7 @@ class DetailPage(BasePage):
         palette = get_palette(ctk.get_appearance_mode().lower())
         manga = self._manga
         title = manga.get("title", "Unknown")
-        state_data = self.app.state.get_manga_state(title)
+        state_data = self.app.app_state.get_manga_state(title)
         primary, primary_url, backup, backup_url = self._get_source_display(manga)
 
         # Back button
@@ -373,10 +373,10 @@ class DetailPage(BasePage):
 
                 # Rename state if title changed
                 if new_title != old_title:
-                    old_state = self.app.state.get_manga_state(old_title)
+                    old_state = self.app.app_state.get_manga_state(old_title)
                     if old_state:
-                        self.app.state._data.setdefault("manga", {})[new_title] = old_state
-                        self.app.state.remove_manga(old_title)
+                        self.app.app_state._data.setdefault("manga", {})[new_title] = old_state
+                        self.app.app_state.remove_manga(old_title)
 
                 self._manga = m
                 break
@@ -390,7 +390,7 @@ class DetailPage(BasePage):
 
     def _check_updates(self):
         if self._manga:
-            self.app.worker.check_updates([self._manga], self.app.state, self.app.config)
+            self.app.worker.check_updates([self._manga], self.app.app_state, self.app.config)
             self.app.show_page("downloads")
             Toast(self, "Checking for updates...", kind="info")
 
@@ -415,9 +415,9 @@ class DetailPage(BasePage):
             return
 
         title = self._manga.get("title", "")
-        self.app.state.reset_manga_progress(title, from_ch)
+        self.app.app_state.reset_manga_progress(title, from_ch)
 
-        self.app.worker.check_updates([self._manga], self.app.state, self.app.config)
+        self.app.worker.check_updates([self._manga], self.app.app_state, self.app.config)
         self.app.show_page("downloads")
         Toast(self, f"Downloading from chapter {int(from_ch) if from_ch == int(from_ch) else from_ch}...", kind="info")
 
@@ -442,7 +442,7 @@ class DetailPage(BasePage):
         manga_list = [m for m in manga_list if m.get("title") != title]
         self.app.config.set("manga", manga_list)
         self.app.config.save()
-        self.app.state.remove_manga(title)
+        self.app.app_state.remove_manga(title)
         self.app.show_page("library")
 
     # ---- Reader ----

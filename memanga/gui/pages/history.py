@@ -69,7 +69,7 @@ class HistoryPage(BasePage):
 
         palette = get_palette(ctk.get_appearance_mode().lower())
         query = self._filter_entry.get().strip().lower()
-        history = self.app.state.get_download_history(200)
+        history = self.app.app_state.get_download_history(200)
 
         if query:
             history = [h for h in history if query in h.get("title", "").lower()]

@@ -44,7 +44,7 @@ class NotificationPanel(ctk.CTkToplevel):
         scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=PAD_MD, pady=(0, PAD_MD))
 
-        notifications = self.app.state.get_notifications(50)
+        notifications = self.app.app_state.get_notifications(50)
 
         if not notifications:
             ctk.CTkLabel(
@@ -91,5 +91,5 @@ class NotificationPanel(ctk.CTkToplevel):
         ctk.CTkLabel(info, text=ts_display, font=font(FONT_SIZE_XS), text_color=palette["fg_muted"], anchor="w").pack(fill="x")
 
     def _mark_read(self):
-        self.app.state.mark_notifications_read()
+        self.app.app_state.mark_notifications_read()
         self.destroy()
