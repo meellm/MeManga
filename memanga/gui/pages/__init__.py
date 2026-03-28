@@ -1,0 +1,1 @@
+"""GUI pages for MeManga."""
