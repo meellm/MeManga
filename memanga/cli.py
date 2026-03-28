@@ -386,11 +386,15 @@ def cmd_check(args):
             return
     
     from_chapter = getattr(args, 'from_chapter', None)
+    if getattr(args, 'all', False):
+        from_chapter = 0
     dry_run = getattr(args, 'dry_run', False)
 
     if dry_run:
         console.print(Panel("[bold]🔍 Dry Run — Checking for New Chapters[/bold]", border_style="yellow"))
-    elif from_chapter:
+    elif from_chapter is not None and from_chapter == 0:
+        console.print(Panel("[bold]📥 Downloading All Chapters[/bold]", border_style="green"))
+    elif from_chapter is not None:
         console.print(Panel(f"[bold]📥 Downloading from Chapter {from_chapter}[/bold]", border_style="green"))
     else:
         console.print(Panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
@@ -1013,11 +1017,13 @@ def cmd_tui(args):
 
                 # Start from chapter?
                 from_input = Prompt.ask(
-                    "Start from chapter? (Enter for latest, or type a number)",
+                    "Start from chapter? (Enter for latest, 0 or 'all' for all chapters, or type a number)",
                     default="",
                 )
                 from_chapter = None
-                if from_input.strip():
+                if from_input.strip().lower() == "all":
+                    from_chapter = 0
+                elif from_input.strip():
                     try:
                         from_chapter = float(from_input)
                     except ValueError:
@@ -1132,6 +1138,7 @@ Examples:
     p_check = subparsers.add_parser("check", help="Check for new chapters")
     p_check.add_argument("-t", "--title", help="Check specific manga only")
     p_check.add_argument("-f", "--from", dest="from_chapter", type=float, help="Start from chapter N (for fresh downloads)")
+    p_check.add_argument("--all", action="store_true", help="Download all chapters from the beginning")
     p_check.add_argument("-a", "--auto", action="store_true", help="Auto-download without prompts")
     p_check.add_argument("-y", "--yes", action="store_true", help="Say yes to all prompts")
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")

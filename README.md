@@ -31,7 +31,7 @@ Then:
 ./scripts/run.sh             # Launch interactive TUI
 ```
 
-> **Windows:** Use `scripts\windows\run.bat` instead of `./scripts/run.sh`
+> **Windows:** Use `.\scripts\windows\run.bat` instead of `./scripts/run.sh`
 
 ## 🌐 Popular Sources
 
