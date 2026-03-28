@@ -33,6 +33,7 @@ class DownloadsPage(BasePage):
         self.app.events.subscribe("download_queued", self._on_queued)
         self.app.events.subscribe("download_cancelled", self._on_cancelled)
         self.app.events.subscribe("check_complete", self._on_check_complete)
+        self.app.events.subscribe("check_error", self._on_check_error)
 
     def _build(self):
         palette = get_palette(ctk.get_appearance_mode().lower())
@@ -186,6 +187,12 @@ class DownloadsPage(BasePage):
                 subprocess.Popen(["xdg-open", folder])
         except Exception:
             Toast(self, "Could not open folder", kind="error")
+
+    def _on_check_error(self, data):
+        """Show scraper errors so the user knows why chapters weren't found."""
+        title = data.get("title", "")
+        error = data.get("error", "Unknown error")
+        Toast(self, f"Error checking {title}: {error[:60]}", kind="error", duration=6000)
 
     def _on_check_complete(self, data):
         """Auto-queue downloads when check finds new chapters."""
