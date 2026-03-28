@@ -49,6 +49,7 @@ class Config:
                 "download_dir": str(self.config_dir / "downloads"),
                 "delete_after_send": False,  # Delete file after sending to Kindle
                 "output_format": "pdf",  # "pdf", "epub", "cbz", "zip", "jpg", "png", or "webp"
+                "naming_template": "{title} - Chapter {chapter}",  # File naming pattern
             },
             "email": {
                 "kindle_email": "",
@@ -60,6 +61,11 @@ class Config:
             "cron": {
                 "enabled": False,
                 "time": "06:00",
+            },
+            "gui": {
+                "sort_by": "title",
+                "auto_check": True,
+                "auto_check_interval": 3600,
             },
         }
     
