@@ -3,9 +3,13 @@ Thread-safe event bus for GUI <-> worker communication.
 Workers publish events from background threads; the main thread polls and dispatches.
 """
 
+import logging
 import queue
+import traceback
 import threading
 from typing import Any, Callable, Dict, List
+
+logger = logging.getLogger(__name__)
 
 
 class EventBus:
@@ -15,6 +19,7 @@ class EventBus:
         self._queue: queue.Queue = queue.Queue()
         self._subscribers: Dict[str, List[Callable]] = {}
         self._sub_lock = threading.Lock()
+        self._last_error: str = ""
 
     def subscribe(self, event_type: str, callback: Callable):
         """Subscribe to an event type. Callback runs on the main thread."""
@@ -49,6 +54,10 @@ class EventBus:
             for callback in callbacks:
                 try:
                     callback(data)
-                except Exception:
-                    pass  # Don't let one bad handler block others
+                except Exception as e:
+                    # Log the error so it's not completely invisible
+                    tb = traceback.format_exc()
+                    self._last_error = f"[{event_type}] {callback.__name__}: {e}"
+                    logger.error(f"Event handler error [{event_type}] {callback.__name__}: {e}\n{tb}")
+                    print(f"[EventBus ERROR] {event_type} -> {callback.__name__}: {e}")
             processed += 1

@@ -93,7 +93,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # Windowed GUI mode
+    console=True,  # Keep console open for debugging — errors print here
 )
 
 coll = COLLECT(

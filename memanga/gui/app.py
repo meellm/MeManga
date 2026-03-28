@@ -35,6 +35,7 @@ class MeMangaApp(ctk.CTk):
         self.events.subscribe("download_complete", self._on_download_complete)
         self.events.subscribe("download_error", self._on_download_error)
         self.events.subscribe("check_complete", self._on_check_complete)
+        self.events.subscribe("check_error", self._on_check_error)
         self.events.subscribe("kindle_sent", self._on_kindle_sent)
 
         # Window setup
@@ -160,6 +161,14 @@ class MeMangaApp(ctk.CTk):
 
         # Clear "new chapters" badge for this manga
         self.app_state.clear_new_chapters(title)
+
+    def _on_check_error(self, data):
+        """Handle scraper errors — log notification so user can see what failed."""
+        title = data.get("title", "")
+        error = data.get("error", "Unknown")
+        self.app_state.add_notification("error", f"Check failed: {title} - {error[:80]}")
+        self.events.publish("notification_added", {})
+        print(f"[Check Error] {title}: {error}")
 
     def _on_download_error(self, data):
         title = data.get("title", "")
