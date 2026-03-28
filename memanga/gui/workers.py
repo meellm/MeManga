@@ -62,9 +62,17 @@ class BackgroundWorker:
 
         def _task():
             import traceback
-            from ..downloader import check_for_updates
-            results = []
             print(f"[Check] Background task started", flush=True)
+            try:
+                from ..downloader import check_for_updates
+            except Exception as e:
+                print(f"[Check] FATAL: Failed to import downloader: {e}", flush=True)
+                traceback.print_exc()
+                _sys.stdout.flush()
+                self._events.publish("check_error", {"title": "Import Error", "error": str(e)})
+                self._events.publish("check_complete", {"results": []})
+                return
+            results = []
             _sys.stdout.flush()
             for i, manga in enumerate(manga_list):
                 status = manga.get("status", "reading")
@@ -150,7 +158,16 @@ class BackgroundWorker:
     def _run_download(self, item):
         """Execute a single download task."""
         import traceback
-        from ..downloader import download_chapter
+        try:
+            from ..downloader import download_chapter
+        except Exception as e:
+            print(f"[Download] FATAL: Failed to import downloader: {e}", flush=True)
+            traceback.print_exc()
+            self._events.publish("download_error", {
+                "task_id": item["task_id"], "error": f"Import error: {e}",
+                "title": item["manga"]["title"], "chapter": "?",
+            })
+            return
         task_id = item["task_id"]
         manga = item["manga"]
         chapter = item["chapter"]
