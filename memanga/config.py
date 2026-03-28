@@ -46,7 +46,7 @@ class Config:
             "manga": [],
             "delivery": {
                 "mode": "local",  # "local" or "email"
-                "download_dir": str(self.config_dir / "downloads"),
+                "download_dir": str(Path.home() / "Downloads" / "MeManga"),
                 "delete_after_send": False,  # Delete file after sending to Kindle
                 "output_format": "pdf",  # "pdf", "epub", "cbz", "zip", "jpg", "png", or "webp"
                 "naming_template": "{title} - Chapter {chapter}",  # File naming pattern

@@ -4,7 +4,7 @@ Entry point for running MeManga as a module:
     python -m memanga
 """
 
-from memanga.gui import launch_gui
+from memanga.cli import main
 
 if __name__ == "__main__":
-    launch_gui()
+    main()

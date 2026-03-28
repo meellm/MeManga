@@ -60,7 +60,7 @@ if os.path.isdir(templates_dir):
     ]
 
 a = Analysis(
-    ["memanga/__main__.py"],
+    ["memanga/gui/__main__.py"],
     pathex=[project_root],
     binaries=[],
     datas=datas,
