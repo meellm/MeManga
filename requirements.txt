@@ -24,4 +24,7 @@ keyring>=24.0.0
 # Stealth mode for Playwright scrapers
 playwright-stealth>=1.0.0
 
+# GUI
+customtkinter>=5.2.0
+
 # Email (stdlib, no extra deps needed)

@@ -1096,8 +1096,10 @@ Examples:
   memanga check --auto                  # Auto-download new chapters
   memanga cron install                  # Set up daily checks
   memanga config                        # Configure settings
+  memanga --gui                         # Launch graphical interface
         """,
     )
+    parser.add_argument("--gui", action="store_true", help="Launch the graphical user interface")
     
     subparsers = parser.add_subparsers(dest="command", title="commands")
     
@@ -1182,7 +1184,12 @@ Examples:
     p_tui.set_defaults(func=cmd_tui)
     
     args = parser.parse_args()
-    
+
+    if args.gui:
+        from .gui import launch_gui
+        launch_gui()
+        return
+
     if args.command is None:
         # Default to TUI
         cmd_tui(args)

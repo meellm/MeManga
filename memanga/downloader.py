@@ -239,17 +239,20 @@ def download_chapter(
     output_dir: Path,
     output_format: OutputFormat = "pdf",
     state: Optional[State] = None,
+    progress_callback=None,
+    naming_template: Optional[str] = None,
 ) -> Optional[Path]:
     """
     Download a chapter and convert to PDF or EPUB.
-    
+
     Args:
         manga: Manga entry from config
         chapter: Chapter to download (can be ChapterWithSource)
         output_dir: Directory to save the file
         output_format: "pdf" or "epub"
         state: State manager (for clearing pending backup after download)
-    
+        progress_callback: Optional callable(current, total) for progress updates
+
     Returns:
         Path to downloaded file, or None if failed
     """
@@ -292,6 +295,8 @@ def download_chapter(
             download_tasks.append((i, url, img_path))
 
         results: Dict[int, Path] = {}
+        total_pages = len(download_tasks)
+        completed_count = 0
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {
                 executor.submit(scraper.download_image, url, img_path): (idx, img_path)
@@ -306,6 +311,9 @@ def download_chapter(
                         print(f"  Warning: Failed to download page {idx+1}")
                 except Exception:
                     print(f"  Warning: Failed to download page {idx+1}")
+                completed_count += 1
+                if progress_callback:
+                    progress_callback(completed_count, total_pages)
 
         # Preserve page order
         image_paths = [results[i] for i in sorted(results)]
@@ -343,20 +351,28 @@ def download_chapter(
         # Zero-pad chapter numbers for proper sorting
         chapter_str = _format_chapter_number(chapter.number)
 
+        # Build filename from template
+        template = naming_template or "{title} - Chapter {chapter}"
+        base_name = _sanitize_filename(
+            template.replace("{title}", title)
+                    .replace("{chapter}", chapter_str)
+                    .replace("{source}", source)
+        )
+
         if output_format == "epub":
-            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.epub"
+            output_path = output_dir / f"{base_name}.epub"
             try:
                 _images_to_epub(image_paths, output_path, title, chapter.number, cover_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create EPUB: {e}")
         elif output_format == "cbz":
-            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.cbz"
+            output_path = output_dir / f"{base_name}.cbz"
             try:
                 _images_to_cbz(image_paths, output_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create CBZ: {e}")
         elif output_format == "zip":
-            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.zip"
+            output_path = output_dir / f"{base_name}.zip"
             try:
                 _images_to_cbz(image_paths, output_path)  # Reuse CBZ logic (same ZIP format)
             except Exception as e:
@@ -369,7 +385,7 @@ def download_chapter(
                 raise DownloaderError(f"Failed to save images: {e}")
             output_path = chapter_folder  # Return the directory path
         else:
-            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.pdf"
+            output_path = output_dir / f"{base_name}.pdf"
             try:
                 _images_to_pdf(image_paths, output_path)
             except Exception as e:
