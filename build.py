@@ -7,8 +7,7 @@ Usage:
     python build.py          # Build GUI executable
     python build.py --cli    # Also build CLI executable
 
-Requirements:
-    pip install pyinstaller
+Automatically installs all dependencies from requirements.txt before building.
 """
 
 import os
@@ -19,14 +18,68 @@ import sys
 from pathlib import Path
 
 
-def check_pyinstaller():
-    try:
-        import PyInstaller
-        print(f"PyInstaller {PyInstaller.__version__} found")
+def install_dependencies():
+    """Install all dependencies from requirements.txt + pyinstaller."""
+    print("=== Installing dependencies ===\n")
+
+    req_file = Path("requirements.txt")
+    if not req_file.exists():
+        print("WARNING: requirements.txt not found, skipping dependency install")
         return True
-    except ImportError:
-        print("PyInstaller not found. Install with: pip install pyinstaller")
+
+    # Install requirements.txt
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"],
+    )
+    if result.returncode != 0:
+        print("Failed to install requirements.txt")
         return False
+    print("Dependencies installed from requirements.txt")
+
+    # Ensure PyInstaller + certifi are available (needed for build)
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "pyinstaller", "certifi", "-q"],
+    )
+    if result.returncode != 0:
+        print("Failed to install PyInstaller")
+        return False
+    print("PyInstaller installed")
+
+    return True
+
+
+def verify_imports():
+    """Verify critical imports work before building."""
+    print("\n=== Verifying imports ===\n")
+    errors = []
+    modules = [
+        ("img2pdf", "img2pdf"),
+        ("PIL", "Pillow"),
+        ("ebooklib", "ebooklib"),
+        ("bs4", "beautifulsoup4"),
+        ("cloudscraper", "cloudscraper"),
+        ("pikepdf", "pikepdf"),
+        ("yaml", "pyyaml"),
+        ("customtkinter", "customtkinter"),
+        ("certifi", "certifi"),
+        ("requests", "requests"),
+        ("rich", "rich"),
+    ]
+    for module_name, pip_name in modules:
+        try:
+            __import__(module_name)
+            print(f"  {module_name}: OK")
+        except ImportError:
+            print(f"  {module_name}: MISSING (pip install {pip_name})")
+            errors.append(pip_name)
+
+    if errors:
+        print(f"\nMissing modules: {', '.join(errors)}")
+        print("Run: pip install " + " ".join(errors))
+        return False
+
+    print("\nAll imports verified")
+    return True
 
 
 def build_gui():
@@ -110,9 +163,15 @@ def create_archive():
 def main():
     os.chdir(Path(__file__).parent)
 
-    if not check_pyinstaller():
+    # Step 1: Install all dependencies
+    if not install_dependencies():
         sys.exit(1)
 
+    # Step 2: Verify imports before wasting time on a build
+    if not verify_imports():
+        sys.exit(1)
+
+    # Step 3: Build
     build_cli_flag = "--cli" in sys.argv
 
     if not build_gui():
@@ -125,8 +184,6 @@ def main():
 
     print("\n=== Done ===")
     print("To run: dist/memanga-gui/memanga-gui" + (".exe" if platform.system() == "Windows" else ""))
-    print("\nNote: Playwright browsers will be downloaded on first use.")
-    print("Users need internet access for the first launch.")
 
 
 if __name__ == "__main__":
