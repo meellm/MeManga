@@ -526,7 +526,7 @@ class SettingsPage(BasePage):
                 "version": 1,
                 "exported_at": datetime.now().isoformat(),
                 "manga": self.app.config.get("manga", []),
-                "state": self.app.state._data.get("manga", {}),
+                "state": self.app.app_state._data.get("manga", {}),
             }
             with open(path, "w") as f:
                 json.dump(data, f, indent=2, default=str)
@@ -553,8 +553,8 @@ class SettingsPage(BasePage):
                 self.app.config.save()
                 # Replace state
                 state_data = data.get("state", {})
-                self.app.state._data["manga"] = state_data
-                self.app.state.save()
+                self.app.app_state._data["manga"] = state_data
+                self.app.app_state.save()
                 Toast(self, f"Replaced with {len(manga_list)} manga", kind="success")
             else:
                 existing = self.app.config.get("manga", [])
@@ -570,16 +570,16 @@ class SettingsPage(BasePage):
                 # Merge state
                 state_data = data.get("state", {})
                 for title, sdata in state_data.items():
-                    existing_state = self.app.state.get_manga_state(title)
+                    existing_state = self.app.app_state.get_manga_state(title)
                     if not existing_state:
-                        self.app.state._data.setdefault("manga", {})[title] = sdata
+                        self.app.app_state._data.setdefault("manga", {})[title] = sdata
                     else:
                         # Merge downloaded chapters
                         existing_dl = set(existing_state.get("downloaded", []))
                         new_dl = set(sdata.get("downloaded", []))
                         merged = sorted(existing_dl | new_dl, key=lambda x: float(x) if x.replace(".", "").isdigit() else 0)
-                        self.app.state._data["manga"][title]["downloaded"] = merged
-                self.app.state.save()
+                        self.app.app_state._data["manga"][title]["downloaded"] = merged
+                self.app.app_state.save()
 
                 skipped = len(manga_list) - added
                 Toast(self, f"Imported: {added} added, {skipped} skipped", kind="success")

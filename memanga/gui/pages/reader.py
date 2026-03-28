@@ -118,7 +118,7 @@ class ReaderPage(BasePage):
             # Save reading progress
             title = self._manga.get("title", "")
             if title:
-                self.app.state.set_reading_progress(title, str(self._chapter))
+                self.app.app_state.set_reading_progress(title, str(self._chapter))
 
         # Bind keyboard shortcuts (store binding ID for clean removal)
         self._key_bind_id = self.app.bind("<KeyPress>", self._on_key, add="+")
@@ -270,7 +270,7 @@ class ReaderPage(BasePage):
         ).pack(side="left", padx=1)
 
         # Chapter navigation
-        downloaded = self.app.state.get_downloaded_chapters(title)
+        downloaded = self.app.app_state.get_downloaded_chapters(title)
         try:
             idx = downloaded.index(str(self._chapter))
         except ValueError:
@@ -383,14 +383,14 @@ class ReaderPage(BasePage):
         if self._manga:
             title = self._manga.get("title", "")
             if title:
-                self.app.state.set_reading_progress(title, str(chapter))
+                self.app.app_state.set_reading_progress(title, str(chapter))
         self._load_chapter()
 
     def _go_next_chapter(self):
         if not self._manga:
             return
         title = self._manga.get("title", "")
-        downloaded = self.app.state.get_downloaded_chapters(title)
+        downloaded = self.app.app_state.get_downloaded_chapters(title)
         try:
             idx = downloaded.index(str(self._chapter))
             if idx < len(downloaded) - 1:
@@ -402,7 +402,7 @@ class ReaderPage(BasePage):
         if not self._manga:
             return
         title = self._manga.get("title", "")
-        downloaded = self.app.state.get_downloaded_chapters(title)
+        downloaded = self.app.app_state.get_downloaded_chapters(title)
         try:
             idx = downloaded.index(str(self._chapter))
             if idx > 0:

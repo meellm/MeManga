@@ -45,7 +45,7 @@ class DashboardPage(BasePage):
         self._content.pack(fill="both", expand=True)
 
         palette = get_palette(ctk.get_appearance_mode().lower())
-        stats = self.app.state.get_stats()
+        stats = self.app.app_state.get_stats()
 
         # Header
         ctk.CTkLabel(
@@ -71,7 +71,7 @@ class DashboardPage(BasePage):
         self._stat_card(cards_frame, "Last Check", check_display, "#f59e0b")
 
         # Continue Reading
-        continue_data = self.app.state.get_continue_reading()
+        continue_data = self.app.app_state.get_continue_reading()
         if continue_data:
             ctk.CTkLabel(
                 self._content, text="Continue Reading",
@@ -108,7 +108,7 @@ class DashboardPage(BasePage):
             ).pack(anchor="w", pady=(PAD_SM, 0))
 
         # Recent Activity
-        notifications = self.app.state.get_notifications(10)
+        notifications = self.app.app_state.get_notifications(10)
         ctk.CTkLabel(
             self._content, text="Recent Activity",
             font=font(FONT_SIZE_LG, "bold"),
@@ -155,7 +155,7 @@ class DashboardPage(BasePage):
             ).pack(anchor="w", padx=PAD_XL, pady=PAD_MD)
 
         # Check History (mini chart)
-        history = self.app.state.get_check_history(14)
+        history = self.app.app_state.get_check_history(14)
         if history:
             ctk.CTkLabel(
                 self._content, text="Check History (last 14)",

@@ -115,7 +115,7 @@ class SourcesPage(BasePage):
             ).pack(anchor="w")
             return
 
-        all_health = self.app.state.get_all_source_health()
+        all_health = self.app.app_state.get_all_source_health()
 
         for domain, titles in sorted(source_manga.items()):
             row = ctk.CTkFrame(self._user_sources_frame, fg_color=palette["bg_card"], corner_radius=6)

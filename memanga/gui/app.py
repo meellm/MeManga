@@ -25,7 +25,7 @@ class MeMangaApp(ctk.CTk):
 
         # Shared state
         self.config = Config()
-        self.state = State()
+        self.app_state = State()
         self.events = EventBus()
         self.worker = BackgroundWorker(self.events)
         self.cover_cache = CoverCache(self.config.config_dir, self.events)
@@ -126,7 +126,7 @@ class MeMangaApp(ctk.CTk):
 
     def reload_data(self):
         self.config = Config()
-        self.state = State()
+        self.app_state = State()
 
     # ---- Event Handlers (notifications + state updates) ----
 
@@ -139,7 +139,7 @@ class MeMangaApp(ctk.CTk):
         path = data.get("path", "")
 
         # Log notification
-        self.state.add_notification("download", f"Downloaded {title} Ch. {chapter}")
+        self.app_state.add_notification("download", f"Downloaded {title} Ch. {chapter}")
         self.events.publish("notification_added", {})
 
         # Log download history
@@ -150,18 +150,18 @@ class MeMangaApp(ctk.CTk):
                 size_mb = Path(path).stat().st_size / (1024 * 1024)
             except Exception:
                 pass
-        self.state.add_download_history(
+        self.app_state.add_download_history(
             title=title, chapter=str(chapter),
             fmt=self.config.output_format, path=path, size_mb=size_mb,
         )
 
         # Clear "new chapters" badge for this manga
-        self.state.clear_new_chapters(title)
+        self.app_state.clear_new_chapters(title)
 
     def _on_download_error(self, data):
         title = data.get("title", "")
         error = data.get("error", "Unknown")
-        self.state.add_notification("error", f"Failed: {title} - {error[:50]}")
+        self.app_state.add_notification("error", f"Failed: {title} - {error[:50]}")
         self.events.publish("notification_added", {})
 
     def _on_check_complete(self, data):
@@ -173,20 +173,20 @@ class MeMangaApp(ctk.CTk):
             title = r["manga"].get("title", "")
             count = len(r["chapters"])
             if count > 0:
-                self.state.set_new_chapters(title, count)
+                self.app_state.set_new_chapters(title, count)
 
         # Log notification
         if total_new > 0:
-            self.state.add_notification("check", f"Found {total_new} new chapter(s)")
+            self.app_state.add_notification("check", f"Found {total_new} new chapter(s)")
         else:
-            self.state.add_notification("check", "No new chapters found")
+            self.app_state.add_notification("check", "No new chapters found")
         self.events.publish("notification_added", {})
 
         # Update last check
-        self.state.update_last_check(new_chapters=total_new)
+        self.app_state.update_last_check(new_chapters=total_new)
 
     def _on_kindle_sent(self, data):
-        self.state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")
+        self.app_state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")
         self.events.publish("notification_added", {})
 
     # ---- Auto-Check ----
@@ -194,7 +194,7 @@ class MeMangaApp(ctk.CTk):
     def _auto_check(self):
         """Auto-check for updates on app open if enough time has passed."""
         interval = self.config.get("gui.auto_check_interval", 3600)
-        last_check = self.state.get("last_check")
+        last_check = self.app_state.get("last_check")
 
         should_check = True
         if last_check:
@@ -209,14 +209,14 @@ class MeMangaApp(ctk.CTk):
         if should_check:
             manga_list = self.config.get("manga", [])
             if manga_list:
-                self.worker.check_updates(manga_list, self.state, self.config)
+                self.worker.check_updates(manga_list, self.app_state, self.config)
 
     def _periodic_flush(self):
         """Flush dirty state to disk every 5 seconds."""
-        self.state.flush()
+        self.app_state.flush()
         self.after(5000, self._periodic_flush)
 
     def destroy(self):
-        self.state.flush()  # Final flush before exit
+        self.app_state.flush()  # Final flush before exit
         self.worker.shutdown()
         super().destroy()

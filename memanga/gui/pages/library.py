@@ -174,7 +174,7 @@ class LibraryPage(BasePage):
             results.sort(key=lambda m: m.get("title", "").lower())
         elif sort_key in ("last_updated", "recently_added", "chapter_count"):
             state_cache = {
-                m.get("title", ""): self.app.state.get_manga_state(m.get("title", ""))
+                m.get("title", ""): self.app.app_state.get_manga_state(m.get("title", ""))
                 for m in results
             }
             if sort_key == "last_updated":
@@ -225,7 +225,7 @@ class LibraryPage(BasePage):
             cover_url = manga.get("cover_url")
             cover_img = self.app.cover_cache.get_cover(cover_url, size=(180, 230))
             title = manga.get("title", "")
-            new_count = self.app.state.get_new_chapters(title)
+            new_count = self.app.app_state.get_new_chapters(title)
 
             card = MangaCard(
                 self._grid_frame, manga=manga, cover_image=cover_img,
@@ -243,10 +243,10 @@ class LibraryPage(BasePage):
     def _build_list(self, manga_list):
         for manga in manga_list:
             title = manga.get("title", "")
-            state_data = self.app.state.get_manga_state(title)
+            state_data = self.app.app_state.get_manga_state(title)
             cover_url = manga.get("cover_url")
             thumb = self.app.cover_cache.get_cover(cover_url, size=(40, 55)) if cover_url else None
-            new_count = self.app.state.get_new_chapters(title)
+            new_count = self.app.app_state.get_new_chapters(title)
 
             row = MangaRow(
                 self._grid_frame, manga=manga, state_data=state_data,
@@ -334,13 +334,13 @@ class LibraryPage(BasePage):
         ContextMenu(self, x, y, items)
 
     def _ctx_check(self, manga):
-        self.app.worker.check_updates([manga], self.app.state, self.app.config)
+        self.app.worker.check_updates([manga], self.app.app_state, self.app.config)
         self.app.show_page("downloads")
 
     def _ctx_download_all(self, manga):
         title = manga.get("title", "")
-        self.app.state.reset_manga_progress(title, from_chapter=0)
-        self.app.worker.check_updates([manga], self.app.state, self.app.config)
+        self.app.app_state.reset_manga_progress(title, from_chapter=0)
+        self.app.worker.check_updates([manga], self.app.app_state, self.app.config)
         self.app.show_page("downloads")
 
     def _ctx_set_status(self, manga, status):
@@ -364,7 +364,7 @@ class LibraryPage(BasePage):
         manga_list = [m for m in self.app.config.get("manga", []) if m.get("title") != title]
         self.app.config.set("manga", manga_list)
         self.app.config.save()
-        self.app.state.remove_manga(title)
+        self.app.app_state.remove_manga(title)
         self._refresh()
 
     # ---- Bulk Operations ----
@@ -393,7 +393,7 @@ class LibraryPage(BasePage):
         manga_list = [m for m in self.app.config.get("manga", [])
                       if m.get("title") in self._selected_titles]
         if manga_list:
-            self.app.worker.check_updates(manga_list, self.app.state, self.app.config)
+            self.app.worker.check_updates(manga_list, self.app.app_state, self.app.config)
             self.app.show_page("downloads")
 
     def _bulk_set_status(self, status):
@@ -415,7 +415,7 @@ class LibraryPage(BasePage):
 
     def _do_bulk_remove(self):
         for title in self._selected_titles:
-            self.app.state.remove_manga(title)
+            self.app.app_state.remove_manga(title)
         manga_list = [m for m in self.app.config.get("manga", [])
                       if m.get("title") not in self._selected_titles]
         self.app.config.set("manga", manga_list)
@@ -442,7 +442,7 @@ class LibraryPage(BasePage):
     def _check_all(self):
         manga_list = self.app.config.get("manga", [])
         if manga_list:
-            self.app.worker.check_updates(manga_list, self.app.state, self.app.config)
+            self.app.worker.check_updates(manga_list, self.app.app_state, self.app.config)
             Toast(self, "Checking for updates...", kind="info")
         else:
             Toast(self, "No manga to check", kind="info")
