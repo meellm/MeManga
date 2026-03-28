@@ -369,11 +369,12 @@ class SettingsPage(BasePage):
                 server.starttls()
                 server.login(sender, pw)
                 server.quit()
-                self._test_label.configure(text="Connection successful!", text_color=palette["success"])
+                self.after(0, lambda: self._test_label.configure(text="Connection successful!", text_color=palette["success"]))
             except smtplib.SMTPAuthenticationError:
-                self._test_label.configure(text="Authentication failed - check password", text_color=palette["error"])
+                self.after(0, lambda: self._test_label.configure(text="Authentication failed - check password", text_color=palette["error"]))
             except Exception as e:
-                self._test_label.configure(text=f"Failed: {str(e)[:40]}", text_color=palette["error"])
+                msg = str(e)[:40]
+                self.after(0, lambda: self._test_label.configure(text=f"Failed: {msg}", text_color=palette["error"]))
 
         import threading
         threading.Thread(target=_test, daemon=True).start()

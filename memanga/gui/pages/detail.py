@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from .base import BasePage
 from ..theme import (
-    PAD_SM, PAD_MD, PAD_LG, PAD_XL,
+    PAD_XS, PAD_SM, PAD_MD, PAD_LG, PAD_XL,
     FONT_SIZE_SM, FONT_SIZE_MD, FONT_SIZE_LG, FONT_SIZE_XL, FONT_SIZE_XS,
     STATUS_COLORS, font, get_palette,
 )
@@ -21,7 +21,9 @@ class DetailPage(BasePage):
     def __init__(self, parent, app):
         super().__init__(parent, app)
         self._manga = None
-        self._content_frame = None
+        # Build scrollable frame once — _rebuild only clears its children
+        self._content_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._content_frame.pack(fill="both", expand=True)
         self._editing = False
 
     def on_show(self, **kwargs):
@@ -48,11 +50,9 @@ class DetailPage(BasePage):
         return primary, primary_url, backup, backup_url
 
     def _rebuild(self):
-        if self._content_frame:
-            self._content_frame.destroy()
-
-        self._content_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self._content_frame.pack(fill="both", expand=True)
+        # Clear children only — keep scrollable frame to avoid flash
+        for child in self._content_frame.winfo_children():
+            child.destroy()
 
         palette = get_palette(ctk.get_appearance_mode().lower())
         manga = self._manga

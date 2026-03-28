@@ -155,6 +155,9 @@ class MeMangaApp(ctk.CTk):
             fmt=self.config.output_format, path=path, size_mb=size_mb,
         )
 
+        # Mark chapter as downloaded in state (prevents re-downloading)
+        self.app_state.add_downloaded_chapter(title, str(chapter))
+
         # Clear "new chapters" badge for this manga
         self.app_state.clear_new_chapters(title)
 

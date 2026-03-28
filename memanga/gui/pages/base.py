@@ -12,7 +12,7 @@ class BasePage(ctk.CTkFrame):
         super().__init__(parent, fg_color="transparent")
         self.app = app
 
-    def on_show(self):
+    def on_show(self, **kwargs):
         """Called when this page becomes visible. Override to refresh data."""
         pass
 

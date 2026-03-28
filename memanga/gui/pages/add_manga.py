@@ -161,6 +161,7 @@ class AddMangaPage(BasePage):
 
             entry = {
                 "title": title,
+                "status": "reading",
                 "fallback_delay_days": delay,
                 "sources": [
                     {"url": url, "source": domain},
@@ -170,6 +171,7 @@ class AddMangaPage(BasePage):
         else:
             entry = {
                 "title": title,
+                "status": "reading",
                 "source": domain,
                 "url": url,
             }
@@ -207,4 +209,7 @@ class AddMangaPage(BasePage):
         self._backup_var.set(False)
         self._backup_frame.pack_forget()
 
-        Toast(self, f"Added '{title}'", kind="success")
+        Toast(self, f"Added '{title}' — checking for chapters...", kind="success")
+
+        # Auto-check for chapters on the newly added manga
+        self.app.worker.check_updates([entry], self.app.app_state, self.app.config)

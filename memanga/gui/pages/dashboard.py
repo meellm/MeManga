@@ -18,7 +18,9 @@ class DashboardPage(BasePage):
 
     def __init__(self, parent, app):
         super().__init__(parent, app)
-        self._content = None
+        # Build the scrollable frame once — _rebuild only clears its children
+        self._content = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._content.pack(fill="both", expand=True)
         self.app.events.subscribe("storage_calculated", self._on_storage)
         self.app.events.subscribe("check_complete", lambda d: self._rebuild_if_visible())
         self.app.events.subscribe("download_complete", lambda d: self._rebuild_if_visible())
@@ -38,11 +40,9 @@ class DashboardPage(BasePage):
         self._rebuild_timer = self.after(500, self._rebuild)
 
     def _rebuild(self):
-        if self._content:
-            self._content.destroy()
-
-        self._content = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self._content.pack(fill="both", expand=True)
+        # Clear children only — keep the scrollable frame to avoid flash
+        for child in self._content.winfo_children():
+            child.destroy()
 
         palette = get_palette(ctk.get_appearance_mode().lower())
         stats = self.app.app_state.get_stats()

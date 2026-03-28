@@ -121,9 +121,10 @@ class LibraryPage(BasePage):
         self._scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self._scroll.pack(fill="both", expand=True, padx=PAD_XL, pady=(0, PAD_SM))
 
-        # Grid container
+        # Grid container — pack with fill="x" only so height comes from configure()
+        # (place()-managed children don't propagate height to pack)
         self._grid_frame = ctk.CTkFrame(self._scroll, fg_color="transparent")
-        self._grid_frame.pack(fill="both", expand=True)
+        self._grid_frame.pack(fill="x")
 
         # Bulk action bar (hidden by default)
         self._bulk_bar = ctk.CTkFrame(self, fg_color=palette["bg_card"], corner_radius=8, height=46)
@@ -238,7 +239,8 @@ class LibraryPage(BasePage):
             )
             self._cards.append((manga, card))
 
-        self._reflow_grid()
+        # Defer reflow so the scroll frame has a real width from layout
+        self.after(50, self._reflow_grid)
 
     def _build_list(self, manga_list):
         for manga in manga_list:

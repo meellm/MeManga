@@ -10,62 +10,24 @@ def _is_frozen():
 
 
 def _check_playwright_browsers():
-    """Check if Playwright Firefox browser binary exists (without launching it)."""
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["python", "-m", "playwright", "install", "--dry-run", "firefox"],
-            capture_output=True, text=True, timeout=10,
-        )
-        # If dry-run exits 0, browsers are already installed
-        return result.returncode == 0
-    except Exception:
-        pass
-    # Fallback: check the registry directly
-    try:
-        from playwright._impl._driver import compute_driver_executable
-        driver_exec = compute_driver_executable()
-        import subprocess
-        result = subprocess.run(
-            [str(driver_exec), "install", "--dry-run", "firefox"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return result.returncode == 0
-    except Exception:
-        pass
-    # Final fallback: try importing and checking browser path
-    try:
-        from pathlib import Path
-        import os
-        # Playwright stores browsers in a well-known location
-        if os.name == 'nt':
-            browsers_path = Path.home() / "AppData" / "Local" / "ms-playwright"
-        else:
-            browsers_path = Path.home() / ".cache" / "ms-playwright"
-        if browsers_path.exists():
-            firefox_dirs = [d for d in browsers_path.iterdir() if 'firefox' in d.name.lower()]
-            return len(firefox_dirs) > 0
-    except Exception:
-        pass
+    """Check if Playwright Firefox browser binary exists on disk."""
+    from pathlib import Path
+    import os
+    if os.name == 'nt':
+        browsers_path = Path.home() / "AppData" / "Local" / "ms-playwright"
+    else:
+        browsers_path = Path.home() / ".cache" / "ms-playwright"
+    if browsers_path.exists():
+        firefox_dirs = [d for d in browsers_path.iterdir()
+                        if d.is_dir() and 'firefox' in d.name.lower()]
+        return len(firefox_dirs) > 0
     return False
 
 
 def _install_playwright_browsers():
-    """Run playwright install firefox using the playwright CLI directly."""
+    """Run playwright install firefox. Returns True on success."""
     import subprocess
     import shutil
-    # Try using 'playwright' CLI from PATH first
-    playwright_bin = shutil.which("playwright")
-    if playwright_bin:
-        try:
-            result = subprocess.run(
-                [playwright_bin, "install", "firefox"],
-                capture_output=True, text=True, timeout=300,
-            )
-            return result.returncode == 0
-        except Exception:
-            pass
-    # Try using the bundled playwright driver
     try:
         from playwright._impl._driver import compute_driver_executable
         driver_exec = compute_driver_executable()
@@ -73,10 +35,21 @@ def _install_playwright_browsers():
             [str(driver_exec), "install", "firefox"],
             capture_output=True, text=True, timeout=300,
         )
-        return result.returncode == 0
+        if result.returncode == 0:
+            return True
     except Exception:
         pass
-    # Last resort: try 'python -m playwright' (won't work in frozen .exe)
+    playwright_bin = shutil.which("playwright")
+    if playwright_bin:
+        try:
+            result = subprocess.run(
+                [playwright_bin, "install", "firefox"],
+                capture_output=True, text=True, timeout=300,
+            )
+            if result.returncode == 0:
+                return True
+        except Exception:
+            pass
     if not _is_frozen():
         import sys
         try:
@@ -90,34 +63,64 @@ def _install_playwright_browsers():
     return False
 
 
-def launch_gui():
-    """Launch the MeManga GUI application."""
-    import customtkinter as ctk
+def _ensure_browsers(app):
+    """Ensure Playwright Firefox is installed. Blocks until installed or user quits."""
+    # Already installed — nothing to do
+    if _check_playwright_browsers():
+        return True
 
-    # Check for Playwright browsers before starting
-    if not _check_playwright_browsers():
-        # Show a simple dialog asking to install
-        root = ctk.CTk()
-        root.withdraw()
+    from tkinter import messagebox
+    import sys
 
-        from tkinter import messagebox
+    while True:
         answer = messagebox.askyesno(
-            "MeManga - First Run Setup",
-            "Manga scraping requires browser components (Firefox).\n\n"
-            "Download now? (~150 MB, requires internet)\n\n"
-            "You can also run later:\n"
+            "MeManga - Browser Required",
+            "MeManga needs Firefox browser components to scrape manga.\n\n"
+            "Download now? (~150 MB, requires internet)",
+        )
+
+        if not answer:
+            # User said No — can't run without browsers
+            quit_answer = messagebox.askyesno(
+                "MeManga",
+                "MeManga cannot work without browser components.\n\n"
+                "Quit the application?",
+            )
+            if quit_answer:
+                app.destroy()
+                sys.exit(0)
+            # User chose not to quit — loop back and ask again
+            continue
+
+        # User said Yes — try to install
+        # Show a "please wait" info (non-blocking isn't possible with messagebox,
+        # so just run the install and show result after)
+        installed = _install_playwright_browsers()
+
+        if installed:
+            messagebox.showinfo("Success", "Browser components installed successfully!")
+            return True
+
+        # Install failed — let user retry or quit
+        retry = messagebox.askretrycancel(
+            "Installation Failed",
+            "Browser installation failed.\n\n"
+            "Make sure you have an internet connection and try again.\n\n"
+            "You can also install manually:\n"
             "  playwright install firefox",
         )
-        root.destroy()
+        if not retry:
+            app.destroy()
+            sys.exit(0)
+        # retry=True → loop back
 
-        if answer:
-            print("Installing Playwright Firefox browser...")
-            if _install_playwright_browsers():
-                print("Browser installed successfully!")
-            else:
-                print("Browser installation failed. Some scrapers may not work.")
-                print("Run manually: playwright install firefox")
 
+def launch_gui():
+    """Launch the MeManga GUI application."""
     from .app import MeMangaApp
     app = MeMangaApp()
+
+    # Ensure browsers are installed — blocks until done or user quits
+    _ensure_browsers(app)
+
     app.mainloop()
