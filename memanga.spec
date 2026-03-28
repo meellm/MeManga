@@ -9,12 +9,14 @@ import os
 import sys
 from pathlib import Path
 
+import certifi
 import customtkinter
 
 block_cipher = None
 
 # Paths
 ctk_path = os.path.dirname(customtkinter.__file__)
+certifi_dir = os.path.dirname(certifi.where())
 project_root = os.path.abspath(".")
 
 # Collect all scraper modules as hidden imports
@@ -42,12 +44,15 @@ hidden_imports += [
     "playwright",
     "playwright.sync_api",
     "playwright_stealth",
+    "certifi",
 ]
 
 # Data files to include
 datas = [
     # CustomTkinter themes and assets
     (ctk_path, "customtkinter"),
+    # SSL CA certificates — required for HTTPS requests in frozen builds
+    (certifi_dir, "certifi"),
 ]
 
 # Collect template scrapers

@@ -163,20 +163,25 @@ def check_for_updates(
     backup_chapters: Dict[str, Tuple[Chapter, str, str]] = {}  # chapter_num -> (Chapter, source, url)
     
     # Check each source
+    source_errors = []
+    sources_checked = 0
     for i, src in enumerate(sources):
         source = src["source"]
         url = src["url"]
         is_primary = (i == 0)
-        
+
         try:
             scraper = get_scraper(source)
             all_chapters = scraper.get_chapters(url)
+            sources_checked += 1
         except ValueError as e:
             # Unsupported source - skip but warn
+            source_errors.append(f"{source}: {e}")
             print(f"  [Warning] Unsupported source '{source}': {e}")
             continue
         except Exception as e:
             # Failed to fetch - skip but warn
+            source_errors.append(f"{source}: {e}")
             print(f"  [Warning] Failed to fetch from {source}: {e}")
             continue
         
@@ -196,6 +201,12 @@ def check_for_updates(
                 if ch_num not in primary_chapters:
                     backup_chapters[ch_num] = (ch, source, url)
     
+    # If ALL sources failed, raise so the caller knows
+    if sources_checked == 0 and source_errors:
+        raise DownloaderError(
+            f"All sources failed for '{title}': " + "; ".join(source_errors)
+        )
+
     # Process primary chapters first (always download these)
     for ch_num, ch in primary_chapters.items():
         primary_src = sources[0]

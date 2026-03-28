@@ -389,13 +389,21 @@ class State:
     def reset_manga_progress(self, manga_title: str, from_chapter: float = 0):
         """Reset a manga's download progress to re-download from a specific chapter.
         If from_chapter is 0, clears everything for a full re-download.
+        If from_chapter is N, keeps chapters < N downloaded and re-downloads N onwards.
         """
         self._ensure_manga_entry(manga_title)
+        entry = self._data["manga"][manga_title]
         if from_chapter == 0:
-            self._data["manga"][manga_title]["last_chapter"] = None
-            self._data["manga"][manga_title]["downloaded"] = []
+            entry["last_chapter"] = None
+            entry["downloaded"] = []
         else:
-            self._data["manga"][manga_title]["last_chapter"] = str(from_chapter - 0.001)
+            # Keep only chapters before from_chapter, remove the rest
+            entry["downloaded"] = [
+                ch for ch in entry.get("downloaded", [])
+                if float(ch) < from_chapter
+            ]
+            entry["last_chapter"] = None
+        entry["last_updated"] = datetime.now().isoformat()
         self.save()
 
     # ========================================================================
