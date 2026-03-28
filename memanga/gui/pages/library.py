@@ -281,7 +281,6 @@ class LibraryPage(BasePage):
             card.place(
                 x=col * (CARD_WIDTH + card_spacing),
                 y=row * (CARD_HEIGHT + card_spacing),
-                width=CARD_WIDTH, height=CARD_HEIGHT,
             )
 
         total_rows = (len(self._cards) + cols - 1) // cols
