@@ -56,12 +56,17 @@ class BackgroundWorker:
     def check_updates(self, manga_list: list, state, config):
         """Check for new chapters across manga list."""
         def _task():
+            import traceback
             from ..downloader import check_for_updates
             results = []
+            print(f"[Check] Starting check for {len(manga_list)} manga")
             for i, manga in enumerate(manga_list):
-                if manga.get("status", "reading") != "reading":
+                status = manga.get("status", "reading")
+                if status != "reading":
+                    print(f"[Check] Skipping '{manga.get('title')}' — status={status}")
                     continue
                 title = manga.get("title", "")
+                print(f"[Check] Checking '{title}' ({i+1}/{len(manga_list)})")
                 self._events.publish("check_progress", {
                     "current": i + 1,
                     "total": len(manga_list),
@@ -71,21 +76,26 @@ class BackgroundWorker:
                 # Determine source domain for health tracking
                 sources = manga.get("sources", [])
                 domain = sources[0].get("source", "") if sources else manga.get("source", "")
+                print(f"[Check]   Source domain: {domain}")
 
                 try:
                     new_chapters = check_for_updates(manga, state)
+                    print(f"[Check]   Found {len(new_chapters)} new chapter(s)")
                     if new_chapters:
                         results.append({"manga": manga, "chapters": new_chapters})
                     # Mark source healthy
                     if domain:
                         state.update_source_health(domain, success=True)
                 except Exception as e:
+                    print(f"[Check]   ERROR: {e}")
+                    traceback.print_exc()
                     # Mark source unhealthy
                     if domain:
                         state.update_source_health(domain, success=False, error_msg=str(e))
                     self._events.publish("check_error", {
                         "title": title, "error": str(e),
                     })
+            print(f"[Check] Done. Total results: {len(results)} manga with new chapters")
             self._events.publish("check_complete", {"results": results})
 
         self._pool.submit(_task)
@@ -132,11 +142,14 @@ class BackgroundWorker:
 
     def _run_download(self, item):
         """Execute a single download task."""
+        import traceback
         from ..downloader import download_chapter
         task_id = item["task_id"]
         manga = item["manga"]
         chapter = item["chapter"]
 
+        print(f"[Download] Starting: {manga['title']} Ch.{chapter.number}")
+        print(f"[Download]   Output: {item['output_dir']} format={item['output_format']}")
         self._events.publish("download_started", {
             "task_id": task_id,
             "title": manga["title"],
@@ -192,6 +205,8 @@ class BackgroundWorker:
         except InterruptedError:
             self._events.publish("download_cancelled", {"task_id": task_id})
         except Exception as e:
+            print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}")
+            traceback.print_exc()
             self._events.publish("download_error", {
                 "task_id": task_id, "error": str(e),
                 "title": manga["title"], "chapter": chapter.number,
