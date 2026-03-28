@@ -11,12 +11,14 @@ from pathlib import Path
 
 import certifi
 import customtkinter
+import playwright_stealth
 
 block_cipher = None
 
 # Paths
 ctk_path = os.path.dirname(customtkinter.__file__)
 certifi_dir = os.path.dirname(certifi.where())
+stealth_path = os.path.dirname(playwright_stealth.__file__)
 project_root = os.path.abspath(".")
 
 # Collect all scraper modules as hidden imports
@@ -53,6 +55,8 @@ datas = [
     (ctk_path, "customtkinter"),
     # SSL CA certificates — required for HTTPS requests in frozen builds
     (certifi_dir, "certifi"),
+    # Playwright stealth JS files — required by scrapers that bypass bot detection
+    (stealth_path, "playwright_stealth"),
 ]
 
 # Collect template scrapers
@@ -75,7 +79,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         "matplotlib", "numpy", "scipy", "pandas", "tkinter.test",
-        "unittest", "test", "distutils",
+        "unittest", "test",
     ],
     cipher=block_cipher,
     noarchive=False,
