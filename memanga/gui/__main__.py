@@ -15,36 +15,33 @@ if getattr(sys, 'frozen', False):
     if os.path.exists(ca_bundle):
         os.environ['SSL_CERT_FILE'] = ca_bundle
         os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
-        print(f"[SSL] Using CA bundle: {ca_bundle}")
+        print(f"[SSL] Using CA bundle: {ca_bundle}", flush=True)
     else:
-        # Try the _internal subdirectory (PyInstaller onedir on newer versions)
         ca_bundle_alt = os.path.join(os.path.dirname(sys.executable), '_internal', 'certifi', 'cacert.pem')
         if os.path.exists(ca_bundle_alt):
             os.environ['SSL_CERT_FILE'] = ca_bundle_alt
             os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle_alt
-            print(f"[SSL] Using CA bundle (alt): {ca_bundle_alt}")
+            print(f"[SSL] Using CA bundle (alt): {ca_bundle_alt}", flush=True)
         else:
-            # Last fallback: try certifi package
             try:
                 import certifi
                 os.environ['SSL_CERT_FILE'] = certifi.where()
                 os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
-                print(f"[SSL] Using certifi.where(): {certifi.where()}")
+                print(f"[SSL] Using certifi.where(): {certifi.where()}", flush=True)
             except Exception as e:
-                print(f"[SSL] WARNING: No CA bundle found! HTTPS will fail.")
-                print(f"[SSL]   Tried: {ca_bundle}")
-                print(f"[SSL]   Tried: {ca_bundle_alt}")
-                print(f"[SSL]   certifi import error: {e}")
+                print(f"[SSL] WARNING: No CA bundle found! HTTPS will fail.", flush=True)
+                print(f"[SSL]   Tried: {ca_bundle}", flush=True)
+                print(f"[SSL]   Tried: {ca_bundle_alt}", flush=True)
+                print(f"[SSL]   certifi import error: {e}", flush=True)
 
-    # Quick test: verify SSL actually works
     try:
         import urllib.request
         urllib.request.urlopen("https://httpbin.org/get", timeout=5)
-        print("[SSL] HTTPS test passed")
+        print("[SSL] HTTPS test passed", flush=True)
     except Exception as e:
-        print(f"[SSL] HTTPS test FAILED: {e}")
+        print(f"[SSL] HTTPS test FAILED: {e}", flush=True)
 else:
-    print("[SSL] Not frozen — using system certificates")
+    print("[SSL] Not frozen — using system certificates", flush=True)
 
 from memanga.gui import launch_gui
 

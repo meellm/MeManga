@@ -55,18 +55,24 @@ class BackgroundWorker:
 
     def check_updates(self, manga_list: list, state, config):
         """Check for new chapters across manga list."""
+        import sys as _sys
+        print(f"[Check] check_updates called with {len(manga_list)} manga", flush=True)
+        for m in manga_list:
+            print(f"[Check]   - '{m.get('title')}' source={m.get('source', '')} status={m.get('status', 'reading')}", flush=True)
+
         def _task():
             import traceback
             from ..downloader import check_for_updates
             results = []
-            print(f"[Check] Starting check for {len(manga_list)} manga")
+            print(f"[Check] Background task started", flush=True)
+            _sys.stdout.flush()
             for i, manga in enumerate(manga_list):
                 status = manga.get("status", "reading")
                 if status != "reading":
-                    print(f"[Check] Skipping '{manga.get('title')}' — status={status}")
+                    print(f"[Check] Skipping '{manga.get('title')}' — status={status}", flush=True)
                     continue
                 title = manga.get("title", "")
-                print(f"[Check] Checking '{title}' ({i+1}/{len(manga_list)})")
+                print(f"[Check] Checking '{title}' ({i+1}/{len(manga_list)})", flush=True)
                 self._events.publish("check_progress", {
                     "current": i + 1,
                     "total": len(manga_list),
@@ -76,26 +82,27 @@ class BackgroundWorker:
                 # Determine source domain for health tracking
                 sources = manga.get("sources", [])
                 domain = sources[0].get("source", "") if sources else manga.get("source", "")
-                print(f"[Check]   Source domain: {domain}")
+                print(f"[Check]   Source domain: {domain}", flush=True)
 
                 try:
                     new_chapters = check_for_updates(manga, state)
-                    print(f"[Check]   Found {len(new_chapters)} new chapter(s)")
+                    print(f"[Check]   Found {len(new_chapters)} new chapter(s)", flush=True)
                     if new_chapters:
                         results.append({"manga": manga, "chapters": new_chapters})
                     # Mark source healthy
                     if domain:
                         state.update_source_health(domain, success=True)
                 except Exception as e:
-                    print(f"[Check]   ERROR: {e}")
+                    print(f"[Check]   ERROR: {e}", flush=True)
                     traceback.print_exc()
+                    _sys.stdout.flush()
                     # Mark source unhealthy
                     if domain:
                         state.update_source_health(domain, success=False, error_msg=str(e))
                     self._events.publish("check_error", {
                         "title": title, "error": str(e),
                     })
-            print(f"[Check] Done. Total results: {len(results)} manga with new chapters")
+            print(f"[Check] Done. Total results: {len(results)} manga with new chapters", flush=True)
             self._events.publish("check_complete", {"results": results})
 
         self._pool.submit(_task)
@@ -148,8 +155,8 @@ class BackgroundWorker:
         manga = item["manga"]
         chapter = item["chapter"]
 
-        print(f"[Download] Starting: {manga['title']} Ch.{chapter.number}")
-        print(f"[Download]   Output: {item['output_dir']} format={item['output_format']}")
+        print(f"[Download] Starting: {manga['title']} Ch.{chapter.number}", flush=True)
+        print(f"[Download]   Output: {item['output_dir']} format={item['output_format']}", flush=True)
         self._events.publish("download_started", {
             "task_id": task_id,
             "title": manga["title"],
@@ -205,7 +212,7 @@ class BackgroundWorker:
         except InterruptedError:
             self._events.publish("download_cancelled", {"task_id": task_id})
         except Exception as e:
-            print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}")
+            print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}", flush=True)
             traceback.print_exc()
             self._events.publish("download_error", {
                 "task_id": task_id, "error": str(e),
