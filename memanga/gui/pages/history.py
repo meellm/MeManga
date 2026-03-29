@@ -63,6 +63,7 @@ class HistoryPage(BasePage):
         self._render()
 
     def _render(self):
+        self._scroll.pack_forget()
         for w in self._widgets:
             w.destroy()
         self._widgets.clear()
@@ -83,6 +84,7 @@ class HistoryPage(BasePage):
             )
             lbl.pack(pady=PAD_XL)
             self._widgets.append(lbl)
+            self._scroll.pack(fill="both", expand=True, padx=PAD_XL, pady=(0, PAD_MD))
             return
 
         for h in history:
@@ -109,3 +111,5 @@ class HistoryPage(BasePage):
                          text_color=palette["success"]).pack(side="left", padx=2)
 
             self._widgets.append(row)
+
+        self._scroll.pack(fill="both", expand=True, padx=PAD_XL, pady=(0, PAD_MD))

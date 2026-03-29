@@ -38,11 +38,22 @@ class DownloadsPage(BasePage):
     def _build(self):
         palette = get_palette(ctk.get_appearance_mode().lower())
 
-        # Header
+        # Header row with Cancel All button
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.pack(fill="x", padx=PAD_XL, pady=(PAD_XL, PAD_LG))
+
         ctk.CTkLabel(
-            self, text="Downloads",
+            header, text="Downloads",
             font=font(FONT_SIZE_XL, "bold"),
-        ).pack(anchor="w", padx=PAD_XL, pady=(PAD_XL, PAD_LG))
+        ).pack(side="left")
+
+        self._cancel_all_btn = ctk.CTkButton(
+            header, text="Cancel All", width=100, height=32,
+            font=font(FONT_SIZE_SM), corner_radius=6,
+            fg_color=palette["error"], hover_color="#b91c1c",
+            command=self._cancel_all,
+        )
+        self._cancel_all_btn.pack(side="right")
 
         # Active downloads
         ctk.CTkLabel(
@@ -142,6 +153,16 @@ class DownloadsPage(BasePage):
 
     def _cancel_download(self, task_id):
         self.app.worker.cancel_download(task_id)
+
+    def _cancel_all(self):
+        """Cancel all active and queued downloads."""
+        # Cancel active downloads
+        for task_id in list(self._active_items.keys()):
+            self.app.worker.cancel_download(task_id)
+        # Clear the worker's download queue
+        with self.app.worker._lock:
+            self.app.worker._download_queue.clear()
+        Toast(self, "Cancelled all downloads", kind="warning")
 
     def _move_to_completed(self, task_id, data):
         if not self.winfo_exists():

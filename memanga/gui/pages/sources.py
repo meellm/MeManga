@@ -86,6 +86,7 @@ class SourcesPage(BasePage):
 
     def _render_user_sources(self):
         """Show sources used by tracked manga."""
+        self._user_sources_frame.pack_forget()
         for w in self._user_sources_frame.winfo_children():
             w.destroy()
 
@@ -113,6 +114,7 @@ class SourcesPage(BasePage):
                 text="No active sources. Add manga to see their sources here.",
                 font=font(FONT_SIZE_SM), text_color=palette["fg_muted"],
             ).pack(anchor="w")
+            self._user_sources_frame.pack(fill="x", pady=(0, PAD_XL))
             return
 
         all_health = self.app.app_state.get_all_source_health()
@@ -160,7 +162,10 @@ class SourcesPage(BasePage):
                 font=font(FONT_SIZE_XS), text_color=palette["fg_muted"], anchor="w",
             ).pack(fill="x")
 
+        self._user_sources_frame.pack(fill="x", pady=(0, PAD_XL))
+
     def _render_all_sources(self):
+        self._source_list_frame.pack_forget()
         for w in self._source_list_frame.winfo_children():
             w.destroy()
         self._widgets.clear()
@@ -182,6 +187,8 @@ class SourcesPage(BasePage):
             ).pack(side="left", fill="x", expand=True)
 
             self._widgets.append(row)
+
+        self._source_list_frame.pack(fill="x")
 
     def _on_filter(self, event=None):
         self._render_all_sources()

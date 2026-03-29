@@ -1,50 +1,49 @@
 """
 Theme constants for MeManga GUI.
-Calming green accent with dark/light mode support.
 """
 
 # Accent colors
-ACCENT = "#2fa572"
-ACCENT_HOVER = "#28916a"
-ACCENT_LIGHT = "#2d9b6e"
-ACCENT_LIGHT_HOVER = "#258c5f"
+ACCENT = "#669F2A"
+ACCENT_HOVER = "#578A22"
+ACCENT_LIGHT = "#5C8F26"
+ACCENT_LIGHT_HOVER = "#4D7A1F"
 
 # Dark mode palette
 DARK = {
-    "bg": "#1a1a2e",
-    "bg_secondary": "#16213e",
-    "bg_card": "#1f2940",
-    "bg_sidebar": "#111827",
-    "bg_input": "#1f2940",
-    "fg": "#e2e8f0",
-    "fg_secondary": "#94a3b8",
-    "fg_muted": "#64748b",
-    "border": "#2d3748",
+    "bg": "#0A0D12",
+    "bg_secondary": "#0F1319",
+    "bg_card": "#141920",
+    "bg_sidebar": "#080B0F",
+    "bg_input": "#141920",
+    "fg": "#F3F4F6",
+    "fg_secondary": "#B0B5BC",
+    "fg_muted": "#6B7280",
+    "border": "#1F2937",
     "accent": ACCENT,
     "accent_hover": ACCENT_HOVER,
-    "success": "#22c55e",
-    "warning": "#eab308",
-    "error": "#ef4444",
-    "scrollbar": "#334155",
+    "success": "#669F2A",
+    "warning": "#EAB308",
+    "error": "#EF4444",
+    "scrollbar": "#1F2937",
 }
 
 # Light mode palette
 LIGHT = {
-    "bg": "#f8fafc",
-    "bg_secondary": "#f1f5f9",
+    "bg": "#F3F4F6",
+    "bg_secondary": "#E5E7EB",
     "bg_card": "#ffffff",
-    "bg_sidebar": "#e2e8f0",
+    "bg_sidebar": "#D1D5DB",
     "bg_input": "#ffffff",
-    "fg": "#1e293b",
-    "fg_secondary": "#475569",
-    "fg_muted": "#94a3b8",
-    "border": "#cbd5e1",
+    "fg": "#0A0D12",
+    "fg_secondary": "#374151",
+    "fg_muted": "#6B7280",
+    "border": "#D1D5DB",
     "accent": ACCENT_LIGHT,
     "accent_hover": ACCENT_LIGHT_HOVER,
-    "success": "#16a34a",
-    "warning": "#ca8a04",
-    "error": "#dc2626",
-    "scrollbar": "#94a3b8",
+    "success": "#669F2A",
+    "warning": "#CA8A04",
+    "error": "#DC2626",
+    "scrollbar": "#9CA3AF",
 }
 
 # Typography
@@ -75,10 +74,10 @@ CARD_RADIUS = 8
 
 # Status colors
 STATUS_COLORS = {
-    "reading": "#22c55e",
-    "on-hold": "#eab308",
-    "dropped": "#ef4444",
-    "completed": "#3b82f6",
+    "reading": "#669F2A",
+    "on-hold": "#EAB308",
+    "dropped": "#EF4444",
+    "completed": "#3B82F6",
 }
 
 
