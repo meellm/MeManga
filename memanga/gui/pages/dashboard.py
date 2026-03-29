@@ -40,7 +40,8 @@ class DashboardPage(BasePage):
         self._rebuild_timer = self.after(500, self._rebuild)
 
     def _rebuild(self):
-        # Clear children only — keep the scrollable frame to avoid flash
+        # Hide during rebuild so widgets don't appear one-by-one
+        self._content.pack_forget()
         for child in self._content.winfo_children():
             child.destroy()
 
@@ -184,6 +185,9 @@ class DashboardPage(BasePage):
                 ctk.CTkFrame(col, fg_color=bar_color, height=bar_h, corner_radius=2).pack(
                     fill="x", side="bottom",
                 )
+
+        # Show everything at once
+        self._content.pack(fill="both", expand=True)
 
     def _stat_card(self, parent, label, value, color):
         palette = get_palette(ctk.get_appearance_mode().lower())

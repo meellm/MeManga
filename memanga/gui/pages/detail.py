@@ -50,7 +50,8 @@ class DetailPage(BasePage):
         return primary, primary_url, backup, backup_url
 
     def _rebuild(self):
-        # Clear children only — keep scrollable frame to avoid flash
+        # Hide during rebuild so widgets don't appear one-by-one
+        self._content_frame.pack_forget()
         for child in self._content_frame.winfo_children():
             child.destroy()
 
@@ -291,6 +292,9 @@ class DetailPage(BasePage):
                 text="No chapters downloaded yet. Use 'Check Updates' or 'Download From...' to start.",
                 font=font(FONT_SIZE_SM), text_color=palette["fg_muted"],
             ).pack(anchor="w", padx=PAD_XL, pady=PAD_SM)
+
+        # Show everything at once
+        self._content_frame.pack(fill="both", expand=True)
 
     # ---- Status ----
 
