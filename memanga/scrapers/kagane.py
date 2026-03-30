@@ -1,307 +1,389 @@
 """
-Kagane.org scraper - Custom REST API manga platform.
+Kagane.org scraper - Cloudflare-protected manga site.
 https://kagane.org
 
 API Architecture:
     API server: https://yuzuki.kagane.org/api/v2
-    Image/cache server: https://akari.kagane.org
+    Image server: https://akari.kagane.org/api/v2
     Web frontend: https://kagane.org
 
-Search and chapter metadata use the REST API directly (with cloudscraper
-for Cloudflare bypass). Chapter images require a DRM challenge, so we use
-Playwright (Chromium) to load the reader page and intercept authenticated
-image URLs from network requests.
+URL Patterns:
+    Series: https://kagane.org/series/{series_id}
+    Reader: https://kagane.org/series/{series_id}/reader/{book_id}
+    Images: https://akari.kagane.org/api/v2/books/file/{book_id}/{page_id}?token={JWT}
 
-Based on keiyoushi/extensions-source Tachiyomi extension
-and Yui007/kagane-downloader.
+Uses nodriver (undetected Chromium) to bypass Cloudflare.
+Images require browser-context downloads (JWT tokens are session-bound).
 """
 
-import re
-import time
+import asyncio
+import base64
+import json
 import logging
-import requests
+import os
+import re
+import subprocess
+import sys
 from typing import List, Optional
 from pathlib import Path
 
-from .base import BaseScraper, Chapter, Manga, _retry
-from .playwright_base import PlaywrightScraper
+from .base import BaseScraper, Chapter, Manga
 
 logger = logging.getLogger(__name__)
 
+# Lazy import - will be set after install
+uc = None
+NODRIVER_AVAILABLE = False
 
-class KaganeScraper(PlaywrightScraper):
-    """Scraper for kagane.org using REST API + Playwright for images."""
+
+def _ensure_nodriver():
+    """Install nodriver on-demand if not available."""
+    global uc, NODRIVER_AVAILABLE
+    
+    if NODRIVER_AVAILABLE:
+        return True
+    
+    try:
+        import nodriver as _uc
+        uc = _uc
+        NODRIVER_AVAILABLE = True
+        return True
+    except ImportError:
+        pass
+    
+    # Try to install
+    logger.info("[Kagane] Installing nodriver (first-time setup)...")
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", "nodriver>=0.38", "-q"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        import nodriver as _uc
+        uc = _uc
+        NODRIVER_AVAILABLE = True
+        logger.info("[Kagane] nodriver installed successfully!")
+        return True
+    except Exception as e:
+        logger.error(f"[Kagane] Failed to install nodriver: {e}")
+        logger.error("[Kagane] Please install manually: pip install nodriver")
+        return False
+
+
+class KaganeScraper(BaseScraper):
+    """Scraper for kagane.org using nodriver for Cloudflare bypass."""
 
     name = "kagane"
     base_url = "https://kagane.org"
-
-    API_BASE = "https://yuzuki.kagane.org"
-    IMAGE_BASE = "https://akari.kagane.org"
+    
+    API_BASE = "https://yuzuki.kagane.org/api/v2"
+    IMAGE_BASE = "https://akari.kagane.org/api/v2"
 
     def __init__(self):
         super().__init__()
-        self._rate_limit = 1.0
+        self._rate_limit = 2.0
+        self._browser = None
+        self._page = None
+        self._loop = None
+        # Store page URLs when loading reader (for browser-context downloads)
+        self._current_page_urls = []
 
-        # Use cloudscraper for API calls (Cloudflare-protected)
+    def _get_event_loop(self):
+        """Get or create event loop for this thread."""
         try:
-            import cloudscraper
-            self.session = cloudscraper.create_scraper(
-                browser={"browser": "chrome", "platform": "windows", "desktop": True}
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Loop is closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop
+
+    def _run_async(self, coro):
+        """Run async coroutine synchronously."""
+        loop = self._get_event_loop()
+        return loop.run_until_complete(coro)
+
+    async def _ensure_browser(self):
+        """Ensure browser is running and has bypassed Cloudflare."""
+        if self._browser is None:
+            logger.info("[Kagane] Starting nodriver browser...")
+            
+            # Set display for xvfb
+            if 'DISPLAY' not in os.environ:
+                os.environ['DISPLAY'] = ':99'
+            
+            self._browser = await uc.start(
+                browser_executable_path='/usr/bin/chromium',
+                headless=False,
+                browser_args=['--window-size=1920,1080']
             )
-        except ImportError:
-            pass
+            
+            logger.info("[Kagane] Bypassing Cloudflare...")
+            self._page = await self._browser.get(self.base_url)
+            
+            # Wait for CF bypass (up to 60 seconds)
+            for i in range(30):
+                await asyncio.sleep(2)
+                try:
+                    title = await self._page.evaluate('document.title')
+                    if title and 'Kagane' in str(title):
+                        logger.info("[Kagane] Cloudflare bypassed!")
+                        break
+                except:
+                    pass
+            
+            await asyncio.sleep(3)
+        
+        return self._page
 
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Origin": "https://kagane.org",
-            "Referer": "https://kagane.org/",
-            "Accept": "application/json",
-        })
-
-    # ── Helpers ──
-
-    def _post_json(self, url: str, json_body: dict = None,
-                   extra_headers: dict = None, **kwargs) -> dict:
-        """Rate-limited POST returning JSON, with retry."""
-        def _do_post():
-            with self._rate_lock:
-                elapsed = time.time() - self._last_request
-                if elapsed < self._rate_limit:
-                    time.sleep(self._rate_limit - elapsed)
-                self._last_request = time.time()
-
-            headers = dict(extra_headers) if extra_headers else {}
-            resp = self.session.post(
-                url, json=json_body, headers=headers, timeout=30, **kwargs
-            )
-            resp.raise_for_status()
-            return resp.json()
-
-        return _retry(
-            _do_post,
-            max_attempts=3,
-            base_delay=1.0,
-            exceptions=(requests.RequestException,),
-        )
-
-    @staticmethod
-    def _extract_series_id(url: str) -> Optional[str]:
-        """Extract series ID/slug from kagane.org URL."""
-        match = re.search(r'/series/([^/?#]+)', url)
-        return match.group(1) if match else None
-
-    @staticmethod
-    def _extract_chapter_id(url: str) -> Optional[str]:
-        """Extract chapter ID from kagane.org URL."""
-        match = re.search(r'/read/([^/?#]+)', url)
-        return match.group(1) if match else None
-
-    # ── Public API ──
+    async def _api_fetch(self, endpoint: str, method: str = 'GET', 
+                         body: dict = None) -> Optional[dict]:
+        """Make an API request through the browser context."""
+        page = await self._ensure_browser()
+        
+        url = f"{self.API_BASE}{endpoint}"
+        body_json = json.dumps(body) if body else '{}'
+        
+        js_code = f'''
+            window._kaganeResult = null;
+            (async function() {{
+                try {{
+                    const options = {{ method: '{method}' }};
+                    if ('{method}' !== 'GET') {{
+                        options.headers = {{'Content-Type': 'application/json'}};
+                        options.body = '{body_json}';
+                    }}
+                    const res = await fetch('{url}', options);
+                    if (!res.ok) {{
+                        window._kaganeResult = {{ error: res.status }};
+                        return;
+                    }}
+                    const data = await res.json();
+                    window._kaganeResult = {{ success: true, data: data }};
+                }} catch (e) {{
+                    window._kaganeResult = {{ error: e.toString() }};
+                }}
+            }})();
+        '''
+        
+        await page.evaluate(js_code)
+        await asyncio.sleep(5)
+        
+        result_str = await page.evaluate('JSON.stringify(window._kaganeResult)')
+        
+        if result_str and result_str != 'null':
+            try:
+                result = json.loads(result_str)
+                if result.get('success'):
+                    return result.get('data')
+                else:
+                    logger.warning(f"[Kagane] API error: {result.get('error')}")
+            except json.JSONDecodeError as e:
+                logger.error(f"[Kagane] JSON decode error: {e}")
+        
+        return None
 
     def search(self, query: str) -> List[Manga]:
         """Search for manga on kagane.org."""
-        url = f"{self.API_BASE}/api/v2/search/series"
-        data = self._post_json(
-            url,
-            json_body={"title": query},
-            params={"page": 1, "size": 35, "sort": "relevance"},
-        )
+        if not _ensure_nodriver():
+            return []
+        
+        async def _search():
+            data = await self._api_fetch(
+                '/search/series?page=0&size=20&sort=relevance',
+                method='POST',
+                body={'title': query}
+            )
+            
+            if not data or 'content' not in data:
+                return []
+            
+            results = []
+            for item in data['content']:
+                series_id = item.get('series_id', '')
+                title = item.get('title', '')
+                
+                if not title or not series_id:
+                    continue
+                
+                cover_url = None
+                cover_id = item.get('cover_image_id')
+                if cover_id:
+                    cover_url = f"{self.API_BASE}/image/{cover_id}"
+                
+                results.append(Manga(
+                    title=title,
+                    url=f"{self.base_url}/series/{series_id}",
+                    cover_url=cover_url,
+                ))
+            
+            return results
+        
+        try:
+            return self._run_async(_search())
+        except Exception as e:
+            logger.error(f"[Kagane] Search error: {e}")
+            return []
 
-        results = []
-        for item in data.get("content", []):
-            series_id = item.get("series_id", "")
-            title = item.get("title", "")
-            if not title or not series_id:
-                continue
-
-            cover_url = None
-            cover_id = item.get("cover_image_id")
-            if cover_id:
-                cover_url = f"{self.API_BASE}/api/v2/image/{cover_id}"
-
-            results.append(Manga(
-                title=title,
-                url=f"{self.base_url}/series/{series_id}",
-                cover_url=cover_url,
-            ))
-
-        return results[:20]
+    @staticmethod
+    def _extract_series_id(url: str) -> Optional[str]:
+        """Extract series ID from kagane.org URL."""
+        match = re.search(r'/series/([0-9a-f-]{36})', url)
+        return match.group(1) if match else None
 
     def get_chapters(self, manga_url: str) -> List[Chapter]:
         """Get all chapters for a manga."""
+        if not _ensure_nodriver():
+            return []
+        
         series_id = self._extract_series_id(manga_url)
         if not series_id:
-            raise ValueError(f"Could not extract series ID from: {manga_url}")
-
-        url = f"{self.API_BASE}/api/v2/series/{series_id}"
-        data = self._get_json(url)
-
-        chapters = []
-        books = data.get("series_books", [])
-
-        for book in books:
-            book_id = book.get("book_id", "")
-            if not book_id:
-                continue
-
-            chapter_no = book.get("chapter_no") or "0"
-            title = book.get("title", "")
-            date = book.get("created_at")
-
-            chapter_url = f"{self.base_url}/read/{book_id}"
-            chapters.append(Chapter(
-                number=str(chapter_no),
-                title=title or None,
-                url=chapter_url,
-                date=date,
-            ))
-
-        return sorted(chapters)
-
-    def get_pages(self, chapter_url: str) -> List[str]:
-        """Get page image URLs by loading the reader in Playwright.
-
-        The kagane.org reader requires a DRM challenge to obtain image
-        tokens. Instead of generating the challenge programmatically,
-        we load the chapter in Chromium (which handles DRM natively)
-        and intercept the authenticated image URLs from network requests.
-        """
-        chapter_id = self._extract_chapter_id(chapter_url)
-        if not chapter_id:
-            raise ValueError(f"Could not extract chapter ID from: {chapter_url}")
-
-        reader_url = f"{self.base_url}/read/{chapter_id}"
-
-        # Use Playwright to capture image URLs from network requests
-        image_urls = self._capture_image_urls(reader_url)
-
-        if not image_urls:
-            logger.warning(f"No images found for chapter {chapter_id}")
-
-        return image_urls
-
-    def _capture_image_urls_in_thread(self, url: str) -> List[str]:
-        """Load reader page and capture image network requests.
-
-        Tries browsers in order: system Chrome (best DRM support),
-        then Playwright Firefox (installed by default in MeManga).
-        """
-        from playwright.sync_api import sync_playwright
-
-        captured_urls = []
-
-        pw = sync_playwright().start()
+            return []
+        
+        async def _get_chapters():
+            data = await self._api_fetch(f'/series/{series_id}')
+            
+            if not data:
+                return []
+            
+            chapters = []
+            books = data.get('series_books', [])
+            
+            for book in books:
+                book_id = book.get('book_id', '')
+                if not book_id:
+                    continue
+                
+                chapter_no = book.get('chapter_no') or book.get('sort_no') or '0'
+                title = book.get('title', '')
+                date = book.get('created_at')
+                
+                chapter_url = f"{self.base_url}/series/{series_id}/reader/{book_id}"
+                chapters.append(Chapter(
+                    number=str(chapter_no),
+                    title=title or None,
+                    url=chapter_url,
+                    date=date,
+                ))
+            
+            return sorted(chapters)
+        
         try:
-            browser = self._launch_browser(pw)
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-            )
-            page = context.new_page()
-
-            # Intercept responses matching the image endpoint
-            def handle_response(response):
-                req_url = response.url
-                if "/api/v2/books/file/" in req_url:
-                    captured_urls.append(req_url)
-
-            page.on("response", handle_response)
-
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-
-            # Wait for reader to initialize and images to start loading
-            page.wait_for_timeout(8000)
-
-            # Scroll through the reader to trigger lazy-loaded images
-            prev_count = 0
-            for _ in range(60):
-                page.evaluate("window.scrollBy(0, window.innerHeight)")
-                page.wait_for_timeout(800)
-                if len(captured_urls) > prev_count:
-                    prev_count = len(captured_urls)
-                elif prev_count > 0:
-                    # No new images after scrolling, wait a bit more
-                    page.wait_for_timeout(3000)
-                    if len(captured_urls) == prev_count:
-                        break
-
-            page.close()
-            context.close()
-            browser.close()
-        finally:
-            pw.stop()
-
-        # Deduplicate while preserving order
-        seen = set()
-        unique = []
-        for u in captured_urls:
-            base = u.split("?")[0]
-            if base not in seen:
-                seen.add(base)
-                unique.append(u)
-
-        return unique
+            return self._run_async(_get_chapters())
+        except Exception as e:
+            logger.error(f"[Kagane] Get chapters error: {e}")
+            return []
 
     @staticmethod
-    def _launch_browser(pw):
-        """Launch the best available browser for DRM support.
+    def _extract_ids_from_reader_url(url: str) -> tuple:
+        """Extract series_id and book_id from reader URL."""
+        match = re.search(r'/series/([0-9a-f-]{36})/reader/([0-9a-f-]{36})', url)
+        if match:
+            return match.group(1), match.group(2)
+        return None, None
 
-        Tries system Chrome first (has Widevine CDM), then
-        Playwright's bundled Firefox as fallback.
-        """
-        # System Chrome has Widevine DRM support
-        for channel in ("chrome", "msedge"):
-            try:
-                return pw.chromium.launch(headless=True, channel=channel)
-            except Exception:
-                continue
-
-        # Bundled Chromium (no DRM but may work for non-DRM chapters)
+    def get_pages(self, chapter_url: str) -> List[str]:
+        """Get page image URLs for a chapter by loading the reader."""
+        if not _ensure_nodriver():
+            return []
+        
+        series_id, book_id = self._extract_ids_from_reader_url(chapter_url)
+        if not book_id:
+            logger.error(f"[Kagane] Could not extract IDs from URL: {chapter_url}")
+            return []
+        
+        async def _get_pages():
+            page = await self._ensure_browser()
+            
+            logger.info(f"[Kagane] Loading reader: {chapter_url}")
+            await page.get(chapter_url)
+            await asyncio.sleep(12)
+            
+            # Get image URLs from performance entries
+            img_urls = await page.evaluate('''
+                JSON.stringify(
+                    performance.getEntriesByType('resource')
+                        .filter(e => e.name.includes('akari.kagane.org') && e.name.includes('/file/'))
+                        .map(e => e.name)
+                )
+            ''')
+            
+            if img_urls:
+                urls = json.loads(img_urls)
+                # Deduplicate while preserving order
+                unique_urls = list(dict.fromkeys(urls))
+                logger.info(f"[Kagane] Found {len(unique_urls)} page images")
+                
+                # Store for browser-context downloads
+                self._current_page_urls = unique_urls
+                return unique_urls
+            
+            return []
+        
         try:
-            return pw.chromium.launch(headless=True)
-        except Exception:
-            pass
-
-        # Firefox fallback (installed by default in MeManga)
-        return pw.firefox.launch(headless=True)
-
-    def _capture_image_urls(self, url: str) -> List[str]:
-        """Run image capture in thread pool (avoids asyncio conflicts)."""
-        future = self._executor.submit(self._capture_image_urls_in_thread, url)
-        return future.result(timeout=180)
+            return self._run_async(_get_pages())
+        except Exception as e:
+            logger.error(f"[Kagane] Get pages error: {e}")
+            return []
 
     def download_image(self, url: str, path: Path) -> bool:
-        """Download image with kagane-specific headers."""
+        """Download image through browser context (required for JWT tokens)."""
+        if not _ensure_nodriver():
+            return False
+        
+        async def _download():
+            page = await self._ensure_browser()
+            
+            # Download through browser fetch
+            escaped_url = url.replace("'", "\\'")
+            await page.evaluate(f'''
+                window._imgData = null;
+                (async () => {{
+                    try {{
+                        const res = await fetch('{escaped_url}');
+                        const blob = await res.blob();
+                        const reader = new FileReader();
+                        reader.onload = () => {{
+                            window._imgData = {{
+                                status: res.status,
+                                type: blob.type,
+                                size: blob.size,
+                                data: reader.result
+                            }};
+                        }};
+                        reader.readAsDataURL(blob);
+                    }} catch(e) {{
+                        window._imgData = {{error: e.toString()}};
+                    }}
+                }})();
+            ''')
+            await asyncio.sleep(5)
+            
+            result = await page.evaluate('JSON.stringify(window._imgData)')
+            if result:
+                data = json.loads(result)
+                if data.get('status') == 200 and data.get('data'):
+                    data_url = data['data']
+                    if ',' in data_url:
+                        _, b64data = data_url.split(',', 1)
+                        img_bytes = base64.b64decode(b64data)
+                        
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(path, 'wb') as f:
+                            f.write(img_bytes)
+                        
+                        logger.debug(f"[Kagane] Downloaded {len(img_bytes)} bytes to {path}")
+                        return True
+                else:
+                    logger.warning(f"[Kagane] Download failed: {data.get('error') or data.get('status')}")
+            
+            return False
+        
         try:
-            headers = {
-                "Origin": "https://kagane.org",
-                "Referer": "https://kagane.org/",
-                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*",
-            }
-
-            with self._rate_lock:
-                elapsed = time.time() - self._last_request
-                if elapsed < self._rate_limit:
-                    time.sleep(self._rate_limit - elapsed)
-                self._last_request = time.time()
-
-            response = self.session.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-
-            if len(response.content) < 1000:
-                return False
-
-            path = Path(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "wb") as f:
-                f.write(response.content)
-            return True
+            return self._run_async(_download())
         except Exception as e:
-            logger.debug(f"Failed to download {url}: {e}")
+            logger.error(f"[Kagane] Download error: {e}")
             return False
 
     def get_cover_url(self, manga_url: str) -> Optional[str]:
@@ -309,20 +391,42 @@ class KaganeScraper(PlaywrightScraper):
         series_id = self._extract_series_id(manga_url)
         if not series_id:
             return None
-
-        try:
-            url = f"{self.API_BASE}/api/v2/series/{series_id}"
-            data = self._get_json(url)
-            # Cover is in series_covers array
-            covers = data.get("series_covers", [])
+        
+        async def _get_cover():
+            data = await self._api_fetch(f'/series/{series_id}')
+            
+            if not data:
+                return None
+            
+            covers = data.get('series_covers', [])
             if covers:
-                cover_id = covers[0].get("image_id")
-                if cover_id:
-                    return f"{self.API_BASE}/api/v2/image/{cover_id}"
-            # Fallback to cover_image_id
-            cover_id = data.get("cover_image_id")
+                image_id = covers[0].get('image_id')
+                if image_id:
+                    return f"{self.API_BASE}/image/{image_id}"
+            
+            cover_id = data.get('cover_image_id')
             if cover_id:
-                return f"{self.API_BASE}/api/v2/image/{cover_id}"
-        except Exception:
+                return f"{self.API_BASE}/image/{cover_id}"
+            
+            return None
+        
+        try:
+            return self._run_async(_get_cover())
+        except:
+            return None
+
+    def close(self):
+        """Clean up browser resources."""
+        if self._browser:
+            try:
+                self._browser.stop()
+            except:
+                pass
+            self._browser = None
+            self._page = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except:
             pass
-        return None
