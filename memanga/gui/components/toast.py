@@ -1,41 +1,38 @@
 """
-Non-blocking toast notification popup.
+Floating toast notification.
 """
 
-import customtkinter as ctk
-from ..theme import font, FONT_SIZE_SM, PAD_MD, PAD_LG, get_palette
+from PySide6.QtWidgets import QLabel, QWidget, QGraphicsOpacityEffect
+from PySide6.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve
+from .. import theme as T
+
+_COLORS = {"info": T.ACCENT, "success": T.SUCCESS, "warning": T.WARNING, "error": T.ERROR}
 
 
-class Toast(ctk.CTkFrame):
-    """A temporary notification that appears at the top-right and auto-dismisses."""
+class Toast(QLabel):
+    """Auto-dismissing toast shown at top-right of parent."""
 
-    def __init__(self, parent, message: str, kind: str = "info", duration: int = 3000):
-        palette = get_palette(ctk.get_appearance_mode().lower())
-        color_map = {
-            "info": palette["accent"],
-            "success": palette["success"],
-            "warning": palette["warning"],
-            "error": palette["error"],
-        }
-        bg = color_map.get(kind, palette["accent"])
+    def __init__(self, parent: QWidget, message: str, kind: str = "info", duration: int = 3000):
+        super().__init__(message, parent)
+        bg = _COLORS.get(kind, T.ACCENT)
+        self.setStyleSheet(
+            f"background: {bg}; color: #ffffff; border-radius: 6px; padding: 8px 16px;"
+            f" font-size: {T.FONT_SIZE_SM}pt;"
+        )
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.adjustSize()
+        self.setFixedHeight(self.sizeHint().height())
 
-        super().__init__(parent, fg_color=bg, corner_radius=8)
-        self.place(relx=1.0, rely=0.0, anchor="ne", x=-PAD_LG, y=PAD_LG)
+        # Position top-right
+        pw = parent.width() if parent else 400
+        self.move(pw - self.width() - T.PAD_LG, T.PAD_LG)
+        self.raise_()
+        self.show()
 
-        ctk.CTkLabel(
-            self,
-            text=message,
-            font=font(FONT_SIZE_SM),
-            text_color="#ffffff",
-            padx=PAD_LG,
-            pady=PAD_MD,
-        ).pack()
-
-        self.after(duration, self._dismiss)
+        QTimer.singleShot(duration, self._dismiss)
 
     def _dismiss(self):
         try:
-            self.place_forget()
-            self.destroy()
+            self.deleteLater()
         except Exception:
             pass

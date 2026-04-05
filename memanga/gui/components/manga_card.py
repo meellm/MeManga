@@ -1,106 +1,81 @@
 """
-Manga cover art card for grid view with badge support and selection.
+Manga cover card for grid view.
 """
 
-import customtkinter as ctk
-from ..theme import (
-    CARD_WIDTH, CARD_HEIGHT, CARD_COVER_HEIGHT, CARD_RADIUS,
-    PAD_XS, PAD_SM, FONT_SIZE_SM, FONT_SIZE_XS,
-    STATUS_COLORS, font, get_palette,
-)
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QHBoxLayout
+from PySide6.QtGui import QPixmap, QMouseEvent
+from PySide6.QtCore import Qt
+from .. import theme as T
 
 
-class MangaCard(ctk.CTkFrame):
-    """A card showing cover art, title, status badge, and optional NEW indicator."""
+class MangaCard(QFrame):
+    """Clickable card with cover image, title, and status."""
 
-    def __init__(self, parent, manga: dict, cover_image, on_click=None,
-                 on_right_click=None, new_count: int = 0, selectable: bool = False,
-                 selected: bool = False, on_select=None):
-        palette = get_palette(ctk.get_appearance_mode().lower())
-        super().__init__(
-            parent,
-            width=CARD_WIDTH,
-            height=CARD_HEIGHT,
-            corner_radius=CARD_RADIUS,
-            fg_color=palette["bg_card"],
-            cursor="hand2",
-        )
-        self.pack_propagate(False)
+    def __init__(self, parent, manga: dict, cover_image: QPixmap, on_click=None,
+                 on_right_click=None, new_count: int = 0):
+        super().__init__(parent)
+        self.setProperty("class", "card")
+        self.setFixedSize(T.CARD_WIDTH, T.CARD_HEIGHT)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._manga = manga
         self._on_click = on_click
         self._on_right_click = on_right_click
-        self._selected = selected
 
-        # Selection checkbox (hidden by default)
-        if selectable:
-            self._check_var = ctk.BooleanVar(value=selected)
-            self._checkbox = ctk.CTkCheckBox(
-                self, text="", variable=self._check_var, width=24, height=24,
-                command=lambda: on_select(manga, self._check_var.get()) if on_select else None,
-            )
-            self._checkbox.place(x=6, y=6)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, T.PAD_SM)
+        layout.setSpacing(T.PAD_XS)
 
-        # Cover image
-        self._cover_label = ctk.CTkLabel(
-            self, text="", image=cover_image,
-            width=CARD_WIDTH, height=CARD_COVER_HEIGHT,
-        )
-        self._cover_label.pack(fill="x")
+        # Cover
+        self._cover_label = QLabel()
+        self._cover_label.setFixedSize(T.CARD_WIDTH - 2, T.CARD_COVER_HEIGHT)
+        self._cover_label.setPixmap(cover_image.scaled(
+            T.CARD_WIDTH - 2, T.CARD_COVER_HEIGHT,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+        self._cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._cover_label.setStyleSheet("border-radius: 6px 6px 0 0;")
+        layout.addWidget(self._cover_label)
 
-        # NEW badge overlay
-        if new_count > 0:
-            badge = ctk.CTkLabel(
-                self, text=f" {new_count} NEW ",
-                font=font(FONT_SIZE_XS, "bold"),
-                text_color="#ffffff", fg_color="#22c55e",
-                corner_radius=4, height=18,
-            )
-            badge.place(relx=1.0, x=-8, y=8, anchor="ne")
-
-        # Info section
-        info = ctk.CTkFrame(self, fg_color="transparent")
-        info.pack(fill="both", expand=True, padx=PAD_SM, pady=PAD_XS)
-
-        # Title (truncated)
+        # Title
         title = manga.get("title", "Unknown")
-        if len(title) > 22:
-            title = title[:20] + ".."
-        ctk.CTkLabel(
-            info, text=title, font=font(FONT_SIZE_SM, "bold"),
-            text_color=palette["fg"], anchor="w",
-        ).pack(fill="x")
+        if len(title) > 20:
+            title = title[:18] + ".."
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; font-weight: bold; padding: 0 {T.PAD_SM}px;")
+        layout.addWidget(title_label)
 
-        # Status + reading progress
+        # Status row
         status = manga.get("status", "reading")
-        status_color = STATUS_COLORS.get(status, palette["fg_muted"])
+        color = T.STATUS_COLORS.get(status, T.FG_MUTED)
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
 
-        bottom = ctk.CTkFrame(info, fg_color="transparent")
-        bottom.pack(fill="x")
+        status_label = QLabel(status.capitalize())
+        status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {color};")
+        bottom.addWidget(status_label)
 
-        ctk.CTkLabel(
-            bottom, text=status.capitalize(),
-            font=font(FONT_SIZE_XS), text_color=status_color, anchor="w",
-        ).pack(side="left")
+        if new_count > 0:
+            badge = QLabel(f" {new_count} NEW ")
+            badge.setStyleSheet(
+                f"background: {T.ACCENT}; color: #fff; font-size: {T.FONT_SIZE_XS}pt;"
+                f" font-weight: bold; border-radius: 3px; padding: 1px 4px;"
+            )
+            bottom.addWidget(badge)
 
-        # Bind clicks
-        self.bind("<Button-1>", self._clicked)
-        self._cover_label.bind("<Button-1>", self._clicked)
-        for child in info.winfo_children():
-            child.bind("<Button-1>", self._clicked)
+        bottom.addStretch()
+        layout.addLayout(bottom)
 
-        # Right-click (bind to all children so it works anywhere on the card)
-        if on_right_click:
-            for widget in [self, self._cover_label] + list(info.winfo_children()) + list(bottom.winfo_children()):
-                widget.bind("<Button-2>", self._right_clicked)
-                widget.bind("<Button-3>", self._right_clicked)
-
-    def _clicked(self, event=None):
-        if self._on_click:
+    def mousePressEvent(self, event: QMouseEvent):
+        if event.button() == Qt.MouseButton.LeftButton and self._on_click:
             self._on_click(self._manga)
+        elif event.button() == Qt.MouseButton.RightButton and self._on_right_click:
+            pos = event.globalPosition().toPoint()
+            self._on_right_click(self._manga, pos.x(), pos.y())
 
-    def _right_clicked(self, event=None):
-        if self._on_right_click and event:
-            self._on_right_click(self._manga, event.x_root, event.y_root)
-
-    def update_cover(self, cover_image):
-        self._cover_label.configure(image=cover_image)
+    def update_cover(self, cover_image: QPixmap):
+        self._cover_label.setPixmap(cover_image.scaled(
+            T.CARD_WIDTH - 2, T.CARD_COVER_HEIGHT,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        ))

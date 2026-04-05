@@ -1,8 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for MeManga GUI.
+PyInstaller spec for MeManga GUI (PySide6).
 Builds a standalone folder with memanga-gui executable.
-Playwright browsers are NOT bundled — downloaded on first run.
 """
 
 import os
@@ -10,13 +9,11 @@ import sys
 from pathlib import Path
 
 import certifi
-import customtkinter
 import playwright_stealth
 
 block_cipher = None
 
 # Paths
-ctk_path = os.path.dirname(customtkinter.__file__)
 certifi_dir = os.path.dirname(certifi.where())
 stealth_path = os.path.dirname(playwright_stealth.__file__)
 project_root = os.path.abspath(".")
@@ -31,9 +28,7 @@ hidden_imports = [
 
 # Add other hidden imports that PyInstaller may miss
 hidden_imports += [
-    "customtkinter",
     "PIL",
-    "PIL._tkinter_finder",
     "ebooklib",
     "ebooklib.epub",
     "img2pdf",
@@ -47,15 +42,17 @@ hidden_imports += [
     "playwright.sync_api",
     "playwright_stealth",
     "certifi",
+    "PySide6",
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
 ]
 
 # Data files to include
 datas = [
-    # CustomTkinter themes and assets
-    (ctk_path, "customtkinter"),
-    # SSL CA certificates — required for HTTPS requests in frozen builds
+    # SSL CA certificates
     (certifi_dir, "certifi"),
-    # Playwright stealth JS files — required by scrapers that bypass bot detection
+    # Playwright stealth JS files
     (stealth_path, "playwright_stealth"),
 ]
 
@@ -79,7 +76,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         "matplotlib", "numpy", "scipy", "pandas", "tkinter.test",
-        "unittest", "test",
+        "unittest", "test", "customtkinter",
     ],
     cipher=block_cipher,
     noarchive=False,
@@ -97,7 +94,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,  # Keep console open for debugging — errors print here
+    console=True,  # Console for debugging — set to False for release
 )
 
 coll = COLLECT(

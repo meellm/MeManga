@@ -2,20 +2,18 @@
 Base page class for all GUI pages.
 """
 
-import customtkinter as ctk
+from PySide6.QtWidgets import QWidget
 
 
-class BasePage(ctk.CTkFrame):
+class BasePage(QWidget):
     """Base class for all pages. Subclass and override on_show/on_hide."""
 
     def __init__(self, parent, app):
-        super().__init__(parent, fg_color="transparent")
+        super().__init__(parent)
         self.app = app
 
     def on_show(self, **kwargs):
-        """Called when this page becomes visible. Override to refresh data."""
         pass
 
     def on_hide(self):
-        """Called when this page is hidden. Override to clean up."""
         pass

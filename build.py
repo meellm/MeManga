@@ -60,7 +60,7 @@ def verify_imports():
         ("cloudscraper", "cloudscraper"),
         ("pikepdf", "pikepdf"),
         ("yaml", "pyyaml"),
-        ("customtkinter", "customtkinter"),
+        ("PySide6", "PySide6"),
         ("certifi", "certifi"),
         ("requests", "requests"),
         ("rich", "rich"),
@@ -131,7 +131,7 @@ def build_cli():
         "--noconfirm",
         "--clean",
         "--onedir",
-        "--add-data", f"{_get_ctk_path()}{os.pathsep}customtkinter",
+        # No extra data needed for CLI
         "memanga/__main__.py",
     ]
 
@@ -140,8 +140,8 @@ def build_cli():
 
 
 def _get_ctk_path():
-    import customtkinter
-    return os.path.dirname(customtkinter.__file__)
+    # Legacy — no longer needed with PySide6
+    return ""
 
 
 def create_archive():

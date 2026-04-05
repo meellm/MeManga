@@ -1,10 +1,11 @@
 """
-MeManga GUI Application - Root window and page routing.
+MeManga GUI Application - PySide6 MainWindow with sidebar + QStackedWidget.
 """
 
 from datetime import datetime
 
-import customtkinter as ctk
+from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
+from PySide6.QtCore import QTimer
 
 from .. import __version__
 from ..config import Config, get_app_password, set_app_password
@@ -12,12 +13,12 @@ from ..state import State
 from .events import EventBus
 from .workers import BackgroundWorker
 from .cache import CoverCache
-from .theme import get_palette, SIDEBAR_WIDTH, font, FONT_SIZE_LG
+from . import theme as T
 from .components.sidebar import Sidebar
 from .pages.base import BasePage
 
 
-class MeMangaApp(ctk.CTk):
+class MeMangaApp(QMainWindow):
     """Main application window."""
 
     def __init__(self):
@@ -39,111 +40,107 @@ class MeMangaApp(ctk.CTk):
         self.events.subscribe("kindle_sent", self._on_kindle_sent)
 
         # Window setup
-        self.title(f"MeManga v{__version__}")
-        self.geometry("1100x750")
-        self.minsize(900, 600)
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("green")
+        self.setWindowTitle(f"MeManga v{__version__}")
+        self.resize(1100, 750)
+        self.setMinimumSize(900, 600)
 
-        # Layout: sidebar + content
-        self._sidebar = Sidebar(self, app=self)
-        self._sidebar.pack(side="left", fill="y")
+        # Central widget
+        central = QWidget()
+        central.setObjectName("central")
+        self.setCentralWidget(central)
 
-        self._content_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._content_frame.pack(side="right", fill="both", expand=True)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Sidebar
+        self._sidebar = Sidebar(central, app=self)
+        main_layout.addWidget(self._sidebar)
+
+        # Page stack (instant page switching — no destroy/rebuild)
+        self._stack = QStackedWidget()
+        main_layout.addWidget(self._stack, 1)
 
         # Pages registry
         self._pages: dict[str, BasePage] = {}
         self._current_page: str = ""
-
         self._register_pages()
 
-        # Show dashboard as default
-        self.show_page("dashboard")
+        # Library is home
+        self.show_page("library")
 
-        # Start event polling and periodic state flush
-        self._poll_events()
-        self._periodic_flush()
+        # Event polling via QTimer
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.events.poll)
+        self._timer.start(100)
 
-        # Auto-check on open (after 3s delay)
+        # Periodic state flush
+        self._flush_timer = QTimer(self)
+        self._flush_timer.timeout.connect(self.app_state.flush)
+        self._flush_timer.start(5000)
+
+        # Auto-check on open
         if self.config.get("gui.auto_check", True):
-            self.after(3000, self._auto_check)
+            QTimer.singleShot(3000, self._auto_check)
 
     def _register_pages(self):
-        """Import and register all pages."""
-        from .pages.dashboard import DashboardPage
         from .pages.library import LibraryPage
-        from .pages.add_manga import AddMangaPage
         from .pages.search import SearchPage
         from .pages.downloads import DownloadsPage
-        from .pages.history import HistoryPage
         from .pages.settings import SettingsPage
-        from .pages.sources import SourcesPage
         from .pages.detail import DetailPage
         from .pages.reader import ReaderPage
 
         page_classes = {
-            "dashboard": DashboardPage,
             "library": LibraryPage,
-            "add": AddMangaPage,
             "search": SearchPage,
             "downloads": DownloadsPage,
-            "history": HistoryPage,
             "settings": SettingsPage,
-            "sources": SourcesPage,
             "detail": DetailPage,
             "reader": ReaderPage,
         }
         for name, cls in page_classes.items():
-            page = cls(self._content_frame, app=self)
+            page = cls(self._stack, app=self)
+            self._stack.addWidget(page)
             self._pages[name] = page
 
     def show_page(self, name: str, **kwargs):
-        """Switch to a page by name. Extra kwargs passed to on_show."""
         if name == self._current_page and not kwargs:
             return
 
         if self._current_page and self._current_page in self._pages:
             self._pages[self._current_page].on_hide()
-            self._pages[self._current_page].pack_forget()
 
         page = self._pages.get(name)
         if page:
-            page.pack(fill="both", expand=True)
+            self._stack.setCurrentWidget(page)
             page.on_show(**kwargs)
             self._current_page = name
             self._sidebar.set_active(name)
 
-    def on_theme_changed(self):
-        palette = get_palette(ctk.get_appearance_mode().lower())
-        self._sidebar.refresh_colors()
-        for page in self._pages.values():
-            if hasattr(page, "refresh_colors"):
-                page.refresh_colors()
-
-    def _poll_events(self):
-        self.events.poll()
-        self.after(100, self._poll_events)
+    def apply_theme(self, mode: str):
+        """Switch between dark and light mode."""
+        from PySide6.QtWidgets import QApplication
+        T.apply_theme(mode)
+        QApplication.instance().setStyleSheet(T.generate_stylesheet(mode))
 
     def reload_data(self):
         self.config = Config()
         self.app_state = State()
 
-    # ---- Event Handlers (notifications + state updates) ----
+    # ---- Event Handlers ----
 
     def _on_cover_fetch_request(self, data):
-        self.worker.fetch_cover(data["url"], data.get("size", (180, 230)), self.cover_cache)
+        self.worker.fetch_cover(data["url"], data.get("size", (170, 210)), self.cover_cache)
 
     def _on_download_complete(self, data):
         title = data.get("title", "")
         chapter = data.get("chapter", "")
         path = data.get("path", "")
 
-        # Log notification
         self.app_state.add_notification("download", f"Downloaded {title} Ch. {chapter}")
         self.events.publish("notification_added", {})
 
-        # Log download history
         size_mb = 0
         if path:
             try:
@@ -155,20 +152,15 @@ class MeMangaApp(ctk.CTk):
             title=title, chapter=str(chapter),
             fmt=self.config.output_format, path=path, size_mb=size_mb,
         )
-
-        # Mark chapter as downloaded in state (prevents re-downloading)
         self.app_state.add_downloaded_chapter(title, str(chapter))
-
-        # Clear "new chapters" badge for this manga
         self.app_state.clear_new_chapters(title)
 
     def _on_check_error(self, data):
-        """Handle scraper errors — log notification so user can see what failed."""
         title = data.get("title", "")
         error = data.get("error", "Unknown")
         self.app_state.add_notification("error", f"Check failed: {title} - {error[:80]}")
         self.events.publish("notification_added", {})
-        print(f"[Check Error] {title}: {error}")
+        print(f"[Check Error] {title}: {error}", flush=True)
 
     def _on_download_error(self, data):
         title = data.get("title", "")
@@ -180,21 +172,17 @@ class MeMangaApp(ctk.CTk):
         results = data.get("results", [])
         total_new = sum(len(r["chapters"]) for r in results)
 
-        # Update new_chapters badges per manga
         for r in results:
             title = r["manga"].get("title", "")
             count = len(r["chapters"])
             if count > 0:
                 self.app_state.set_new_chapters(title, count)
 
-        # Log notification
         if total_new > 0:
             self.app_state.add_notification("check", f"Found {total_new} new chapter(s)")
         else:
             self.app_state.add_notification("check", "No new chapters found")
         self.events.publish("notification_added", {})
-
-        # Update last check
         self.app_state.update_last_check(new_chapters=total_new)
 
     def _on_kindle_sent(self, data):
@@ -204,7 +192,6 @@ class MeMangaApp(ctk.CTk):
     # ---- Auto-Check ----
 
     def _auto_check(self):
-        """Auto-check for updates on app open if enough time has passed."""
         interval = self.config.get("gui.auto_check_interval", 3600)
         last_check = self.app_state.get("last_check")
 
@@ -223,12 +210,7 @@ class MeMangaApp(ctk.CTk):
             if manga_list:
                 self.worker.check_updates(manga_list, self.app_state, self.config)
 
-    def _periodic_flush(self):
-        """Flush dirty state to disk every 5 seconds."""
+    def closeEvent(self, event):
         self.app_state.flush()
-        self.after(5000, self._periodic_flush)
-
-    def destroy(self):
-        self.app_state.flush()  # Final flush before exit
         self.worker.shutdown()
-        super().destroy()
+        super().closeEvent(event)
