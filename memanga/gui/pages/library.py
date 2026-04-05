@@ -1,15 +1,15 @@
 """
-Library page - Grid/List view with sorting, right-click menus, and bulk operations.
+Library page — main home view with grid/list, filters, stats bar.
 """
 
-import customtkinter as ctk
-from .base import BasePage
-from ..theme import (
-    PAD_SM, PAD_MD, PAD_LG, PAD_XL,
-    FONT_SIZE_SM, FONT_SIZE_MD, FONT_SIZE_LG, FONT_SIZE_XL,
-    CARD_WIDTH, CARD_HEIGHT, STATUS_COLORS,
-    font, get_palette,
+from datetime import datetime
+from PySide6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
+    QComboBox, QScrollArea, QWidget, QGridLayout, QFrame,
 )
+from PySide6.QtCore import Qt, QTimer
+from .base import BasePage
+from .. import theme as T
 from ..components.manga_card import MangaCard
 from ..components.manga_row import MangaRow
 from ..components.context_menu import ContextMenu
@@ -18,8 +18,6 @@ from ..components.dialogs import ConfirmDialog
 
 
 class LibraryPage(BasePage):
-    """Main library view with grid/list toggle, sorting, right-click, and bulk ops."""
-
     def __init__(self, parent, app):
         super().__init__(parent, app)
         self._view_mode = "grid"
@@ -27,8 +25,6 @@ class LibraryPage(BasePage):
         self._search_query = ""
         self._sort_by = self.app.config.get("gui.sort_by", "title")
         self._cards: list = []
-        self._select_mode = False
-        self._selected_titles: set = set()
 
         self._build()
 
@@ -37,126 +33,169 @@ class LibraryPage(BasePage):
         self.app.events.subscribe("download_complete", lambda d: self._on_check_done())
 
     def _build(self):
-        palette = get_palette(ctk.get_appearance_mode().lower())
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(T.PAD_XL, T.PAD_XL, T.PAD_XL, T.PAD_SM)
+        layout.setSpacing(T.PAD_SM)
 
-        # Header
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=PAD_XL, pady=(PAD_XL, PAD_MD))
+        # Header row
+        header = QHBoxLayout()
 
-        ctk.CTkLabel(
-            header, text="Library",
-            font=font(FONT_SIZE_XL, "bold"),
-        ).pack(side="left")
+        title_block = QVBoxLayout()
+        title = QLabel("Library")
+        title.setStyleSheet(f"font-size: {T.FONT_SIZE_XL}pt; font-weight: bold;")
+        title_block.addWidget(title)
 
-        # Right side controls
-        controls = ctk.CTkFrame(header, fg_color="transparent")
-        controls.pack(side="right")
+        self._stats_label = QLabel("")
+        self._stats_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+        title_block.addWidget(self._stats_label)
+        header.addLayout(title_block)
+        header.addStretch()
 
-        # Check All button
-        ctk.CTkButton(
-            controls, text="Check Updates", width=120, height=32,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["accent"], hover_color=palette["accent_hover"],
-            command=self._check_all,
-        ).pack(side="right", padx=(PAD_SM, 0))
+        add_btn = QPushButton("+ Add")
+        add_btn.setProperty("class", "accent")
+        add_btn.setFixedHeight(30)
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.clicked.connect(self._open_add_dialog)
+        header.addWidget(add_btn)
 
-        # Select mode toggle
-        self._select_btn = ctk.CTkButton(
-            controls, text="Select", width=70, height=32,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["bg_secondary"], hover_color=palette["border"],
-            text_color=palette["fg"],
-            command=self._toggle_select_mode,
-        )
-        self._select_btn.pack(side="right", padx=(PAD_SM, PAD_SM))
+        check_btn = QPushButton("Check All")
+        check_btn.setProperty("class", "accent")
+        check_btn.setFixedHeight(30)
+        check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        check_btn.clicked.connect(self._check_all)
+        header.addWidget(check_btn)
 
-        # View toggle
-        self._toggle_btn = ctk.CTkSegmentedButton(
-            controls, values=["Grid", "List"], width=120,
-            font=font(FONT_SIZE_SM),
-            command=self._on_view_toggle,
-        )
-        self._toggle_btn.set("Grid")
-        self._toggle_btn.pack(side="right", padx=(PAD_SM, 0))
+        layout.addLayout(header)
 
         # Filter bar
-        filter_bar = ctk.CTkFrame(self, fg_color="transparent")
-        filter_bar.pack(fill="x", padx=PAD_XL, pady=(0, PAD_MD))
+        filter_bar = QHBoxLayout()
 
-        self._search_entry = ctk.CTkEntry(
-            filter_bar, placeholder_text="Filter manga...",
-            font=font(FONT_SIZE_SM), height=32, width=200,
-        )
-        self._search_entry.pack(side="left")
-        self._search_entry.bind("<KeyRelease>", self._on_search)
+        self._search_entry = QLineEdit()
+        self._search_entry.setPlaceholderText("Filter manga...")
+        self._search_entry.setFixedHeight(30)
+        self._search_entry.setMaximumWidth(200)
+        self._search_entry.textChanged.connect(self._on_search)
+        filter_bar.addWidget(self._search_entry)
 
-        self._status_filter = ctk.CTkOptionMenu(
-            filter_bar,
-            values=["All", "Reading", "On-hold", "Dropped", "Completed"],
-            font=font(FONT_SIZE_SM), height=32, width=110,
-            command=self._on_status_filter,
-        )
-        self._status_filter.pack(side="left", padx=PAD_SM)
+        self._status_filter = QComboBox()
+        self._status_filter.addItems(["All", "Reading", "On-hold", "Dropped", "Completed"])
+        self._status_filter.setFixedHeight(30)
+        self._status_filter.currentTextChanged.connect(self._on_status_filter)
+        filter_bar.addWidget(self._status_filter)
 
-        # Sort dropdown
-        self._sort_menu = ctk.CTkOptionMenu(
-            filter_bar,
-            values=["Title A-Z", "Last Updated", "Recently Added", "Chapter Count", "Status"],
-            font=font(FONT_SIZE_SM), height=32, width=140,
-            command=self._on_sort_change,
-        )
+        self._sort_menu = QComboBox()
+        self._sort_menu.addItems(["Title A-Z", "Last Updated", "Recently Added", "Chapter Count", "Status"])
+        self._sort_menu.setFixedHeight(30)
         sort_display = {"title": "Title A-Z", "last_updated": "Last Updated",
                         "recently_added": "Recently Added", "chapter_count": "Chapter Count",
                         "status": "Status"}
-        self._sort_menu.set(sort_display.get(self._sort_by, "Title A-Z"))
-        self._sort_menu.pack(side="left", padx=PAD_SM)
+        self._sort_menu.setCurrentText(sort_display.get(self._sort_by, "Title A-Z"))
+        self._sort_menu.currentTextChanged.connect(self._on_sort_change)
+        filter_bar.addWidget(self._sort_menu)
 
-        self._count_label = ctk.CTkLabel(
-            filter_bar, text="", font=font(FONT_SIZE_SM),
-            text_color=palette["fg_muted"],
-        )
-        self._count_label.pack(side="right")
+        filter_bar.addStretch()
 
-        # Scrollable content area
-        self._scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self._scroll.pack(fill="both", expand=True, padx=PAD_XL, pady=(0, PAD_SM))
+        self._count_label = QLabel("")
+        self._count_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+        filter_bar.addWidget(self._count_label)
 
-        # Grid container — pack with fill="x" only so height comes from configure()
-        # (place()-managed children don't propagate height to pack)
-        self._grid_frame = ctk.CTkFrame(self._scroll, fg_color="transparent")
-        self._grid_frame.pack(fill="x")
+        layout.addLayout(filter_bar)
 
-        # Bulk action bar (hidden by default)
-        self._bulk_bar = ctk.CTkFrame(self, fg_color=palette["bg_card"], corner_radius=8, height=46)
-        self._bulk_count = ctk.CTkLabel(self._bulk_bar, text="0 selected", font=font(FONT_SIZE_SM, "bold"))
-        self._bulk_count.pack(side="left", padx=PAD_LG)
-
-        ctk.CTkButton(
-            self._bulk_bar, text="Check All", width=90, height=30,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["accent"], hover_color=palette["accent_hover"],
-            command=self._bulk_check,
-        ).pack(side="left", padx=PAD_SM)
-
-        ctk.CTkButton(
-            self._bulk_bar, text="Set Reading", width=100, height=30,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["bg_secondary"], hover_color=palette["border"],
-            text_color=palette["fg"],
-            command=lambda: self._bulk_set_status("reading"),
-        ).pack(side="left", padx=PAD_SM)
-
-        ctk.CTkButton(
-            self._bulk_bar, text="Remove", width=80, height=30,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["error"], hover_color="#b91c1c",
-            command=self._bulk_remove,
-        ).pack(side="left", padx=PAD_SM)
-
-        self._scroll.bind("<Configure>", self._on_resize)
+        # Scrollable grid
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll_content = QWidget()
+        self._grid_layout = QGridLayout(self._scroll_content)
+        self._grid_layout.setSpacing(T.PAD_MD)
+        self._grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._scroll.setWidget(self._scroll_content)
+        layout.addWidget(self._scroll, 1)
 
     def on_show(self, **kwargs):
         self._refresh()
+
+    def _refresh(self):
+        # Clear grid
+        while self._grid_layout.count():
+            item = self._grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._cards.clear()
+
+        manga_list = self._get_filtered_manga()
+
+        # Update stats
+        stats = self.app.app_state.get_stats()
+        last_check = self.app.app_state.get("last_check")
+        check_text = "never"
+        if last_check:
+            try:
+                elapsed = (datetime.now() - datetime.fromisoformat(last_check)).total_seconds()
+                if elapsed < 60:
+                    check_text = "just now"
+                elif elapsed < 3600:
+                    check_text = f"{int(elapsed // 60)}m ago"
+                elif elapsed < 86400:
+                    check_text = f"{int(elapsed // 3600)}h ago"
+                else:
+                    check_text = f"{int(elapsed // 86400)}d ago"
+            except Exception:
+                pass
+        self._stats_label.setText(
+            f"{stats['total_manga']} manga  \u00b7  {stats['total_chapters']} chapters  \u00b7  Last check: {check_text}"
+        )
+        self._count_label.setText(f"{len(manga_list)} shown")
+
+        if not manga_list:
+            empty = QLabel("No manga tracked yet. Click '+ Add' to get started.")
+            empty.setStyleSheet(f"color: {T.FG_MUTED}; font-size: {T.FONT_SIZE_MD}pt; padding: 60px;")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._grid_layout.addWidget(empty, 0, 0)
+            return
+
+        if self._view_mode == "grid":
+            self._build_grid(manga_list)
+        else:
+            self._build_list(manga_list)
+
+    def _build_grid(self, manga_list):
+        cols = max(1, (self._scroll.width() - 40) // (T.CARD_WIDTH + T.PAD_MD))
+        if cols < 1:
+            cols = 4
+
+        for i, manga in enumerate(manga_list):
+            cover_url = manga.get("cover_url")
+            cover_img = self.app.cover_cache.get_cover(cover_url, size=(T.CARD_WIDTH, T.CARD_COVER_HEIGHT))
+            title = manga.get("title", "")
+            new_count = self.app.app_state.get_new_chapters(title)
+
+            card = MangaCard(
+                self._scroll_content, manga=manga, cover_image=cover_img,
+                on_click=self._on_manga_click,
+                on_right_click=self._on_right_click,
+                new_count=new_count,
+            )
+            row = i // cols
+            col = i % cols
+            self._grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignTop)
+            self._cards.append((manga, card))
+
+    def _build_list(self, manga_list):
+        for i, manga in enumerate(manga_list):
+            title = manga.get("title", "")
+            state_data = self.app.app_state.get_manga_state(title)
+            cover_url = manga.get("cover_url")
+            thumb = self.app.cover_cache.get_cover(cover_url, size=(36, 48)) if cover_url else None
+            new_count = self.app.app_state.get_new_chapters(title)
+
+            row = MangaRow(
+                self._scroll_content, manga=manga, state_data=state_data,
+                cover_image=thumb, on_click=self._on_manga_click,
+                on_right_click=self._on_right_click, new_count=new_count,
+            )
+            self._grid_layout.addWidget(row, i, 0)
+            self._cards.append((manga, row))
 
     def _get_filtered_manga(self):
         manga_list = self.app.config.get("manga", [])
@@ -169,137 +208,24 @@ class LibraryPage(BasePage):
                 continue
             results.append(m)
 
-        # Sort (cache state lookups to avoid O(n * state_access) per sort)
         sort_key = self._sort_by
         if sort_key == "title":
             results.sort(key=lambda m: m.get("title", "").lower())
         elif sort_key in ("last_updated", "recently_added", "chapter_count"):
-            state_cache = {
-                m.get("title", ""): self.app.app_state.get_manga_state(m.get("title", ""))
-                for m in results
-            }
+            cache = {m.get("title", ""): self.app.app_state.get_manga_state(m.get("title", "")) for m in results}
             if sort_key == "last_updated":
-                results.sort(key=lambda m: state_cache.get(m.get("title", ""), {}).get("last_updated") or "", reverse=True)
+                results.sort(key=lambda m: cache.get(m.get("title", ""), {}).get("last_updated") or "", reverse=True)
             elif sort_key == "recently_added":
-                results.sort(key=lambda m: state_cache.get(m.get("title", ""), {}).get("created") or "", reverse=True)
+                results.sort(key=lambda m: cache.get(m.get("title", ""), {}).get("created") or "", reverse=True)
             elif sort_key == "chapter_count":
-                results.sort(key=lambda m: len(state_cache.get(m.get("title", ""), {}).get("downloaded", [])), reverse=True)
+                results.sort(key=lambda m: len(cache.get(m.get("title", ""), {}).get("downloaded", [])), reverse=True)
         elif sort_key == "status":
             order = {"reading": 0, "on-hold": 1, "completed": 2, "dropped": 3}
             results.sort(key=lambda m: order.get(m.get("status", "reading"), 4))
-
         return results
 
-    def _refresh(self):
-        for widget in self._grid_frame.winfo_children():
-            widget.destroy()
-        self._cards.clear()
-
-        manga_list = self._get_filtered_manga()
-        palette = get_palette(ctk.get_appearance_mode().lower())
-        self._count_label.configure(text=f"{len(manga_list)} manga")
-
-        if not manga_list:
-            empty_frame = ctk.CTkFrame(self._grid_frame, fg_color="transparent")
-            empty_frame.pack(expand=True, pady=80)
-
-            ctk.CTkLabel(
-                empty_frame, text="No manga tracked yet",
-                font=font(FONT_SIZE_LG), text_color=palette["fg_muted"], justify="center",
-            ).pack()
-
-            ctk.CTkButton(
-                empty_frame, text="+ Add Manga", height=36, width=150,
-                font=font(FONT_SIZE_MD), corner_radius=8,
-                fg_color=palette["accent"], hover_color=palette["accent_hover"],
-                command=lambda: self.app.show_page("add"),
-            ).pack(pady=PAD_LG)
-            return
-
-        if self._view_mode == "grid":
-            self._build_grid(manga_list)
-        else:
-            self._build_list(manga_list)
-
-    def _build_grid(self, manga_list):
-        for manga in manga_list:
-            cover_url = manga.get("cover_url")
-            cover_img = self.app.cover_cache.get_cover(cover_url, size=(180, 230))
-            title = manga.get("title", "")
-            new_count = self.app.app_state.get_new_chapters(title)
-
-            card = MangaCard(
-                self._grid_frame, manga=manga, cover_image=cover_img,
-                on_click=self._on_manga_click,
-                on_right_click=self._on_right_click,
-                new_count=new_count,
-                selectable=self._select_mode,
-                selected=title in self._selected_titles,
-                on_select=self._on_select_toggle,
-            )
-            self._cards.append((manga, card))
-
-        # Defer reflow so the scroll frame has a real width from layout
-        self.after(50, self._reflow_grid)
-
-    def _build_list(self, manga_list):
-        for manga in manga_list:
-            title = manga.get("title", "")
-            state_data = self.app.app_state.get_manga_state(title)
-            cover_url = manga.get("cover_url")
-            thumb = self.app.cover_cache.get_cover(cover_url, size=(40, 55)) if cover_url else None
-            new_count = self.app.app_state.get_new_chapters(title)
-
-            row = MangaRow(
-                self._grid_frame, manga=manga, state_data=state_data,
-                cover_image=thumb, on_click=self._on_manga_click,
-                on_right_click=self._on_right_click,
-                new_count=new_count,
-                selectable=self._select_mode,
-                selected=title in self._selected_titles,
-                on_select=self._on_select_toggle,
-            )
-            row.pack(fill="x", pady=2)
-            self._cards.append((manga, row))
-
-    def _reflow_grid(self):
-        if self._view_mode != "grid" or not self._cards:
-            return
-        try:
-            available_width = self._scroll.winfo_width() - 20
-        except Exception:
-            available_width = 800
-        if available_width < 200:
-            available_width = 800
-
-        card_spacing = 12
-        cols = max(1, available_width // (CARD_WIDTH + card_spacing))
-
-        for i, (manga, card) in enumerate(self._cards):
-            row = i // cols
-            col = i % cols
-            card.place(
-                x=col * (CARD_WIDTH + card_spacing),
-                y=row * (CARD_HEIGHT + card_spacing),
-            )
-
-        total_rows = (len(self._cards) + cols - 1) // cols
-        self._grid_frame.configure(height=total_rows * (CARD_HEIGHT + card_spacing) + card_spacing)
-
-    def _on_resize(self, event=None):
-        if self._view_mode != "grid" or not self._cards:
-            return
-        # Debounce resize — only reflow after 150ms of no resize events
-        if hasattr(self, "_resize_timer"):
-            self.after_cancel(self._resize_timer)
-        self._resize_timer = self.after(150, self._reflow_grid)
-
-    def _on_view_toggle(self, value):
-        self._view_mode = value.lower()
-        self._refresh()
-
-    def _on_search(self, event=None):
-        self._search_query = self._search_entry.get().strip()
+    def _on_search(self, text):
+        self._search_query = text.strip()
         self._refresh()
 
     def _on_status_filter(self, value):
@@ -318,10 +244,7 @@ class LibraryPage(BasePage):
     def _on_manga_click(self, manga):
         self.app.show_page("detail", manga=manga)
 
-    # ---- Right-Click Context Menu ----
-
     def _on_right_click(self, manga, x, y):
-        title = manga.get("title", "")
         items = [
             ("Check Updates", lambda: self._ctx_check(manga)),
             ("Download All", lambda: self._ctx_download_all(manga)),
@@ -339,27 +262,22 @@ class LibraryPage(BasePage):
         self.app.show_page("downloads")
 
     def _ctx_download_all(self, manga):
-        title = manga.get("title", "")
-        self.app.app_state.reset_manga_progress(title, from_chapter=0)
+        self.app.app_state.reset_manga_progress(manga.get("title", ""), from_chapter=0)
         self.app.worker.check_updates([manga], self.app.app_state, self.app.config)
         self.app.show_page("downloads")
 
     def _ctx_set_status(self, manga, status):
-        manga_list = self.app.config.get("manga", [])
-        for m in manga_list:
+        for m in self.app.config.get("manga", []):
             if m.get("title") == manga.get("title"):
                 m["status"] = status
                 break
         self.app.config.save()
         self._refresh()
-        Toast(self, f"Status: {status}", kind="info")
 
     def _ctx_remove(self, manga):
         title = manga.get("title", "Unknown")
-        ConfirmDialog(
-            self, title="Remove", message=f"Remove '{title}'?",
-            on_confirm=lambda: self._do_remove(title),
-        )
+        ConfirmDialog(self, title="Remove", message=f"Remove '{title}'?",
+                      on_confirm=lambda: self._do_remove(title))
 
     def _do_remove(self, title):
         manga_list = [m for m in self.app.config.get("manga", []) if m.get("title") != title]
@@ -368,82 +286,28 @@ class LibraryPage(BasePage):
         self.app.app_state.remove_manga(title)
         self._refresh()
 
-    # ---- Bulk Operations ----
-
-    def _toggle_select_mode(self):
-        self._select_mode = not self._select_mode
-        palette = get_palette(ctk.get_appearance_mode().lower())
-        if self._select_mode:
-            self._select_btn.configure(fg_color=palette["accent"], text_color="#ffffff")
-            self._bulk_bar.pack(fill="x", padx=PAD_XL, pady=(0, PAD_SM))
-        else:
-            self._select_btn.configure(fg_color=palette["bg_secondary"], text_color=palette["fg"])
-            self._bulk_bar.pack_forget()
-            self._selected_titles.clear()
+    def _open_add_dialog(self, prefill=None):
+        from .add_manga import AddMangaDialog
+        dialog = AddMangaDialog(self, self.app, prefill=prefill)
+        dialog.exec()
         self._refresh()
-
-    def _on_select_toggle(self, manga, selected):
-        title = manga.get("title", "")
-        if selected:
-            self._selected_titles.add(title)
-        else:
-            self._selected_titles.discard(title)
-        self._bulk_count.configure(text=f"{len(self._selected_titles)} selected")
-
-    def _bulk_check(self):
-        manga_list = [m for m in self.app.config.get("manga", [])
-                      if m.get("title") in self._selected_titles]
-        if manga_list:
-            self.app.worker.check_updates(manga_list, self.app.app_state, self.app.config)
-            self.app.show_page("downloads")
-
-    def _bulk_set_status(self, status):
-        manga_list = self.app.config.get("manga", [])
-        for m in manga_list:
-            if m.get("title") in self._selected_titles:
-                m["status"] = status
-        self.app.config.save()
-        self._refresh()
-        Toast(self, f"Set {len(self._selected_titles)} manga to {status}", kind="success")
-
-    def _bulk_remove(self):
-        count = len(self._selected_titles)
-        ConfirmDialog(
-            self, title="Bulk Remove",
-            message=f"Remove {count} manga from library?",
-            on_confirm=self._do_bulk_remove,
-        )
-
-    def _do_bulk_remove(self):
-        for title in self._selected_titles:
-            self.app.app_state.remove_manga(title)
-        manga_list = [m for m in self.app.config.get("manga", [])
-                      if m.get("title") not in self._selected_titles]
-        self.app.config.set("manga", manga_list)
-        self.app.config.save()
-        self._selected_titles.clear()
-        self._refresh()
-
-    # ---- Cover / Check callbacks ----
-
-    def _on_cover_loaded(self, data):
-        if not hasattr(self, "_cover_refresh_pending") or not self._cover_refresh_pending:
-            self._cover_refresh_pending = True
-            self.after(500, self._debounced_cover_refresh)
-
-    def _debounced_cover_refresh(self):
-        self._cover_refresh_pending = False
-        if self.winfo_ismapped():
-            self._refresh()
-
-    def _on_check_done(self):
-        if self.winfo_ismapped():
-            self.after(300, self._refresh)
 
     def _check_all(self):
         manga_list = self.app.config.get("manga", [])
         if manga_list:
             self.app.worker.check_updates(manga_list, self.app.app_state, self.app.config)
             Toast(self, "Checking for updates...", kind="info")
-        else:
-            Toast(self, "No manga to check", kind="info")
+
+    def _on_cover_loaded(self, data):
+        if not hasattr(self, "_cover_pending") or not self._cover_pending:
+            self._cover_pending = True
+            QTimer.singleShot(500, self._debounced_cover_refresh)
+
+    def _debounced_cover_refresh(self):
+        self._cover_pending = False
+        if self.isVisible():
+            self._refresh()
+
+    def _on_check_done(self):
+        if self.isVisible():
+            QTimer.singleShot(300, self._refresh)

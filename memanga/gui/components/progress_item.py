@@ -2,62 +2,61 @@
 Download progress bar widget.
 """
 
-import customtkinter as ctk
-from ..theme import font, FONT_SIZE_SM, FONT_SIZE_XS, PAD_SM, PAD_MD, get_palette
+from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar
+from PySide6.QtCore import Qt
+from .. import theme as T
 
 
-class ProgressItem(ctk.CTkFrame):
+class ProgressItem(QFrame):
     """A single download progress entry."""
 
     def __init__(self, parent, task_id: str, title: str, chapter: str, on_cancel=None):
-        palette = get_palette(ctk.get_appearance_mode().lower())
-        super().__init__(parent, fg_color=palette["bg_card"], corner_radius=8)
+        super().__init__(parent)
+        self.setProperty("class", "card")
         self.task_id = task_id
-        self._on_cancel = on_cancel
 
-        inner = ctk.CTkFrame(self, fg_color="transparent")
-        inner.pack(fill="x", padx=PAD_MD, pady=PAD_SM)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(T.PAD_MD, T.PAD_SM, T.PAD_MD, T.PAD_SM)
+        layout.setSpacing(T.PAD_XS)
 
-        # Title row
-        top = ctk.CTkFrame(inner, fg_color="transparent")
-        top.pack(fill="x")
+        top = QHBoxLayout()
+        title_label = QLabel(f"{title} - Ch. {chapter}")
+        title_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; font-weight: bold;")
+        top.addWidget(title_label, 1)
 
-        ctk.CTkLabel(
-            top, text=f"{title} - Ch. {chapter}",
-            font=font(FONT_SIZE_SM, "bold"), anchor="w",
-        ).pack(side="left", fill="x", expand=True)
-
-        self._status_label = ctk.CTkLabel(
-            top, text="Waiting...",
-            font=font(FONT_SIZE_XS), text_color=palette["fg_muted"],
-        )
-        self._status_label.pack(side="right")
+        self._status_label = QLabel("Waiting...")
+        self._status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+        top.addWidget(self._status_label)
 
         if on_cancel:
-            ctk.CTkButton(
-                top, text="x", width=24, height=24,
-                font=font(FONT_SIZE_XS), corner_radius=4,
-                fg_color="transparent", hover_color=palette["error"],
-                text_color=palette["fg_muted"],
-                command=lambda: on_cancel(task_id),
-            ).pack(side="right", padx=(PAD_SM, 0))
+            cancel_btn = QPushButton("x")
+            cancel_btn.setFixedSize(22, 22)
+            cancel_btn.setStyleSheet(
+                f"background: transparent; border: none; color: {T.FG_MUTED}; font-weight: bold;"
+            )
+            cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            cancel_btn.clicked.connect(lambda: on_cancel(task_id))
+            top.addWidget(cancel_btn)
 
-        # Progress bar
-        self._progress = ctk.CTkProgressBar(inner, height=6)
-        self._progress.pack(fill="x", pady=(PAD_SM, 0))
-        self._progress.set(0)
+        layout.addLayout(top)
+
+        self._progress = QProgressBar()
+        self._progress.setMaximum(100)
+        self._progress.setValue(0)
+        self._progress.setFixedHeight(6)
+        self._progress.setTextVisible(False)
+        layout.addWidget(self._progress)
 
     def update_progress(self, current: int, total: int):
-        """Update the progress bar and status text."""
         if total > 0:
-            self._progress.set(current / total)
-            self._status_label.configure(text=f"{current}/{total} pages")
+            self._progress.setValue(int(current / total * 100))
+            self._status_label.setText(f"{current}/{total} pages")
 
     def set_complete(self, path: str = None):
-        palette = get_palette(ctk.get_appearance_mode().lower())
-        self._progress.set(1.0)
-        self._status_label.configure(text="Complete", text_color=palette["success"])
+        self._progress.setValue(100)
+        self._status_label.setText("Complete")
+        self._status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.SUCCESS};")
 
     def set_error(self, error: str):
-        palette = get_palette(ctk.get_appearance_mode().lower())
-        self._status_label.configure(text=f"Error: {error[:40]}", text_color=palette["error"])
+        self._status_label.setText(f"Error: {error[:40]}")
+        self._status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")

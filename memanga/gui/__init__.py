@@ -1,16 +1,15 @@
 """
-MeManga GUI - CustomTkinter-based graphical interface.
+MeManga GUI - PySide6-based graphical interface.
 """
+
+import sys
 
 
 def _is_frozen():
-    """Check if running inside a PyInstaller bundle."""
-    import sys
     return getattr(sys, 'frozen', False)
 
 
 def _check_playwright_browsers():
-    """Check if Playwright Firefox browser binary exists on disk."""
     from pathlib import Path
     import os
     if os.name == 'nt':
@@ -25,7 +24,6 @@ def _check_playwright_browsers():
 
 
 def _install_playwright_browsers():
-    """Run playwright install firefox. Returns True on success."""
     import subprocess
     import shutil
     try:
@@ -51,7 +49,6 @@ def _install_playwright_browsers():
         except Exception:
             pass
     if not _is_frozen():
-        import sys
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "playwright", "install", "firefox"],
@@ -63,64 +60,63 @@ def _install_playwright_browsers():
     return False
 
 
-def _ensure_browsers(app):
-    """Ensure Playwright Firefox is installed. Blocks until installed or user quits."""
-    # Already installed — nothing to do
+def _ensure_browsers():
+    """Ensure Playwright Firefox is installed. Uses Qt message boxes."""
     if _check_playwright_browsers():
         return True
 
-    from tkinter import messagebox
-    import sys
+    from PySide6.QtWidgets import QMessageBox
 
     while True:
-        answer = messagebox.askyesno(
-            "MeManga - Browser Required",
+        answer = QMessageBox.question(
+            None, "MeManga - Browser Required",
             "MeManga needs Firefox browser components to scrape manga.\n\n"
             "Download now? (~150 MB, requires internet)",
         )
 
-        if not answer:
-            # User said No — can't run without browsers
-            quit_answer = messagebox.askyesno(
-                "MeManga",
-                "MeManga cannot work without browser components.\n\n"
-                "Quit the application?",
+        if answer != QMessageBox.StandardButton.Yes:
+            quit_answer = QMessageBox.question(
+                None, "MeManga",
+                "MeManga cannot work without browser components.\n\nQuit?",
             )
-            if quit_answer:
-                app.destroy()
+            if quit_answer == QMessageBox.StandardButton.Yes:
                 sys.exit(0)
-            # User chose not to quit — loop back and ask again
             continue
 
-        # User said Yes — try to install
-        # Show a "please wait" info (non-blocking isn't possible with messagebox,
-        # so just run the install and show result after)
         installed = _install_playwright_browsers()
 
         if installed:
-            messagebox.showinfo("Success", "Browser components installed successfully!")
+            QMessageBox.information(None, "Success", "Browser components installed!")
             return True
 
-        # Install failed — let user retry or quit
-        retry = messagebox.askretrycancel(
-            "Installation Failed",
+        retry = QMessageBox.question(
+            None, "Installation Failed",
             "Browser installation failed.\n\n"
-            "Make sure you have an internet connection and try again.\n\n"
-            "You can also install manually:\n"
-            "  playwright install firefox",
+            "Make sure you have internet and try again.\n\n"
+            "You can also install manually:\n  playwright install firefox",
         )
-        if not retry:
-            app.destroy()
+        if retry != QMessageBox.StandardButton.Yes:
             sys.exit(0)
-        # retry=True → loop back
 
 
 def launch_gui():
     """Launch the MeManga GUI application."""
+    from PySide6.QtWidgets import QApplication
     from .app import MeMangaApp
-    app = MeMangaApp()
+    from ..config import Config
+    from . import theme as T
 
-    # Ensure browsers are installed — blocks until done or user quits
-    _ensure_browsers(app)
+    qapp = QApplication(sys.argv)
+    qapp.setStyle("Fusion")
 
-    app.mainloop()
+    # Load theme preference from config
+    config = Config()
+    mode = config.get("gui.theme", "dark")
+    T.apply_theme(mode)
+    qapp.setStyleSheet(T.generate_stylesheet(mode))
+
+    _ensure_browsers()
+
+    window = MeMangaApp()
+    window.show()
+    sys.exit(qapp.exec())

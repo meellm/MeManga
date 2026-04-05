@@ -25,6 +25,6 @@ keyring>=24.0.0
 playwright-stealth>=1.0.0
 
 # GUI
-customtkinter>=5.2.0
+PySide6>=6.5.0
 
 # Email (stdlib, no extra deps needed)

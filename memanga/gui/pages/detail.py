@@ -2,15 +2,15 @@
 Detail page - Manga info, edit, chapters, download from chapter, and actions.
 """
 
-import customtkinter as ctk
 from pathlib import Path
 from urllib.parse import urlparse
-from .base import BasePage
-from ..theme import (
-    PAD_XS, PAD_SM, PAD_MD, PAD_LG, PAD_XL,
-    FONT_SIZE_SM, FONT_SIZE_MD, FONT_SIZE_LG, FONT_SIZE_XL, FONT_SIZE_XS,
-    STATUS_COLORS, font, get_palette,
+from PySide6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QScrollArea, QWidget, QComboBox, QCheckBox, QLineEdit,
 )
+from PySide6.QtCore import Qt
+from .base import BasePage
+from .. import theme as T
 from ..components.toast import Toast
 from ..components.dialogs import ConfirmDialog, InputDialog
 
@@ -21,10 +21,22 @@ class DetailPage(BasePage):
     def __init__(self, parent, app):
         super().__init__(parent, app)
         self._manga = None
-        # Build scrollable frame once — _rebuild only clears its children
-        self._content_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        self._content_frame.pack(fill="both", expand=True)
         self._editing = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        root.addWidget(self._scroll)
+
+        self._scroll_content = QWidget()
+        self._layout = QVBoxLayout(self._scroll_content)
+        self._layout.setContentsMargins(T.PAD_XL, T.PAD_LG, T.PAD_XL, T.PAD_XL)
+        self._layout.setSpacing(0)
+        self._scroll.setWidget(self._scroll_content)
 
     def on_show(self, **kwargs):
         manga = kwargs.get("manga")
@@ -49,113 +61,135 @@ class DetailPage(BasePage):
             backup_url = ""
         return primary, primary_url, backup, backup_url
 
-    def _rebuild(self):
-        # Hide during rebuild so widgets don't appear one-by-one
-        self._content_frame.pack_forget()
-        for child in self._content_frame.winfo_children():
-            child.destroy()
+    def _clear_layout(self):
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+            elif item.layout():
+                self._clear_child_layout(item.layout())
 
-        palette = get_palette(ctk.get_appearance_mode().lower())
+    def _clear_child_layout(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+            elif item.layout():
+                self._clear_child_layout(item.layout())
+
+    def _rebuild(self):
+        self._clear_layout()
+
         manga = self._manga
         title = manga.get("title", "Unknown")
         state_data = self.app.app_state.get_manga_state(title)
         primary, primary_url, backup, backup_url = self._get_source_display(manga)
 
-        # Back button
-        back_frame = ctk.CTkFrame(self._content_frame, fg_color="transparent")
-        back_frame.pack(fill="x", padx=PAD_XL, pady=(PAD_LG, PAD_SM))
+        # ── Back button ──
+        back_btn = QPushButton("<  Back")
+        back_btn.setProperty("class", "flat")
+        back_btn.setFixedHeight(28)
+        back_btn.setFixedWidth(80)
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.clicked.connect(lambda: self.app.show_page("library"))
+        self._layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        self._layout.addSpacing(T.PAD_MD)
 
-        ctk.CTkButton(
-            back_frame, text="< Back to Library", width=140, height=30,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color="transparent", hover_color=palette["bg_card"],
-            text_color=palette["fg_secondary"],
-            command=lambda: self.app.show_page("library"),
-        ).pack(side="left")
+        # ── Main row: cover left + info right ──
+        main_row = QHBoxLayout()
+        main_row.setSpacing(T.PAD_XL)
 
-        # Main layout: cover left + info right
-        main = ctk.CTkFrame(self._content_frame, fg_color="transparent")
-        main.pack(fill="x", padx=PAD_XL, pady=PAD_MD)
-
-        # Left: cover
+        # Cover
         cover_url = manga.get("cover_url")
-        cover_img = self.app.cover_cache.get_cover(cover_url, size=(200, 280))
-        ctk.CTkLabel(main, text="", image=cover_img).pack(side="left", anchor="n", padx=(0, PAD_XL))
+        cover_pixmap = self.app.cover_cache.get_cover(cover_url, size=(200, 280))
+        cover_label = QLabel()
+        cover_label.setFixedSize(200, 280)
+        cover_label.setPixmap(cover_pixmap.scaled(
+            200, 280,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        ))
+        cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cover_label.setStyleSheet(f"border-radius: {T.CARD_RADIUS}px; border: 1px solid {T.BORDER};")
+        main_row.addWidget(cover_label, alignment=Qt.AlignmentFlag.AlignTop)
 
-        # Right: info
-        info = ctk.CTkFrame(main, fg_color="transparent")
-        info.pack(side="left", fill="both", expand=True, anchor="n")
+        # Info column
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(T.PAD_XS)
+        info_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # Title
-        ctk.CTkLabel(
-            info, text=title, font=font(FONT_SIZE_XL, "bold"), anchor="w",
-        ).pack(fill="x")
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XL}pt; font-weight: bold;")
+        title_label.setWordWrap(True)
+        info_layout.addWidget(title_label)
 
         # Source info
-        ctk.CTkLabel(
-            info, text=f"Primary: {primary}",
-            font=font(FONT_SIZE_SM), text_color=palette["fg_muted"], anchor="w",
-        ).pack(fill="x", pady=(PAD_SM, 0))
+        primary_label = QLabel(f"Primary: {primary}")
+        primary_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
+        info_layout.addWidget(primary_label)
 
         if primary_url:
-            ctk.CTkLabel(
-                info, text=f"  {primary_url}",
-                font=font(FONT_SIZE_XS), text_color=palette["fg_muted"], anchor="w",
-            ).pack(fill="x")
+            url_label = QLabel(f"  {primary_url}")
+            url_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+            url_label.setWordWrap(True)
+            info_layout.addWidget(url_label)
 
         if backup:
-            ctk.CTkLabel(
-                info, text=f"Backup: {backup}",
-                font=font(FONT_SIZE_SM), text_color=palette["fg_muted"], anchor="w",
-            ).pack(fill="x", pady=(PAD_SM, 0))
+            backup_label = QLabel(f"Backup: {backup}")
+            backup_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
+            info_layout.addWidget(backup_label)
             if backup_url:
-                ctk.CTkLabel(
-                    info, text=f"  {backup_url}",
-                    font=font(FONT_SIZE_XS), text_color=palette["fg_muted"], anchor="w",
-                ).pack(fill="x")
+                bu_label = QLabel(f"  {backup_url}")
+                bu_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+                bu_label.setWordWrap(True)
+                info_layout.addWidget(bu_label)
 
             delay = manga.get("fallback_delay_days", 2)
-            ctk.CTkLabel(
-                info, text=f"Fallback delay: {delay} days",
-                font=font(FONT_SIZE_XS), text_color=palette["fg_muted"], anchor="w",
-            ).pack(fill="x")
+            delay_label = QLabel(f"Fallback delay: {delay} days")
+            delay_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+            info_layout.addWidget(delay_label)
+
+        info_layout.addSpacing(T.PAD_SM)
 
         # Status dropdown
-        status = manga.get("status", "reading")
-        status_frame = ctk.CTkFrame(info, fg_color="transparent")
-        status_frame.pack(fill="x", pady=PAD_MD)
+        status_row = QHBoxLayout()
+        status_lbl = QLabel("Status:")
+        status_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+        status_row.addWidget(status_lbl)
 
-        ctk.CTkLabel(status_frame, text="Status:", font=font(FONT_SIZE_SM)).pack(side="left")
-        self._status_menu = ctk.CTkOptionMenu(
-            status_frame,
-            values=["reading", "on-hold", "dropped", "completed"],
-            font=font(FONT_SIZE_SM), height=28, width=130,
-            command=self._on_status_change,
-        )
-        self._status_menu.set(status)
-        self._status_menu.pack(side="left", padx=PAD_SM)
+        self._status_combo = QComboBox()
+        self._status_combo.addItems(["reading", "on-hold", "dropped", "completed"])
+        self._status_combo.setCurrentText(manga.get("status", "reading"))
+        self._status_combo.setFixedHeight(28)
+        self._status_combo.setFixedWidth(130)
+        self._status_combo.currentTextChanged.connect(self._on_status_change)
+        status_row.addWidget(self._status_combo)
+        status_row.addStretch()
+        info_layout.addLayout(status_row)
 
-        # Kindle toggle (per-manga, respects global setting)
+        # Kindle toggle
         global_email_on = (self.app.config.delivery_mode == "email" and self.app.config.email_enabled)
         manga_kindle = manga.get("send_to_kindle", True)
 
-        kindle_frame = ctk.CTkFrame(info, fg_color="transparent")
-        kindle_frame.pack(fill="x", pady=(0, PAD_SM))
-
-        self._kindle_var = ctk.BooleanVar(value=manga_kindle and global_email_on)
-        self._kindle_check = ctk.CTkCheckBox(
-            kindle_frame, text="Send to Kindle after download",
-            font=font(FONT_SIZE_SM), variable=self._kindle_var,
-            command=self._on_kindle_toggle,
-        )
-        self._kindle_check.pack(side="left")
+        kindle_row = QHBoxLayout()
+        self._kindle_check = QCheckBox("Send to Kindle after download")
+        self._kindle_check.setChecked(manga_kindle and global_email_on)
+        self._kindle_check.stateChanged.connect(self._on_kindle_toggle)
+        kindle_row.addWidget(self._kindle_check)
 
         if not global_email_on:
-            self._kindle_check.configure(state="disabled")
-            ctk.CTkLabel(
-                kindle_frame, text="  (enable email in Settings first)",
-                font=font(FONT_SIZE_XS), text_color=palette["fg_muted"],
-            ).pack(side="left")
+            self._kindle_check.setEnabled(False)
+            hint = QLabel("(enable email in Settings first)")
+            hint.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+            kindle_row.addWidget(hint)
+
+        kindle_row.addStretch()
+        info_layout.addLayout(kindle_row)
+
+        info_layout.addSpacing(T.PAD_SM)
 
         # Stats
         downloaded = state_data.get("downloaded", [])
@@ -165,144 +199,150 @@ class DetailPage(BasePage):
             last_updated = last_updated.split("T")[0]
 
         stats_text = f"Downloaded: {len(downloaded)} chapters  |  Last: Ch. {last_ch}  |  Updated: {last_updated}"
-        ctk.CTkLabel(
-            info, text=stats_text,
-            font=font(FONT_SIZE_SM), text_color=palette["fg_secondary"], anchor="w",
-        ).pack(fill="x", pady=(0, PAD_MD))
+        stats_label = QLabel(stats_text)
+        stats_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_SECONDARY};")
+        info_layout.addWidget(stats_label)
+
+        info_layout.addSpacing(T.PAD_MD)
 
         # Action buttons - row 1
-        actions1 = ctk.CTkFrame(info, fg_color="transparent")
-        actions1.pack(fill="x", pady=(0, PAD_SM))
+        actions1 = QHBoxLayout()
+        actions1.setSpacing(T.PAD_SM)
 
-        ctk.CTkButton(
-            actions1, text="Check Updates", height=34, width=130,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["accent"], hover_color=palette["accent_hover"],
-            command=self._check_updates,
-        ).pack(side="left", padx=(0, PAD_SM))
+        check_btn = QPushButton("Check Updates")
+        check_btn.setProperty("class", "accent")
+        check_btn.setFixedHeight(34)
+        check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        check_btn.clicked.connect(self._check_updates)
+        actions1.addWidget(check_btn)
 
-        ctk.CTkButton(
-            actions1, text="Download From...", height=34, width=140,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["bg_secondary"], hover_color=palette["border"],
-            text_color=palette["fg"],
-            command=self._download_from_chapter,
-        ).pack(side="left", padx=(0, PAD_SM))
+        dl_from_btn = QPushButton("Download From...")
+        dl_from_btn.setFixedHeight(34)
+        dl_from_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        dl_from_btn.clicked.connect(self._download_from_chapter)
+        actions1.addWidget(dl_from_btn)
 
-        ctk.CTkButton(
-            actions1, text="Download All", height=34, width=120,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["bg_secondary"], hover_color=palette["border"],
-            text_color=palette["fg"],
-            command=self._download_all,
-        ).pack(side="left")
+        dl_all_btn = QPushButton("Download All")
+        dl_all_btn.setFixedHeight(34)
+        dl_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        dl_all_btn.clicked.connect(self._download_all)
+        actions1.addWidget(dl_all_btn)
+
+        actions1.addStretch()
+        info_layout.addLayout(actions1)
 
         # Action buttons - row 2
-        actions2 = ctk.CTkFrame(info, fg_color="transparent")
-        actions2.pack(fill="x", pady=(0, PAD_LG))
+        actions2 = QHBoxLayout()
+        actions2.setSpacing(T.PAD_SM)
 
-        ctk.CTkButton(
-            actions2, text="Edit Manga", height=34, width=110,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["bg_secondary"], hover_color=palette["border"],
-            text_color=palette["fg"],
-            command=self._show_edit_form,
-        ).pack(side="left", padx=(0, PAD_SM))
+        edit_btn = QPushButton("Edit Manga")
+        edit_btn.setFixedHeight(34)
+        edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        edit_btn.clicked.connect(self._show_edit_form)
+        actions2.addWidget(edit_btn)
 
-        ctk.CTkButton(
-            actions2, text="Remove", height=34, width=100,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["error"], hover_color="#b91c1c",
-            command=self._confirm_remove,
-        ).pack(side="left")
+        remove_btn = QPushButton("Remove")
+        remove_btn.setProperty("class", "danger")
+        remove_btn.setFixedHeight(34)
+        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        remove_btn.clicked.connect(self._confirm_remove)
+        actions2.addWidget(remove_btn)
 
-        # Edit form (hidden by default)
-        self._edit_frame = ctk.CTkFrame(self._content_frame, fg_color=palette["bg_card"], corner_radius=10)
+        actions2.addStretch()
+        info_layout.addLayout(actions2)
 
-        edit_inner = ctk.CTkFrame(self._edit_frame, fg_color="transparent")
-        edit_inner.pack(fill="x", padx=PAD_LG, pady=PAD_LG)
+        main_row.addLayout(info_layout, 1)
 
-        ctk.CTkLabel(edit_inner, text="Edit Manga", font=font(FONT_SIZE_LG, "bold")).pack(anchor="w")
+        main_wrapper = QWidget()
+        main_wrapper.setLayout(main_row)
+        self._layout.addWidget(main_wrapper)
 
-        ctk.CTkLabel(edit_inner, text="Title:", font=font(FONT_SIZE_SM)).pack(anchor="w", pady=(PAD_MD, 0))
-        self._edit_title = ctk.CTkEntry(edit_inner, font=font(FONT_SIZE_SM), height=32)
-        self._edit_title.pack(fill="x", pady=(PAD_XS, 0))
-        self._edit_title.insert(0, title)
+        # ── Edit form (hidden by default) ──
+        self._edit_frame = QFrame()
+        self._edit_frame.setProperty("class", "card")
+        edit_inner = QVBoxLayout(self._edit_frame)
+        edit_inner.setContentsMargins(T.PAD_LG, T.PAD_LG, T.PAD_LG, T.PAD_LG)
+        edit_inner.setSpacing(T.PAD_SM)
 
-        ctk.CTkLabel(edit_inner, text="Primary URL:", font=font(FONT_SIZE_SM)).pack(anchor="w", pady=(PAD_MD, 0))
-        self._edit_url = ctk.CTkEntry(edit_inner, font=font(FONT_SIZE_SM), height=32)
-        self._edit_url.pack(fill="x", pady=(PAD_XS, 0))
-        self._edit_url.insert(0, primary_url)
+        edit_title_lbl = QLabel("Edit Manga")
+        edit_title_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
+        edit_inner.addWidget(edit_title_lbl)
 
-        ctk.CTkLabel(edit_inner, text="Backup URL (leave empty to remove):", font=font(FONT_SIZE_SM)).pack(anchor="w", pady=(PAD_MD, 0))
-        self._edit_backup = ctk.CTkEntry(edit_inner, font=font(FONT_SIZE_SM), height=32)
-        self._edit_backup.pack(fill="x", pady=(PAD_XS, 0))
-        self._edit_backup.insert(0, backup_url)
+        edit_inner.addWidget(QLabel("Title:"))
+        self._edit_title = QLineEdit(title)
+        self._edit_title.setFixedHeight(32)
+        edit_inner.addWidget(self._edit_title)
 
-        edit_btns = ctk.CTkFrame(edit_inner, fg_color="transparent")
-        edit_btns.pack(fill="x", pady=(PAD_LG, 0))
+        edit_inner.addWidget(QLabel("Primary URL:"))
+        self._edit_url = QLineEdit(primary_url)
+        self._edit_url.setFixedHeight(32)
+        edit_inner.addWidget(self._edit_url)
 
-        ctk.CTkButton(
-            edit_btns, text="Save Changes", height=34, width=120,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["accent"], hover_color=palette["accent_hover"],
-            command=self._save_edit,
-        ).pack(side="left", padx=(0, PAD_SM))
+        edit_inner.addWidget(QLabel("Backup URL (leave empty to remove):"))
+        self._edit_backup = QLineEdit(backup_url)
+        self._edit_backup.setFixedHeight(32)
+        edit_inner.addWidget(self._edit_backup)
 
-        ctk.CTkButton(
-            edit_btns, text="Cancel", height=34, width=80,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color=palette["bg_secondary"], hover_color=palette["border"],
-            text_color=palette["fg"],
-            command=self._hide_edit_form,
-        ).pack(side="left")
+        edit_btns = QHBoxLayout()
+        save_edit_btn = QPushButton("Save Changes")
+        save_edit_btn.setProperty("class", "accent")
+        save_edit_btn.setFixedHeight(34)
+        save_edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_edit_btn.clicked.connect(self._save_edit)
+        edit_btns.addWidget(save_edit_btn)
 
-        # Chapter list section
-        ch_header = ctk.CTkFrame(self._content_frame, fg_color="transparent")
-        ch_header.pack(fill="x", padx=PAD_XL, pady=(PAD_MD, PAD_SM))
+        cancel_edit_btn = QPushButton("Cancel")
+        cancel_edit_btn.setFixedHeight(34)
+        cancel_edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_edit_btn.clicked.connect(self._hide_edit_form)
+        edit_btns.addWidget(cancel_edit_btn)
 
-        ctk.CTkLabel(
-            ch_header, text=f"Downloaded Chapters ({len(downloaded)})",
-            font=font(FONT_SIZE_LG, "bold"), anchor="w",
-        ).pack(side="left")
+        edit_btns.addStretch()
+        edit_inner.addLayout(edit_btns)
+
+        self._edit_frame.setVisible(False)
+        self._layout.addWidget(self._edit_frame)
+
+        # ── Chapter list section ──
+        self._layout.addSpacing(T.PAD_MD)
+        ch_header = QLabel(f"Downloaded Chapters ({len(downloaded)})")
+        ch_header.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
+        self._layout.addWidget(ch_header)
+        self._layout.addSpacing(T.PAD_SM)
 
         if downloaded:
             for ch_num in reversed(downloaded):
-                ch_frame = ctk.CTkFrame(
-                    self._content_frame, fg_color=palette["bg_card"],
-                    corner_radius=6, height=40,
-                )
-                ch_frame.pack(fill="x", padx=PAD_XL, pady=1)
-                ch_frame.pack_propagate(False)
+                ch_frame = QFrame()
+                ch_frame.setProperty("class", "card")
+                ch_frame.setFixedHeight(40)
+                ch_row = QHBoxLayout(ch_frame)
+                ch_row.setContentsMargins(T.PAD_MD, 0, T.PAD_MD, 0)
 
-                ctk.CTkLabel(
-                    ch_frame, text=f"  Chapter {ch_num}",
-                    font=font(FONT_SIZE_SM), anchor="w",
-                ).pack(side="left", fill="x", expand=True)
+                ch_label = QLabel(f"Chapter {ch_num}")
+                ch_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+                ch_row.addWidget(ch_label, 1)
 
-                ctk.CTkButton(
-                    ch_frame, text="Read", width=60, height=26,
-                    font=font(FONT_SIZE_XS), corner_radius=4,
-                    fg_color=palette["accent"], hover_color=palette["accent_hover"],
-                    command=lambda c=ch_num: self._read_chapter(c),
-                ).pack(side="right", padx=PAD_SM)
+                read_btn = QPushButton("Read")
+                read_btn.setProperty("class", "accent")
+                read_btn.setFixedSize(60, 26)
+                read_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                read_btn.clicked.connect(lambda checked=False, c=ch_num: self._read_chapter(c))
+                ch_row.addWidget(read_btn)
+
+                self._layout.addWidget(ch_frame)
         else:
-            ctk.CTkLabel(
-                self._content_frame,
-                text="No chapters downloaded yet. Use 'Check Updates' or 'Download From...' to start.",
-                font=font(FONT_SIZE_SM), text_color=palette["fg_muted"],
-            ).pack(anchor="w", padx=PAD_XL, pady=PAD_SM)
+            empty = QLabel("No chapters downloaded yet. Use 'Check Updates' or 'Download From...' to start.")
+            empty.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
+            self._layout.addWidget(empty)
 
-        # Show everything at once
-        self._content_frame.pack(fill="both", expand=True)
+        self._layout.addStretch()
 
-    # ---- Status ----
+    # ── Status ──
 
-    def _on_kindle_toggle(self):
-        """Toggle per-manga kindle delivery."""
+    def _on_kindle_toggle(self, state):
         if not self._manga:
             return
-        val = self._kindle_var.get()
+        val = self._kindle_check.isChecked()
         manga_list = self.app.config.get("manga", [])
         for m in manga_list:
             if m.get("title") == self._manga.get("title"):
@@ -312,7 +352,7 @@ class DetailPage(BasePage):
         self.app.config.save()
         kind = "info" if val else "warning"
         msg = "Kindle delivery enabled" if val else "Kindle delivery disabled"
-        Toast(self._content_frame, msg, kind=kind)
+        Toast(self, msg, kind=kind)
 
     def _on_status_change(self, new_status):
         if not self._manga:
@@ -324,39 +364,37 @@ class DetailPage(BasePage):
                 self._manga = m
                 break
         self.app.config.save()
-        Toast(self._content_frame, f"Status: {new_status}", kind="info")
+        Toast(self, f"Status: {new_status}", kind="info")
 
-    # ---- Edit ----
+    # ── Edit ──
 
     def _show_edit_form(self):
         if not self._editing:
-            self._edit_frame.pack(fill="x", padx=PAD_XL, pady=PAD_MD)
+            self._edit_frame.setVisible(True)
             self._editing = True
 
     def _hide_edit_form(self):
-        self._edit_frame.pack_forget()
+        self._edit_frame.setVisible(False)
         self._editing = False
 
     def _save_edit(self):
         if not self._manga:
             return
 
-        new_title = self._edit_title.get().strip()
-        new_url = self._edit_url.get().strip()
-        new_backup = self._edit_backup.get().strip()
+        new_title = self._edit_title.text().strip()
+        new_url = self._edit_url.text().strip()
+        new_backup = self._edit_backup.text().strip()
         old_title = self._manga.get("title", "")
 
         if not new_title:
-            Toast(self._content_frame, "Title cannot be empty", kind="error")
+            Toast(self, "Title cannot be empty", kind="error")
             return
 
         manga_list = self.app.config.get("manga", [])
         for m in manga_list:
             if m.get("title") == old_title:
-                # Update title
                 m["title"] = new_title
 
-                # Update URLs - handle both single and multi-source formats
                 if new_url:
                     new_domain = urlparse(new_url).netloc.replace("www.", "")
                     if new_backup:
@@ -375,7 +413,6 @@ class DetailPage(BasePage):
                         m["source"] = new_domain
                         m["url"] = new_url
 
-                # Rename state if title changed
                 if new_title != old_title:
                     old_state = self.app.app_state.get_manga_state(old_title)
                     if old_state:
@@ -387,10 +424,10 @@ class DetailPage(BasePage):
 
         self.app.config.save()
         self._editing = False
-        Toast(self._content_frame, "Manga updated", kind="success")
+        Toast(self, "Manga updated", kind="success")
         self._rebuild()
 
-    # ---- Downloads ----
+    # ── Downloads ──
 
     def _check_updates(self):
         if self._manga:
@@ -399,7 +436,6 @@ class DetailPage(BasePage):
             Toast(self, "Checking for updates...", kind="info")
 
     def _download_from_chapter(self):
-        """Prompt for a chapter number and download from there."""
         if not self._manga:
             return
         InputDialog(
@@ -415,7 +451,7 @@ class DetailPage(BasePage):
         try:
             from_ch = float(value)
         except ValueError:
-            Toast(self._content_frame, "Invalid chapter number", kind="error")
+            Toast(self, "Invalid chapter number", kind="error")
             return
 
         title = self._manga.get("title", "")
@@ -423,12 +459,13 @@ class DetailPage(BasePage):
 
         self.app.worker.check_updates([self._manga], self.app.app_state, self.app.config)
         self.app.show_page("downloads")
-        Toast(self, f"Downloading from chapter {int(from_ch) if from_ch == int(from_ch) else from_ch}...", kind="info")
+        ch_display = int(from_ch) if from_ch == int(from_ch) else from_ch
+        Toast(self, f"Downloading from chapter {ch_display}...", kind="info")
 
     def _download_all(self):
         self._do_download_from("0")
 
-    # ---- Remove ----
+    # ── Remove ──
 
     def _confirm_remove(self):
         if not self._manga:
@@ -449,7 +486,7 @@ class DetailPage(BasePage):
         self.app.app_state.remove_manga(title)
         self.app.show_page("library")
 
-    # ---- Reader ----
+    # ── Reader ──
 
     def _read_chapter(self, chapter_num):
         self.app.show_page("reader", manga=self._manga, chapter=chapter_num)

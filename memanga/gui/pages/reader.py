@@ -7,18 +7,18 @@ import zipfile
 from pathlib import Path
 from typing import List, Optional
 
-import customtkinter as ctk
-from PIL import Image
+from PySide6.QtWidgets import (
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QScrollArea, QWidget,
+)
+from PySide6.QtGui import QPixmap, QImage, QKeyEvent, QShortcut
+from PySide6.QtCore import Qt, QByteArray, QBuffer
 
 from .base import BasePage
-from ..theme import (
-    PAD_SM, PAD_MD, PAD_LG, PAD_XL,
-    FONT_SIZE_SM, FONT_SIZE_MD, FONT_SIZE_LG, FONT_SIZE_XL, FONT_SIZE_XS,
-    font, get_palette,
-)
+from .. import theme as T
 
 
-def _extract_images_from_file(filepath: Path) -> List[Image.Image]:
+def _extract_images_from_file(filepath: Path) -> List[QImage]:
     """Extract images from a downloaded chapter file."""
     suffix = filepath.suffix.lower()
     images = []
@@ -30,8 +30,10 @@ def _extract_images_from_file(filepath: Path) -> List[Image.Image]:
                 ext = Path(name).suffix.lower()
                 if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
                     data = zf.read(name)
-                    img = Image.open(io.BytesIO(data))
-                    images.append(img)
+                    img = QImage()
+                    img.loadFromData(data)
+                    if not img.isNull():
+                        images.append(img)
 
     elif suffix == ".pdf":
         try:
@@ -39,18 +41,25 @@ def _extract_images_from_file(filepath: Path) -> List[Image.Image]:
             doc = fitz.open(str(filepath))
             for page in doc:
                 pix = page.get_pixmap(dpi=150)
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                images.append(img)
+                img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
+                # Make a deep copy since pix.samples is transient
+                images.append(img.copy())
             doc.close()
         except ImportError:
             try:
+                from PIL import Image as PILImage
                 import pikepdf
                 pdf = pikepdf.open(str(filepath))
                 for page in pdf.pages:
                     for img_key in page.images:
                         raw = page.images[img_key]
-                        pil_img = Image.open(io.BytesIO(raw.get_raw_stream_buffer()))
-                        images.append(pil_img)
+                        pil_img = PILImage.open(io.BytesIO(raw.get_raw_stream_buffer()))
+                        buf = io.BytesIO()
+                        pil_img.save(buf, format="PNG")
+                        qimg = QImage()
+                        qimg.loadFromData(buf.getvalue())
+                        if not qimg.isNull():
+                            images.append(qimg)
                 pdf.close()
             except Exception:
                 pass
@@ -63,21 +72,25 @@ def _extract_images_from_file(filepath: Path) -> List[Image.Image]:
                     ext = Path(name).suffix.lower()
                     if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
                         data = zf.read(name)
-                        img = Image.open(io.BytesIO(data))
-                        images.append(img)
+                        img = QImage()
+                        img.loadFromData(data)
+                        if not img.isNull():
+                            images.append(img)
         except Exception:
             pass
 
     return images
 
 
-def _extract_images_from_folder(folder: Path) -> List[Image.Image]:
+def _extract_images_from_folder(folder: Path) -> List[QImage]:
     extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     images = []
     files = sorted([f for f in folder.iterdir() if f.suffix.lower() in extensions])
     for f in files:
         try:
-            images.append(Image.open(f))
+            img = QImage(str(f))
+            if not img.isNull():
+                images.append(img)
         except Exception:
             pass
     return images
@@ -95,14 +108,16 @@ class ReaderPage(BasePage):
         super().__init__(parent, app)
         self._manga = None
         self._chapter = None
-        self._images: List[Image.Image] = []
-        self._ctk_images: list = []
-        self._content = None
-        self._scroll = None
+        self._images: List[QImage] = []
+        self._page_labels: list = []
         self._zoom_level = 1.0
         self._fit_width = True
-        self._page_labels: list = []
+        self._content: Optional[QWidget] = None
+        self._scroll = None
+        self._image_layout = None
         self._page_indicator = None
+
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def on_show(self, **kwargs):
         manga = kwargs.get("manga")
@@ -119,40 +134,30 @@ class ReaderPage(BasePage):
             title = self._manga.get("title", "")
             if title:
                 self.app.app_state.set_reading_progress(title, str(self._chapter))
-
-        # Bind keyboard shortcuts (store binding ID for clean removal)
-        self._key_bind_id = self.app.bind("<KeyPress>", self._on_key, add="+")
+        self.setFocus()
 
     def on_hide(self):
         self._images.clear()
-        self._ctk_images.clear()
         self._page_labels.clear()
-        if hasattr(self, "_key_bind_id") and self._key_bind_id:
-            try:
-                self.app.unbind("<KeyPress>", self._key_bind_id)
-            except Exception:
-                pass
-            self._key_bind_id = None
 
-    def _on_key(self, event):
-        """Handle keyboard shortcuts."""
-        key = event.keysym.lower()
-
-        if key == "escape":
+    def keyPressEvent(self, event: QKeyEvent):
+        key = event.key()
+        if key == Qt.Key.Key_Escape:
             if self._manga:
                 self.app.show_page("detail", manga=self._manga)
             return
-
-        if key in ("plus", "equal"):
+        if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
             self._zoom_in()
-        elif key == "minus":
+        elif key == Qt.Key.Key_Minus:
             self._zoom_out()
-        elif key == "f":
+        elif key == Qt.Key.Key_F:
             self._toggle_fit_width()
-        elif key == "n":
+        elif key == Qt.Key.Key_N:
             self._go_next_chapter()
-        elif key == "p":
+        elif key == Qt.Key.Key_P:
             self._go_prev_chapter()
+        else:
+            super().keyPressEvent(event)
 
     def _zoom_in(self):
         if self._zoom_level < self.ZOOM_MAX:
@@ -169,29 +174,27 @@ class ReaderPage(BasePage):
         self._rebuild_images()
 
     def _rebuild_images(self):
-        """Re-render images at current zoom level."""
         if not self._scroll or not self._images:
             return
 
-        # Clear existing image labels
         for lbl in self._page_labels:
-            lbl.destroy()
+            try:
+                lbl.deleteLater()
+            except Exception:
+                pass
         self._page_labels.clear()
-        self._ctk_images.clear()
 
-        self._render_images(self._scroll)
+        self._render_images()
 
-        # Update zoom indicator
         if self._page_indicator:
-            self._page_indicator.configure(
-                text=f"Zoom: {int(self._zoom_level * 100)}%  |  {len(self._images)} pages"
+            self._page_indicator.setText(
+                f"Zoom: {int(self._zoom_level * 100)}%  |  {len(self._images)} pages"
             )
 
-    def _render_images(self, scroll):
-        """Render all images into the scroll frame."""
+    def _render_images(self):
         if self._fit_width:
             try:
-                max_w = min(scroll.winfo_width() - 40, 1200)
+                max_w = min(self._scroll.width() - 40, 1200)
             except Exception:
                 max_w = self.DEFAULT_MAX_WIDTH
             if max_w < 300:
@@ -201,73 +204,66 @@ class ReaderPage(BasePage):
 
         max_w = int(max_w * self._zoom_level)
 
-        for pil_img in self._images:
-            w, h = pil_img.size
+        for qimg in self._images:
+            w, h = qimg.width(), qimg.height()
             if w > max_w:
                 ratio = max_w / w
-                w, h = int(w * ratio), int(h * ratio)
+                new_w, new_h = int(w * ratio), int(h * ratio)
             else:
-                w = int(w * self._zoom_level)
-                h = int(h * self._zoom_level)
+                new_w = int(w * self._zoom_level)
+                new_h = int(h * self._zoom_level)
 
-            ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(w, h))
-            self._ctk_images.append(ctk_img)
-
-            lbl = ctk.CTkLabel(scroll, text="", image=ctk_img)
-            lbl.pack(pady=1)
+            pm = QPixmap.fromImage(qimg).scaled(
+                new_w, new_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            lbl = QLabel()
+            lbl.setPixmap(pm)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._image_layout.addWidget(lbl)
             self._page_labels.append(lbl)
 
     def _load_chapter(self):
+        # Tear down previous content
         if self._content:
-            self._content.destroy()
+            self._content.deleteLater()
+            self._content = None
 
-        self._content = ctk.CTkFrame(self, fg_color="transparent")
-        self._content.pack(fill="both", expand=True)
+        self._content = QWidget()
+        content_layout = QVBoxLayout(self._content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
 
-        palette = get_palette(ctk.get_appearance_mode().lower())
+        # Ensure this widget has a layout
+        if not self.layout():
+            QVBoxLayout(self)
+            self.layout().setContentsMargins(0, 0, 0, 0)
+            self.layout().setSpacing(0)
+        self.layout().addWidget(self._content)
+
         title = self._manga.get("title", "Unknown")
 
-        # Top bar
-        top = ctk.CTkFrame(self._content, fg_color=palette["bg_card"], height=44)
-        top.pack(fill="x")
-        top.pack_propagate(False)
+        # ── Top bar ──
+        top = QFrame()
+        top.setFixedHeight(44)
+        top.setStyleSheet(f"background-color: {T.BG_CARD};")
+        top_layout = QHBoxLayout(top)
+        top_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
+        top_layout.setSpacing(T.PAD_SM)
 
-        ctk.CTkButton(
-            top, text="< Back", width=80, height=30,
-            font=font(FONT_SIZE_SM), corner_radius=6,
-            fg_color="transparent", hover_color=palette["bg_secondary"],
-            text_color=palette["fg_secondary"],
-            command=lambda: self.app.show_page("detail", manga=self._manga),
-        ).pack(side="left", padx=PAD_SM, pady=6)
+        back_btn = QPushButton("< Back")
+        back_btn.setProperty("class", "flat")
+        back_btn.setFixedHeight(30)
+        back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.clicked.connect(lambda: self.app.show_page("detail", manga=self._manga))
+        top_layout.addWidget(back_btn)
 
-        ctk.CTkLabel(
-            top, text=f"{title} - Chapter {self._chapter}",
-            font=font(FONT_SIZE_MD, "bold"),
-        ).pack(side="left", padx=PAD_SM)
+        title_label = QLabel(f"{title} - Chapter {self._chapter}")
+        title_label.setStyleSheet(f"font-size: {T.FONT_SIZE_MD}pt; font-weight: bold;")
+        top_layout.addWidget(title_label)
 
-        # Zoom controls
-        zoom_frame = ctk.CTkFrame(top, fg_color="transparent")
-        zoom_frame.pack(side="right", padx=PAD_SM)
-
-        ctk.CTkButton(
-            zoom_frame, text="-", width=28, height=26,
-            font=font(FONT_SIZE_SM), corner_radius=4,
-            fg_color=palette["bg_secondary"], hover_color=palette["border"],
-            text_color=palette["fg"], command=self._zoom_out,
-        ).pack(side="left", padx=1)
-
-        self._page_indicator = ctk.CTkLabel(
-            zoom_frame, text=f"100%  |  ...",
-            font=font(FONT_SIZE_XS), text_color=palette["fg_muted"], width=120,
-        )
-        self._page_indicator.pack(side="left", padx=PAD_SM)
-
-        ctk.CTkButton(
-            zoom_frame, text="+", width=28, height=26,
-            font=font(FONT_SIZE_SM), corner_radius=4,
-            fg_color=palette["bg_secondary"], hover_color=palette["border"],
-            text_color=palette["fg"], command=self._zoom_in,
-        ).pack(side="left", padx=1)
+        top_layout.addStretch()
 
         # Chapter navigation
         downloaded = self.app.app_state.get_downloaded_chapters(title)
@@ -276,70 +272,101 @@ class ReaderPage(BasePage):
         except ValueError:
             idx = -1
 
-        nav = ctk.CTkFrame(top, fg_color="transparent")
-        nav.pack(side="right", padx=PAD_SM)
-
         if idx > 0:
             prev_ch = downloaded[idx - 1]
-            ctk.CTkButton(
-                nav, text="< Prev", width=70, height=26,
-                font=font(FONT_SIZE_XS), corner_radius=4,
-                fg_color=palette["bg_secondary"], hover_color=palette["border"],
-                text_color=palette["fg"],
-                command=lambda c=prev_ch: self._navigate_chapter(c),
-            ).pack(side="left", padx=2)
+            prev_btn = QPushButton("< Prev")
+            prev_btn.setFixedHeight(26)
+            prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            prev_btn.clicked.connect(lambda checked=False, c=prev_ch: self._navigate_chapter(c))
+            top_layout.addWidget(prev_btn)
 
         if idx >= 0 and idx < len(downloaded) - 1:
             next_ch = downloaded[idx + 1]
-            ctk.CTkButton(
-                nav, text="Next >", width=70, height=26,
-                font=font(FONT_SIZE_XS), corner_radius=4,
-                fg_color=palette["bg_secondary"], hover_color=palette["border"],
-                text_color=palette["fg"],
-                command=lambda c=next_ch: self._navigate_chapter(c),
-            ).pack(side="left", padx=2)
+            next_btn = QPushButton("Next >")
+            next_btn.setFixedHeight(26)
+            next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            next_btn.clicked.connect(lambda checked=False, c=next_ch: self._navigate_chapter(c))
+            top_layout.addWidget(next_btn)
 
-        # Load images
+        # Zoom controls
+        zoom_minus = QPushButton("-")
+        zoom_minus.setFixedSize(28, 26)
+        zoom_minus.setCursor(Qt.CursorShape.PointingHandCursor)
+        zoom_minus.clicked.connect(self._zoom_out)
+        top_layout.addWidget(zoom_minus)
+
+        self._page_indicator = QLabel(f"100%  |  ...")
+        self._page_indicator.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+        self._page_indicator.setFixedWidth(120)
+        self._page_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top_layout.addWidget(self._page_indicator)
+
+        zoom_plus = QPushButton("+")
+        zoom_plus.setFixedSize(28, 26)
+        zoom_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+        zoom_plus.clicked.connect(self._zoom_in)
+        top_layout.addWidget(zoom_plus)
+
+        content_layout.addWidget(top)
+
+        # ── Load images ──
         self._images = self._find_and_load_chapter()
-        self._ctk_images.clear()
         self._page_labels.clear()
 
         if not self._images:
             download_dir = self.app.config.download_dir
             manga_dir = Path(download_dir) / self._manga.get("title", "")
-            ctk.CTkLabel(
-                self._content,
-                text=f"Could not load chapter {self._chapter} images.\n\n"
-                     f"Looked in: {manga_dir}\n"
-                     f"The file may not have been downloaded yet.",
-                font=font(FONT_SIZE_SM), text_color=palette["fg_muted"], justify="center",
-            ).pack(expand=True, pady=80)
+            empty = QLabel(
+                f"Could not load chapter {self._chapter} images.\n\n"
+                f"Looked in: {manga_dir}\n"
+                f"The file may not have been downloaded yet."
+            )
+            empty.setStyleSheet(f"color: {T.FG_MUTED}; font-size: {T.FONT_SIZE_SM}pt;")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setWordWrap(True)
+            content_layout.addWidget(empty, 1)
             return
 
-        self._page_indicator.configure(
-            text=f"{int(self._zoom_level * 100)}%  |  {len(self._images)} pages"
+        self._page_indicator.setText(
+            f"{int(self._zoom_level * 100)}%  |  {len(self._images)} pages"
         )
 
-        # Scrollable image area
-        self._scroll = ctk.CTkScrollableFrame(self._content, fg_color=palette["bg"])
-        self._scroll.pack(fill="both", expand=True)
+        # ── Scrollable image area ──
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setStyleSheet(f"background-color: {T.BG};")
 
-        self._render_images(self._scroll)
+        scroll_content = QWidget()
+        self._image_layout = QVBoxLayout(scroll_content)
+        self._image_layout.setSpacing(1)
+        self._image_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+        self._scroll.setWidget(scroll_content)
 
-        # Auto-advance: "Next Chapter" button at bottom
+        self._render_images()
+
+        # "Next Chapter" button at bottom
         if idx >= 0 and idx < len(downloaded) - 1:
             next_ch = downloaded[idx + 1]
-            next_frame = ctk.CTkFrame(self._scroll, fg_color="transparent")
-            next_frame.pack(fill="x", pady=PAD_XL)
+            next_frame = QWidget()
+            next_frame_layout = QHBoxLayout(next_frame)
+            next_frame_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            ctk.CTkButton(
-                next_frame, text=f"Next: Chapter {next_ch} >>", height=40, width=250,
-                font=font(FONT_SIZE_MD, "bold"), corner_radius=8,
-                fg_color=palette["accent"], hover_color=palette["accent_hover"],
-                command=lambda c=next_ch: self._navigate_chapter(c),
-            ).pack()
+            next_chapter_btn = QPushButton(f"Next: Chapter {next_ch} >>")
+            next_chapter_btn.setProperty("class", "accent")
+            next_chapter_btn.setFixedHeight(40)
+            next_chapter_btn.setFixedWidth(250)
+            next_chapter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            next_chapter_btn.clicked.connect(
+                lambda checked=False, c=next_ch: self._navigate_chapter(c)
+            )
+            next_frame_layout.addWidget(next_chapter_btn)
+            self._image_layout.addSpacing(T.PAD_XL)
+            self._image_layout.addWidget(next_frame)
 
-    def _find_and_load_chapter(self) -> List[Image.Image]:
+        content_layout.addWidget(self._scroll, 1)
+
+    def _find_and_load_chapter(self) -> List[QImage]:
         title = self._manga.get("title", "")
         ch = self._chapter
         download_dir = self.app.config.download_dir
@@ -385,6 +412,7 @@ class ReaderPage(BasePage):
             if title:
                 self.app.app_state.set_reading_progress(title, str(chapter))
         self._load_chapter()
+        self.setFocus()
 
     def _go_next_chapter(self):
         if not self._manga:
