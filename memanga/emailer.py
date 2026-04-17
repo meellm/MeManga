@@ -23,7 +23,7 @@ class EmailError(Exception):
 
 
 # Gmail limit is 25MB, use 23MB to be safe (base64 encoding adds ~33% overhead)
-MAX_ATTACHMENT_SIZE = 23 * 1024 * 1024  # 23MB
+MAX_ATTACHMENT_SIZE = 18 * 1024 * 1024  # 18MB raw (~24MB after base64, under Gmail's 25MB limit)
 
 
 def split_pdf(pdf_path: Path, max_size: int = MAX_ATTACHMENT_SIZE) -> List[Path]:
