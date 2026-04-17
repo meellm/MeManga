@@ -390,6 +390,8 @@ def cmd_check(args):
         from_chapter = 0
     dry_run = getattr(args, 'dry_run', False)
 
+    console.print(f"[dim]=== {datetime.now().strftime('%Y-%m-%d %H:%M')} ===[/dim]")
+
     if dry_run:
         console.print(Panel("[bold]🔍 Dry Run — Checking for New Chapters[/bold]", border_style="yellow"))
     elif from_chapter is not None and from_chapter == 0:
