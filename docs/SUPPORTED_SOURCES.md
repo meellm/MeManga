@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga supports **260+ scrapers** covering **300+ domains**. This document lists all supported sources.
+MeManga supports **224 scrapers** covering **319+ domains**. This document lists all supported sources.
 
 For basic usage, see the main [README](../README.md).
 
