@@ -155,6 +155,9 @@ from .bluelockreadww2 import BlueLockReadWW2Scraper
 from .mashlemangaonline import MashleMangaOnlineScraper
 from .readonepunchonline import ReadOnePunchOnlineScraper
 from .bakirahen import BakiRahenScraper
+from .blamemanga import BlameMangaScraper
+from .jjkmanga import JJKMangaScraper
+from .kagane import KaganeScraper
 
 # ── Scrapers kept as individual files (unique domain mappings) ──
 
@@ -594,6 +597,17 @@ SCRAPERS = {
 
     # BakiRahen - Baki Rahen dedicated (WordPress Ifenzi v2 + cdn.readkakegurui.com CDN)
     "bakirahen.com": BakiRahenScraper,
+
+    # BlameManga - BLAME! dedicated (WordPress Comic Easel + Blogger CDN)
+    "blame-manga.com": BlameMangaScraper,
+    "w9.blame-manga.com": BlameMangaScraper,
+
+    # JJKManga - Jujutsu Kaisen dedicated (cloudscraper + pic.readkakegurui.com CDN)
+    "jjkmanga.net": JJKMangaScraper,
+
+    # Kagane - Multi-manga REST API + Playwright for DRM-protected images
+    "kagane.org": KaganeScraper,
+    "www.kagane.org": KaganeScraper,
 }
 
 # Merge template-based scrapers into SCRAPERS dict

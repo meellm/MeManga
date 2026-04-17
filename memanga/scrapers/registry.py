@@ -291,13 +291,6 @@ _cfg_fma = {
     "uses_cloudscraper": True,
 }
 
-_cfg_blame = {
-    "base_url": "https://w9.blame-manga.com",
-    "manga_title": "BLAME!",
-    "chapter_link_pattern": r'chapter-(\d+(?:\.\d+)?)',
-    "image_cdn_filters": ["blogger.googleusercontent.com"],
-    "cover_url": "https://w9.blame-manga.com/wp-content/uploads/2022/03/Blame-Volume-1.webp",
-}
 
 _cfg_beck = {
     "base_url": "https://beckmanga.com",
@@ -737,8 +730,7 @@ TEMPLATE_SCRAPERS = {
     "w9.parasytemanga.com": (OGImageMetaScraper, _cfg_parasyte),
     "full-metal-alchemist.online": (OGImageMetaScraper, _cfg_fma),
     "w9.full-metal-alchemist.online": (OGImageMetaScraper, _cfg_fma),
-    "blame-manga.com": (OGImageMetaScraper, _cfg_blame),
-    "w9.blame-manga.com": (OGImageMetaScraper, _cfg_blame),
+
     "beckmanga.com": (OGImageMetaScraper, _cfg_beck),
     "readclaymore.com": (OGImageMetaScraper, _cfg_claymore),
     "bakidou.com": (OGImageMetaScraper, _cfg_bakidou),
