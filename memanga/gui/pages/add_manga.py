@@ -178,6 +178,7 @@ class AddMangaDialog(QDialog):
             entry = {
                 "title": title,
                 "status": "reading",
+                "mode": "manual",  # New manga default — see Detail page to opt into auto
                 "fallback_delay_days": delay,
                 "sources": [
                     {"url": url, "source": domain},
@@ -188,6 +189,7 @@ class AddMangaDialog(QDialog):
             entry = {
                 "title": title,
                 "status": "reading",
+                "mode": "manual",  # New manga default — see Detail page to opt into auto
                 "source": domain,
                 "url": url,
             }

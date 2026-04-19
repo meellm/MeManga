@@ -153,7 +153,21 @@ class MeMangaApp(QMainWindow):
             fmt=self.config.output_format, path=path, size_mb=size_mb,
         )
         self.app_state.add_downloaded_chapter(title, str(chapter))
-        self.app_state.clear_new_chapters(title)
+
+        # Badge update depends on mode:
+        #   auto   → batch download flushes the whole badge at once
+        #   manual → user picked one chapter; just decrement
+        if self._get_manga_mode(title) == "manual":
+            self.app_state.decrement_new_chapters(title)
+        else:
+            self.app_state.clear_new_chapters(title)
+
+    def _get_manga_mode(self, title: str) -> str:
+        """Look up a manga's mode from config. Defaults to 'auto' for legacy entries."""
+        for m in self.config.get("manga", []):
+            if m.get("title") == title:
+                return m.get("mode", "auto")
+        return "auto"
 
     def _on_check_error(self, data):
         title = data.get("title", "")
@@ -177,6 +191,25 @@ class MeMangaApp(QMainWindow):
             count = len(r["chapters"])
             if count > 0:
                 self.app_state.set_new_chapters(title, count)
+
+            # Cache the full chapter list from the primary source so the
+            # Detail page can render every chapter as Read/Download without
+            # re-scraping. Done for BOTH modes — lets users freely toggle
+            # auto↔manual without losing visibility.
+            all_chapters = r.get("all_chapters") or []
+            if all_chapters:
+                cached = [
+                    {
+                        "number": c.number,
+                        "title": getattr(c, "title", "") or "",
+                        "source": getattr(c, "source", ""),
+                        "source_url": getattr(c, "source_url", ""),
+                        "is_backup": getattr(c, "is_backup", False),
+                        "url": c.url,
+                    }
+                    for c in all_chapters
+                ]
+                self.app_state.set_available_chapters(title, cached)
 
         if total_new > 0:
             self.app_state.add_notification("check", f"Found {total_new} new chapter(s)")

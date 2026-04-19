@@ -315,17 +315,39 @@ class DownloadsPage(BasePage):
 
     def _on_check_complete(self, data):
         results = data.get("results", [])
-        if not results:
-            Toast(self, "No new chapters found", kind="info")
+
+        # Filter to auto-mode manga that actually have new chapters to queue.
+        # Manual-mode manga surface their badge + per-chapter Download buttons
+        # on the Detail page; we never auto-queue for them.
+        auto_results = [
+            r for r in results
+            if r["manga"].get("mode", "auto") == "auto" and r.get("chapters")
+        ]
+
+        if not auto_results:
+            # Nothing to queue. Show an informational toast distinguishing
+            # "nothing found" from "found, but waiting for user action".
+            manual_with_new = sum(
+                len(r["chapters"]) for r in results
+                if r["manga"].get("mode", "auto") == "manual" and r.get("chapters")
+            )
+            if manual_with_new:
+                Toast(
+                    self,
+                    f"{manual_with_new} new chapter(s) available — open the manga to download",
+                    kind="info",
+                )
+            else:
+                Toast(self, "No new chapters found", kind="info")
             return
 
-        total = sum(len(r["chapters"]) for r in results)
+        total = sum(len(r["chapters"]) for r in auto_results)
         Toast(self, f"Found {total} new chapter(s), downloading...", kind="success")
 
         global_kindle = self.app.config.delivery_mode == "email" and self.app.config.email_enabled
         naming_template = self.app.config.get("delivery.naming_template")
 
-        for r in results:
+        for r in auto_results:
             manga = r["manga"]
             for ch in r["chapters"]:
                 kindle_cfg = None

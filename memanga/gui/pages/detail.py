@@ -22,6 +22,12 @@ class DetailPage(BasePage):
         super().__init__(parent, app)
         self._manga = None
         self._editing = False
+        # Container for the merged chapter list — rebuilt independently of the
+        # rest of the page when a single download completes.
+        self._chapters_container = None
+        # task_ids of in-flight per-chapter Download buttons → button widget,
+        # so we can flip them to "Read" when their download completes.
+        self._pending_downloads: dict = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -37,6 +43,13 @@ class DetailPage(BasePage):
         self._layout.setContentsMargins(T.PAD_XL, T.PAD_LG, T.PAD_XL, T.PAD_XL)
         self._layout.setSpacing(0)
         self._scroll.setWidget(self._scroll_content)
+
+        # Refresh the chapter list when a single download completes for the
+        # currently displayed manga (manual-mode per-chapter Download flow).
+        self.app.events.subscribe("download_complete", self._on_any_download_complete)
+        # Also refresh after a check completes — newly discovered chapters
+        # surface as Download rows immediately, no navigation needed.
+        self.app.events.subscribe("check_complete", self._on_any_check_complete)
 
     def on_show(self, **kwargs):
         manga = kwargs.get("manga")
@@ -189,6 +202,35 @@ class DetailPage(BasePage):
         kindle_row.addStretch()
         info_layout.addLayout(kindle_row)
 
+        # ── Download mode toggle ──
+        # Existing manga without a `mode` field default to "auto" so legacy
+        # behavior is preserved. New manga (added via the Add Manga dialog)
+        # default to "manual" — users opt into auto-download per series.
+        mode_row = QHBoxLayout()
+        mode_lbl = QLabel("Mode:")
+        mode_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+        mode_row.addWidget(mode_lbl)
+
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItems(["Auto", "Manual"])
+        current_mode = manga.get("mode", "auto")
+        self._mode_combo.setCurrentText("Manual" if current_mode == "manual" else "Auto")
+        self._mode_combo.setFixedHeight(28)
+        self._mode_combo.setFixedWidth(130)
+        self._mode_combo.currentTextChanged.connect(self._on_mode_change)
+        mode_row.addWidget(self._mode_combo)
+
+        mode_hint = QLabel(
+            "(Manual: download chapters individually below)"
+            if current_mode == "manual"
+            else "(Auto: new chapters download after each check)"
+        )
+        mode_hint.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+        mode_row.addWidget(mode_hint)
+        self._mode_hint = mode_hint
+        mode_row.addStretch()
+        info_layout.addLayout(mode_row)
+
         info_layout.addSpacing(T.PAD_SM)
 
         # Stats
@@ -304,38 +346,124 @@ class DetailPage(BasePage):
         self._layout.addWidget(self._edit_frame)
 
         # ── Chapter list section ──
+        # Wrapped in a refreshable container so individual per-chapter
+        # downloads (manual mode) can flip a row from Download → Read
+        # without rebuilding the whole detail page.
         self._layout.addSpacing(T.PAD_MD)
-        ch_header = QLabel(f"Downloaded Chapters ({len(downloaded)})")
-        ch_header.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
-        self._layout.addWidget(ch_header)
-        self._layout.addSpacing(T.PAD_SM)
-
-        if downloaded:
-            for ch_num in reversed(downloaded):
-                ch_frame = QFrame()
-                ch_frame.setProperty("class", "card")
-                ch_frame.setFixedHeight(40)
-                ch_row = QHBoxLayout(ch_frame)
-                ch_row.setContentsMargins(T.PAD_MD, 0, T.PAD_MD, 0)
-
-                ch_label = QLabel(f"Chapter {ch_num}")
-                ch_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-                ch_row.addWidget(ch_label, 1)
-
-                read_btn = QPushButton("Read")
-                read_btn.setProperty("class", "accent")
-                read_btn.setFixedSize(60, 26)
-                read_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                read_btn.clicked.connect(lambda checked=False, c=ch_num: self._read_chapter(c))
-                ch_row.addWidget(read_btn)
-
-                self._layout.addWidget(ch_frame)
-        else:
-            empty = QLabel("No chapters downloaded yet. Use 'Check Updates' or 'Download From...' to start.")
-            empty.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
-            self._layout.addWidget(empty)
+        self._chapters_container = QWidget()
+        chapters_layout = QVBoxLayout(self._chapters_container)
+        chapters_layout.setContentsMargins(0, 0, 0, 0)
+        chapters_layout.setSpacing(0)
+        self._layout.addWidget(self._chapters_container)
+        self._build_chapter_list()
 
         self._layout.addStretch()
+
+    def _build_chapter_list(self):
+        """Render the merged chapter list (downloaded + available).
+
+        - Each row: "Chapter N" + Read button (if downloaded) OR Download button.
+        - Sorted descending by numeric chapter number.
+        - Falls back to a downloaded-only render when no available_chapters
+          are cached yet (e.g. legacy auto manga that haven't been re-checked).
+        """
+        if not self._chapters_container or not self._manga:
+            return
+
+        # Reset the container layout
+        layout = self._chapters_container.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+            elif item.layout():
+                self._clear_child_layout(item.layout())
+        # Forget any stale download-button references
+        self._pending_downloads.clear()
+
+        title = self._manga.get("title", "")
+        downloaded = self.app.app_state.get_downloaded_chapters(title)
+        available = self.app.app_state.get_available_chapters(title)
+
+        # Build the merged set, keyed by chapter number string.
+        # Available entries provide source/url metadata; downloaded entries
+        # without metadata are still rendered (just no Download button is
+        # needed because they're already on disk).
+        merged: dict = {}
+        for entry in available:
+            num = str(entry.get("number", ""))
+            if num:
+                merged[num] = entry
+        for ch_num in downloaded:
+            num = str(ch_num)
+            if num and num not in merged:
+                merged[num] = {"number": num}
+
+        if not merged:
+            empty = QLabel(
+                "No chapters yet. Use 'Check Updates' to see what's available."
+            )
+            empty.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
+            layout.addWidget(empty)
+            return
+
+        # Header
+        n_dl = len(downloaded)
+        n_total = len(merged)
+        header = QLabel(f"Chapters ({n_dl} downloaded · {n_total} total)")
+        header.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
+        layout.addWidget(header)
+        layout.addSpacing(T.PAD_SM)
+
+        def _sort_key(num: str) -> float:
+            try:
+                return float(num)
+            except (ValueError, TypeError):
+                return 0.0
+
+        # Sort descending so newest chapters appear first
+        for num in sorted(merged.keys(), key=_sort_key, reverse=True):
+            entry = merged[num]
+            ch_frame = QFrame()
+            ch_frame.setProperty("class", "card")
+            ch_frame.setFixedHeight(40)
+            ch_row = QHBoxLayout(ch_frame)
+            ch_row.setContentsMargins(T.PAD_MD, 0, T.PAD_MD, 0)
+
+            label_text = f"Chapter {num}"
+            ch_title = (entry.get("title") or "").strip()
+            if ch_title and ch_title != num:
+                label_text = f"Chapter {num} — {ch_title}"
+            ch_label = QLabel(label_text)
+            ch_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+            ch_row.addWidget(ch_label, 1)
+
+            is_dl = self.app.app_state.is_chapter_downloaded(title, num)
+            if is_dl:
+                btn = QPushButton("Read")
+                btn.setProperty("class", "accent")
+                btn.setFixedSize(70, 26)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(
+                    lambda checked=False, c=num: self._read_chapter(c)
+                )
+            else:
+                btn = QPushButton("Download")
+                btn.setFixedSize(90, 26)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                # Capture entry by value so the closure stays correct
+                btn.clicked.connect(
+                    lambda checked=False, e=entry, b=btn: self._download_chapter(e, b)
+                )
+            ch_row.addWidget(btn)
+
+            layout.addWidget(ch_frame)
+
+    def _refresh_chapter_list(self):
+        """Public helper to rebuild the chapter list (used after mode change /
+        download completion)."""
+        self._build_chapter_list()
 
     # ── Status ──
 
@@ -365,6 +493,38 @@ class DetailPage(BasePage):
                 break
         self.app.config.save()
         Toast(self, f"Status: {new_status}", kind="info")
+
+    # ── Mode (Auto / Manual) ──
+
+    def _on_mode_change(self, label: str):
+        """Persist the new mode for the current manga."""
+        if not self._manga:
+            return
+        new_mode = "manual" if label == "Manual" else "auto"
+        manga_list = self.app.config.get("manga", [])
+        for m in manga_list:
+            if m.get("title") == self._manga.get("title"):
+                m["mode"] = new_mode
+                self._manga = m
+                break
+        self.app.config.set("manga", manga_list)
+        self.app.config.save()
+
+        # Update the inline hint text
+        if hasattr(self, "_mode_hint") and self._mode_hint:
+            self._mode_hint.setText(
+                "(Manual: download chapters individually below)"
+                if new_mode == "manual"
+                else "(Auto: new chapters download after each check)"
+            )
+
+        Toast(
+            self,
+            "Mode: Manual — chapters won't auto-download"
+            if new_mode == "manual"
+            else "Mode: Auto — new chapters will download on next check",
+            kind="info",
+        )
 
     # ── Edit ──
 
@@ -430,10 +590,16 @@ class DetailPage(BasePage):
     # ── Downloads ──
 
     def _check_updates(self):
-        if self._manga:
-            self.app.worker.check_updates([self._manga], self.app.app_state, self.app.config)
+        if not self._manga:
+            return
+        self.app.worker.check_updates([self._manga], self.app.app_state, self.app.config)
+        # For auto-mode manga we follow the user to the Downloads page since
+        # something will start queueing. For manual mode we stay put — the
+        # Detail page will refresh its chapter list when check_complete fires.
+        mode = self._manga.get("mode", "auto")
+        if mode == "auto":
             self.app.show_page("downloads")
-            Toast(self, "Checking for updates...", kind="info")
+        Toast(self, "Checking for updates...", kind="info")
 
     def _download_from_chapter(self):
         if not self._manga:
@@ -490,3 +656,101 @@ class DetailPage(BasePage):
 
     def _read_chapter(self, chapter_num):
         self.app.show_page("reader", manga=self._manga, chapter=chapter_num)
+
+    # ── Per-chapter manual download ──
+
+    def _download_chapter(self, ch_dict: dict, button=None):
+        """Queue a single chapter for download (manual-mode flow).
+
+        Reconstructs a ``ChapterWithSource`` from the cached entry and routes
+        through the existing ``BackgroundWorker.download_chapter`` API — same
+        2-concurrent queue, same Kindle delivery, same progress events.
+        """
+        if not self._manga:
+            return
+
+        try:
+            from ...downloader import ChapterWithSource
+            from ...scrapers.base import Chapter
+        except Exception as e:
+            Toast(self, f"Download unavailable: {e}", kind="error")
+            return
+
+        number = str(ch_dict.get("number", ""))
+        if not number:
+            Toast(self, "Chapter number missing", kind="error")
+            return
+
+        url = ch_dict.get("url") or ch_dict.get("source_url") or ""
+        source = ch_dict.get("source", "")
+        source_url = ch_dict.get("source_url") or url
+        is_backup = bool(ch_dict.get("is_backup", False))
+        ch_title = ch_dict.get("title") or ""
+
+        if not url:
+            Toast(self, "Chapter URL missing — re-run Check Updates", kind="error")
+            return
+
+        # Build a Chapter (then promote to ChapterWithSource for source routing)
+        base = Chapter(number=number, title=ch_title, url=url, date=None)
+        chapter = ChapterWithSource(base, source, source_url, is_backup=is_backup)
+
+        # Optional Kindle delivery, same gating as the auto-queue path
+        kindle_cfg = None
+        global_email_on = (
+            self.app.config.delivery_mode == "email" and self.app.config.email_enabled
+        )
+        if global_email_on and self._manga.get("send_to_kindle", True):
+            try:
+                from ...config import get_app_password
+                kindle_cfg = {
+                    "kindle_email": self.app.config.get("email.kindle_email"),
+                    "sender_email": self.app.config.get("email.sender_email"),
+                    "app_password": get_app_password(self.app.config),
+                    "smtp_server": self.app.config.get("email.smtp_server", "smtp.gmail.com"),
+                    "smtp_port": self.app.config.get("email.smtp_port", 587),
+                }
+            except Exception:
+                kindle_cfg = None
+
+        naming_template = self.app.config.get("delivery.naming_template")
+
+        self.app.worker.download_chapter(
+            manga=self._manga, chapter=chapter,
+            output_dir=self.app.config.download_dir,
+            output_format=self.app.config.output_format,
+            state=self.app.app_state, kindle_cfg=kindle_cfg,
+            naming_template=naming_template,
+        )
+
+        # Visual feedback: disable the button and relabel until completion
+        if button is not None:
+            button.setEnabled(False)
+            button.setText("Queued")
+            self._pending_downloads[f"{self._manga['title']}:{number}"] = button
+
+        Toast(self, f"Queued Chapter {number}", kind="info")
+
+    def _on_any_download_complete(self, data):
+        """Refresh the chapter list when a download for the current manga
+        finishes — flips the matching row from Download → Read."""
+        if not self._manga:
+            return
+        if data.get("title") != self._manga.get("title"):
+            return
+        # Drop the pending button reference (the row will be rebuilt anyway)
+        self._pending_downloads.pop(data.get("task_id", ""), None)
+        # Only refresh if this page is currently visible to avoid wasted work
+        if self.isVisible():
+            self._refresh_chapter_list()
+
+    def _on_any_check_complete(self, data):
+        """Refresh the chapter list after a check completes — newly discovered
+        chapters appear as Download rows without requiring navigation."""
+        if not self._manga or not self.isVisible():
+            return
+        my_title = self._manga.get("title", "")
+        for r in data.get("results", []):
+            if r.get("manga", {}).get("title") == my_title:
+                self._refresh_chapter_list()
+                return
