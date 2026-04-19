@@ -213,6 +213,7 @@ class BackgroundWorker:
                 state=item["state"],
                 progress_callback=progress_cb,
                 naming_template=item.get("naming_template"),
+                cancel_event=item["cancel"],
             )
 
             # Kindle delivery

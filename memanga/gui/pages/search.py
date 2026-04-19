@@ -13,14 +13,32 @@ from ..components.search_result import SearchResultRow
 from ..components.toast import Toast
 
 
-# Top sources for quick search
-DEFAULT_SEARCH_SOURCES = [
-    "mangadex.org",
-    "bato.to",
-    "mangapill.com",
-    "comick.io",
-    "mangakakalot.com",
-]
+def _compute_search_sources(app) -> list[str]:
+    """Build the source list for the search worker.
+
+    Library sources are always included (they're proven-usable for this
+    user). Everything else from the supported set is included unless the
+    user disabled it on the Sources page (`config["sources.disabled"]`).
+    """
+    from ...downloader import get_supported_sources
+
+    disabled = set(app.config.get("sources.disabled", []) or [])
+    library: set[str] = set()
+    for m in app.config.get("manga", []):
+        for s in m.get("sources", []) or []:
+            d = s.get("source", "")
+            if d:
+                library.add(d)
+        d = m.get("source", "")
+        if d:
+            library.add(d)
+
+    try:
+        supported = set(get_supported_sources())
+    except Exception:
+        supported = set()
+
+    return sorted(library | (supported - disabled))
 
 
 class SearchPage(BasePage):
@@ -97,7 +115,14 @@ class SearchPage(BasePage):
         self._result_widgets.clear()
         self._results.clear()
 
-        self.app.worker.search_manga(query, DEFAULT_SEARCH_SOURCES)
+        sources = _compute_search_sources(self.app)
+        if not sources:
+            self._status_label.setText(
+                "No sources enabled — enable some on the Sources tab."
+            )
+            return
+        self._status_label.setText(f"Searching {len(sources)} source(s)…")
+        self.app.worker.search_manga(query, sources)
 
     def _on_started(self, data):
         self._status_label.setText(f"Searching for '{data['query']}'...")

@@ -26,8 +26,6 @@ class SettingsPage(BasePage):
     def __init__(self, parent, app):
         super().__init__(parent, app)
         self._current_tab = "general"
-        self._source_widgets: list = []
-        self._all_sources: list = []
         self._build()
 
     def _build(self):
@@ -43,7 +41,7 @@ class SettingsPage(BasePage):
         # Tab bar
         tab_bar = QHBoxLayout()
         self._tab_buttons: dict[str, QPushButton] = {}
-        for name in ["General", "Email", "Sources", "Advanced"]:
+        for name in ["General", "Email", "Advanced"]:
             btn = QPushButton(name)
             btn.setProperty("class", "tab")
             btn.setFixedHeight(30)
@@ -76,17 +74,6 @@ class SettingsPage(BasePage):
         self._email_scroll.setWidget(email_content)
         self._build_email()
 
-        # ── Sources tab ──
-        self._sources_scroll = QScrollArea()
-        self._sources_scroll.setWidgetResizable(True)
-        self._sources_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        sources_content = QWidget()
-        self._sources_layout = QVBoxLayout(sources_content)
-        self._sources_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._sources_layout.setSpacing(T.PAD_SM)
-        self._sources_scroll.setWidget(sources_content)
-        self._build_sources()
-
         # ── Advanced tab ──
         self._advanced_scroll = QScrollArea()
         self._advanced_scroll.setWidgetResizable(True)
@@ -101,7 +88,6 @@ class SettingsPage(BasePage):
         # Add all tab scrolls
         layout.addWidget(self._general_scroll, 1)
         layout.addWidget(self._email_scroll, 1)
-        layout.addWidget(self._sources_scroll, 1)
         layout.addWidget(self._advanced_scroll, 1)
 
         self._switch_tab("general")
@@ -111,7 +97,6 @@ class SettingsPage(BasePage):
 
         self._general_scroll.setVisible(tab_name == "general")
         self._email_scroll.setVisible(tab_name == "email")
-        self._sources_scroll.setVisible(tab_name == "sources")
         self._advanced_scroll.setVisible(tab_name == "advanced")
 
         for name, btn in self._tab_buttons.items():
@@ -119,9 +104,6 @@ class SettingsPage(BasePage):
             btn.setProperty("active", "true" if is_active else "false")
             btn.style().unpolish(btn)
             btn.style().polish(btn)
-
-        if tab_name == "sources":
-            self._refresh_sources()
 
     # ── Helpers ──
 
@@ -307,138 +289,6 @@ class SettingsPage(BasePage):
         save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         save_btn.clicked.connect(self._save)
         f.addWidget(save_btn)
-
-    # ── Sources Tab ──
-
-    def _build_sources(self):
-        f = self._sources_layout
-
-        self._section(f, "Active Sources")
-        sub = QLabel("Sources used by your tracked manga")
-        sub.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        f.addWidget(sub)
-
-        self._user_sources_widget = QWidget()
-        self._user_sources_layout = QVBoxLayout(self._user_sources_widget)
-        self._user_sources_layout.setContentsMargins(0, 0, 0, 0)
-        self._user_sources_layout.setSpacing(1)
-        f.addWidget(self._user_sources_widget)
-
-        f.addSpacing(T.PAD_XL)
-
-        self._section(f, "All Supported Sources")
-        filter_row = QHBoxLayout()
-        self._source_filter = QLineEdit()
-        self._source_filter.setPlaceholderText("Filter...")
-        self._source_filter.setFixedHeight(28)
-        self._source_filter.setFixedWidth(200)
-        self._source_filter.textChanged.connect(self._on_source_filter)
-        filter_row.addWidget(self._source_filter)
-
-        filter_row.addStretch()
-        self._source_count_label = QLabel("")
-        self._source_count_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        filter_row.addWidget(self._source_count_label)
-        f.addLayout(filter_row)
-
-        self._source_list_widget = QWidget()
-        self._source_list_layout = QVBoxLayout(self._source_list_widget)
-        self._source_list_layout.setContentsMargins(0, 0, 0, 0)
-        self._source_list_layout.setSpacing(1)
-        f.addWidget(self._source_list_widget)
-
-    def _refresh_sources(self):
-        # Clear active sources
-        while self._user_sources_layout.count():
-            item = self._user_sources_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        manga_list = self.app.config.get("manga", [])
-        source_manga: dict[str, list] = {}
-        for m in manga_list:
-            title = m.get("title", "")
-            sources = m.get("sources", [])
-            if sources:
-                for s in sources:
-                    d = s.get("source", "")
-                    if d:
-                        source_manga.setdefault(d, []).append(title)
-            else:
-                d = m.get("source", "")
-                if d:
-                    source_manga.setdefault(d, []).append(title)
-
-        if not source_manga:
-            lbl = QLabel("No active sources")
-            lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
-            self._user_sources_layout.addWidget(lbl)
-        else:
-            all_health = self.app.app_state.get_all_source_health()
-            for domain, titles in sorted(source_manga.items()):
-                health = all_health.get(domain, {})
-                status = health.get("status", "unknown")
-                color_map = {"ok": T.SUCCESS, "warning": T.WARNING, "error": T.ERROR}
-                dot_color = color_map.get(status, T.FG_MUTED)
-
-                row = QFrame()
-                row.setProperty("class", "card")
-                row.setFixedHeight(32)
-                row_layout = QHBoxLayout(row)
-                row_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
-
-                dot = QLabel("\u2022")
-                dot.setStyleSheet(f"font-size: {T.FONT_SIZE_MD}pt; color: {dot_color};")
-                dot.setFixedWidth(20)
-                row_layout.addWidget(dot)
-
-                domain_label = QLabel(domain)
-                domain_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-                row_layout.addWidget(domain_label, 1)
-
-                count_label = QLabel(f"{len(titles)} manga")
-                count_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-                row_layout.addWidget(count_label)
-
-                self._user_sources_layout.addWidget(row)
-
-        # All sources
-        if not self._all_sources:
-            try:
-                from ...downloader import get_supported_sources
-                self._all_sources = sorted(get_supported_sources())
-            except Exception:
-                self._all_sources = []
-        self._render_all_sources()
-
-    def _render_all_sources(self):
-        for w in self._source_widgets:
-            try:
-                w.deleteLater()
-            except Exception:
-                pass
-        self._source_widgets.clear()
-
-        query = self._source_filter.text().strip().lower() if hasattr(self, '_source_filter') else ""
-        filtered = [s for s in self._all_sources if not query or query in s.lower()]
-        self._source_count_label.setText(f"{len(filtered)} of {len(self._all_sources)}")
-
-        for source in filtered:
-            row = QFrame()
-            row.setProperty("class", "card")
-            row.setFixedHeight(28)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
-
-            label = QLabel(source)
-            label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt;")
-            row_layout.addWidget(label, 1)
-
-            self._source_list_layout.addWidget(row)
-            self._source_widgets.append(row)
-
-    def _on_source_filter(self, text=None):
-        self._render_all_sources()
 
     # ── Advanced Tab ──
 

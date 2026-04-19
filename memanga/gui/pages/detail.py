@@ -325,6 +325,20 @@ class DetailPage(BasePage):
         self._edit_backup.setFixedHeight(32)
         edit_inner.addWidget(self._edit_backup)
 
+        # Fallback delay — only meaningful with a backup source, but always
+        # rendered so users can fill it in alongside adding a backup. Saved
+        # only when a backup URL is present (matches Add Manga behavior).
+        delay_row = QHBoxLayout()
+        delay_lbl = QLabel("Fallback delay (days):")
+        delay_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+        delay_row.addWidget(delay_lbl)
+        self._edit_delay = QLineEdit(str(manga.get("fallback_delay_days", 2)))
+        self._edit_delay.setFixedWidth(60)
+        self._edit_delay.setFixedHeight(28)
+        delay_row.addWidget(self._edit_delay)
+        delay_row.addStretch()
+        edit_inner.addLayout(delay_row)
+
         edit_btns = QHBoxLayout()
         save_edit_btn = QPushButton("Save Changes")
         save_edit_btn.setProperty("class", "accent")
@@ -385,6 +399,7 @@ class DetailPage(BasePage):
         title = self._manga.get("title", "")
         downloaded = self.app.app_state.get_downloaded_chapters(title)
         available = self.app.app_state.get_available_chapters(title)
+        external = self.app.app_state.get_external_chapters(title)
 
         # Build the merged set, keyed by chapter number string.
         # Available entries provide source/url metadata; downloaded entries
@@ -396,6 +411,14 @@ class DetailPage(BasePage):
             if num:
                 merged[num] = entry
         for ch_num in downloaded:
+            num = str(ch_num)
+            if num and num not in merged:
+                merged[num] = {"number": num}
+        # External-only entries (user said "I'm on chapter N" but the cached
+        # list hasn't been pulled yet) — render them too so the user sees the
+        # state was recorded. They'll get proper source metadata once a check
+        # populates available_chapters.
+        for ch_num in external:
             num = str(ch_num)
             if num and num not in merged:
                 merged[num] = {"number": num}
@@ -440,6 +463,11 @@ class DetailPage(BasePage):
             ch_row.addWidget(ch_label, 1)
 
             is_dl = self.app.app_state.is_chapter_downloaded(title, num)
+            is_external = (
+                not is_dl
+                and self.app.app_state.is_external_chapter(title, num)
+            )
+
             if is_dl:
                 btn = QPushButton("Read")
                 btn.setProperty("class", "accent")
@@ -448,6 +476,22 @@ class DetailPage(BasePage):
                 btn.clicked.connect(
                     lambda checked=False, c=num: self._read_chapter(c)
                 )
+                ch_row.addWidget(btn)
+            elif is_external:
+                # Greyed "Read elsewhere" pill + Download still available
+                # so the user can grab a copy if they want one on disk.
+                ext_lbl = QLabel("Read elsewhere")
+                ext_lbl.setStyleSheet(
+                    f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};"
+                )
+                ch_row.addWidget(ext_lbl)
+                btn = QPushButton("Download")
+                btn.setFixedSize(90, 26)
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.clicked.connect(
+                    lambda checked=False, e=entry, b=btn: self._download_chapter(e, b)
+                )
+                ch_row.addWidget(btn)
             else:
                 btn = QPushButton("Download")
                 btn.setFixedSize(90, 26)
@@ -456,7 +500,7 @@ class DetailPage(BasePage):
                 btn.clicked.connect(
                     lambda checked=False, e=entry, b=btn: self._download_chapter(e, b)
                 )
-            ch_row.addWidget(btn)
+                ch_row.addWidget(btn)
 
             layout.addWidget(ch_frame)
 
@@ -550,6 +594,15 @@ class DetailPage(BasePage):
             Toast(self, "Title cannot be empty", kind="error")
             return
 
+        # Fallback delay — only meaningful with a backup source. Drop the
+        # field entirely when the user removes the backup so config stays clean.
+        try:
+            new_delay = int(self._edit_delay.text().strip())
+            if new_delay < 0:
+                new_delay = 2
+        except (ValueError, AttributeError):
+            new_delay = 2
+
         manga_list = self.app.config.get("manga", [])
         for m in manga_list:
             if m.get("title") == old_title:
@@ -572,6 +625,11 @@ class DetailPage(BasePage):
                     else:
                         m["source"] = new_domain
                         m["url"] = new_url
+
+                if new_backup:
+                    m["fallback_delay_days"] = new_delay
+                else:
+                    m.pop("fallback_delay_days", None)
 
                 if new_title != old_title:
                     old_state = self.app.app_state.get_manga_state(old_title)

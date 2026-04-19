@@ -197,6 +197,7 @@ class State:
                 "reading_progress": {"last_chapter": None, "last_read": None},
                 "new_chapters_available": 0,
                 "available_chapters": [],
+                "external_chapters": [],
             }
     
     # ========================================================================
@@ -327,6 +328,41 @@ class State:
     def get_available_chapters(self, manga_title: str) -> List[Dict[str, Any]]:
         """Get the cached chapter list for a manga (empty list if never checked)."""
         return self.get_manga_state(manga_title).get("available_chapters", [])
+
+    # ========================================================================
+    # External Chapters (read elsewhere — user said "I'm on chapter N")
+    # ========================================================================
+
+    def mark_external_chapter(self, manga_title: str, chapter: str):
+        """Record a chapter the user already read outside MeManga.
+
+        Stored separately from `downloaded` so we never lie about what's on
+        disk; the Detail page renders these as "Read elsewhere" rows.
+        """
+        self._ensure_manga_entry(manga_title)
+        entry = self._data["manga"][manga_title]
+        if "external_chapters" not in entry:
+            entry["external_chapters"] = []
+        ch_str = str(chapter)
+        if ch_str not in entry["external_chapters"]:
+            entry["external_chapters"].append(ch_str)
+
+            def _sort_key(x):
+                try:
+                    return float(x)
+                except (ValueError, TypeError):
+                    return 0.0
+
+            entry["external_chapters"].sort(key=_sort_key)
+            self._mark_dirty()
+
+    def get_external_chapters(self, manga_title: str) -> List[str]:
+        """Get the chapters the user marked as already read elsewhere."""
+        return self.get_manga_state(manga_title).get("external_chapters", [])
+
+    def is_external_chapter(self, manga_title: str, chapter: str) -> bool:
+        """Whether a chapter was previously marked as read-elsewhere."""
+        return str(chapter) in self.get_external_chapters(manga_title)
 
     # ========================================================================
     # Notifications

@@ -103,17 +103,12 @@ def launch_gui():
     """Launch the MeManga GUI application."""
     from PySide6.QtWidgets import QApplication
     from .app import MeMangaApp
-    from ..config import Config
     from . import theme as T
 
     qapp = QApplication(sys.argv)
     qapp.setStyle("Fusion")
 
-    # Load theme preference from config
-    config = Config()
-    mode = config.get("gui.theme", "dark")
-    T.apply_theme(mode)
-    qapp.setStyleSheet(T.generate_stylesheet(mode))
+    qapp.setStyleSheet(T.generate_stylesheet())
 
     _ensure_browsers()
 

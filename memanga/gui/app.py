@@ -83,6 +83,12 @@ class MeMangaApp(QMainWindow):
         if self.config.get("gui.auto_check", True):
             QTimer.singleShot(3000, self._auto_check)
 
+        # Backfill missing covers a few seconds after launch. Many older
+        # entries were added before the MangaDex fallback existed and still
+        # show blank cards; this pass populates them quietly in the
+        # background.
+        QTimer.singleShot(5000, self._backfill_missing_covers)
+
     def _register_pages(self):
         from .pages.library import LibraryPage
         from .pages.search import SearchPage
@@ -90,11 +96,13 @@ class MeMangaApp(QMainWindow):
         from .pages.settings import SettingsPage
         from .pages.detail import DetailPage
         from .pages.reader import ReaderPage
+        from .pages.sources import SourcesPage
 
         page_classes = {
             "library": LibraryPage,
             "search": SearchPage,
             "downloads": DownloadsPage,
+            "sources": SourcesPage,
             "settings": SettingsPage,
             "detail": DetailPage,
             "reader": ReaderPage,
@@ -117,12 +125,6 @@ class MeMangaApp(QMainWindow):
             page.on_show(**kwargs)
             self._current_page = name
             self._sidebar.set_active(name)
-
-    def apply_theme(self, mode: str):
-        """Switch between dark and light mode."""
-        from PySide6.QtWidgets import QApplication
-        T.apply_theme(mode)
-        QApplication.instance().setStyleSheet(T.generate_stylesheet(mode))
 
     def reload_data(self):
         self.config = Config()
@@ -162,6 +164,53 @@ class MeMangaApp(QMainWindow):
         else:
             self.app_state.clear_new_chapters(title)
 
+    def _resolve_external_threshold(self, manga, threshold_raw, all_chapters) -> bool:
+        """Walk cached chapters and mark anything below the user's stated
+        "I'm on chapter N" as external (read elsewhere). Bumps last_chapter
+        so future check_for_updates calls don't surface the same chapters as
+        new. Returns True if config was mutated (sentinel popped).
+        """
+        title = manga.get("title", "")
+        try:
+            threshold = float(str(threshold_raw))
+        except (ValueError, TypeError):
+            # Unparseable sentinel — drop it so we don't keep retrying.
+            self._pop_external_threshold(title)
+            return True
+
+        marked_max = None
+        for c in all_chapters:
+            try:
+                num_f = float(c.number)
+            except (ValueError, TypeError):
+                continue
+            if num_f < threshold:
+                self.app_state.mark_external_chapter(title, c.number)
+                if marked_max is None or num_f > marked_max:
+                    marked_max = num_f
+
+        # Bump last_chapter so subsequent checks treat these as already-seen.
+        # Format as int when whole-numbered ("47" not "47.0") to match how
+        # chapter numbers come back from scrapers.
+        if marked_max is not None:
+            if marked_max == int(marked_max):
+                last_str = str(int(marked_max))
+            else:
+                last_str = str(marked_max)
+            self.app_state.set_last_chapter(title, last_str)
+
+        # One-shot: pop the sentinel from config so we don't redo this on
+        # every subsequent check.
+        return self._pop_external_threshold(title)
+
+    def _pop_external_threshold(self, title: str) -> bool:
+        manga_list = self.config.get("manga", [])
+        for entry in manga_list:
+            if entry.get("title") == title and "external_threshold" in entry:
+                entry.pop("external_threshold", None)
+                return True
+        return False
+
     def _get_manga_mode(self, title: str) -> str:
         """Look up a manga's mode from config. Defaults to 'auto' for legacy entries."""
         for m in self.config.get("manga", []):
@@ -185,9 +234,11 @@ class MeMangaApp(QMainWindow):
     def _on_check_complete(self, data):
         results = data.get("results", [])
         total_new = sum(len(r["chapters"]) for r in results)
+        config_dirty = False
 
         for r in results:
-            title = r["manga"].get("title", "")
+            manga = r["manga"]
+            title = manga.get("title", "")
             count = len(r["chapters"])
             if count > 0:
                 self.app_state.set_new_chapters(title, count)
@@ -211,6 +262,19 @@ class MeMangaApp(QMainWindow):
                 ]
                 self.app_state.set_available_chapters(title, cached)
 
+            # Resolve "I'm on chapter N" onboarding sentinel. Done after
+            # caching available_chapters so we always have something to walk.
+            # One-shot: pop the sentinel and re-save config.
+            threshold_raw = manga.get("external_threshold")
+            if threshold_raw is not None and all_chapters:
+                if self._resolve_external_threshold(manga, threshold_raw, all_chapters):
+                    config_dirty = True
+
+        if config_dirty:
+            # Persist the popped sentinels and the freshly-set last_chapter.
+            self.config.set("manga", self.config.get("manga", []))
+            self.config.save()
+
         if total_new > 0:
             self.app_state.add_notification("check", f"Found {total_new} new chapter(s)")
         else:
@@ -223,6 +287,46 @@ class MeMangaApp(QMainWindow):
         self.events.publish("notification_added", {})
 
     # ---- Auto-Check ----
+
+    def _backfill_missing_covers(self):
+        """Walk the library and try to populate covers for entries that
+        don't have one yet, via the MangaDex fallback. One worker thread
+        polls titles serially with a small sleep between requests so we
+        don't hammer the API."""
+        manga_list = self.config.get("manga", [])
+        missing = [m for m in manga_list if not m.get("cover_url")]
+        if not missing:
+            return
+
+        titles = [m.get("title", "") for m in missing if m.get("title")]
+        if not titles:
+            return
+
+        def _task():
+            import time
+            from .cover_fallback import fetch_mangadex_cover
+
+            any_updated = False
+            for t in titles:
+                try:
+                    cover = fetch_mangadex_cover(t)
+                except Exception:
+                    cover = None
+                if cover:
+                    # Re-read the list each iteration in case the user mutated it.
+                    current = self.config.get("manga", [])
+                    for entry in current:
+                        if entry.get("title") == t and not entry.get("cover_url"):
+                            entry["cover_url"] = cover
+                            any_updated = True
+                            break
+                # Small throttle between API calls.
+                time.sleep(1.0)
+
+            if any_updated:
+                self.config.save()
+
+        self.worker._pool.submit(_task)
 
     def _auto_check(self):
         interval = self.config.get("gui.auto_check_interval", 3600)
