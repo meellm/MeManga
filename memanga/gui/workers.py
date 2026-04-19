@@ -93,10 +93,22 @@ class BackgroundWorker:
                 print(f"[Check]   Source domain: {domain}", flush=True)
 
                 try:
-                    new_chapters = check_for_updates(manga, state)
-                    print(f"[Check]   Found {len(new_chapters)} new chapter(s)", flush=True)
-                    if new_chapters:
-                        results.append({"manga": manga, "chapters": new_chapters})
+                    new_chapters, all_chapters = check_for_updates(
+                        manga, state, return_all=True,
+                    )
+                    print(
+                        f"[Check]   Found {len(new_chapters)} new chapter(s) "
+                        f"(total {len(all_chapters)} available on primary)",
+                        flush=True,
+                    )
+                    # Always include the result so the GUI can cache the full
+                    # chapter list (used by Detail page for Read/Download UI).
+                    # Empty `chapters` is fine — auto-queue will simply skip.
+                    results.append({
+                        "manga": manga,
+                        "chapters": new_chapters,
+                        "all_chapters": all_chapters,
+                    })
                     # Mark source healthy
                     if domain:
                         state.update_source_health(domain, success=True)

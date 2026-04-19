@@ -114,13 +114,14 @@ def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
 
 
 def check_for_updates(
-    manga: Dict[str, Any], 
+    manga: Dict[str, Any],
     state: State,
     from_chapter: Optional[float] = None,
-) -> List[ChapterWithSource]:
+    return_all: bool = False,
+):
     """
     Check if a manga has new chapters, with backup source support.
-    
+
     Logic:
     1. Check primary source first
     2. If new chapter on primary → return it
@@ -131,14 +132,22 @@ def check_for_updates(
          - No → skip (still waiting)
        - Not in pending_backup? Add it, skip (start waiting)
     5. If primary gets the chapter later, we prefer primary
-    
+
     Args:
         manga: Manga entry from config with title, sources (or url/source)
         state: State manager to check last downloaded chapter
         from_chapter: Override starting chapter (for downloading from scratch)
-    
+        return_all: If True, return a tuple ``(new_chapters, all_chapters)``
+            where ``all_chapters`` is the full chapter list from the primary
+            source wrapped as :class:`ChapterWithSource` (used by the GUI
+            Detail page to show every chapter as Read/Download). When False
+            (default), returns just the filtered new-chapter list — preserves
+            the original CLI signature.
+
     Returns:
-        List of ChapterWithSource objects (includes source info)
+        ``List[ChapterWithSource]`` (default) or
+        ``Tuple[List[ChapterWithSource], List[ChapterWithSource]]`` when
+        ``return_all=True``.
     """
     title = manga["title"]
     sources = _get_sources_from_manga(manga)
@@ -157,11 +166,16 @@ def check_for_updates(
     
     # Results to return
     chapters_to_download: List[ChapterWithSource] = []
-    
+
     # Track what we found on each source
     primary_chapters: Dict[str, Chapter] = {}  # chapter_num -> Chapter
     backup_chapters: Dict[str, Tuple[Chapter, str, str]] = {}  # chapter_num -> (Chapter, source, url)
-    
+
+    # Full chapter list from the primary source (every chapter, downloaded or not).
+    # Used by the GUI Detail page when return_all=True so it can render every
+    # chapter as Read or Download without re-scraping.
+    primary_all: List[ChapterWithSource] = []
+
     # Check each source
     source_errors = []
     sources_checked = 0
@@ -184,16 +198,25 @@ def check_for_updates(
             source_errors.append(f"{source}: {e}")
             print(f"  [Warning] Failed to fetch from {source}: {e}")
             continue
-        
+
+        # Capture the full chapter list from the primary source for the
+        # Detail-page cache. Backup sources are intentionally skipped here —
+        # we don't want backup-only chapters polluting the canonical list.
+        if is_primary:
+            primary_all = [
+                ChapterWithSource(ch, source, url, is_backup=False)
+                for ch in all_chapters
+            ]
+
         # Filter to new chapters
         new_chapters = [
             ch for ch in all_chapters
             if ch.numeric > last_num and not state.is_chapter_downloaded(title, ch.number)
         ]
-        
+
         for ch in new_chapters:
             ch_num = ch.number
-            
+
             if is_primary:
                 primary_chapters[ch_num] = ch
             else:
@@ -240,8 +263,11 @@ def check_for_updates(
         else:
             # First time seeing this on backup, start waiting
             state.set_pending_backup(title, ch_num, backup_source, ch.url)
-    
-    return sorted(chapters_to_download)
+
+    new_sorted = sorted(chapters_to_download)
+    if return_all:
+        return new_sorted, sorted(primary_all)
+    return new_sorted
 
 
 def download_chapter(

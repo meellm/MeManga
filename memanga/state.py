@@ -196,6 +196,7 @@ class State:
                 "created": datetime.now().isoformat(),
                 "reading_progress": {"last_chapter": None, "last_read": None},
                 "new_chapters_available": 0,
+                "available_chapters": [],
             }
     
     # ========================================================================
@@ -299,6 +300,33 @@ class State:
         if state and state.get("new_chapters_available", 0) > 0:
             self._data["manga"][manga_title]["new_chapters_available"] = 0
             self._mark_dirty()
+
+    def decrement_new_chapters(self, manga_title: str):
+        """Decrement the new chapters badge by 1 (used by manual single downloads)."""
+        state = self.get_manga_state(manga_title)
+        current = state.get("new_chapters_available", 0) if state else 0
+        if current > 0:
+            self._data["manga"][manga_title]["new_chapters_available"] = current - 1
+            self._mark_dirty()
+
+    # ========================================================================
+    # Available Chapters Cache
+    # ========================================================================
+
+    def set_available_chapters(self, manga_title: str, chapters: List[Dict[str, Any]]):
+        """Cache the full list of chapters from the last check (for both modes).
+
+        Each entry should contain: number, title, source, source_url, is_backup.
+        Used by the Detail page to show every chapter as 'Read' (downloaded) or
+        'Download' (available) without re-scraping.
+        """
+        self._ensure_manga_entry(manga_title)
+        self._data["manga"][manga_title]["available_chapters"] = chapters
+        self._mark_dirty()
+
+    def get_available_chapters(self, manga_title: str) -> List[Dict[str, Any]]:
+        """Get the cached chapter list for a manga (empty list if never checked)."""
+        return self.get_manga_state(manga_title).get("available_chapters", [])
 
     # ========================================================================
     # Notifications
