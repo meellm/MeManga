@@ -21,7 +21,7 @@ class AddMangaDialog(QDialog):
         self.app = app
 
         self.setWindowTitle("Add Manga")
-        self.setFixedSize(480, 420)
+        self.setFixedSize(480, 500)
         self.setModal(True)
 
         self._build(prefill)
@@ -94,6 +94,24 @@ class AddMangaDialog(QDialog):
 
         self._backup_frame.setVisible(False)
         layout.addWidget(self._backup_frame)
+
+        layout.addSpacing(T.PAD_SM)
+
+        # Current chapter — lets users skip the badge flood when adding a
+        # manga they're already mid-way through. Older chapters get marked
+        # as "read elsewhere" once the first check populates the chapter list.
+        current_lbl = QLabel("I'm currently on chapter (optional):")
+        current_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; font-weight: bold;")
+        layout.addWidget(current_lbl)
+
+        current_row = QHBoxLayout()
+        self._current_entry = QLineEdit()
+        self._current_entry.setPlaceholderText("e.g. 47 — leave blank if starting fresh")
+        self._current_entry.setFixedHeight(30)
+        self._current_entry.setFixedWidth(220)
+        current_row.addWidget(self._current_entry)
+        current_row.addStretch()
+        layout.addLayout(current_row)
 
         layout.addStretch()
 
@@ -194,26 +212,51 @@ class AddMangaDialog(QDialog):
                 "url": url,
             }
 
+        # Onboarding: "I'm on chapter N" → seed external_threshold. The first
+        # check_complete handler walks the cached chapter list, marks
+        # everything < N as external, and pops this sentinel. Stored as a
+        # string so it survives YAML round-trips even for non-integer
+        # chapter numbers (e.g. "47.5").
+        current_raw = self._current_entry.text().strip()
+        if current_raw:
+            try:
+                # Just validate it parses; persist the original string.
+                float(current_raw)
+                entry["external_threshold"] = current_raw
+            except ValueError:
+                pass  # silently ignore garbage rather than blocking the add
+
         existing.append(entry)
         self.app.config.set("manga", existing)
         self.app.config.save()
 
-        # Fetch cover in background
+        # Fetch cover in background — try the source's own scraper first,
+        # then fall back to MangaDex's public API for sources that don't
+        # expose covers (or whose cover URL came back empty).
         def _fetch_cover():
+            cover = None
             try:
                 from ...scrapers import get_scraper
                 scraper = get_scraper(domain)
                 if hasattr(scraper, "get_cover_url"):
                     cover = scraper.get_cover_url(url)
-                    if cover:
-                        manga_list = self.app.config.get("manga", [])
-                        for m in manga_list:
-                            if m.get("title") == title:
-                                m["cover_url"] = cover
-                                break
-                        self.app.config.save()
             except Exception:
-                pass
+                cover = None
+
+            if not cover:
+                try:
+                    from ..cover_fallback import fetch_mangadex_cover
+                    cover = fetch_mangadex_cover(title)
+                except Exception:
+                    cover = None
+
+            if cover:
+                manga_list = self.app.config.get("manga", [])
+                for m in manga_list:
+                    if m.get("title") == title:
+                        m["cover_url"] = cover
+                        break
+                self.app.config.save()
 
         threading.Thread(target=_fetch_cover, daemon=True).start()
 

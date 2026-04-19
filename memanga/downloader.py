@@ -278,6 +278,7 @@ def download_chapter(
     state: Optional[State] = None,
     progress_callback=None,
     naming_template: Optional[str] = None,
+    cancel_event=None,
 ) -> Optional[Path]:
     """
     Download a chapter and convert to PDF or EPUB.
@@ -289,12 +290,18 @@ def download_chapter(
         output_format: "pdf" or "epub"
         state: State manager (for clearing pending backup after download)
         progress_callback: Optional callable(current, total) for progress updates
+        cancel_event: Optional threading.Event — when set, raises
+            InterruptedError before/during page fetching to abort the download.
 
     Returns:
         Path to downloaded file, or None if failed
     """
     title = manga["title"]
-    
+
+    def _check_cancel():
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("Download cancelled")
+
     # Get source from chapter if available (ChapterWithSource), else from manga config
     if isinstance(chapter, ChapterWithSource):
         source = chapter.source
@@ -303,26 +310,31 @@ def download_chapter(
         sources = _get_sources_from_manga(manga)
         source = sources[0]["source"] if sources else ""
         is_backup = False
-    
+
     # Get scraper
     try:
         scraper = get_scraper(source)
     except ValueError as e:
         raise DownloaderError(f"Unsupported source: {e}")
-    
+
+    # Bail before kicking off any expensive work if already cancelled.
+    _check_cancel()
+
     # Create temp directory for images
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
-        
+
         # Get page URLs
         try:
             page_urls = scraper.get_pages(chapter.url)
         except Exception as e:
             raise DownloaderError(f"Failed to get pages: {e}")
-        
+
+        _check_cancel()
+
         if not page_urls:
             raise DownloaderError("No pages found for chapter")
-        
+
         # Download images concurrently
         image_paths = []
         download_tasks = []
@@ -334,7 +346,11 @@ def download_chapter(
         results: Dict[int, Path] = {}
         total_pages = len(download_tasks)
         completed_count = 0
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        # Manually manage the pool so we can `cancel_futures=True` and bail
+        # without waiting for in-flight image fetches when the user cancels.
+        executor = ThreadPoolExecutor(max_workers=4)
+        cancelled = False
+        try:
             futures = {
                 executor.submit(scraper.download_image, url, img_path): (idx, img_path)
                 for idx, url, img_path in download_tasks
@@ -351,6 +367,16 @@ def download_chapter(
                 completed_count += 1
                 if progress_callback:
                     progress_callback(completed_count, total_pages)
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    break
+        finally:
+            # cancel_futures only ditches futures that haven't started yet;
+            # in-flight ones still run to completion but we don't wait on them.
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        if cancelled:
+            raise InterruptedError("Download cancelled")
 
         # Preserve page order
         image_paths = [results[i] for i in sorted(results)]

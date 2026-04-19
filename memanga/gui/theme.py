@@ -1,5 +1,5 @@
 """
-MeManga GUI Theme — dual dark/light palette with dynamic QSS generation.
+MeManga GUI Theme — dark palette + QSS generation.
 """
 
 # ── Dark Mode Palette ──
@@ -20,26 +20,6 @@ DARK = {
     "error": "#F87171",
     "scrollbar": "#2A2F3B",
     "scrollbar_hover": "#3A4050",
-}
-
-# ── Light Mode Palette ──
-LIGHT = {
-    "bg": "#F8F9FB",
-    "bg_secondary": "#EEF0F4",
-    "bg_card": "#FFFFFF",
-    "bg_sidebar": "#EBEDF2",
-    "bg_input": "#FFFFFF",
-    "border": "#D5D9E0",
-    "fg": "#1A1D27",
-    "fg_secondary": "#5F6673",
-    "fg_muted": "#9AA0AB",
-    "accent": "#4D8C1F",
-    "accent_hover": "#3E7518",
-    "success": "#16A34A",
-    "warning": "#CA8A04",
-    "error": "#DC2626",
-    "scrollbar": "#C5CAD3",
-    "scrollbar_hover": "#A8B0BC",
 }
 
 # ── Shared constants (palette-independent) ──
@@ -70,7 +50,7 @@ PAD_MD = 10
 PAD_LG = 14
 PAD_XL = 20
 
-# ── Active palette (set by apply_theme) ──
+# ── Active palette (dark only) ──
 BG = DARK["bg"]
 BG_SECONDARY = DARK["bg_secondary"]
 BG_CARD = DARK["bg_card"]
@@ -89,38 +69,9 @@ SCROLLBAR = DARK["scrollbar"]
 SCROLLBAR_HOVER = DARK["scrollbar_hover"]
 
 
-def get_palette(mode: str) -> dict:
-    return DARK if mode == "dark" else LIGHT
-
-
-def apply_theme(mode: str):
-    """Update module-level color variables to match the given mode."""
-    global BG, BG_SECONDARY, BG_CARD, BG_SIDEBAR, BG_INPUT, BORDER
-    global FG, FG_SECONDARY, FG_MUTED, ACCENT, ACCENT_HOVER
-    global SUCCESS, WARNING, ERROR, SCROLLBAR, SCROLLBAR_HOVER
-
-    p = get_palette(mode)
-    BG = p["bg"]
-    BG_SECONDARY = p["bg_secondary"]
-    BG_CARD = p["bg_card"]
-    BG_SIDEBAR = p["bg_sidebar"]
-    BG_INPUT = p["bg_input"]
-    BORDER = p["border"]
-    FG = p["fg"]
-    FG_SECONDARY = p["fg_secondary"]
-    FG_MUTED = p["fg_muted"]
-    ACCENT = p["accent"]
-    ACCENT_HOVER = p["accent_hover"]
-    SUCCESS = p["success"]
-    WARNING = p["warning"]
-    ERROR = p["error"]
-    SCROLLBAR = p["scrollbar"]
-    SCROLLBAR_HOVER = p["scrollbar_hover"]
-
-
-def generate_stylesheet(mode: str = "dark") -> str:
-    """Generate QSS stylesheet for the given mode."""
-    p = get_palette(mode)
+def generate_stylesheet() -> str:
+    """Generate QSS stylesheet for the dark palette."""
+    p = DARK
 
     return f"""
 /* ── Base ── */
