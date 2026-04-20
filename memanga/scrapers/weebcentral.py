@@ -64,8 +64,7 @@ class WeebCentralScraper(PlaywrightScraper):
 
     def search(self, query: str) -> List[Manga]:
         """Search for manga using Quick Search dropdown."""
-        future = self._executor.submit(self._search_in_thread, query)
-        results = future.result(timeout=120)
+        results = self._run_serialized(self._search_in_thread, query, timeout=120)
 
         # Deduplicate
         seen = set()
@@ -160,5 +159,4 @@ class WeebCentralScraper(PlaywrightScraper):
 
     def get_pages(self, chapter_url: str) -> List[str]:
         """Get pages using Playwright (JavaScript rendering required)."""
-        future = self._executor.submit(self._get_pages_in_thread, chapter_url)
-        return future.result(timeout=120)
+        return self._run_serialized(self._get_pages_in_thread, chapter_url, timeout=120)

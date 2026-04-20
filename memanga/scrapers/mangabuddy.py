@@ -172,8 +172,7 @@ class MangaBuddyScraper(PlaywrightScraper):
 
         Uses Playwright to render JS-loaded images.
         """
-        future = self._executor.submit(self._get_pages_in_thread, chapter_url)
-        return future.result(timeout=120)
+        return self._run_serialized(self._get_pages_in_thread, chapter_url, timeout=120)
 
     def download_image(self, url: str, path) -> bool:
         """Download image with proper headers."""

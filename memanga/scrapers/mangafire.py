@@ -149,7 +149,18 @@ class VRFGenerator:
     """
 
     _instance = None
+    # Single-worker pool keeps one Firefox per process. Pair with a lock so
+    # callers wait OUTSIDE the timeout — otherwise a second chapter queued
+    # behind a slow first chapter eats into its own 120s budget. See
+    # playwright_base.PlaywrightScraper._run_serialized for the same pattern.
     _executor = ThreadPoolExecutor(max_workers=1)
+    _executor_lock = threading.Lock()
+
+    @classmethod
+    def _run_serialized(cls, fn, *args, timeout: float, **kwargs):
+        with cls._executor_lock:
+            future = cls._executor.submit(fn, *args, **kwargs)
+            return future.result(timeout=timeout)
 
     def __new__(cls):
         if cls._instance is None:
@@ -260,8 +271,9 @@ class VRFGenerator:
             cached = self._pages_data_cache[chapter_url]
             return cached['urls'], cached['offsets']
 
-        future = self._executor.submit(self._get_chapter_pages_in_thread, chapter_url)
-        return future.result(timeout=120)
+        return self._run_serialized(
+            self._get_chapter_pages_in_thread, chapter_url, timeout=120,
+        )
 
     def _close_in_thread(self):
         """Clean up browser resources - runs in executor thread."""
@@ -296,8 +308,7 @@ class VRFGenerator:
     def close(self):
         """Clean up browser resources."""
         try:
-            future = self._executor.submit(self._close_in_thread)
-            future.result(timeout=10)
+            self._run_serialized(self._close_in_thread, timeout=10)
         except Exception:
             pass
 
@@ -339,8 +350,17 @@ class MangaFireScraper(BaseScraper):
     # Supported languages
     LANGUAGES = ['en', 'es', 'es-la', 'fr', 'ja', 'pt', 'pt-br']
 
-    # Shared executor for search Playwright ops
+    # Shared executor for search Playwright ops — single worker, paired with
+    # a lock so callers wait outside the timeout window. Same rationale as
+    # VRFGenerator above.
     _executor = ThreadPoolExecutor(max_workers=1)
+    _executor_lock = threading.Lock()
+
+    @classmethod
+    def _run_serialized(cls, fn, *args, timeout: float, **kwargs):
+        with cls._executor_lock:
+            future = cls._executor.submit(fn, *args, **kwargs)
+            return future.result(timeout=timeout)
 
     def __init__(self):
         super().__init__()
@@ -457,8 +477,7 @@ class MangaFireScraper(BaseScraper):
 
     def search(self, query: str) -> List[Manga]:
         """Search for manga using Firefox and the search bar."""
-        future = self._executor.submit(self._search_in_thread, query)
-        return future.result(timeout=120)
+        return self._run_serialized(self._search_in_thread, query, timeout=120)
 
     def get_chapters(self, manga_url: str, language: str = 'en') -> List[Chapter]:
         """Get all chapters for a manga."""
