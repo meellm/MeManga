@@ -10,6 +10,7 @@ from pathlib import Path
 
 import certifi
 import playwright_stealth
+from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
@@ -55,6 +56,13 @@ datas = [
     # Playwright stealth JS files
     (stealth_path, "playwright_stealth"),
 ]
+
+# Playwright driver tree (node binary + cli.js). Not a Python package,
+# so PyInstaller's default collection misses it — we need it at runtime
+# to invoke `playwright install firefox` on first launch. Explicit
+# collection guarantees it ships regardless of what version of
+# pyinstaller-hooks-contrib the build environment has.
+datas += collect_data_files("playwright", include_py_files=False)
 
 # Collect template scrapers
 templates_dir = os.path.join(scrapers_dir, "templates")
