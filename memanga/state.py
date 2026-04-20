@@ -101,11 +101,16 @@ class State:
         return manga_state.get("last_chapter")
     
     def set_last_chapter(self, manga_title: str, chapter: str):
-        """Set the last downloaded chapter for a manga."""
+        """Set the last downloaded chapter for a manga.
+
+        Marks dirty rather than syncing — the app's 5s flush timer + the
+        closeEvent flush cover durability without thrashing disk on
+        every per-chapter update.
+        """
         self._ensure_manga_entry(manga_title)
         self._data["manga"][manga_title]["last_chapter"] = chapter
         self._data["manga"][manga_title]["last_updated"] = datetime.now().isoformat()
-        self.save()
+        self._mark_dirty()
     
     def get_downloaded_chapters(self, manga_title: str) -> List[str]:
         """Get list of all downloaded chapter numbers for a manga."""
@@ -131,8 +136,8 @@ class State:
         
         self._data["manga"][manga_title]["last_chapter"] = chapter_str
         self._data["manga"][manga_title]["last_updated"] = datetime.now().isoformat()
-        self.save()
-    
+        self._mark_dirty()
+
     def is_chapter_downloaded(self, manga_title: str, chapter: str) -> bool:
         """Check if a chapter has been downloaded."""
         return str(chapter) in self.get_downloaded_chapters(manga_title)

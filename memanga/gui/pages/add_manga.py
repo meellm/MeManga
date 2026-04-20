@@ -224,7 +224,14 @@ class AddMangaDialog(QDialog):
                 float(current_raw)
                 entry["external_threshold"] = current_raw
             except ValueError:
-                pass  # silently ignore garbage rather than blocking the add
+                # Don't block the add, but tell the user the shortcut
+                # didn't take effect — otherwise they'll wonder why the
+                # badge floods after the first check.
+                Toast(
+                    self,
+                    "Current chapter must be a number — leaving blank",
+                    kind="warning",
+                )
 
         existing.append(entry)
         self.app.config.set("manga", existing)
@@ -262,5 +269,9 @@ class AddMangaDialog(QDialog):
 
         # Auto-check for chapters
         self.app.worker.check_updates([entry], self.app.app_state, self.app.config)
+
+        # Tell other pages (Library, Sources) that the library mutated so
+        # they can refresh without waiting for navigation.
+        self.app.events.publish("library_updated", {"title": title, "action": "add"})
 
         self.accept()

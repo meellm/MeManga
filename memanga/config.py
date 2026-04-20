@@ -3,21 +3,30 @@ Configuration management for MeManga
 """
 
 import os
+import tempfile
+import threading
 import yaml
 from pathlib import Path
 
 
 class Config:
-    """Manages configuration file."""
-    
+    """Manages configuration file.
+
+    Thread-safe: a single ``_lock`` serializes both `_data` mutations from
+    background threads (cover backfill, cover fetch on add) and the YAML
+    write itself. Writes are atomic via tempfile + os.replace so a crash
+    mid-save can never truncate the user's config.
+    """
+
     def __init__(self, config_dir=None):
         if config_dir:
             self.config_dir = Path(config_dir)
         else:
             self.config_dir = Path.home() / ".config" / "memanga"
-        
+
         self.config_path = self.config_dir / "config.yaml"
         self.config_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
         self._data = self._load()
     
     def _load(self):
@@ -93,9 +102,49 @@ class Config:
         data[keys[-1]] = value
     
     def save(self):
-        """Save config to file."""
-        with open(self.config_path, "w") as f:
-            yaml.dump(self._data, f, default_flow_style=False, allow_unicode=True)
+        """Save config to file atomically. Thread-safe.
+
+        Snapshots `_data` under the lock, then writes to a temp file and
+        atomically replaces the live file. Concurrent saves serialize on
+        the lock instead of fighting over the same file descriptor.
+        """
+        with self._lock:
+            payload = yaml.dump(
+                self._data, default_flow_style=False, allow_unicode=True,
+            )
+
+        fd, tmp_path = tempfile.mkstemp(dir=self.config_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(payload)
+            os.replace(tmp_path, self.config_path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def update_manga(self, title, mutator):
+        """Atomically mutate the manga entry with the given title.
+
+        ``mutator`` is called with the entry dict while the lock is held;
+        any return value is ignored. Saves automatically when the mutator
+        returns truthy (or returns ``None``, the common "I mutated in
+        place" case). Returns True if an entry was found.
+        """
+        with self._lock:
+            for entry in self._data.get("manga", []):
+                if entry.get("title") == title:
+                    result = mutator(entry)
+                    # None == "I mutated in place"; False == "skip save"
+                    needs_save = result is None or bool(result)
+                    break
+            else:
+                return False
+        if needs_save:
+            self.save()
+        return True
     
     def reset(self):
         """Reset to default config."""

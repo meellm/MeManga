@@ -581,6 +581,44 @@ class DetailPage(BasePage):
         self._edit_frame.setVisible(False)
         self._editing = False
 
+    def _refetch_cover(self, title: str, url: str, domain: str):
+        """Spawn a background cover lookup (scraper → MangaDex fallback).
+
+        Used when the user renames a manga and we want to give them
+        another shot at finding a cover for the corrected title.
+        Mirrors the chain in ``add_manga.py:_fetch_cover``.
+        """
+        import threading
+
+        def _task():
+            cover = None
+            try:
+                from ...scrapers import get_scraper
+                scraper = get_scraper(domain)
+                if hasattr(scraper, "get_cover_url") and url:
+                    cover = scraper.get_cover_url(url)
+            except Exception:
+                cover = None
+
+            if not cover:
+                try:
+                    from ..cover_fallback import fetch_mangadex_cover
+                    cover = fetch_mangadex_cover(title)
+                except Exception:
+                    cover = None
+
+            if cover:
+                def _mutate(entry, _cover=cover):
+                    entry["cover_url"] = _cover
+                    entry.pop("cover_lookup_failed", None)
+                    return True
+                if self.app.config.update_manga(title, _mutate):
+                    self.app.events.publish(
+                        "library_updated", {"title": title, "action": "cover"}
+                    )
+
+        threading.Thread(target=_task, daemon=True).start()
+
     def _save_edit(self):
         if not self._manga:
             return
@@ -643,6 +681,34 @@ class DetailPage(BasePage):
         self.app.config.save()
         self._editing = False
         Toast(self, "Manga updated", kind="success")
+
+        # Title rename + missing cover → take another shot at finding one.
+        # The MangaDex fallback may now succeed if the prior failure was
+        # due to a typo. Clear the negative-lookup flag first so the
+        # backfill loop won't skip it on the next launch either.
+        if (
+            new_title
+            and new_title != old_title
+            and not self._manga.get("cover_url")
+        ):
+            primary_url = ""
+            primary_domain = ""
+            srcs = self._manga.get("sources") or []
+            if srcs:
+                primary_url = srcs[0].get("url", "")
+                primary_domain = srcs[0].get("source", "")
+            else:
+                primary_url = self._manga.get("url", "")
+                primary_domain = self._manga.get("source", "")
+            # Pop the failed-flag eagerly so backfill won't skip it.
+            self._manga.pop("cover_lookup_failed", None)
+            self._refetch_cover(new_title, primary_url, primary_domain)
+
+        # Notify other pages (Library card label, Sources Active list).
+        self.app.events.publish(
+            "library_updated", {"title": new_title, "action": "edit"}
+        )
+
         self._rebuild()
 
     # ── Downloads ──
@@ -708,6 +774,9 @@ class DetailPage(BasePage):
         self.app.config.set("manga", manga_list)
         self.app.config.save()
         self.app.app_state.remove_manga(title)
+        self.app.events.publish(
+            "library_updated", {"title": title, "action": "remove"}
+        )
         self.app.show_page("library")
 
     # ── Reader ──
