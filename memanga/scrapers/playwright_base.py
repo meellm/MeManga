@@ -45,8 +45,29 @@ def cleanup_browsers():
 class PlaywrightScraper(BaseScraper):
     """Base class for scrapers that need Playwright with stealth mode."""
 
-    # Shared thread pool for all Playwright operations
+    # Shared thread pool for all Playwright operations.
+    # max_workers=1 keeps a single browser instance per process (memory),
+    # but means submitted tasks queue serially. Pair with _executor_lock so
+    # callers wait OUTSIDE the timeout window — see `_run_serialized`.
     _executor = ThreadPoolExecutor(max_workers=1)
+    _executor_lock = threading.Lock()
+
+    @classmethod
+    def _run_serialized(cls, fn, *args, timeout: float, **kwargs):
+        """Submit ``fn`` to the shared executor under the class lock.
+
+        ``Future.result(timeout=N)`` measures wall-clock from the ``submit``
+        call, which means a queued task can blow its budget while waiting
+        for the prior task to finish — a real bug when downloading many
+        chapters in parallel. Holding the lock around submit + wait
+        guarantees the timeout reflects actual work time only.
+
+        Subclasses with their own ``_executor`` should also override
+        ``_executor_lock`` so the pair stays consistent.
+        """
+        with cls._executor_lock:
+            future = cls._executor.submit(fn, *args, **kwargs)
+            return future.result(timeout=timeout)
 
     def _get_browser_in_thread(self):
         """Get or create browser instance in the current thread."""
@@ -103,8 +124,9 @@ class PlaywrightScraper(BaseScraper):
             wait_time: Extra wait time in ms after load
             cookies: Optional list of cookies to set
         """
-        future = self._executor.submit(self._fetch_page_content, url, wait_time, cookies)
-        return future.result(timeout=60)
+        return self._run_serialized(
+            self._fetch_page_content, url, wait_time, cookies, timeout=60,
+        )
 
     def _run_js_in_thread(self, url: str, script: str, wait_time: int = 2000):
         """Internal: execute JS on page (runs in thread) with retry."""
@@ -143,14 +165,14 @@ class PlaywrightScraper(BaseScraper):
             script: JavaScript to execute
             wait_time: Wait time before executing
         """
-        future = self._executor.submit(self._run_js_in_thread, url, script, wait_time)
-        return future.result(timeout=60)
+        return self._run_serialized(
+            self._run_js_in_thread, url, script, wait_time, timeout=60,
+        )
 
     @classmethod
     def cleanup(cls):
         """Cleanup browser instances in the executor thread."""
         try:
-            future = cls._executor.submit(cleanup_browsers)
-            future.result(timeout=10)
+            cls._run_serialized(cleanup_browsers, timeout=10)
         except Exception:
             pass
