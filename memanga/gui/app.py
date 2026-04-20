@@ -205,10 +205,35 @@ class MeMangaApp(QMainWindow):
 
     def _pop_external_threshold(self, title: str) -> bool:
         manga_list = self.config.get("manga", [])
+        mutated = False
         for entry in manga_list:
             if entry.get("title") == title and "external_threshold" in entry:
                 entry.pop("external_threshold", None)
-                return True
+                entry.pop("external_threshold_attempts", None)
+                mutated = True
+        return mutated
+
+    def _increment_threshold_attempts(self, title: str) -> bool:
+        """Bump the attempt counter for the external_threshold sentinel.
+
+        Returns True if the config was mutated (caller should save).
+        After 2 failed attempts (i.e. checks where the scraper returned
+        no chapters), pops the sentinel so we don't keep retrying a
+        permanently-broken source.
+        """
+        if not title:
+            return False
+        manga_list = self.config.get("manga", [])
+        for entry in manga_list:
+            if entry.get("title") != title or "external_threshold" not in entry:
+                continue
+            attempts = int(entry.get("external_threshold_attempts", 0)) + 1
+            if attempts >= 2:
+                entry.pop("external_threshold", None)
+                entry.pop("external_threshold_attempts", None)
+            else:
+                entry["external_threshold_attempts"] = attempts
+            return True
         return False
 
     def _get_manga_mode(self, title: str) -> str:
@@ -266,9 +291,17 @@ class MeMangaApp(QMainWindow):
             # caching available_chapters so we always have something to walk.
             # One-shot: pop the sentinel and re-save config.
             threshold_raw = manga.get("external_threshold")
-            if threshold_raw is not None and all_chapters:
-                if self._resolve_external_threshold(manga, threshold_raw, all_chapters):
-                    config_dirty = True
+            if threshold_raw is not None:
+                if all_chapters:
+                    if self._resolve_external_threshold(manga, threshold_raw, all_chapters):
+                        config_dirty = True
+                else:
+                    # No chapters returned (scrape failure or empty source).
+                    # Track attempt count so a permanently-broken scraper
+                    # doesn't leave the sentinel forever; pop after the
+                    # second failure to keep config clean.
+                    if self._increment_threshold_attempts(manga.get("title", "")):
+                        config_dirty = True
 
         if config_dirty:
             # Persist the popped sentinels and the freshly-set last_chapter.
@@ -292,9 +325,18 @@ class MeMangaApp(QMainWindow):
         """Walk the library and try to populate covers for entries that
         don't have one yet, via the MangaDex fallback. One worker thread
         polls titles serially with a small sleep between requests so we
-        don't hammer the API."""
+        don't hammer the API.
+
+        Skips entries previously marked ``cover_lookup_failed`` so we
+        don't re-query MangaDex on every launch for titles it doesn't
+        carry. The flag clears on title rename (Detail → Edit).
+        """
         manga_list = self.config.get("manga", [])
-        missing = [m for m in manga_list if not m.get("cover_url")]
+        # Skip entries that have a cover OR that we already tried and missed.
+        missing = [
+            m for m in manga_list
+            if not m.get("cover_url") and not m.get("cover_lookup_failed")
+        ]
         if not missing:
             return
 
@@ -306,27 +348,37 @@ class MeMangaApp(QMainWindow):
             import time
             from .cover_fallback import fetch_mangadex_cover
 
-            any_updated = False
             for t in titles:
                 try:
                     cover = fetch_mangadex_cover(t)
                 except Exception:
                     cover = None
-                if cover:
-                    # Re-read the list each iteration in case the user mutated it.
-                    current = self.config.get("manga", [])
-                    for entry in current:
-                        if entry.get("title") == t and not entry.get("cover_url"):
-                            entry["cover_url"] = cover
-                            any_updated = True
-                            break
+
+                # Mutate + save under the config lock so we don't race
+                # with the UI thread editing the same entry.
+                def _mutate(entry, _cover=cover):
+                    if _cover:
+                        if entry.get("cover_url"):
+                            return False  # someone else already filled it
+                        entry["cover_url"] = _cover
+                        entry.pop("cover_lookup_failed", None)
+                        return True
+                    # Negative result — remember so we don't re-query
+                    # this title on every future launch.
+                    entry["cover_lookup_failed"] = True
+                    return True
+
+                updated = self.config.update_manga(t, _mutate)
+                if updated and cover:
+                    # Tell the Library page to repaint — otherwise the new
+                    # cover URL just sits in config until the user navigates
+                    # away and back.
+                    self.events.publish("library_updated", {"title": t})
+
                 # Small throttle between API calls.
                 time.sleep(1.0)
 
-            if any_updated:
-                self.config.save()
-
-        self.worker._pool.submit(_task)
+        self.worker.submit_task(_task)
 
     def _auto_check(self):
         interval = self.config.get("gui.auto_check_interval", 3600)

@@ -66,6 +66,10 @@ class Sidebar(QWidget):
 
         self.app.events.subscribe("notification_added", lambda d: self._update_badge())
 
+        # Surface unread notifications from prior sessions immediately —
+        # otherwise the bell stays blank until the next event fires.
+        self._update_badge()
+
     def _show_notifications(self):
         from .notification import NotificationPanel
         NotificationPanel(self, self.app)

@@ -28,6 +28,14 @@ class BackgroundWorker:
         """Clean up the thread pool."""
         self._pool.shutdown(wait=False)
 
+    def submit_task(self, fn):
+        """Run a fire-and-forget callable on the shared worker pool.
+
+        Use this for one-off background work (e.g. cover backfill) so
+        callers don't have to reach into ``_pool`` directly.
+        """
+        return self._pool.submit(fn)
+
     # ------------------------------------------------------------------
     # Cover fetching
     # ------------------------------------------------------------------

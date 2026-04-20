@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QWidget, QCheckBox, QLineEdit,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from .base import BasePage
 from .. import theme as T
 
@@ -29,10 +29,23 @@ class SourcesPage(BasePage):
         self._all_sources: list[str] = []
         self._supported_widgets: list = []
         self._active_widgets: list = []
+        self._filter_pending = False
         self._build()
+
+        # Live-refresh the Active section when manga are added / removed /
+        # edited from anywhere in the app — otherwise this page can drift
+        # if the user navigates here and then mutates the library elsewhere
+        # (e.g. via context menu).
+        self.app.events.subscribe(
+            "library_updated", lambda d: self._on_library_updated()
+        )
 
     def on_show(self, **kwargs):
         self._refresh()
+
+    def _on_library_updated(self):
+        if self.isVisible():
+            self._render_active()
 
     # ── Layout ──────────────────────────────────────────────────────────
 
@@ -87,7 +100,10 @@ class SourcesPage(BasePage):
         self._filter_entry.setPlaceholderText("Filter…")
         self._filter_entry.setFixedHeight(28)
         self._filter_entry.setFixedWidth(220)
-        self._filter_entry.textChanged.connect(self._render_supported)
+        # Debounce: rebuilding the supported list on every keystroke
+        # gets stuttery as the scraper count grows. 150ms is short
+        # enough to feel instant, long enough to coalesce typing.
+        self._filter_entry.textChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self._filter_entry)
         filter_row.addStretch()
         self._count_lbl = QLabel("")
@@ -208,8 +224,12 @@ class SourcesPage(BasePage):
 
             check = QCheckBox()
             check.setChecked(source not in disabled)
+            # Read isChecked() from the captured widget instead of
+            # comparing the signal's int payload — matches the rest of
+            # the codebase and avoids enum-variant fragility across
+            # PySide6 versions.
             check.stateChanged.connect(
-                lambda state, s=source: self._on_toggle(s, state)
+                lambda _=None, s=source, c=check: self._on_toggle(s, c.isChecked())
             )
             row_layout.addWidget(check)
 
@@ -226,11 +246,21 @@ class SourcesPage(BasePage):
             self._supported_layout.addWidget(row)
             self._supported_widgets.append(row)
 
+    # ── Filter debounce ─────────────────────────────────────────────────
+
+    def _on_filter_changed(self, _text=""):
+        if self._filter_pending:
+            return
+        self._filter_pending = True
+        QTimer.singleShot(150, self._do_filter)
+
+    def _do_filter(self):
+        self._filter_pending = False
+        self._render_supported()
+
     # ── Toggle handler ──────────────────────────────────────────────────
 
-    def _on_toggle(self, source: str, state):
-        from PySide6.QtCore import Qt
-        is_checked = state == Qt.CheckState.Checked.value
+    def _on_toggle(self, source: str, is_checked: bool):
         disabled = set(self.app.config.get("sources.disabled", []) or [])
         if is_checked:
             disabled.discard(source)

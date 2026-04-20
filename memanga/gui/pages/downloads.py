@@ -257,10 +257,17 @@ class DownloadsPage(BasePage):
         self.app.worker.cancel_download(task_id)
 
     def _cancel_all(self):
+        # Order matters: set cancel flags on every queued item AND clear
+        # the queue inside the same lock acquisition. Otherwise
+        # _start_next_download can pop a queued item between us cancelling
+        # actives and clearing — and that fresh task wouldn't have its
+        # cancel flag set, defeating Round 2's whole cancel fix.
+        with self.app.worker._lock:
+            for item in self.app.worker._download_queue:
+                item["cancel"].set()
+            self.app.worker._download_queue.clear()
         for task_id in list(self._active_items.keys()):
             self.app.worker.cancel_download(task_id)
-        with self.app.worker._lock:
-            self.app.worker._download_queue.clear()
         Toast(self, "Cancelled all downloads", kind="warning")
 
     def _move_to_completed(self, task_id, data):

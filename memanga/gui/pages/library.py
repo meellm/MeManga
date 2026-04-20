@@ -31,6 +31,9 @@ class LibraryPage(BasePage):
         self.app.events.subscribe("cover_loaded", self._on_cover_loaded)
         self.app.events.subscribe("check_complete", lambda d: self._on_check_done())
         self.app.events.subscribe("download_complete", lambda d: self._on_check_done())
+        # Refresh when something edits/adds/removes a manga elsewhere
+        # (Add Manga dialog, Detail page, cover backfill writes a URL).
+        self.app.events.subscribe("library_updated", lambda d: self._on_check_done())
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -284,6 +287,9 @@ class LibraryPage(BasePage):
         self.app.config.set("manga", manga_list)
         self.app.config.save()
         self.app.app_state.remove_manga(title)
+        self.app.events.publish(
+            "library_updated", {"title": title, "action": "remove"}
+        )
         self._refresh()
 
     def _open_add_dialog(self, prefill=None):
