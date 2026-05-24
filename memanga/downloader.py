@@ -10,6 +10,7 @@ Handles:
 """
 
 import io
+import time
 import atexit
 import tempfile
 import shutil
@@ -233,12 +234,42 @@ def check_for_updates(
     return sorted(chapters_to_download)
 
 
+def _find_chapter_on_backup(
+    manga: Dict[str, Any],
+    chapter_num_str: str,
+) -> Optional["ChapterWithSource"]:
+    """
+    Find a chapter on backup sources.
+
+    Used when the primary source download fails — looks up the same chapter
+    number on any configured backup sources and returns it ready to download.
+    """
+    sources = _get_sources_from_manga(manga)
+    backup_sources = sources[1:]  # Everything after primary
+
+    for src in backup_sources:
+        source = src["source"]
+        url = src["url"]
+        try:
+            scraper = get_scraper(source)
+            all_chapters = scraper.get_chapters(url)
+        except Exception:
+            continue
+
+        for ch in all_chapters:
+            if ch.number == chapter_num_str:
+                return ChapterWithSource(ch, source, url, is_backup=True)
+
+    return None
+
+
 def download_chapter(
     manga: Dict[str, Any],
     chapter: Chapter,
     output_dir: Path,
     output_format: OutputFormat = "pdf",
     state: Optional[State] = None,
+    max_retries: int = 3,
 ) -> Optional[Path]:
     """
     Download a chapter and convert to PDF or EPUB.
@@ -284,7 +315,6 @@ def download_chapter(
             raise DownloaderError("No pages found for chapter")
         
         # Download images concurrently
-        image_paths = []
         download_tasks = []
         for i, url in enumerate(page_urls):
             ext = _get_extension(url)
@@ -294,24 +324,42 @@ def download_chapter(
         results: Dict[int, Path] = {}
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {
-                executor.submit(scraper.download_image, url, img_path): (idx, img_path)
+                executor.submit(scraper.download_image, url, img_path): (idx, url, img_path)
                 for idx, url, img_path in download_tasks
             }
             for future in as_completed(futures):
-                idx, img_path = futures[future]
+                idx, url, img_path = futures[future]
                 try:
                     if future.result():
                         results[idx] = img_path
-                    else:
-                        print(f"  Warning: Failed to download page {idx+1}")
                 except Exception:
-                    print(f"  Warning: Failed to download page {idx+1}")
+                    pass
+
+        # Retry individually any pages that failed the first pass
+        if max_retries > 0:
+            for attempt in range(1, max_retries + 1):
+                failed = [(idx, url, img_path) for idx, url, img_path in download_tasks if idx not in results]
+                if not failed:
+                    break
+                print(f"  Retrying {len(failed)} failed page(s), attempt {attempt}/{max_retries}...")
+                time.sleep(2 ** (attempt - 1))
+                for idx, url, img_path in failed:
+                    try:
+                        if scraper.download_image(url, img_path):
+                            results[idx] = img_path
+                    except Exception:
+                        pass
+
+        still_failed = [idx for idx, _, _ in download_tasks if idx not in results]
+        if still_failed:
+            failed_page_nums = [i + 1 for i in still_failed]
+            raise DownloaderError(
+                f"Incomplete download: {len(still_failed)}/{len(page_urls)} pages failed"
+                f" (pages {failed_page_nums})"
+            )
 
         # Preserve page order
         image_paths = [results[i] for i in sorted(results)]
-        
-        if not image_paths:
-            raise DownloaderError("Failed to download any pages")
 
         # Download cover image for EPUB
         cover_path = None

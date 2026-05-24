@@ -161,6 +161,57 @@ class State:
         manga_state = self.get_manga_state(manga_title)
         return manga_state.get("pending_backup", {})
     
+    # ========================================================================
+    # Failed Chapter Tracking
+    # ========================================================================
+
+    def add_failed_chapter(
+        self,
+        manga_title: str,
+        chapter: str,
+        source: str,
+        error: str,
+        failed_pages: Optional[List[int]] = None,
+    ):
+        """Record a chapter download failure."""
+        self._ensure_manga_entry(manga_title)
+        chapter_str = str(chapter)
+
+        if "failed_chapters" not in self._data["manga"][manga_title]:
+            self._data["manga"][manga_title]["failed_chapters"] = {}
+
+        existing = self._data["manga"][manga_title]["failed_chapters"].get(chapter_str, {})
+        self._data["manga"][manga_title]["failed_chapters"][chapter_str] = {
+            "failed_at": datetime.now().isoformat(),
+            "source": source,
+            "error": error[:300],
+            "failed_pages": failed_pages or [],
+            "attempts": existing.get("attempts", 0) + 1,
+        }
+        self.save()
+
+    def get_failed_chapters(self, manga_title: str) -> Dict[str, Any]:
+        """Get all failed chapter records for a manga."""
+        manga_state = self.get_manga_state(manga_title)
+        return manga_state.get("failed_chapters", {})
+
+    def get_all_failed_chapters(self) -> Dict[str, Dict[str, Any]]:
+        """Get failed chapters for all manga that have failures."""
+        result = {}
+        for title, manga_state in self._data.get("manga", {}).items():
+            failed = manga_state.get("failed_chapters", {})
+            if failed:
+                result[title] = failed
+        return result
+
+    def clear_failed_chapter(self, manga_title: str, chapter: str):
+        """Remove a failed chapter record after successful re-download."""
+        chapter_str = str(chapter)
+        failed = self._data.get("manga", {}).get(manga_title, {}).get("failed_chapters", {})
+        if chapter_str in failed:
+            del self._data["manga"][manga_title]["failed_chapters"][chapter_str]
+            self.save()
+
     def _ensure_manga_entry(self, manga_title: str):
         """Ensure manga entry exists in state."""
         if "manga" not in self._data:
@@ -172,7 +223,7 @@ class State:
                 "last_updated": None,
                 "created": datetime.now().isoformat(),
             }
-    
+
     # ========================================================================
     # Check History
     # ========================================================================
