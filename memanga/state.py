@@ -400,6 +400,55 @@ class State:
             n["read"] = True
         self._mark_dirty()
 
+    def clear_notifications(self):
+        """Wipe all notifications. Used by the GUI's 'Clear all' button."""
+        self._data["notifications"] = []
+        self._mark_dirty()
+
+    def filter_notifications(self, kind: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return notifications filtered by category.
+
+        Categories collapse the granular `type` values into the four chip
+        buckets used in the UI:
+            all       — everything
+            new       — new-chapter findings ("check")
+            downloads — download-complete / kindle-sent events
+            system    — errors, warnings, generic system events
+        """
+        all_notifs = list(reversed(self._data.get("notifications", [])[-limit:]))
+        if kind == "all":
+            return all_notifs
+        bucket_map = {
+            "new":       {"check"},
+            "downloads": {"download", "kindle"},
+            "system":    {"error", "warn", "system"},
+        }
+        targets = bucket_map.get(kind, set())
+        return [n for n in all_notifs if n.get("type") in targets]
+
+    # ========================================================================
+    # Search history (for Search page recent-chip row)
+    # ========================================================================
+
+    def add_search_query(self, query: str, limit: int = 8):
+        """Push a query onto the deduped recent-search list (newest first)."""
+        if not query or not query.strip():
+            return
+        q = query.strip()
+        history = self._data.get("search_history", []) or []
+        # Dedupe by case-insensitive match, then prepend.
+        history = [h for h in history if h.lower() != q.lower()]
+        history.insert(0, q)
+        self._data["search_history"] = history[:limit]
+        self._mark_dirty()
+
+    def get_recent_searches(self, limit: int = 8) -> List[str]:
+        return list(self._data.get("search_history", []) or [])[:limit]
+
+    def clear_search_history(self):
+        self._data["search_history"] = []
+        self._mark_dirty()
+
     # ========================================================================
     # Download History
     # ========================================================================
@@ -429,8 +478,14 @@ class State:
     # Source Health
     # ========================================================================
 
-    def update_source_health(self, domain: str, success: bool, error_msg: str = ""):
-        """Update health status for a source domain."""
+    def update_source_health(self, domain: str, success: bool,
+                             error_msg: str = "", latency_ms: int = None):
+        """Update health status for a source domain.
+
+        ``latency_ms`` (optional) records the round-trip time of the
+        probe that produced this status update. Drives the "Xms" badge
+        in the Sources screen.
+        """
         if "source_health" not in self._data:
             self._data["source_health"] = {}
         now = datetime.now().isoformat()
@@ -438,12 +493,18 @@ class State:
         if success:
             health["last_success"] = now
             health["error_count"] = 0
-            health["status"] = "ok"
+            # "slow" badge if response was sluggish (>500ms is plenty).
+            if latency_ms is not None and latency_ms > 500:
+                health["status"] = "warning"
+            else:
+                health["status"] = "ok"
         else:
             health["last_error"] = now
             health["last_error_msg"] = error_msg[:100]
             health["error_count"] = health.get("error_count", 0) + 1
             health["status"] = "warning" if health["error_count"] < 3 else "error"
+        if latency_ms is not None:
+            health["latency_ms"] = int(latency_ms)
         self._data["source_health"][domain] = health
         self._mark_dirty()
 

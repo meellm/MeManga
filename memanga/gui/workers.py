@@ -159,10 +159,12 @@ class BackgroundWorker:
         }
 
         with self._lock:
-            if self._active_downloads < self._max_concurrent_downloads:
+            paused = getattr(self, "_paused", False)
+            if (not paused) and self._active_downloads < self._max_concurrent_downloads:
                 self._active_downloads += 1
                 self._pool.submit(self._run_download, item)
             else:
+                # While paused or saturated, always queue.
                 self._download_queue.append(item)
                 self._events.publish("download_queued", {
                     "task_id": task_id,
@@ -261,10 +263,18 @@ class BackgroundWorker:
             self._start_next_download()
 
     def _start_next_download(self):
-        """Finish current download and start next queued one if capacity allows."""
+        """Finish current download and start next queued one if capacity allows.
+
+        While paused (``pause_all()``) the queue holds — no new jobs are
+        dequeued. In-flight jobs continue until completion. ``resume_all()``
+        kicks this method again to drain the queue.
+        """
         next_item = None
         with self._lock:
             self._active_downloads = max(0, self._active_downloads - 1)
+            if getattr(self, "_paused", False):
+                # Don't dequeue anything while paused.
+                return
             if self._download_queue and self._active_downloads < self._max_concurrent_downloads:
                 next_item = self._download_queue.pop(0)
                 self._active_downloads += 1
@@ -325,3 +335,73 @@ class BackgroundWorker:
             self._events.publish("storage_calculated", {"total_mb": total_mb})
 
         self._pool.submit(_task)
+
+    # ------------------------------------------------------------------
+    # Source health pings
+    # ------------------------------------------------------------------
+
+    def ping_sources(self, sources: List[str], state, timeout: float = 3.0):
+        """Issue a parallel HEAD against each source's homepage to refresh
+        its health entry in :class:`State`. Publishes
+        ``sources_health_updated`` for the UI when done.
+        """
+        def _ping_one(domain: str):
+            url = f"https://{domain}/"
+            import time
+            t0 = time.perf_counter()
+            try:
+                resp = requests.head(
+                    url, timeout=timeout, allow_redirects=True,
+                    headers={"User-Agent": "MeManga/health-check"},
+                )
+                latency = int((time.perf_counter() - t0) * 1000)
+                ok = 200 <= resp.status_code < 500
+                state.update_source_health(
+                    domain, ok,
+                    error_msg=f"HTTP {resp.status_code}" if not ok else "",
+                    latency_ms=latency,
+                )
+            except requests.RequestException as e:
+                latency = int((time.perf_counter() - t0) * 1000)
+                state.update_source_health(
+                    domain, False, error_msg=str(e)[:80], latency_ms=latency,
+                )
+
+        def _task():
+            # Fan out with a small thread pool — bounded so a clean machine
+            # doesn't pop hundreds of connections at once.
+            from concurrent.futures import ThreadPoolExecutor as _TPE
+            with _TPE(max_workers=8) as ex:
+                list(ex.map(_ping_one, sources))
+            self._events.publish("sources_health_updated", {"count": len(sources)})
+
+        self._pool.submit(_task)
+
+    # ------------------------------------------------------------------
+    # Pause / resume
+    # ------------------------------------------------------------------
+
+    @property
+    def active_tasks(self) -> Dict[str, threading.Event]:
+        """Read-only view of in-flight cancel-flag map. Used by the sidebar
+        for the Downloads badge count and by `pause_all` to enumerate jobs.
+        """
+        return dict(self._cancel_flags)
+
+    def is_paused(self) -> bool:
+        return getattr(self, "_paused", False)
+
+    def pause_all(self):
+        """Stop dequeuing new downloads. In-flight jobs continue (Playwright
+        sessions can't be cleanly interrupted), but the queue drains naturally.
+        """
+        with self._lock:
+            self._paused = True
+        self._events.publish("downloads_paused", {})
+
+    def resume_all(self):
+        with self._lock:
+            self._paused = False
+        self._events.publish("downloads_resumed", {})
+        # Kick the queue.
+        self._start_next_download()
