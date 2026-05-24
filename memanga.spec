@@ -47,6 +47,10 @@ hidden_imports += [
     "PySide6.QtCore",
     "PySide6.QtGui",
     "PySide6.QtWidgets",
+    # QtSvg is used at runtime by memanga.gui.assets.icons to render the
+    # Lucide-style stroke icons. PyInstaller's auto-detection sometimes
+    # misses it depending on hooks-contrib version — list it explicitly.
+    "PySide6.QtSvg",
 ]
 
 # Data files to include

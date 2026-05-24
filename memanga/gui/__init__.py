@@ -148,10 +148,15 @@ def launch_gui():
     qapp = QApplication(sys.argv)
     qapp.setStyle("Fusion")
 
-    qapp.setStyleSheet(T.generate_stylesheet())
+    # Apply the persisted theme (dark by default). Switching themes from
+    # Settings re-runs T.apply(qapp) without a restart.
+    T.apply(qapp)
 
     _ensure_browsers()
 
     window = MeMangaApp()
+    # Re-apply on every theme switch so dropdown menus, dialogs and
+    # any reparented widgets pick up the new palette.
+    T.on_theme_change(lambda: T.apply(qapp))
     window.show()
     sys.exit(qapp.exec())

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QWidget, QComboBox, QCheckBox, QLineEdit,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from .base import BasePage
 from .. import theme as T
 from ..components.toast import Toast
@@ -28,6 +28,10 @@ class DetailPage(BasePage):
         # task_ids of in-flight per-chapter Download buttons → button widget,
         # so we can flip them to "Read" when their download completes.
         self._pending_downloads: dict = {}
+        # Chapter filter state (HTML chip row: All/Downloaded/Not downloaded/Unread)
+        self._chapter_filter = "all"
+        self._chapter_chips: dict = {}
+        self._chapter_sort = "Newest first"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -100,138 +104,168 @@ class DetailPage(BasePage):
         state_data = self.app.app_state.get_manga_state(title)
         primary, primary_url, backup, backup_url = self._get_source_display(manga)
 
-        # ── Back button ──
-        back_btn = QPushButton("<  Back")
-        back_btn.setProperty("class", "flat")
-        back_btn.setFixedHeight(28)
-        back_btn.setFixedWidth(80)
+        # ── Back button (matches HTML "< Library" ghost) ──
+        back_row = QHBoxLayout()
+        back_btn = QPushButton("‹  Library")
+        back_btn.setProperty("variant", "ghost")
         back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         back_btn.clicked.connect(lambda: self.app.show_page("library"))
-        self._layout.addWidget(back_btn, alignment=Qt.AlignmentFlag.AlignLeft)
+        back_row.addWidget(back_btn)
+        back_row.addStretch(1)
+        self._layout.addLayout(back_row)
         self._layout.addSpacing(T.PAD_MD)
 
-        # ── Main row: cover left + info right ──
+        # ── Main row: cover left + info right (matches HTML spec.screens.manga_detail.hero)
         main_row = QHBoxLayout()
-        main_row.setSpacing(T.PAD_XL)
+        main_row.setSpacing(28)
 
-        # Cover
+        # Cover — 220x330 per spec
         cover_url = manga.get("cover_url")
-        cover_pixmap = self.app.cover_cache.get_cover(cover_url, size=(200, 280))
+        cover_pixmap = self.app.cover_cache.get_cover(cover_url, size=(220, 330))
         cover_label = QLabel()
-        cover_label.setFixedSize(200, 280)
+        cover_label.setFixedSize(220, 330)
         cover_label.setPixmap(cover_pixmap.scaled(
-            200, 280,
+            220, 330,
             Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,
         ))
         cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cover_label.setStyleSheet(f"border-radius: {T.CARD_RADIUS}px; border: 1px solid {T.BORDER};")
+        cover_label.setStyleSheet(
+            f"border-radius: 8px; border: 1px solid {T.tokens()['surfaces.border']};"
+            f"background-color: {T.tokens()['surfaces.bg_2']};"
+        )
         main_row.addWidget(cover_label, alignment=Qt.AlignmentFlag.AlignTop)
 
         # Info column
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(T.PAD_XS)
+        info_layout.setSpacing(6)
         info_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # Title
+        # "By Author" line above title — matches HTML
+        author = manga.get("author", "")
+        if author:
+            by_label = QLabel(f"By  <span style='color:{T.tokens()['text.t_1']};font-weight:500'>{author}</span>")
+            by_label.setProperty("role", "t2")
+            by_label.setStyleSheet(f"color: {T.tokens()['text.t_2']}; font-size: 12pt;")
+            info_layout.addWidget(by_label)
+
+        # Title — use the new detail_title typography role.
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XL}pt; font-weight: bold;")
+        title_label.setProperty("role", "detail_title")
         title_label.setWordWrap(True)
         info_layout.addWidget(title_label)
+        info_layout.addSpacing(6)
 
-        # Source info
-        primary_label = QLabel(f"Primary: {primary}")
-        primary_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
-        info_layout.addWidget(primary_label)
+        # Source pill row (green dot + name) + URL link in mono
+        src_row = QHBoxLayout()
+        src_row.setSpacing(8)
+        src_row.setContentsMargins(0, 0, 0, 0)
+        if primary:
+            pill = QLabel(f"●  {primary}")
+            accent = T.tokens()["accent.primary"]
+            soft = T.tokens()["accent.soft_10"]
+            pill.setStyleSheet(
+                f"background-color: {soft}; color: {accent};"
+                f"padding: 4px 10px; border-radius: 999px;"
+                f"font-size: 11pt; font-weight: 500;"
+            )
+            src_row.addWidget(pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
         if primary_url:
-            url_label = QLabel(f"  {primary_url}")
-            url_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-            url_label.setWordWrap(True)
-            info_layout.addWidget(url_label)
+            url_lbl = QLabel(primary_url)
+            url_lbl.setProperty("role", "mono_meta")
+            url_lbl.setStyleSheet(
+                f"font-family: 'Geist Mono', monospace; color: {T.tokens()['text.t_3']};"
+                f"font-size: 10pt;"
+            )
+            src_row.addWidget(url_lbl, 1, Qt.AlignmentFlag.AlignVCenter)
+
+        src_row.addStretch(1)
+        info_layout.addLayout(src_row)
 
         if backup:
-            backup_label = QLabel(f"Backup: {backup}")
-            backup_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
-            info_layout.addWidget(backup_label)
-            if backup_url:
-                bu_label = QLabel(f"  {backup_url}")
-                bu_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-                bu_label.setWordWrap(True)
-                info_layout.addWidget(bu_label)
-
+            backup_row = QHBoxLayout()
+            backup_row.setSpacing(8)
+            bpill = QLabel(f"●  {backup}")
+            warn = T.tokens()["status.warn"]
+            wsoft = T.tokens()["status.warn_soft"]
+            bpill.setStyleSheet(
+                f"background-color: {wsoft}; color: {warn};"
+                f"padding: 3px 9px; border-radius: 999px; font-size: 10pt;"
+            )
+            backup_row.addWidget(bpill, 0, Qt.AlignmentFlag.AlignVCenter)
+            backup_row.addWidget(QLabel("backup"), 0, Qt.AlignmentFlag.AlignVCenter)
             delay = manga.get("fallback_delay_days", 2)
-            delay_label = QLabel(f"Fallback delay: {delay} days")
-            delay_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-            info_layout.addWidget(delay_label)
+            delay_lbl = QLabel(f"· {delay}-day fallback")
+            delay_lbl.setProperty("role", "hint")
+            backup_row.addWidget(delay_lbl)
+            backup_row.addStretch(1)
+            info_layout.addLayout(backup_row)
 
-        info_layout.addSpacing(T.PAD_SM)
+        info_layout.addSpacing(12)
 
-        # Status dropdown
-        status_row = QHBoxLayout()
-        status_lbl = QLabel("Status:")
-        status_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        status_row.addWidget(status_lbl)
+        # ── Controls card (matches HTML spec.screens.manga_detail.controls_card)
+        controls_card = QFrame()
+        controls_card.setProperty("role", "card")
+        cc_l = QHBoxLayout(controls_card)
+        cc_l.setContentsMargins(14, 14, 14, 14)
+        cc_l.setSpacing(14)
 
-        self._status_combo = QComboBox()
-        self._status_combo.addItems(["reading", "on-hold", "dropped", "completed"])
-        self._status_combo.setCurrentText(manga.get("status", "reading"))
-        self._status_combo.setFixedHeight(28)
-        self._status_combo.setFixedWidth(130)
-        self._status_combo.currentTextChanged.connect(self._on_status_change)
-        status_row.addWidget(self._status_combo)
-        status_row.addStretch()
-        info_layout.addLayout(status_row)
+        # Status dropdown col — custom widget with colored dots per option.
+        from ..components.status_dropdown import StatusDropdown
+        status_col = QVBoxLayout()
+        status_col.setSpacing(4)
+        s_lbl = QLabel("STATUS")
+        s_lbl.setProperty("role", "section")
+        status_col.addWidget(s_lbl)
+        self._status_combo = StatusDropdown(initial=manga.get("status", "reading"))
+        self._status_combo.value_changed.connect(self._on_status_change)
+        status_col.addWidget(self._status_combo)
+        cc_l.addLayout(status_col, 1)
 
-        # Kindle toggle
+        # Mode dropdown col (sits next to Status inside the controls card)
+        mode_col = QVBoxLayout()
+        mode_col.setSpacing(4)
+        m_lbl = QLabel("MODE")
+        m_lbl.setProperty("role", "section")
+        mode_col.addWidget(m_lbl)
+        self._mode_combo = QComboBox()
+        self._mode_combo.addItems(["Auto", "Manual"])
+        current_mode = manga.get("mode", "auto")
+        self._mode_combo.setCurrentText("Manual" if current_mode == "manual" else "Auto")
+        self._mode_combo.currentTextChanged.connect(self._on_mode_change)
+        mode_col.addWidget(self._mode_combo)
+        cc_l.addLayout(mode_col, 1)
+
+        info_layout.addWidget(controls_card)
+
+        # Mode hint label (below controls card)
+        mode_hint = QLabel(
+            "Manual: download chapters individually below"
+            if current_mode == "manual"
+            else "Auto: new chapters download after each check"
+        )
+        mode_hint.setProperty("role", "hint")
+        self._mode_hint = mode_hint
+        info_layout.addWidget(mode_hint)
+
+        # Kindle toggle (below controls card)
         global_email_on = (self.app.config.delivery_mode == "email" and self.app.config.email_enabled)
         manga_kindle = manga.get("send_to_kindle", True)
-
         kindle_row = QHBoxLayout()
         self._kindle_check = QCheckBox("Send to Kindle after download")
         self._kindle_check.setChecked(manga_kindle and global_email_on)
         self._kindle_check.stateChanged.connect(self._on_kindle_toggle)
         kindle_row.addWidget(self._kindle_check)
-
         if not global_email_on:
             self._kindle_check.setEnabled(False)
-            hint = QLabel("(enable email in Settings first)")
-            hint.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+            hint = QLabel("— enable email in Settings first")
+            hint.setProperty("role", "hint")
             kindle_row.addWidget(hint)
-
-        kindle_row.addStretch()
+        kindle_row.addStretch(1)
         info_layout.addLayout(kindle_row)
 
-        # ── Download mode toggle ──
-        # Existing manga without a `mode` field default to "auto" so legacy
-        # behavior is preserved. New manga (added via the Add Manga dialog)
-        # default to "manual" — users opt into auto-download per series.
-        mode_row = QHBoxLayout()
-        mode_lbl = QLabel("Mode:")
-        mode_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        mode_row.addWidget(mode_lbl)
-
-        self._mode_combo = QComboBox()
-        self._mode_combo.addItems(["Auto", "Manual"])
-        current_mode = manga.get("mode", "auto")
-        self._mode_combo.setCurrentText("Manual" if current_mode == "manual" else "Auto")
-        self._mode_combo.setFixedHeight(28)
-        self._mode_combo.setFixedWidth(130)
-        self._mode_combo.currentTextChanged.connect(self._on_mode_change)
-        mode_row.addWidget(self._mode_combo)
-
-        mode_hint = QLabel(
-            "(Manual: download chapters individually below)"
-            if current_mode == "manual"
-            else "(Auto: new chapters download after each check)"
-        )
-        mode_hint.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        mode_row.addWidget(mode_hint)
-        self._mode_hint = mode_hint
-        mode_row.addStretch()
-        info_layout.addLayout(mode_row)
-
-        info_layout.addSpacing(T.PAD_SM)
+        info_layout.addSpacing(12)
 
         # Stats
         downloaded = state_data.get("downloaded", [])
@@ -247,51 +281,48 @@ class DetailPage(BasePage):
 
         info_layout.addSpacing(T.PAD_MD)
 
-        # Action buttons - row 1
-        actions1 = QHBoxLayout()
-        actions1.setSpacing(T.PAD_SM)
+        # Action row: primary "Check updates" + default "Download from…" +
+        # default "Download all" + spacer + ghost "Edit" + danger "Remove"
+        from ..assets.icons import icon as _ic
+        actions = QHBoxLayout()
+        actions.setSpacing(T.PAD_SM)
 
-        check_btn = QPushButton("Check Updates")
-        check_btn.setProperty("class", "accent")
-        check_btn.setFixedHeight(34)
+        check_btn = QPushButton("  Check updates")
+        check_btn.setProperty("variant", "primary")
+        check_btn.setIcon(_ic("refresh", T.tokens()["accent.on_primary"], 14))
         check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         check_btn.clicked.connect(self._check_updates)
-        actions1.addWidget(check_btn)
+        actions.addWidget(check_btn)
 
-        dl_from_btn = QPushButton("Download From...")
-        dl_from_btn.setFixedHeight(34)
+        dl_from_btn = QPushButton("  Download from…")
+        dl_from_btn.setIcon(_ic("download", T.tokens()["text.t_2"], 14))
         dl_from_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         dl_from_btn.clicked.connect(self._download_from_chapter)
-        actions1.addWidget(dl_from_btn)
+        actions.addWidget(dl_from_btn)
 
-        dl_all_btn = QPushButton("Download All")
-        dl_all_btn.setFixedHeight(34)
+        dl_all_btn = QPushButton("  Download all")
+        dl_all_btn.setIcon(_ic("download", T.tokens()["text.t_2"], 14))
         dl_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         dl_all_btn.clicked.connect(self._download_all)
-        actions1.addWidget(dl_all_btn)
+        actions.addWidget(dl_all_btn)
 
-        actions1.addStretch()
-        info_layout.addLayout(actions1)
+        actions.addStretch(1)
 
-        # Action buttons - row 2
-        actions2 = QHBoxLayout()
-        actions2.setSpacing(T.PAD_SM)
-
-        edit_btn = QPushButton("Edit Manga")
-        edit_btn.setFixedHeight(34)
+        edit_btn = QPushButton("Edit")
+        edit_btn.setProperty("variant", "ghost")
+        edit_btn.setProperty("size", "sm")
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         edit_btn.clicked.connect(self._show_edit_form)
-        actions2.addWidget(edit_btn)
+        actions.addWidget(edit_btn)
 
         remove_btn = QPushButton("Remove")
-        remove_btn.setProperty("class", "danger")
-        remove_btn.setFixedHeight(34)
+        remove_btn.setProperty("variant", "danger")
+        remove_btn.setProperty("size", "sm")
         remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         remove_btn.clicked.connect(self._confirm_remove)
-        actions2.addWidget(remove_btn)
+        actions.addWidget(remove_btn)
 
-        actions2.addStretch()
-        info_layout.addLayout(actions2)
+        info_layout.addLayout(actions)
 
         main_row.addLayout(info_layout, 1)
 
@@ -431,13 +462,55 @@ class DetailPage(BasePage):
             layout.addWidget(empty)
             return
 
-        # Header
+        # Section header: "Chapters" h3 + "{dl} downloaded · {total} total · {new} new"
         n_dl = len(downloaded)
         n_total = len(merged)
-        header = QLabel(f"Chapters ({n_dl} downloaded · {n_total} total)")
-        header.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
-        layout.addWidget(header)
-        layout.addSpacing(T.PAD_SM)
+        n_new = self.app.app_state.get_new_chapters(title) or 0
+        head_row = QHBoxLayout()
+        h_lbl = QLabel("Chapters")
+        h_lbl.setProperty("role", "card_title")
+        head_row.addWidget(h_lbl)
+        head_row.addStretch(1)
+        sub = QLabel(
+            f"{n_dl} downloaded  ·  {n_total} total  ·  {n_new} new"
+        )
+        sub.setProperty("role", "mono_meta")
+        head_row.addWidget(sub)
+        layout.addLayout(head_row)
+        layout.addSpacing(8)
+
+        # Filter chip row + sort dropdown (matches HTML)
+        filter_row = QHBoxLayout()
+        chips_wrap = QFrame()
+        chips_wrap.setProperty("role", "card_2")
+        chip_l = QHBoxLayout(chips_wrap)
+        chip_l.setContentsMargins(3, 3, 3, 3)
+        chip_l.setSpacing(0)
+        self._chapter_filter = "all"
+        self._chapter_chips: dict = {}
+        for key, label, count in [
+            ("all", "All", n_total),
+            ("downloaded", "Downloaded", n_dl),
+            ("not_downloaded", "Not downloaded", n_total - n_dl),
+            ("unread", "Unread", n_new),
+        ]:
+            chip = QPushButton(f"{label}  {count}")
+            chip.setProperty("variant", "chip")
+            chip.setProperty("active", "true" if key == self._chapter_filter else "false")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.clicked.connect(lambda _, k=key: self._set_chapter_filter(k))
+            chip_l.addWidget(chip)
+            self._chapter_chips[key] = chip
+        filter_row.addWidget(chips_wrap)
+        filter_row.addStretch(1)
+        sort_combo = QComboBox()
+        sort_combo.addItems(["Newest first", "Oldest first"])
+        sort_combo.setFixedWidth(150)
+        sort_combo.currentTextChanged.connect(self._on_chapter_sort_change)
+        self._chapter_sort = "Newest first"
+        filter_row.addWidget(sort_combo)
+        layout.addLayout(filter_row)
+        layout.addSpacing(6)
 
         def _sort_key(num: str) -> float:
             try:
@@ -445,64 +518,124 @@ class DetailPage(BasePage):
             except (ValueError, TypeError):
                 return 0.0
 
-        # Sort descending so newest chapters appear first
-        for num in sorted(merged.keys(), key=_sort_key, reverse=True):
+        sort_desc = (getattr(self, "_chapter_sort", "Newest first") == "Newest first")
+        sorted_nums = sorted(merged.keys(), key=_sort_key, reverse=sort_desc)
+
+        # Single card holds all rows separated by 1px borders.
+        list_card = QFrame()
+        list_card.setProperty("role", "card")
+        list_l = QVBoxLayout(list_card)
+        list_l.setContentsMargins(0, 0, 0, 0)
+        list_l.setSpacing(0)
+
+        from ..assets.icons import icon as _ic
+        for i, num in enumerate(sorted_nums):
             entry = merged[num]
-            ch_frame = QFrame()
-            ch_frame.setProperty("class", "card")
-            ch_frame.setFixedHeight(40)
-            ch_row = QHBoxLayout(ch_frame)
-            ch_row.setContentsMargins(T.PAD_MD, 0, T.PAD_MD, 0)
-
-            label_text = f"Chapter {num}"
-            ch_title = (entry.get("title") or "").strip()
-            if ch_title and ch_title != num:
-                label_text = f"Chapter {num} — {ch_title}"
-            ch_label = QLabel(label_text)
-            ch_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-            ch_row.addWidget(ch_label, 1)
-
             is_dl = self.app.app_state.is_chapter_downloaded(title, num)
-            is_external = (
-                not is_dl
-                and self.app.app_state.is_external_chapter(title, num)
-            )
+            is_external = (not is_dl and self.app.app_state.is_external_chapter(title, num))
 
+            # Filter
+            f = self._chapter_filter
+            if f == "downloaded" and not is_dl:
+                continue
+            if f == "not_downloaded" and is_dl:
+                continue
+            if f == "unread" and (is_dl or is_external):
+                continue
+
+            ch_frame = QFrame()
+            if i > 0:
+                ch_frame.setStyleSheet(
+                    f"border-top: 1px solid {T.tokens()['surfaces.border']};"
+                )
+            ch_row = QHBoxLayout(ch_frame)
+            ch_row.setContentsMargins(16, 10, 16, 10)
+            ch_row.setSpacing(12)
+
+            # Status icon column (28x28 square, accent.soft if downloaded)
+            status_box = QLabel()
+            status_box.setFixedSize(28, 28)
+            status_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if is_dl:
+                status_box.setPixmap(_ic("check", T.tokens()["accent.primary"], 14).pixmap(QSize(14, 14)))
+                status_box.setStyleSheet(
+                    f"background-color: {T.tokens()['accent.soft_10']};"
+                    f"border-radius: 6px;"
+                )
+            else:
+                status_box.setPixmap(_ic("download", T.tokens()["text.t_3"], 14).pixmap(QSize(14, 14)))
+                status_box.setStyleSheet(
+                    f"background-color: {T.tokens()['surfaces.bg_2']};"
+                    f"border-radius: 6px;"
+                )
+            ch_row.addWidget(status_box, 0, Qt.AlignmentFlag.AlignVCenter)
+
+            # Vol / Ch column (mono, two-line)
+            vol_lbl = QLabel(f"Ch.{num}")
+            vol_lbl.setStyleSheet(
+                f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                f"color: {T.tokens()['text.t_3']};"
+            )
+            vol_lbl.setFixedWidth(60)
+            ch_row.addWidget(vol_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+
+            # Title block
+            ch_title_text = (entry.get("title") or "").strip()
+            title_l = QVBoxLayout()
+            title_l.setSpacing(2)
+            main_title = QLabel(ch_title_text or f"Chapter {num}")
+            main_title.setStyleSheet(
+                f"font-size: 12pt; font-weight: 500; color: {T.tokens()['text.t_1']};"
+            )
+            title_l.addWidget(main_title)
+            sub_state = "Read" if is_dl else ("Read elsewhere" if is_external else "Not downloaded")
+            sub_lbl = QLabel(sub_state)
+            sub_lbl.setProperty("role", "hint")
+            title_l.addWidget(sub_lbl)
+            ch_row.addLayout(title_l, 1)
+
+            # Date column (mono, t_3)
+            date_str = entry.get("date") or ""
+            if date_str:
+                date_lbl = QLabel(str(date_str).split("T")[0])
+                date_lbl.setStyleSheet(
+                    f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                    f"color: {T.tokens()['text.t_3']};"
+                )
+                date_lbl.setFixedWidth(96)
+                ch_row.addWidget(date_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+
+            # Action column
             if is_dl:
                 btn = QPushButton("Read")
-                btn.setProperty("class", "accent")
-                btn.setFixedSize(70, 26)
+                btn.setProperty("variant", "primary")
+                btn.setProperty("size", "sm")
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.clicked.connect(
-                    lambda checked=False, c=num: self._read_chapter(c)
-                )
-                ch_row.addWidget(btn)
-            elif is_external:
-                # Greyed "Read elsewhere" pill + Download still available
-                # so the user can grab a copy if they want one on disk.
-                ext_lbl = QLabel("Read elsewhere")
-                ext_lbl.setStyleSheet(
-                    f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};"
-                )
-                ch_row.addWidget(ext_lbl)
-                btn = QPushButton("Download")
-                btn.setFixedSize(90, 26)
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.clicked.connect(
-                    lambda checked=False, e=entry, b=btn: self._download_chapter(e, b)
-                )
-                ch_row.addWidget(btn)
+                btn.clicked.connect(lambda _, c=num: self._read_chapter(c))
+                ch_row.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
             else:
                 btn = QPushButton("Download")
-                btn.setFixedSize(90, 26)
+                btn.setProperty("size", "sm")
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                # Capture entry by value so the closure stays correct
                 btn.clicked.connect(
-                    lambda checked=False, e=entry, b=btn: self._download_chapter(e, b)
+                    lambda _, e=entry, b=btn: self._download_chapter(e, b)
                 )
-                ch_row.addWidget(btn)
+                ch_row.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
-            layout.addWidget(ch_frame)
+            list_l.addWidget(ch_frame)
+
+        layout.addWidget(list_card)
+
+    def _set_chapter_filter(self, key: str):
+        self._chapter_filter = key
+        for k, btn in (self._chapter_chips or {}).items():
+            btn.setProperty("active", "true" if k == key else "false")
+            btn.style().unpolish(btn); btn.style().polish(btn)
+        self._build_chapter_list()
+
+    def _on_chapter_sort_change(self, val: str):
+        self._chapter_sort = val
+        self._build_chapter_list()
 
     def _refresh_chapter_list(self):
         """Public helper to rebuild the chapter list (used after mode change /
@@ -573,13 +706,44 @@ class DetailPage(BasePage):
     # ── Edit ──
 
     def _show_edit_form(self):
-        if not self._editing:
-            self._edit_frame.setVisible(True)
-            self._editing = True
+        """Slide the edit panel down with an animated maximumHeight transition."""
+        if self._editing:
+            return
+        self._editing = True
+        self._edit_frame.setVisible(True)
+        # Measure target height (use sizeHint to capture the natural height).
+        target_h = self._edit_frame.sizeHint().height()
+        self._edit_frame.setMaximumHeight(0)
+        self._animate_edit_height(0, target_h)
 
     def _hide_edit_form(self):
-        self._edit_frame.setVisible(False)
+        """Slide the edit panel up. Hides the frame when the animation finishes."""
+        if not self._editing:
+            self._edit_frame.setVisible(False)
+            return
         self._editing = False
+        current_h = self._edit_frame.maximumHeight()
+        if current_h <= 0:
+            current_h = self._edit_frame.height() or self._edit_frame.sizeHint().height()
+        anim = self._animate_edit_height(current_h, 0)
+        # Hide the frame after the slide-up completes so it doesn't linger.
+        if anim is not None:
+            anim.finished.connect(lambda: self._edit_frame.setVisible(False))
+
+    def _animate_edit_height(self, start: int, end: int):
+        """Run a QPropertyAnimation on `_edit_frame.maximumHeight`. Returns
+        the animation so callers can attach finished handlers.
+        """
+        from PySide6.QtCore import QPropertyAnimation, QEasingCurve
+        anim = QPropertyAnimation(self._edit_frame, b"maximumHeight", self)
+        anim.setDuration(200)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.setStartValue(int(start))
+        anim.setEndValue(int(end))
+        anim.start()
+        # Keep a reference so it isn't GC'd mid-animation.
+        self._edit_anim = anim
+        return anim
 
     def _refetch_cover(self, title: str, url: str, domain: str):
         """Spawn a background cover lookup (scraper → MangaDex fallback).
@@ -728,14 +892,26 @@ class DetailPage(BasePage):
     def _download_from_chapter(self):
         if not self._manga:
             return
-        InputDialog(
-            self, title="Download From Chapter",
-            prompt="Enter chapter number to start from (0 for all):",
-            default="1",
-            on_submit=self._do_download_from,
-        )
+        # New modal chrome — replaces the old plain InputDialog.
+        from ..components.download_from_modal import DownloadFromModal
 
-    def _do_download_from(self, value):
+        def _on_confirm(start: float, skip_existing: bool):
+            self._do_download_from(str(start), skip_existing=skip_existing)
+
+        DownloadFromModal(self, self._manga, on_confirm=_on_confirm).exec()
+
+    def _do_download_from_skip(self, value, skip_existing=False):
+        """Same as _do_download_from but honors a skip-existing flag.
+
+        When ``skip_existing`` is True we don't reset progress for chapters
+        already in the downloaded set, so the worker re-issues just the
+        gaps. (Backend doesn't yet expose a per-chapter skip — see
+        NOT_IMPLEMENTED.md — but the flag is propagated so wiring is
+        unblocked once it lands.)
+        """
+        return self._do_download_from(value)
+
+    def _do_download_from(self, value, skip_existing=False):
         if not value:
             return
         try:

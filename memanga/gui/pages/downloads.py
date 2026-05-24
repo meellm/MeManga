@@ -38,27 +38,88 @@ class DownloadsPage(BasePage):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(T.PAD_XL, T.PAD_XL, T.PAD_XL, T.PAD_SM)
-        layout.setSpacing(T.PAD_SM)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Header
-        header = QHBoxLayout()
+        # ── Page header w/ divider (new spec chrome) ──
+        header_w = QWidget()
+        h_layout = QVBoxLayout(header_w)
+        h_layout.setContentsMargins(32, 24, 32, 18)
+        h_layout.setSpacing(4)
+
+        top_row = QHBoxLayout()
         title = QLabel("Downloads")
-        title.setStyleSheet(f"font-size: {T.FONT_SIZE_XL}pt; font-weight: bold;")
-        header.addWidget(title)
-        header.addStretch()
+        title.setProperty("role", "h1")
+        top_row.addWidget(title)
+        top_row.addStretch(1)
 
-        cancel_all_btn = QPushButton("Cancel All")
-        cancel_all_btn.setProperty("class", "danger")
-        cancel_all_btn.setFixedHeight(30)
+        from ..assets.icons import icon as _ic
+        open_folder_btn = QPushButton("  Open folder")
+        open_folder_btn.setProperty("variant", "ghost")
+        open_folder_btn.setIcon(_ic("folder", T.tokens()["text.t_2"], 14))
+        open_folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_folder_btn.clicked.connect(self._open_download_folder)
+        top_row.addWidget(open_folder_btn)
+
+        # Pause all / Resume all (toggle).
+        self._pause_all_btn = QPushButton("  Pause all")
+        self._pause_all_btn.setProperty("variant", "ghost")
+        self._pause_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pause_all_btn.clicked.connect(self._toggle_pause_all)
+        top_row.addWidget(self._pause_all_btn)
+
+        cancel_all_btn = QPushButton("  Cancel all")
+        cancel_all_btn.setProperty("variant", "danger")
+        cancel_all_btn.setIcon(_ic("x_close", T.tokens()["status.danger"], 14))
         cancel_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_all_btn.clicked.connect(self._cancel_all)
-        header.addWidget(cancel_all_btn)
-        layout.addLayout(header)
+        top_row.addWidget(cancel_all_btn)
+        h_layout.addLayout(top_row)
 
-        # Tab bar
+        # Meta line (stub values — live stats not implemented yet, see NOT_IMPLEMENTED.md)
+        meta = QLabel("● 0 active  ·  0 queued  ·  Auto-refreshed each download event")
+        meta.setProperty("role", "meta")
+        h_layout.addWidget(meta)
+
+        layout.addWidget(header_w)
+
+        sep = QFrame()
+        sep.setObjectName("page_header_divider")
+        sep.setFrameShape(QFrame.Shape.NoFrame)
+        sep.setFixedHeight(1)
+        layout.addWidget(sep)
+
+        # Body wrapper to host the original tabs + scrolls.
+        body_w = QWidget()
+        body_outer = QVBoxLayout(body_w)
+        body_outer.setContentsMargins(32, 20, 32, 20)
+        body_outer.setSpacing(T.PAD_SM)
+        layout.addWidget(body_w, 1)
+        # Re-point local `layout` at the body for the rest of the original
+        # build code below, which still uses `layout.addLayout/addWidget`.
+        layout = body_outer
+
+        # ── Stats strip: 4 stat cards (matches HTML spec.screens.downloads.stats_strip)
+        stats_row = QHBoxLayout()
+        stats_row.setSpacing(12)
+        self._stat_cards = {}
+        for key, label in [("in_progress","IN PROGRESS"),("today","TODAY"),
+                            ("week","THIS WEEK"),("disk","LIBRARY ON DISK")]:
+            card = self._make_stat_card(label, "0", "chapters")
+            stats_row.addWidget(card, 1)
+            self._stat_cards[key] = card
+        layout.addLayout(stats_row)
+        layout.addSpacing(8)
+        # Refresh stats on download events.
+        self.app.events.subscribe("download_complete", lambda d: self._refresh_stats())
+        self.app.events.subscribe("download_started", lambda d: self._refresh_stats())
+        # Initial paint.
+        self._stats_pending_first_paint = True
+
+        # Tab bar with live count pills (HTML spec.components.tabs.count_pill).
         tab_bar = QHBoxLayout()
         self._tab_buttons: dict[str, QPushButton] = {}
+        self._tab_labels: dict[str, str] = {}
         for tab_name in ["Active", "Completed", "History"]:
             btn = QPushButton(tab_name)
             btn.setProperty("class", "tab")
@@ -66,9 +127,16 @@ class DownloadsPage(BasePage):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda checked=False, t=tab_name.lower(): self._switch_tab(t))
             tab_bar.addWidget(btn)
-            self._tab_buttons[tab_name.lower()] = btn
+            key = tab_name.lower()
+            self._tab_buttons[key] = btn
+            self._tab_labels[key] = tab_name
         tab_bar.addStretch()
         layout.addLayout(tab_bar)
+        # Refresh counts whenever downloads change.
+        self.app.events.subscribe("download_complete", lambda d: self._refresh_tab_counts())
+        self.app.events.subscribe("download_started", lambda d: self._refresh_tab_counts())
+        self.app.events.subscribe("download_cancelled", lambda d: self._refresh_tab_counts())
+        self.app.events.subscribe("download_queued", lambda d: self._refresh_tab_counts())
 
         # ── Active tab ──
         self._active_scroll = QScrollArea()
@@ -192,6 +260,87 @@ class DownloadsPage(BasePage):
     def on_show(self, **kwargs):
         if self._current_tab == "history":
             self._render_history()
+        self._refresh_stats()
+        self._refresh_tab_counts()
+
+    def _refresh_tab_counts(self):
+        """Re-render each tab button label with a trailing count like 'Active 3'."""
+        try:
+            active_n = len(self._active_items)
+            completed_n = len(self.app.app_state.get("completed_downloads") or [])
+            history_n = len(self.app.app_state.get("download_history") or [])
+        except Exception:
+            active_n = completed_n = history_n = 0
+        counts = {"active": active_n, "completed": completed_n, "history": history_n}
+        for key, btn in self._tab_buttons.items():
+            base = self._tab_labels.get(key, key.title())
+            n = counts.get(key, 0)
+            btn.setText(f"{base}  {n}" if n else base)
+
+    # ── Stats strip helpers ──
+
+    def _make_stat_card(self, label: str, value: str, unit: str) -> QFrame:
+        """Build a single stat card matching memanga-pyside6-spec.json
+        components.stat_card."""
+        card = QFrame()
+        card.setProperty("role", "stat_card")
+        l = QVBoxLayout(card)
+        l.setContentsMargins(14, 12, 14, 12)
+        l.setSpacing(4)
+
+        lbl = QLabel(label)
+        lbl.setProperty("role", "section")
+        l.addWidget(lbl)
+
+        val_row = QHBoxLayout()
+        val_row.setSpacing(6)
+        val_row.setContentsMargins(0, 0, 0, 0)
+        val_lbl = QLabel(value)
+        val_lbl.setStyleSheet("font-size: 22pt; font-weight: 600;")
+        val_lbl.setObjectName("stat_value")
+        val_row.addWidget(val_lbl)
+        unit_lbl = QLabel(unit)
+        unit_lbl.setProperty("role", "t2")
+        unit_lbl.setStyleSheet(f"font-size: 11pt; padding-bottom: 4px;")
+        unit_lbl.setObjectName("stat_unit")
+        val_row.addWidget(unit_lbl, 0, Qt.AlignmentFlag.AlignBottom)
+        val_row.addStretch(1)
+        l.addLayout(val_row)
+        return card
+
+    def _refresh_stats(self):
+        """Pull live values from state into the 4 stat cards."""
+        try:
+            from datetime import datetime, timedelta
+            history = self.app.app_state.get("download_history") or []
+            now = datetime.now()
+            today = sum(1 for h in history
+                        if (datetime.fromisoformat(h["timestamp"]).date() == now.date()))
+            today_mb = sum(h.get("size_mb", 0) for h in history
+                            if datetime.fromisoformat(h["timestamp"]).date() == now.date())
+            week = sum(1 for h in history
+                        if (now - datetime.fromisoformat(h["timestamp"])).days < 7)
+            week_gb = sum(h.get("size_mb", 0) for h in history
+                            if (now - datetime.fromisoformat(h["timestamp"])).days < 7) / 1024
+            disk_gb = sum(h.get("size_mb", 0) for h in history) / 1024
+            active = len(self._active_items)
+
+            self._set_stat("in_progress", str(active), "chapters")
+            self._set_stat("today", str(today), f"{today_mb:.1f} MB")
+            self._set_stat("week", str(week), f"{week_gb:.2f} GB")
+            self._set_stat("disk", f"{disk_gb:.1f}", "GB")
+        except Exception:
+            # Stats are non-critical — never crash the page.
+            pass
+
+    def _set_stat(self, key: str, value: str, unit: str):
+        card = self._stat_cards.get(key)
+        if not card:
+            return
+        v = card.findChild(QLabel, "stat_value")
+        u = card.findChild(QLabel, "stat_unit")
+        if v: v.setText(value)
+        if u: u.setText(unit)
 
     # ── Download event handlers ──
 
@@ -255,6 +404,34 @@ class DownloadsPage(BasePage):
 
     def _cancel_download(self, task_id):
         self.app.worker.cancel_download(task_id)
+
+    def _toggle_pause_all(self):
+        """Flip the global pause flag on the worker pool."""
+        from ..components.toast import Toast
+        if self.app.worker.is_paused():
+            self.app.worker.resume_all()
+            self._pause_all_btn.setText("  Pause all")
+            Toast(self, "Downloads resumed", kind="info")
+        else:
+            self.app.worker.pause_all()
+            self._pause_all_btn.setText("  Resume all")
+            Toast(self, "Downloads paused — in-flight jobs continue", kind="info")
+
+    def _open_download_folder(self):
+        """Open the download directory in the OS file manager."""
+        import platform, subprocess
+        from pathlib import Path
+        path = Path(self.app.config.download_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            if platform.system() == "Darwin":
+                subprocess.run(["open", str(path)])
+            elif platform.system() == "Windows":
+                subprocess.run(["explorer", str(path)])
+            else:
+                subprocess.run(["xdg-open", str(path)])
+        except Exception:
+            pass
 
     def _cancel_all(self):
         # Order matters: set cancel flags on every queued item AND clear

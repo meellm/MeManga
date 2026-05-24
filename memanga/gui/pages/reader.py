@@ -186,10 +186,25 @@ class ReaderPage(BasePage):
 
         self._render_images()
 
+        if hasattr(self, "_zoom_label") and self._zoom_label:
+            self._zoom_label.setText(f"{int(self._zoom_level * 100)}%")
         if self._page_indicator:
-            self._page_indicator.setText(
-                f"Zoom: {int(self._zoom_level * 100)}%  |  {len(self._images)} pages"
-            )
+            self._page_indicator.setText(f"1 / {len(self._images)}")
+
+    def _on_scroll(self, _value):
+        """Update the sticky bottom progress bar from scroll position."""
+        try:
+            sb = self._scroll.verticalScrollBar()
+            mx = max(1, sb.maximum())
+            ratio = sb.value() / mx
+            page_n = max(1, min(len(self._images), int(ratio * len(self._images)) + 1))
+            self._progress_left.setText(f"Page {page_n} of {len(self._images)}")
+            self._progress_track.setValue(int(ratio * 1000))
+            self._progress_pct.setText(f"{int(ratio * 100)}%")
+            if self._page_indicator:
+                self._page_indicator.setText(f"{page_n} / {len(self._images)}")
+        except Exception:
+            pass
 
     def _render_images(self):
         if self._fit_width:
@@ -244,23 +259,29 @@ class ReaderPage(BasePage):
 
         title = self._manga.get("title", "Unknown")
 
-        # ── Top bar ──
+        # ── Reader header (matches HTML spec.screens.reader.reader_header) ──
         top = QFrame()
-        top.setFixedHeight(44)
-        top.setStyleSheet(f"background-color: {T.BG_CARD};")
+        top.setStyleSheet(
+            f"background-color: {T.tokens()['surfaces.bg_1']};"
+            f"border-bottom: 1px solid {T.tokens()['surfaces.border']};"
+        )
         top_layout = QHBoxLayout(top)
-        top_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
-        top_layout.setSpacing(T.PAD_SM)
+        top_layout.setContentsMargins(24, 12, 24, 12)
+        top_layout.setSpacing(10)
 
-        back_btn = QPushButton("< Back")
-        back_btn.setProperty("class", "flat")
-        back_btn.setFixedHeight(30)
+        back_btn = QPushButton("‹ Back")
+        back_btn.setProperty("variant", "ghost")
         back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         back_btn.clicked.connect(lambda: self.app.show_page("detail", manga=self._manga))
         top_layout.addWidget(back_btn)
 
-        title_label = QLabel(f"{title} - Chapter {self._chapter}")
-        title_label.setStyleSheet(f"font-size: {T.FONT_SIZE_MD}pt; font-weight: bold;")
+        # Title: '{manga_title} · Chapter {n} — {chapter_title}'
+        title_text = (
+            f"<b style='color:{T.tokens()['text.t_1']}'>{title}</b>  "
+            f"<span style='color:{T.tokens()['text.t_3']}'>·  Chapter {self._chapter}</span>"
+        )
+        title_label = QLabel(title_text)
+        title_label.setStyleSheet(f"font-size: 13pt;")
         top_layout.addWidget(title_label)
 
         top_layout.addStretch()
@@ -274,38 +295,45 @@ class ReaderPage(BasePage):
 
         if idx > 0:
             prev_ch = downloaded[idx - 1]
-            prev_btn = QPushButton("< Prev")
-            prev_btn.setFixedHeight(26)
+            prev_btn = QPushButton("‹ Prev")
             prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             prev_btn.clicked.connect(lambda checked=False, c=prev_ch: self._navigate_chapter(c))
             top_layout.addWidget(prev_btn)
 
         if idx >= 0 and idx < len(downloaded) - 1:
             next_ch = downloaded[idx + 1]
-            next_btn = QPushButton("Next >")
-            next_btn.setFixedHeight(26)
+            next_btn = QPushButton("Next ›")
             next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             next_btn.clicked.connect(lambda checked=False, c=next_ch: self._navigate_chapter(c))
             top_layout.addWidget(next_btn)
 
-        # Zoom controls
-        zoom_minus = QPushButton("-")
-        zoom_minus.setFixedSize(28, 26)
+        # Zoom chip
+        zoom_minus = QPushButton("−")
+        zoom_minus.setFixedSize(28, 28)
         zoom_minus.setCursor(Qt.CursorShape.PointingHandCursor)
         zoom_minus.clicked.connect(self._zoom_out)
         top_layout.addWidget(zoom_minus)
 
-        self._page_indicator = QLabel(f"100%  |  ...")
-        self._page_indicator.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        self._page_indicator.setFixedWidth(120)
-        self._page_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        top_layout.addWidget(self._page_indicator)
+        self._zoom_label = QLabel("100%")
+        self._zoom_label.setStyleSheet(
+            f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+            f"color: {T.tokens()['text.t_3']}; padding: 0 8px;"
+        )
+        top_layout.addWidget(self._zoom_label)
 
         zoom_plus = QPushButton("+")
-        zoom_plus.setFixedSize(28, 26)
+        zoom_plus.setFixedSize(28, 28)
         zoom_plus.setCursor(Qt.CursorShape.PointingHandCursor)
         zoom_plus.clicked.connect(self._zoom_in)
         top_layout.addWidget(zoom_plus)
+
+        # Page count indicator: '{cur} / {total}' (mono t_3)
+        self._page_indicator = QLabel("— / —")
+        self._page_indicator.setStyleSheet(
+            f"font-family: 'Geist Mono', monospace; font-size: 11pt;"
+            f"color: {T.tokens()['text.t_3']}; padding-left: 12px;"
+        )
+        top_layout.addWidget(self._page_indicator)
 
         content_layout.addWidget(top)
 
@@ -331,11 +359,13 @@ class ReaderPage(BasePage):
             f"{int(self._zoom_level * 100)}%  |  {len(self._images)} pages"
         )
 
-        # ── Scrollable image area ──
+        # ── Scrollable image area (reader_body) ──
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._scroll.setStyleSheet(f"background-color: {T.BG};")
+        self._scroll.setStyleSheet(
+            f"background-color: {T.tokens()['surfaces.bg_0']};"
+        )
 
         scroll_content = QWidget()
         self._image_layout = QVBoxLayout(scroll_content)
@@ -365,6 +395,44 @@ class ReaderPage(BasePage):
             self._image_layout.addWidget(next_frame)
 
         content_layout.addWidget(self._scroll, 1)
+
+        # ── Sticky bottom progress (reader_progress) ──
+        # Tracks scroll position vs. document height.
+        progress_bar = QFrame()
+        progress_bar.setStyleSheet(
+            f"background-color: {T.tokens()['surfaces.bg_1']};"
+            f"border-top: 1px solid {T.tokens()['surfaces.border']};"
+        )
+        pb_l = QHBoxLayout(progress_bar)
+        pb_l.setContentsMargins(24, 10, 24, 10)
+        pb_l.setSpacing(12)
+
+        self._progress_left = QLabel(f"Page 1 of {len(self._images)}")
+        self._progress_left.setStyleSheet(f"color: {T.tokens()['text.t_2']}; font-size: 11pt;")
+        pb_l.addWidget(self._progress_left)
+
+        from PySide6.QtWidgets import QProgressBar
+        self._progress_track = QProgressBar()
+        self._progress_track.setRange(0, 1000)  # finer granularity for scroll
+        self._progress_track.setValue(0)
+        self._progress_track.setTextVisible(False)
+        self._progress_track.setFixedHeight(4)
+        pb_l.addWidget(self._progress_track, 1)
+
+        self._progress_pct = QLabel("0%")
+        self._progress_pct.setStyleSheet(
+            f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+            f"color: {T.tokens()['text.t_3']};"
+        )
+        pb_l.addWidget(self._progress_pct)
+
+        content_layout.addWidget(progress_bar)
+
+        # Wire scroll to the progress bar so it updates as the user scrolls.
+        sb = self._scroll.verticalScrollBar()
+        sb.valueChanged.connect(self._on_scroll)
+        # Initial paint.
+        self._on_scroll(0)
 
     def _find_and_load_chapter(self) -> List[QImage]:
         title = self._manga.get("title", "")

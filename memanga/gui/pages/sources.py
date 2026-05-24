@@ -39,9 +39,45 @@ class SourcesPage(BasePage):
         self.app.events.subscribe(
             "library_updated", lambda d: self._on_library_updated()
         )
+        # Repaint when source health pings finish so latency badges update.
+        self.app.events.subscribe(
+            "sources_health_updated", lambda d: self._on_health_updated()
+        )
 
     def on_show(self, **kwargs):
         self._refresh()
+
+    def _on_recheck_health(self):
+        """Kick off background HEAD probes against every enabled source.
+
+        Surfaces an instant toast so the user knows the request was
+        accepted; the actual badges update via the
+        ``sources_health_updated`` event when the probes finish.
+        """
+        from ..components.toast import Toast
+        if not self._all_sources:
+            try:
+                from ...downloader import get_supported_sources
+                self._all_sources = sorted(get_supported_sources())
+            except Exception:
+                Toast(self, "No sources to check", kind="warning")
+                return
+
+        disabled = set(self.app.config.get("sources.disabled", []) or [])
+        active = [s for s in self._all_sources if s not in disabled]
+        if not active:
+            Toast(self, "No active sources to check", kind="warning")
+            return
+
+        Toast(self, f"Checking {len(active)} source(s)…", kind="info")
+        self._recheck_btn.setEnabled(False)
+        self.app.worker.ping_sources(active, self.app.app_state)
+
+    def _on_health_updated(self):
+        self._recheck_btn.setEnabled(True)
+        if self.isVisible():
+            self._render_active()
+            self._render_supported()
 
     def _on_library_updated(self):
         if self.isVisible():
@@ -50,17 +86,48 @@ class SourcesPage(BasePage):
     # ── Layout ──────────────────────────────────────────────────────────
 
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(T.PAD_XL, T.PAD_XL, T.PAD_XL, T.PAD_SM)
-        layout.setSpacing(T.PAD_SM)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
+        header_w = QWidget()
+        h_layout = QVBoxLayout(header_w)
+        h_layout.setContentsMargins(32, 24, 32, 18)
+        h_layout.setSpacing(4)
+
+        top_row = QHBoxLayout()
         title = QLabel("Sources")
-        title.setStyleSheet(f"font-size: {T.FONT_SIZE_XL}pt; font-weight: bold;")
-        layout.addWidget(title)
+        title.setProperty("role", "h1")
+        top_row.addWidget(title)
+        top_row.addStretch(1)
+
+        # Re-check health button — issues HEAD probes against every
+        # enabled source via worker.ping_sources.
+        from ..assets.icons import icon as _ic
+        self._recheck_btn = QPushButton("  Re-check health")
+        self._recheck_btn.setProperty("variant", "ghost")
+        self._recheck_btn.setIcon(_ic("refresh", T.tokens()["text.t_2"], 14))
+        self._recheck_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._recheck_btn.clicked.connect(self._on_recheck_health)
+        top_row.addWidget(self._recheck_btn)
+        h_layout.addLayout(top_row)
 
         sub = QLabel("Toggle which sources Search should query.")
-        sub.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        layout.addWidget(sub)
+        sub.setProperty("role", "meta")
+        h_layout.addWidget(sub)
+        root.addWidget(header_w)
+
+        sep = QFrame()
+        sep.setObjectName("page_header_divider")
+        sep.setFrameShape(QFrame.Shape.NoFrame)
+        sep.setFixedHeight(1)
+        root.addWidget(sep)
+
+        body_w = QWidget()
+        layout = QVBoxLayout(body_w)
+        layout.setContentsMargins(32, 20, 32, 20)
+        layout.setSpacing(T.PAD_SM)
+        root.addWidget(body_w, 1)
 
         # Single scroll area holds both sections so they share a scrollbar.
         self._scroll = QScrollArea()
@@ -187,8 +254,22 @@ class SourcesPage(BasePage):
             count.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
             row_layout.addWidget(count)
 
-            self._active_layout.addWidget(row)
-            self._active_widgets.append(row)
+            # Wrap in a styled card frame so each active source gets the
+            # accent-tinted border + gradient feel (HTML active card spec).
+            wrap = QFrame()
+            wrap.setStyleSheet(
+                f"QFrame {{"
+                f"  background-color: {T.tokens()['surfaces.bg_1']};"
+                f"  border: 1px solid {T.tokens()['accent.ring']};"
+                f"  border-radius: 8px;"
+                f"  padding: 0;"
+                f"}}"
+            )
+            wl = QVBoxLayout(wrap)
+            wl.setContentsMargins(0, 0, 0, 0)
+            wl.addWidget(row)
+            self._active_layout.addWidget(wrap)
+            self._active_widgets.append(wrap)
 
     def _render_supported(self):
         for w in self._supported_widgets:
@@ -215,36 +296,80 @@ class SourcesPage(BasePage):
             if d:
                 per_source[d] = per_source.get(d, 0) + 1
 
+        # Letter-group the filtered list (matches HTML spec.screens.sources
+        # supported_sources.letter_group_head).
+        from collections import OrderedDict
+        groups: OrderedDict[str, list[str]] = OrderedDict()
         for source in filtered:
-            row = QFrame()
-            row.setProperty("class", "card")
-            row.setFixedHeight(34)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
+            letter = (source[0] if source else "?").upper()
+            if not letter.isalpha():
+                letter = "#"
+            groups.setdefault(letter, []).append(source)
 
-            check = QCheckBox()
-            check.setChecked(source not in disabled)
-            # Read isChecked() from the captured widget instead of
-            # comparing the signal's int payload — matches the rest of
-            # the codebase and avoids enum-variant fragility across
-            # PySide6 versions.
-            check.stateChanged.connect(
-                lambda _=None, s=source, c=check: self._on_toggle(s, c.isChecked())
+        for letter, sources_in_grp in groups.items():
+            # Group header strip
+            head = QFrame()
+            head.setStyleSheet(
+                f"QFrame {{"
+                f"  background-color: {T.tokens()['surfaces.bg_2']};"
+                f"  border: none;"
+                f"}}"
             )
-            row_layout.addWidget(check)
+            head.setFixedHeight(28)
+            head_l = QHBoxLayout(head)
+            head_l.setContentsMargins(16, 0, 16, 0)
+            letter_lbl = QLabel(letter)
+            letter_lbl.setStyleSheet(
+                f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                f"color: {T.tokens()['text.t_3']}; font-weight: 600;"
+            )
+            head_l.addWidget(letter_lbl)
+            head_l.addStretch(1)
+            count_lbl = QLabel(str(len(sources_in_grp)))
+            count_lbl.setStyleSheet(
+                f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                f"color: {T.tokens()['text.t_3']};"
+            )
+            head_l.addWidget(count_lbl)
+            self._supported_layout.addWidget(head)
+            self._supported_widgets.append(head)
 
-            name = QLabel(source)
-            name.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-            row_layout.addWidget(name, 1)
+            for source in sources_in_grp:
+                row = QFrame()
+                row.setProperty("class", "card")
+                row.setFixedHeight(34)
+                row_layout = QHBoxLayout(row)
+                row_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
 
-            n = per_source.get(source, 0)
-            if n:
-                used = QLabel(f"{n} in library")
-                used.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-                row_layout.addWidget(used)
+                check = QCheckBox()
+                check.setChecked(source not in disabled)
+                check.stateChanged.connect(
+                    lambda _=None, s=source, c=check: self._on_toggle(s, c.isChecked())
+                )
+                row_layout.addWidget(check)
 
-            self._supported_layout.addWidget(row)
-            self._supported_widgets.append(row)
+                name = QLabel(source)
+                name.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+                row_layout.addWidget(name, 1)
+
+                # Health latency (if pinged)
+                hh = self.app.app_state.get_source_health(source) or {}
+                if hh.get("latency_ms") is not None:
+                    lat = QLabel(f"{hh['latency_ms']}ms")
+                    lat.setStyleSheet(
+                        f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                        f"color: {T.tokens()['text.t_3']};"
+                    )
+                    row_layout.addWidget(lat)
+
+                n = per_source.get(source, 0)
+                if n:
+                    used = QLabel(f"{n} in library")
+                    used.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+                    row_layout.addWidget(used)
+
+                self._supported_layout.addWidget(row)
+                self._supported_widgets.append(row)
 
     # ── Filter debounce ─────────────────────────────────────────────────
 

@@ -5,7 +5,8 @@ MeManga GUI Application - PySide6 MainWindow with sidebar + QStackedWidget.
 from datetime import datetime
 
 from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QShortcut, QKeySequence
 
 from .. import __version__
 from ..config import Config, get_app_password, set_app_password
@@ -29,6 +30,14 @@ class MeMangaApp(QMainWindow):
         self.app_state = State()
         self.events = EventBus()
         self.worker = BackgroundWorker(self.events)
+        # Honor the persisted concurrency setting on startup so the slider
+        # in Settings → General actually takes effect across launches.
+        try:
+            self.worker._max_concurrent_downloads = int(
+                self.config.get("gui.max_concurrent_downloads", 2)
+            )
+        except Exception:
+            pass
         self.cover_cache = CoverCache(self.config.config_dir, self.events)
 
         # Wire up event handlers
@@ -58,7 +67,9 @@ class MeMangaApp(QMainWindow):
         main_layout.addWidget(self._sidebar)
 
         # Page stack (instant page switching — no destroy/rebuild)
+        # objectName "main_area" so the QSS bg_0 rule kicks in.
         self._stack = QStackedWidget()
+        self._stack.setObjectName("main_area")
         main_layout.addWidget(self._stack, 1)
 
         # Pages registry
@@ -89,6 +100,21 @@ class MeMangaApp(QMainWindow):
         # background.
         QTimer.singleShot(5000, self._backfill_missing_covers)
 
+        # ── Global shortcuts ──
+        # Ctrl/Cmd+K from anywhere → focus the Search input.
+        # QKeySequence("Ctrl+K") maps to ⌘K on macOS automatically.
+        self._search_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
+        self._search_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self._search_shortcut.activated.connect(self._focus_search)
+
+    def _focus_search(self):
+        """Jump to the Search page and put focus in its input."""
+        self.show_page("search")
+        page = self._pages.get("search")
+        if page and hasattr(page, "_search_entry"):
+            page._search_entry.setFocus()
+            page._search_entry.selectAll()
+
     def _register_pages(self):
         from .pages.library import LibraryPage
         from .pages.search import SearchPage
@@ -97,15 +123,17 @@ class MeMangaApp(QMainWindow):
         from .pages.detail import DetailPage
         from .pages.reader import ReaderPage
         from .pages.sources import SourcesPage
+        from .pages.notifications import NotificationsPage
 
         page_classes = {
-            "library": LibraryPage,
-            "search": SearchPage,
-            "downloads": DownloadsPage,
-            "sources": SourcesPage,
-            "settings": SettingsPage,
-            "detail": DetailPage,
-            "reader": ReaderPage,
+            "library":       LibraryPage,
+            "search":        SearchPage,
+            "downloads":     DownloadsPage,
+            "notifications": NotificationsPage,
+            "sources":       SourcesPage,
+            "settings":      SettingsPage,
+            "detail":        DetailPage,
+            "reader":        ReaderPage,
         }
         for name, cls in page_classes.items():
             page = cls(self._stack, app=self)

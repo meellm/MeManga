@@ -1,181 +1,191 @@
 """
-Add Manga dialog - Modal window to add a new manga.
+Add Manga modal — new chrome wrapping the existing add-manga backend.
+
+Public class name and signature are unchanged: callers still do
+    AddMangaDialog(parent, app, prefill=None).exec()
+
+Internally we now inherit from ModalDialog so the modal looks like the
+HTML reference (rounded panel, fade-in, backdrop dim, head/body/foot).
 """
 
 import threading
 from urllib.parse import urlparse
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QCheckBox, QWidget,
+    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QCheckBox,
+    QComboBox, QWidget,
 )
 from PySide6.QtCore import Qt
+
 from .. import theme as T
 from ..components.toast import Toast
+from ..components.modal import ModalDialog, field_label, field_hint
+from ..assets.icons import icon
 
 
-class AddMangaDialog(QDialog):
-    """Modal dialog to add a new manga."""
+class AddMangaDialog(ModalDialog):
+    """Modal dialog to add a new manga.
+
+    Inherits the new modal chrome — title bar, close button, backdrop,
+    centered panel, fade-in animation, Esc-to-close.
+    """
 
     def __init__(self, parent, app, prefill=None):
-        super().__init__(parent)
         self.app = app
+        self._prefill = prefill or {}
+        super().__init__(parent, title="Add manga to library", width=520)
 
-        self.setWindowTitle("Add Manga")
-        self.setFixedSize(480, 500)
-        self.setModal(True)
+    # ── ModalDialog.build_body hook ──
 
-        self._build(prefill)
+    def build_body(self):
+        bl = self.body_layout
 
-    def _build(self, prefill):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(T.PAD_XL, T.PAD_XL, T.PAD_XL, T.PAD_XL)
-        layout.setSpacing(T.PAD_SM)
-
-        # Title field
-        title_lbl = QLabel("Manga Title")
-        title_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; font-weight: bold;")
-        layout.addWidget(title_lbl)
-
-        self._title_entry = QLineEdit()
-        self._title_entry.setPlaceholderText("e.g. One Piece")
-        self._title_entry.setFixedHeight(34)
-        layout.addWidget(self._title_entry)
-
-        layout.addSpacing(T.PAD_SM)
-
-        # URL field
-        url_lbl = QLabel("Source URL")
-        url_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; font-weight: bold;")
-        layout.addWidget(url_lbl)
-
+        # ── Source URL field ──
+        bl.addWidget(field_label("Source URL"))
         self._url_entry = QLineEdit()
-        self._url_entry.setPlaceholderText("https://mangadex.org/title/...")
-        self._url_entry.setFixedHeight(34)
+        self._url_entry.setPlaceholderText("https://mangadex.org/title/…")
         self._url_entry.textChanged.connect(self._on_url_change)
-        layout.addWidget(self._url_entry)
+        bl.addWidget(self._url_entry)
 
-        self._source_label = QLabel("")
-        self._source_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
-        layout.addWidget(self._source_label)
+        # Source-detected callout, hidden until we see a known host.
+        self._source_callout = QWidget()
+        sc_l = QHBoxLayout(self._source_callout)
+        sc_l.setContentsMargins(10, 8, 10, 8)
+        sc_l.setSpacing(8)
+        self._source_callout.setStyleSheet(
+            f"background-color: {T.tokens()['accent.soft_10']};"
+            f"border: 1px solid {T.tokens()['accent.ring']};"
+            f"border-radius: 6px;"
+        )
+        check_lbl = QLabel()
+        from PySide6.QtCore import QSize
+        check_lbl.setPixmap(
+            icon("check", T.tokens()["accent.primary"], 16).pixmap(QSize(16, 16))
+        )
+        sc_l.addWidget(check_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+        self._source_callout_text = QLabel("")
+        self._source_callout_text.setStyleSheet(
+            f"color: {T.tokens()['text.t_1']}; font-size: 12pt;"
+        )
+        sc_l.addWidget(self._source_callout_text, 1)
+        self._source_callout.hide()
+        bl.addWidget(self._source_callout)
 
-        layout.addSpacing(T.PAD_SM)
+        # ── Title override field ──
+        bl.addWidget(field_label("Title", "override (optional)"))
+        self._title_entry = QLineEdit()
+        self._title_entry.setPlaceholderText("Auto-detected from URL")
+        bl.addWidget(self._title_entry)
 
-        # Backup source toggle
-        self._backup_check = QCheckBox("Add backup source")
-        self._backup_check.stateChanged.connect(self._toggle_backup)
-        layout.addWidget(self._backup_check)
+        # ── 2-col grid: I'm currently on chapter + reading status ──
+        grid_w = QWidget()
+        grid_l = QHBoxLayout(grid_w)
+        grid_l.setContentsMargins(0, 0, 0, 0)
+        grid_l.setSpacing(12)
 
-        # Backup frame (hidden by default)
-        self._backup_frame = QWidget()
-        backup_layout = QVBoxLayout(self._backup_frame)
-        backup_layout.setContentsMargins(0, 0, 0, 0)
-        backup_layout.setSpacing(T.PAD_SM)
-
-        backup_url_lbl = QLabel("Backup URL")
-        backup_url_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; font-weight: bold;")
-        backup_layout.addWidget(backup_url_lbl)
-
-        self._backup_url_entry = QLineEdit()
-        self._backup_url_entry.setPlaceholderText("https://...")
-        self._backup_url_entry.setFixedHeight(34)
-        backup_layout.addWidget(self._backup_url_entry)
-
-        delay_row = QHBoxLayout()
-        delay_lbl = QLabel("Fallback delay (days):")
-        delay_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        delay_row.addWidget(delay_lbl)
-
-        self._delay_entry = QLineEdit("2")
-        self._delay_entry.setFixedWidth(50)
-        self._delay_entry.setFixedHeight(28)
-        delay_row.addWidget(self._delay_entry)
-        delay_row.addStretch()
-        backup_layout.addLayout(delay_row)
-
-        self._backup_frame.setVisible(False)
-        layout.addWidget(self._backup_frame)
-
-        layout.addSpacing(T.PAD_SM)
-
-        # Current chapter — lets users skip the badge flood when adding a
-        # manga they're already mid-way through. Older chapters get marked
-        # as "read elsewhere" once the first check populates the chapter list.
-        current_lbl = QLabel("I'm currently on chapter (optional):")
-        current_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; font-weight: bold;")
-        layout.addWidget(current_lbl)
-
-        current_row = QHBoxLayout()
+        col_a = QVBoxLayout()
+        col_a.setSpacing(4)
+        col_a.addWidget(field_label("I'm currently on chapter", "optional"))
         self._current_entry = QLineEdit()
-        self._current_entry.setPlaceholderText("e.g. 47 — leave blank if starting fresh")
-        self._current_entry.setFixedHeight(30)
-        self._current_entry.setFixedWidth(220)
-        current_row.addWidget(self._current_entry)
-        current_row.addStretch()
-        layout.addLayout(current_row)
+        self._current_entry.setPlaceholderText("leave blank to start fresh")
+        self._current_entry.setProperty("role", "mono")
+        self._current_entry.setStyleSheet("font-family: 'Geist Mono', monospace;")
+        col_a.addWidget(self._current_entry)
+        grid_l.addLayout(col_a, 1)
 
-        layout.addStretch()
+        col_b = QVBoxLayout()
+        col_b.setSpacing(4)
+        col_b.addWidget(field_label("Reading status"))
+        self._status_combo = QComboBox()
+        self._status_combo.addItems(["Reading", "Plan to read", "Paused"])
+        col_b.addWidget(self._status_combo)
+        grid_l.addLayout(col_b, 1)
 
-        # Buttons
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
+        bl.addWidget(grid_w)
 
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedHeight(36)
-        cancel_btn.setFixedWidth(90)
-        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_btn.clicked.connect(self.reject)
-        btn_row.addWidget(cancel_btn)
+        # ── Add backup source checkbox + hint ──
+        self._backup_check = QCheckBox("Add backup source")
+        self._backup_check.setChecked(True)
+        self._backup_check.stateChanged.connect(self._toggle_backup)
+        bl.addWidget(self._backup_check)
+        bl.addWidget(field_hint("Fallback if the primary source is unreachable."))
 
-        add_btn = QPushButton("Add Manga")
-        add_btn.setProperty("class", "accent")
-        add_btn.setFixedHeight(36)
-        add_btn.setFixedWidth(120)
+        # ── Backup URL + delay (collapsed by default — shown when checked) ──
+        self._backup_frame = QWidget()
+        bf_l = QVBoxLayout(self._backup_frame)
+        bf_l.setContentsMargins(0, 6, 0, 0)
+        bf_l.setSpacing(6)
+        bf_l.addWidget(field_label("Backup URL"))
+        self._backup_url_entry = QLineEdit()
+        self._backup_url_entry.setPlaceholderText("https://…")
+        bf_l.addWidget(self._backup_url_entry)
+        delay_row = QHBoxLayout()
+        delay_row.addWidget(field_label("Fallback delay (days)"))
+        delay_row.addStretch(1)
+        self._delay_entry = QLineEdit("2")
+        self._delay_entry.setFixedWidth(70)
+        self._delay_entry.setProperty("role", "mono")
+        delay_row.addWidget(self._delay_entry)
+        bf_l.addLayout(delay_row)
+        self._backup_frame.setVisible(True)
+        bl.addWidget(self._backup_frame)
+
+        # ── Foot: replace default Cancel with Cancel + primary "Add to library"
+        self.cancel_btn.setText("Cancel")
+        add_btn = QPushButton("  Add to library")
+        add_btn.setProperty("variant", "primary")
+        add_btn.setIcon(icon("plus", T.tokens()["accent.on_primary"], 14))
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.clicked.connect(self._add_manga)
-        btn_row.addWidget(add_btn)
+        self.foot_layout.addWidget(add_btn)
 
-        layout.addLayout(btn_row)
-
-        # Prefill
-        if prefill:
-            self._title_entry.setText(prefill.get("title", ""))
-            self._url_entry.setText(prefill.get("url", ""))
+        # Prefill if provided.
+        if self._prefill:
+            self._title_entry.setText(self._prefill.get("title", ""))
+            self._url_entry.setText(self._prefill.get("url", ""))
             self._on_url_change()
 
-        self._title_entry.setFocus()
+        self._url_entry.setFocus()
 
-    def _toggle_backup(self, state):
+    # ── Event handlers ──
+
+    def _toggle_backup(self, _state):
         self._backup_frame.setVisible(self._backup_check.isChecked())
 
     def _on_url_change(self, text=None):
         url = self._url_entry.text().strip()
-        if url:
-            try:
-                domain = urlparse(url).netloc.replace("www.", "")
-                from ...downloader import get_supported_sources
-                sources = get_supported_sources()
-                if domain in sources:
-                    self._source_label.setText(f"Source: {domain}")
-                    self._source_label.setStyleSheet(
-                        f"font-size: {T.FONT_SIZE_SM}pt; color: {T.SUCCESS};"
-                    )
-                else:
-                    self._source_label.setText(f"Unknown: {domain}")
-                    self._source_label.setStyleSheet(
-                        f"font-size: {T.FONT_SIZE_SM}pt; color: {T.WARNING};"
-                    )
-            except Exception:
-                self._source_label.setText("")
-        else:
-            self._source_label.setText("")
+        if not url:
+            self._source_callout.hide()
+            return
+        try:
+            domain = urlparse(url).netloc.replace("www.", "")
+            from ...downloader import get_supported_sources
+            sources = get_supported_sources()
+            if domain in sources:
+                self._source_callout_text.setText(
+                    f"Detected <b>{domain}</b>"
+                )
+                self._source_callout.show()
+            else:
+                self._source_callout.hide()
+        except Exception:
+            self._source_callout.hide()
 
     def _add_manga(self):
         title = self._title_entry.text().strip()
         url = self._url_entry.text().strip()
 
-        if not title or not url:
+        # Title is optional; if blank, derive a placeholder from the URL.
+        if not url:
             return
+        if not title:
+            try:
+                last = urlparse(url).path.rstrip("/").split("/")[-1]
+                title = last.replace("-", " ").title() or "Untitled"
+            except Exception:
+                title = "Untitled"
 
+        # Dedupe by case-insensitive title.
         existing = self.app.config.get("manga", [])
         for m in existing:
             if m.get("title", "").lower() == title.lower():
@@ -186,6 +196,9 @@ class AddMangaDialog(QDialog):
         except Exception:
             return
 
+        status_map = {"Reading": "reading", "Plan to read": "plan", "Paused": "on-hold"}
+        status_val = status_map.get(self._status_combo.currentText(), "reading")
+
         if self._backup_check.isChecked() and self._backup_url_entry.text().strip():
             backup_url = self._backup_url_entry.text().strip()
             backup_domain = urlparse(backup_url).netloc.replace("www.", "")
@@ -195,8 +208,8 @@ class AddMangaDialog(QDialog):
                 delay = 2
             entry = {
                 "title": title,
-                "status": "reading",
-                "mode": "manual",  # New manga default — see Detail page to opt into auto
+                "status": status_val,
+                "mode": "manual",
                 "fallback_delay_days": delay,
                 "sources": [
                     {"url": url, "source": domain},
@@ -206,40 +219,26 @@ class AddMangaDialog(QDialog):
         else:
             entry = {
                 "title": title,
-                "status": "reading",
-                "mode": "manual",  # New manga default — see Detail page to opt into auto
+                "status": status_val,
+                "mode": "manual",
                 "source": domain,
                 "url": url,
             }
 
-        # Onboarding: "I'm on chapter N" → seed external_threshold. The first
-        # check_complete handler walks the cached chapter list, marks
-        # everything < N as external, and pops this sentinel. Stored as a
-        # string so it survives YAML round-trips even for non-integer
-        # chapter numbers (e.g. "47.5").
         current_raw = self._current_entry.text().strip()
         if current_raw:
             try:
-                # Just validate it parses; persist the original string.
                 float(current_raw)
                 entry["external_threshold"] = current_raw
             except ValueError:
-                # Don't block the add, but tell the user the shortcut
-                # didn't take effect — otherwise they'll wonder why the
-                # badge floods after the first check.
-                Toast(
-                    self,
-                    "Current chapter must be a number — leaving blank",
-                    kind="warning",
-                )
+                Toast(self, "Current chapter must be a number — leaving blank",
+                      kind="warning")
 
         existing.append(entry)
         self.app.config.set("manga", existing)
         self.app.config.save()
 
-        # Fetch cover in background — try the source's own scraper first,
-        # then fall back to MangaDex's public API for sources that don't
-        # expose covers (or whose cover URL came back empty).
+        # Cover fetch in background (scraper first, MangaDex fallback).
         def _fetch_cover():
             cover = None
             try:
@@ -249,14 +248,12 @@ class AddMangaDialog(QDialog):
                     cover = scraper.get_cover_url(url)
             except Exception:
                 cover = None
-
             if not cover:
                 try:
                     from ..cover_fallback import fetch_mangadex_cover
                     cover = fetch_mangadex_cover(title)
                 except Exception:
                     cover = None
-
             if cover:
                 manga_list = self.app.config.get("manga", [])
                 for m in manga_list:
@@ -270,8 +267,5 @@ class AddMangaDialog(QDialog):
         # Auto-check for chapters
         self.app.worker.check_updates([entry], self.app.app_state, self.app.config)
 
-        # Tell other pages (Library, Sources) that the library mutated so
-        # they can refresh without waiting for navigation.
         self.app.events.publish("library_updated", {"title": title, "action": "add"})
-
         self.accept()

@@ -29,28 +29,85 @@ class SettingsPage(BasePage):
         self._build()
 
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(T.PAD_XL, T.PAD_XL, T.PAD_XL, T.PAD_SM)
-        layout.setSpacing(T.PAD_SM)
+        from PySide6.QtWidgets import QFrame
+        from ..assets.icons import icon
+        from ... import __version__
 
-        # Header
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Page header (matches all other pages) ──
+        header_w = QWidget()
+        h_layout = QVBoxLayout(header_w)
+        h_layout.setContentsMargins(32, 24, 32, 18)
+        h_layout.setSpacing(4)
+
+        top_row = QHBoxLayout()
         title = QLabel("Settings")
-        title.setStyleSheet(f"font-size: {T.FONT_SIZE_XL}pt; font-weight: bold;")
-        layout.addWidget(title)
+        title.setProperty("role", "h1")
+        top_row.addWidget(title)
+        top_row.addStretch(1)
 
-        # Tab bar
-        tab_bar = QHBoxLayout()
+        reset_btn = QPushButton("  Reset to defaults")
+        reset_btn.setProperty("variant", "ghost")
+        reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        reset_btn.setIcon(icon("refresh", T.tokens()["text.t_2"], 14))
+        reset_btn.setToolTip("Not implemented — see NOT_IMPLEMENTED.md")
+        top_row.addWidget(reset_btn)
+        h_layout.addLayout(top_row)
+
+        meta = QLabel(f"MeManga v{__version__}  ·  Config: ~/.memanga/config.toml")
+        meta.setProperty("role", "meta")
+        h_layout.addWidget(meta)
+        root.addWidget(header_w)
+
+        sep = QFrame()
+        sep.setObjectName("page_header_divider")
+        sep.setFrameShape(QFrame.Shape.NoFrame)
+        sep.setFixedHeight(1)
+        root.addWidget(sep)
+
+        # ── Body: 2-col layout [200px left-rail nav] [1fr content] ──
+        body_w = QWidget()
+        body_l = QHBoxLayout(body_w)
+        body_l.setContentsMargins(32, 20, 32, 20)
+        body_l.setSpacing(24)
+        root.addWidget(body_w, 1)
+
+        # Left-rail nav (replaces the old horizontal tabs).
+        nav_w = QWidget()
+        nav_w.setFixedWidth(200)
+        nav_l = QVBoxLayout(nav_w)
+        nav_l.setContentsMargins(0, 0, 0, 0)
+        nav_l.setSpacing(2)
+        nav_l.setAlignment(Qt.AlignmentFlag.AlignTop)
+
         self._tab_buttons: dict[str, QPushButton] = {}
-        for name in ["General", "Email", "Advanced"]:
-            btn = QPushButton(name)
-            btn.setProperty("class", "tab")
-            btn.setFixedHeight(30)
+        nav_items = [
+            ("general",  "General",        "settings"),
+            ("email",    "Kindle / Email", "bell"),
+            ("advanced", "Advanced",       "refresh"),
+        ]
+        for key, label, icon_name in nav_items:
+            btn = QPushButton("  " + label)
+            btn.setProperty("variant", "nav")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda checked=False, t=name.lower(): self._switch_tab(t))
-            tab_bar.addWidget(btn)
-            self._tab_buttons[name.lower()] = btn
-        tab_bar.addStretch()
-        layout.addLayout(tab_bar)
+            btn.setFixedHeight(34)
+            btn.setIcon(icon(icon_name, T.tokens()["text.t_2"], 16))
+            from PySide6.QtCore import QSize
+            btn.setIconSize(QSize(16, 16))
+            btn.clicked.connect(lambda _, t=key: self._switch_tab(t))
+            nav_l.addWidget(btn)
+            self._tab_buttons[key] = btn
+        body_l.addWidget(nav_w)
+
+        # Right pane: scrollable card area
+        right_w = QWidget()
+        right_l = QVBoxLayout(right_w)
+        right_l.setContentsMargins(0, 0, 0, 0)
+        right_l.setSpacing(0)
+        body_l.addWidget(right_w, 1)
 
         # ── General tab ──
         self._general_scroll = QScrollArea()
@@ -85,10 +142,10 @@ class SettingsPage(BasePage):
         self._advanced_scroll.setWidget(advanced_content)
         self._build_advanced()
 
-        # Add all tab scrolls
-        layout.addWidget(self._general_scroll, 1)
-        layout.addWidget(self._email_scroll, 1)
-        layout.addWidget(self._advanced_scroll, 1)
+        # Add all tab scrolls into the right pane
+        right_l.addWidget(self._general_scroll, 1)
+        right_l.addWidget(self._email_scroll, 1)
+        right_l.addWidget(self._advanced_scroll, 1)
 
         self._switch_tab("general")
 
@@ -138,6 +195,18 @@ class SettingsPage(BasePage):
 
     def _build_general(self):
         f = self._general_layout
+
+        # ── Appearance card (theme picker) ──
+        # New since the spec rewrite — instantly re-themes the app via
+        # the token system. Persisted in QSettings.
+        from ..components.theme_picker import ThemePicker
+        self._section(f, "Appearance")
+        appearance_hint = QLabel("Pick a look. Affects every screen — switches instantly, no restart.")
+        appearance_hint.setProperty("role", "hint")
+        f.addWidget(appearance_hint)
+        f.addSpacing(8)
+        f.addWidget(ThemePicker())
+        f.addSpacing(16)
 
         # Delivery mode
         self._section(f, "Delivery Mode")
@@ -191,6 +260,36 @@ class SettingsPage(BasePage):
         format_row.addStretch()
         f.addLayout(format_row)
 
+        # Concurrent downloads slider (1..8).
+        from PySide6.QtWidgets import QSlider
+        self._section(f, "Concurrent Downloads")
+        slider_row = QHBoxLayout()
+        slider_hint = QLabel("Higher = faster, may trip rate limits.")
+        slider_hint.setProperty("role", "hint")
+        slider_hint.setFixedWidth(280)
+        slider_row.addWidget(slider_hint)
+
+        self._concurrent_slider = QSlider(Qt.Orientation.Horizontal)
+        self._concurrent_slider.setMinimum(1)
+        self._concurrent_slider.setMaximum(8)
+        self._concurrent_slider.setSingleStep(1)
+        self._concurrent_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._concurrent_slider.setTickInterval(1)
+        current_concurrent = int(self.app.config.get("gui.max_concurrent_downloads", 2))
+        self._concurrent_slider.setValue(max(1, min(8, current_concurrent)))
+        slider_row.addWidget(self._concurrent_slider, 1)
+
+        self._concurrent_value_lbl = QLabel(str(self._concurrent_slider.value()))
+        self._concurrent_value_lbl.setStyleSheet(
+            f"font-family: 'Geist Mono', monospace; font-size: 13pt; "
+            f"color: {T.tokens()['accent.primary']}; min-width: 24px;"
+        )
+        self._concurrent_slider.valueChanged.connect(
+            lambda v: self._concurrent_value_lbl.setText(str(v))
+        )
+        slider_row.addWidget(self._concurrent_value_lbl)
+        f.addLayout(slider_row)
+
         # Naming template
         self._section(f, "File Naming")
         naming_row = QHBoxLayout()
@@ -203,12 +302,50 @@ class SettingsPage(BasePage):
         )
         self._naming_entry.setFixedHeight(30)
         self._naming_entry.setMinimumWidth(280)
+        self._naming_entry.textChanged.connect(self._refresh_filename_preview)
         naming_row.addWidget(self._naming_entry, 1)
         f.addLayout(naming_row)
 
-        vars_label = QLabel("Variables: {title}, {chapter}, {source}")
-        vars_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        f.addWidget(vars_label)
+        # Variable chips — click to insert into the template.
+        var_row = QHBoxLayout()
+        var_row.setSpacing(6)
+        var_label = QLabel("Variables:")
+        var_label.setProperty("role", "hint")
+        var_row.addWidget(var_label)
+        for var in ["{title}", "{chapter}", "{source}", "{date}"]:
+            chip = QPushButton(var)
+            chip.setProperty("variant", "chip")
+            chip.setProperty("active", "false")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.clicked.connect(lambda _, v=var: self._insert_template_var(v))
+            var_row.addWidget(chip)
+        var_row.addStretch(1)
+        f.addLayout(var_row)
+
+        # Live preview of resolved filename.
+        preview_frame = QFrame()
+        preview_frame.setStyleSheet(
+            f"QFrame {{"
+            f"  background-color: {T.tokens()['surfaces.bg_0']};"
+            f"  border: 1px dashed {T.tokens()['surfaces.border_strong']};"
+            f"  border-radius: 6px;"
+            f"  padding: 8px 12px;"
+            f"}}"
+        )
+        pf_l = QHBoxLayout(preview_frame)
+        pf_l.setContentsMargins(0, 0, 0, 0)
+        pf_label = QLabel("Preview:")
+        pf_label.setProperty("role", "hint")
+        pf_l.addWidget(pf_label)
+        self._filename_preview = QLabel("")
+        self._filename_preview.setStyleSheet(
+            f"font-family: 'Geist Mono', monospace; font-size: 11pt;"
+            f"color: {T.tokens()['accent.primary']};"
+        )
+        pf_l.addWidget(self._filename_preview)
+        pf_l.addStretch(1)
+        f.addWidget(preview_frame)
+        self._refresh_filename_preview()
 
         f.addSpacing(T.PAD_LG)
 
@@ -369,6 +506,114 @@ class SettingsPage(BasePage):
         ie_row.addStretch()
         f.addLayout(ie_row)
 
+        # ── Diagnostics section ──
+        f.addSpacing(T.PAD_XL)
+        self._section(f, "Diagnostics")
+
+        diag_row = QHBoxLayout()
+
+        # Clear cache — wipes the cover cache + on-disk thumbs.
+        self._clear_cache_btn = QPushButton("Clear cache")
+        self._clear_cache_btn.setFixedHeight(30)
+        self._clear_cache_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_cache_btn.clicked.connect(self._clear_cache)
+        diag_row.addWidget(self._clear_cache_btn)
+
+        open_logs_btn = QPushButton("Open logs folder")
+        open_logs_btn.setFixedHeight(30)
+        open_logs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_logs_btn.clicked.connect(self._open_logs_folder)
+        diag_row.addWidget(open_logs_btn)
+
+        # Cache size label, updated lazily.
+        self._cache_size_label = QLabel("")
+        self._cache_size_label.setProperty("role", "hint")
+        diag_row.addWidget(self._cache_size_label)
+
+        diag_row.addStretch()
+        f.addLayout(diag_row)
+
+        # Refresh cache size on display.
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, self._refresh_cache_size)
+
+    def _refresh_cache_size(self):
+        """Compute the on-disk size of the cover cache and update the label."""
+        from pathlib import Path
+        cache_dir = self.app.config.config_dir / "covers"
+        total = 0
+        try:
+            if cache_dir.exists():
+                for f in cache_dir.iterdir():
+                    if f.is_file():
+                        total += f.stat().st_size
+        except Exception:
+            pass
+        mb = total / (1024 * 1024)
+        if mb >= 1:
+            self._cache_size_label.setText(f"{mb:.1f} MB cached")
+            self._clear_cache_btn.setText(f"Clear {mb:.0f} MB")
+        elif total > 0:
+            kb = total / 1024
+            self._cache_size_label.setText(f"{kb:.0f} KB cached")
+            self._clear_cache_btn.setText("Clear cache")
+        else:
+            self._cache_size_label.setText("Cache is empty")
+            self._clear_cache_btn.setText("Clear cache")
+
+    def _clear_cache(self):
+        """Delete cached cover thumbnails and reset the in-memory cache."""
+        from pathlib import Path
+        from ..components.dialogs import ConfirmDialog
+        cache_dir = self.app.config.config_dir / "covers"
+
+        def _do_clear():
+            removed = 0
+            try:
+                if cache_dir.exists():
+                    for f in cache_dir.iterdir():
+                        if f.is_file():
+                            try:
+                                f.unlink()
+                                removed += 1
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            # Reset the in-memory pixmap cache so stale entries don't linger.
+            try:
+                self.app.cover_cache._memory.clear()
+                self.app.cover_cache._failed.clear()
+            except Exception:
+                pass
+            Toast(self, f"Cleared {removed} cached file(s)", kind="success")
+            self._refresh_cache_size()
+
+        ConfirmDialog(
+            self, title="Clear cache?",
+            message="This removes all locally-cached cover thumbnails. They'll be re-fetched next time.",
+            on_confirm=_do_clear,
+        )
+
+    def _open_logs_folder(self):
+        """Open the user config dir (where state.json + logs live) in the
+        OS file manager.
+        """
+        import platform, subprocess
+        from pathlib import Path
+        path = Path(self.app.config.config_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            if platform.system() == "Darwin":
+                subprocess.run(["open", str(path)])
+            elif platform.system() == "Windows":
+                subprocess.run(["explorer", str(path)])
+            else:
+                subprocess.run(["xdg-open", str(path)])
+            Toast(self, f"Opened {path}", kind="info")
+        except Exception as e:
+            Toast(self, f"Couldn't open folder: {e}", kind="error")
+
     # ── Actions ──
 
     def _browse_dir(self):
@@ -386,6 +631,37 @@ class SettingsPage(BasePage):
         except (ValueError, IndexError):
             return False
 
+    def _insert_template_var(self, var: str):
+        """Insert a {variable} token at the cursor of the naming template."""
+        cur = self._naming_entry.cursorPosition()
+        text = self._naming_entry.text()
+        new_text = text[:cur] + var + text[cur:]
+        self._naming_entry.setText(new_text)
+        self._naming_entry.setCursorPosition(cur + len(var))
+        self._naming_entry.setFocus()
+
+    def _refresh_filename_preview(self):
+        """Render a live preview of the filename template + extension."""
+        template = self._naming_entry.text().strip() or "{title} - Chapter {chapter}"
+        from datetime import datetime
+        sample = {
+            "title": "Chainsaw Man",
+            "chapter": "1",
+            "source": "mangadex.org",
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "author": "Tatsuki Fujimoto",
+            "volume": "1",
+        }
+        try:
+            filename = template.format(**sample)
+        except Exception:
+            filename = template
+        ext = self._format_combo.currentText() if hasattr(self, "_format_combo") else "pdf"
+        # Strip leading dot if user picked the "(.pdf)" format string.
+        if ext.startswith("."):
+            ext = ext[1:]
+        self._filename_preview.setText(f"{filename}.{ext}")
+
     def _save(self):
         cfg = self.app.config
         mode = "email" if self._radio_email.isChecked() else "local"
@@ -393,6 +669,16 @@ class SettingsPage(BasePage):
         cfg.set("delivery.download_dir", self._dir_entry.text().strip())
         cfg.set("delivery.output_format", self._format_combo.currentText())
         cfg.set("delivery.delete_after_send", self._delete_after_check.isChecked())
+        # Concurrent downloads (slider)
+        if hasattr(self, "_concurrent_slider"):
+            new_concurrent = int(self._concurrent_slider.value())
+            cfg.set("gui.max_concurrent_downloads", new_concurrent)
+            # Push the new value into the live worker pool so it takes
+            # effect immediately, without a restart.
+            try:
+                self.app.worker._max_concurrent_downloads = new_concurrent
+            except Exception:
+                pass
 
         template = self._naming_entry.text().strip()
         if not template or ("{title}" not in template and "{chapter}" not in template):

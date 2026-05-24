@@ -5,7 +5,7 @@ Library page — main home view with grid/list, filters, stats bar.
 from datetime import datetime
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
-    QComboBox, QScrollArea, QWidget, QGridLayout, QFrame,
+    QComboBox, QScrollArea, QWidget, QGridLayout, QFrame, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QTimer
 from .base import BasePage
@@ -37,58 +37,96 @@ class LibraryPage(BasePage):
 
     def _build(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(T.PAD_XL, T.PAD_XL, T.PAD_XL, T.PAD_SM)
-        layout.setSpacing(T.PAD_SM)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Header row
-        header = QHBoxLayout()
+        # ── Page header (with bottom divider, per new spec) ──
+        header = QWidget()
+        h_layout = QVBoxLayout(header)
+        h_layout.setContentsMargins(32, 24, 32, 18)
+        h_layout.setSpacing(4)
 
-        title_block = QVBoxLayout()
+        top_row = QHBoxLayout()
         title = QLabel("Library")
-        title.setStyleSheet(f"font-size: {T.FONT_SIZE_XL}pt; font-weight: bold;")
-        title_block.addWidget(title)
+        title.setProperty("role", "h1")
+        top_row.addWidget(title)
+        top_row.addStretch(1)
 
-        self._stats_label = QLabel("")
-        self._stats_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        title_block.addWidget(self._stats_label)
-        header.addLayout(title_block)
-        header.addStretch()
-
-        add_btn = QPushButton("+ Add")
-        add_btn.setProperty("class", "accent")
-        add_btn.setFixedHeight(30)
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.clicked.connect(self._open_add_dialog)
-        header.addWidget(add_btn)
-
-        check_btn = QPushButton("Check All")
-        check_btn.setProperty("class", "accent")
-        check_btn.setFixedHeight(30)
+        # Per spec: "Check all" ghost (refresh icon), "Add manga" primary (plus icon).
+        from ..assets.icons import icon as _ic
+        check_btn = QPushButton("  Check all")
+        check_btn.setProperty("variant", "ghost")
+        check_btn.setIcon(_ic("refresh", T.tokens()["text.t_2"], 14))
         check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         check_btn.clicked.connect(self._check_all)
-        header.addWidget(check_btn)
+        top_row.addWidget(check_btn)
 
-        layout.addLayout(header)
+        add_btn = QPushButton("  Add manga")
+        add_btn.setProperty("variant", "primary")
+        add_btn.setIcon(_ic("plus", T.tokens()["accent.on_primary"], 14))
+        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.clicked.connect(self._open_add_dialog)
+        top_row.addWidget(add_btn)
+        h_layout.addLayout(top_row)
 
-        # Filter bar
+        # Multi-part meta line: "{n} manga · {ch} chapters · {unread} unread · Synced {ago}"
+        self._stats_label = QLabel("")
+        self._stats_label.setProperty("role", "meta")
+        h_layout.addWidget(self._stats_label)
+
+        layout.addWidget(header)
+
+        sep = QFrame()
+        sep.setObjectName("page_header_divider")
+        sep.setFrameShape(QFrame.Shape.NoFrame)
+        sep.setFixedHeight(1)
+        layout.addWidget(sep)
+
+        # ── Body wrapper ──
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(32, 20, 32, 20)
+        body_layout.setSpacing(T.PAD_SM)
+        layout.addWidget(body, 1)
+
+        # Filter bar — per design spec, search + status chip-row + sort dropdown.
         filter_bar = QHBoxLayout()
+        filter_bar.setSpacing(10)
 
         self._search_entry = QLineEdit()
-        self._search_entry.setPlaceholderText("Filter manga...")
-        self._search_entry.setFixedHeight(30)
-        self._search_entry.setMaximumWidth(200)
+        self._search_entry.setPlaceholderText("Filter library…")
+        self._search_entry.setMaximumWidth(240)
         self._search_entry.textChanged.connect(self._on_search)
         filter_bar.addWidget(self._search_entry)
 
+        # Status chip-row instead of a dropdown — matches HTML.
+        self._chip_buttons: dict[str, QPushButton] = {}
+        chips_wrap = QFrame()
+        chips_wrap.setProperty("role", "card_2")
+        chips_l = QHBoxLayout(chips_wrap)
+        chips_l.setContentsMargins(3, 3, 3, 3)
+        chips_l.setSpacing(0)
+        for key, label in [("all","All"),("reading","Reading"),("plan","Plan"),
+                            ("on-hold","Paused"),("completed","Complete")]:
+            chip = QPushButton(label)
+            chip.setProperty("variant", "chip")
+            chip.setProperty("active", "true" if key == self._filter_status else "false")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.clicked.connect(lambda _, k=key: self._set_chip_filter(k))
+            chips_l.addWidget(chip)
+            self._chip_buttons[key] = chip
+        filter_bar.addWidget(chips_wrap)
+
+        # Kept as a hidden combobox to preserve back-compat for callers
+        # that probe ._status_filter; not displayed.
         self._status_filter = QComboBox()
         self._status_filter.addItems(["All", "Reading", "On-hold", "Dropped", "Completed"])
-        self._status_filter.setFixedHeight(30)
-        self._status_filter.currentTextChanged.connect(self._on_status_filter)
-        filter_bar.addWidget(self._status_filter)
+        self._status_filter.hide()
+
+        filter_bar.addStretch()
 
         self._sort_menu = QComboBox()
         self._sort_menu.addItems(["Title A-Z", "Last Updated", "Recently Added", "Chapter Count", "Status"])
-        self._sort_menu.setFixedHeight(30)
         sort_display = {"title": "Title A-Z", "last_updated": "Last Updated",
                         "recently_added": "Recently Added", "chapter_count": "Chapter Count",
                         "status": "Status"}
@@ -96,13 +134,62 @@ class LibraryPage(BasePage):
         self._sort_menu.currentTextChanged.connect(self._on_sort_change)
         filter_bar.addWidget(self._sort_menu)
 
-        filter_bar.addStretch()
+        # View-toggle chip row (grid / list) — persisted via gui.view_mode.
+        from ..assets.icons import icon as _ic
+        from PySide6.QtCore import QSize
+        view_wrap = QFrame()
+        view_wrap.setProperty("role", "card_2")
+        view_l = QHBoxLayout(view_wrap)
+        view_l.setContentsMargins(3, 3, 3, 3)
+        view_l.setSpacing(0)
+        self._view_buttons: dict[str, QPushButton] = {}
+        self._view_mode = self.app.config.get("gui.view_mode", "grid")
+        for mode, glyph in [("grid", "▦"), ("list", "≡")]:
+            btn = QPushButton(glyph)
+            btn.setProperty("variant", "chip")
+            btn.setProperty("active", "true" if mode == self._view_mode else "false")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedWidth(34)
+            btn.clicked.connect(lambda _, m=mode: self._set_view_mode(m))
+            view_l.addWidget(btn)
+            self._view_buttons[mode] = btn
+        filter_bar.addWidget(view_wrap)
 
         self._count_label = QLabel("")
-        self._count_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+        self._count_label.setProperty("role", "meta")
         filter_bar.addWidget(self._count_label)
 
-        layout.addLayout(filter_bar)
+        body_layout.addLayout(filter_bar)
+
+        # ── Continue Reading rail ──
+        # Rebuilt on each refresh. Holds up to 4 ContinueCard widgets in
+        # a horizontal grid; hidden entirely when there's nothing to
+        # continue.
+        self._continue_section = QWidget()
+        cs_l = QVBoxLayout(self._continue_section)
+        cs_l.setContentsMargins(0, 4, 0, 0)
+        cs_l.setSpacing(8)
+
+        cs_head = QHBoxLayout()
+        cs_head_lbl = QLabel("CONTINUE READING")
+        cs_head_lbl.setProperty("role", "section")
+        cs_head.addWidget(cs_head_lbl)
+        cs_head.addStretch(1)
+        self._continue_count_lbl = QLabel("0")
+        self._continue_count_lbl.setProperty("role", "mono_meta")
+        cs_head.addWidget(self._continue_count_lbl)
+        cs_l.addLayout(cs_head)
+
+        self._continue_grid = QGridLayout()
+        self._continue_grid.setSpacing(12)
+        cs_l.addLayout(self._continue_grid)
+        body_layout.addWidget(self._continue_section)
+
+        # ALL MANGA section label (between filter and grid) — matches HTML.
+        all_label = QLabel("ALL MANGA")
+        all_label.setProperty("role", "section")
+        all_label.setContentsMargins(0, 16, 0, 8)
+        body_layout.addWidget(all_label)
 
         # Scrollable grid
         self._scroll = QScrollArea()
@@ -113,12 +200,15 @@ class LibraryPage(BasePage):
         self._grid_layout.setSpacing(T.PAD_MD)
         self._grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self._scroll.setWidget(self._scroll_content)
-        layout.addWidget(self._scroll, 1)
+        body_layout.addWidget(self._scroll, 1)
 
     def on_show(self, **kwargs):
         self._refresh()
 
     def _refresh(self):
+        # Continue Reading rail first
+        self._refresh_continue_rail()
+
         # Clear grid
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
@@ -145,10 +235,18 @@ class LibraryPage(BasePage):
                     check_text = f"{int(elapsed // 86400)}d ago"
             except Exception:
                 pass
-        self._stats_label.setText(
-            f"{stats['total_manga']} manga  \u00b7  {stats['total_chapters']} chapters  \u00b7  Last check: {check_text}"
+        # Multi-part meta line per design spec: count \u00b7 chapters \u00b7 unread \u00b7 synced.
+        unread_total = sum(
+            self.app.app_state.get_new_chapters(m.get("title", ""))
+            for m in self.app.config.get("manga", [])
         )
-        self._count_label.setText(f"{len(manga_list)} shown")
+        self._stats_label.setText(
+            f"{stats['total_manga']} manga  \u00b7  {stats['total_chapters']} chapters tracked  "
+            f"\u00b7  {unread_total} unread  \u00b7  Synced {check_text}"
+        )
+        # "10 of 10 shown" format from spec.
+        total_manga = stats['total_manga']
+        self._count_label.setText(f"{len(manga_list)} of {total_manga} shown")
 
         if not manga_list:
             empty = QLabel("No manga tracked yet. Click '+ Add' to get started.")
@@ -227,12 +325,82 @@ class LibraryPage(BasePage):
             results.sort(key=lambda m: order.get(m.get("status", "reading"), 4))
         return results
 
+    def _refresh_continue_rail(self):
+        """Repopulate the Continue Reading rail with up to 4 most-recently-read
+        manga that have an unfinished chapter."""
+        from ..components.continue_card import ContinueCard
+        # Drain old cards
+        while self._continue_grid.count():
+            item = self._continue_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        candidates = []
+        for m in self.app.config.get("manga", []) or []:
+            title = m.get("title", "")
+            if not title:
+                continue
+            state = self.app.app_state.get_manga_state(title) or {}
+            last_chapter = state.get("last_chapter")
+            if not last_chapter:
+                continue
+            # Skip completed/dropped from rail
+            if m.get("status") in ("completed", "dropped"):
+                continue
+            # Sort key = last_updated timestamp (most recent first)
+            candidates.append((state.get("last_updated") or "", m, state))
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        candidates = candidates[:4]
+
+        self._continue_section.setVisible(bool(candidates))
+        self._continue_count_lbl.setText(str(len(candidates)))
+        if not candidates:
+            return
+
+        for col, (_, m, state) in enumerate(candidates):
+            cover = self.app.cover_cache.get_cover(m.get("cover_url"), size=(48, 68))
+            try:
+                done = len(state.get("downloaded", []))
+                total = int(m.get("chapters_total") or done * 2 or 1)
+                pct = min(100, (done / max(total, 1)) * 100)
+            except Exception:
+                pct = 0
+            card = ContinueCard(
+                self._scroll_content, manga=m, cover_pixmap=cover,
+                last_chapter=str(state.get("last_chapter", "")),
+                progress_pct=pct,
+                on_click=lambda mm: self.app.show_page("detail", manga=mm),
+            )
+            self._continue_grid.addWidget(card, 0, col)
+
     def _on_search(self, text):
         self._search_query = text.strip()
         self._refresh()
 
     def _on_status_filter(self, value):
         self._filter_status = value.lower() if value != "All" else "all"
+        self._refresh()
+
+    def _set_chip_filter(self, key: str):
+        """Status chip clicked — update filter + refresh chip active states."""
+        self._filter_status = key
+        for k, btn in self._chip_buttons.items():
+            btn.setProperty("active", "true" if k == key else "false")
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+        self._refresh()
+
+    def _set_view_mode(self, mode: str):
+        """Toggle grid vs list view. Persisted in config."""
+        if mode not in ("grid", "list") or mode == self._view_mode:
+            return
+        self._view_mode = mode
+        for m, btn in self._view_buttons.items():
+            btn.setProperty("active", "true" if m == mode else "false")
+            btn.style().unpolish(btn); btn.style().polish(btn)
+        self.app.config.set("gui.view_mode", mode)
+        self.app.config.save()
         self._refresh()
 
     def _on_sort_change(self, value):
