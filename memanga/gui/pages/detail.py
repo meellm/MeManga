@@ -928,7 +928,18 @@ class DetailPage(BasePage):
             return
 
         title = self._manga.get("title", "")
-        self.app.app_state.reset_manga_progress(title, from_ch)
+
+        if from_ch <= 0:
+            # "Download all" — preserve `downloaded` (issue #15) and let
+            # check_for_updates return every chapter from the source.
+            self.app.app_state.set_last_chapter(title, None)
+        else:
+            if not skip_existing:
+                self.app.app_state.reset_manga_progress(title, from_ch)
+            # Issue #20: tell check_for_updates to only return chapters
+            # >= from_ch. It treats `last_chapter` as a `>` cursor, so
+            # subtract 0.001 to make from_ch itself qualify.
+            self.app.app_state.set_last_chapter(title, str(from_ch - 0.001))
 
         self.app.worker.check_updates([self._manga], self.app.app_state, self.app.config)
         self.app.show_page("downloads")
