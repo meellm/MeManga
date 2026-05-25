@@ -30,7 +30,7 @@ class NotificationPanel(QDialog):
         header.addStretch()
 
         mark_btn = QPushButton("Mark Read")
-        mark_btn.setFixedHeight(26)
+        mark_btn.setMinimumHeight(36)
         mark_btn.clicked.connect(lambda: (app.app_state.mark_notifications_read(), self.close()))
         header.addWidget(mark_btn)
         layout.addLayout(header)

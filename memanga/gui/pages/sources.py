@@ -478,7 +478,7 @@ class SourcesPage(BasePage):
 
             row = QFrame()
             row.setProperty("class", "card")
-            row.setFixedHeight(32)
+            row.setMinimumHeight(38)
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
 
@@ -590,7 +590,7 @@ class SourcesPage(BasePage):
                     f"  border: none;"
                     f"}}"
                 )
-                head.setFixedHeight(28)
+                head.setMinimumHeight(28)
                 head_l = QHBoxLayout(head)
                 head_l.setContentsMargins(16, 0, 16, 0)
                 letter_lbl = QLabel(letter)
@@ -639,29 +639,22 @@ class SourcesPage(BasePage):
                 name.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
                 row_layout.addWidget(name, 1)
 
-                # Lang tag (EN / JP / ES) — small uppercase pill
-                # Small chip — sized to the text, not a big box.
-                # Match HTML: tiny uppercase tag, ~22px tall, hugs content.
+                # Lang tag — TINY chip, matches HTML CSS `.lang-tag`.
+                # Plain colored text on a hair of transparent bg, no
+                # boxed-in look. Just enough padding to read as a tag.
                 lang_chip = QLabel(self._lang_of(source))
                 lang_chip.setStyleSheet(
                     f"QLabel {{"
-                    f"  background-color: {T.tokens()['surfaces.bg_2']};"
                     f"  color: {T.tokens()['text.t_3']};"
                     f"  font-family: 'Geist Mono', monospace;"
-                    f"  font-size: 9pt; font-weight: 600;"
-                    f"  padding: 2px 6px; border-radius: 3px;"
+                    f"  font-size: 8pt; font-weight: 600;"
+                    f"  letter-spacing: 0.5px;"
+                    f"  padding: 0px 4px;"
                     f"}}"
                 )
                 lang_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                # Reserve a thin column so the chip itself stays small
-                # but the latency/count columns still line up.
-                lang_wrap = QWidget()
-                lw_l = QHBoxLayout(lang_wrap)
-                lw_l.setContentsMargins(0, 0, 0, 0)
-                lw_l.addStretch(1)
-                lw_l.addWidget(lang_chip)
-                lang_wrap.setFixedWidth(48)
-                row_layout.addWidget(lang_wrap)
+                lang_chip.setFixedWidth(28)
+                row_layout.addWidget(lang_chip)
 
                 # Latency (if pinged) — fixed-width mono so columns align
                 lat = QLabel(f"{hh['latency_ms']}ms" if hh.get("latency_ms") is not None else "—")

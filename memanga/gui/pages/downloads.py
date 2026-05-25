@@ -123,7 +123,7 @@ class DownloadsPage(BasePage):
         for tab_name in ["Active", "Completed", "History"]:
             btn = QPushButton(tab_name)
             btn.setProperty("class", "tab")
-            btn.setFixedHeight(30)
+            btn.setMinimumHeight(36)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda checked=False, t=tab_name.lower(): self._switch_tab(t))
             tab_bar.addWidget(btn)
@@ -217,7 +217,7 @@ class DownloadsPage(BasePage):
         for h in history:
             row = QFrame()
             row.setProperty("class", "card")
-            row.setFixedHeight(32)
+            row.setMinimumHeight(38)
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
             row_layout.setSpacing(T.PAD_SM)

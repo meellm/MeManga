@@ -213,7 +213,9 @@ QPushButton[variant="tab"], QPushButton[class="tab"] {{
     border-bottom: 2px solid transparent;
     border-radius: 0;
     color: {t_2};
-    padding: 8px 16px;
+    /* Extra bottom padding so the descender on 'y' in History/Library
+       isn't clipped above the underline border. */
+    padding: 10px 16px 12px 16px;
     font-size: {sz_body}pt;
     font-weight: 500;
 }}

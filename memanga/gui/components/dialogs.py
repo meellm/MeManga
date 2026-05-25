@@ -57,7 +57,7 @@ class InputDialog(QDialog):
         layout.addWidget(QLabel(prompt))
 
         self._entry = QLineEdit(default)
-        self._entry.setFixedHeight(32)
+        self._entry.setMinimumHeight(38)
         self._entry.returnPressed.connect(self._submit)
         layout.addWidget(self._entry)
         layout.addStretch()

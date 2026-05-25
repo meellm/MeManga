@@ -161,24 +161,37 @@ class _CoverArea(QWidget):
         p.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, jp_text)
 
     def _paint_new_badge(self, p: QPainter):
+        """Subtle NEW-chapter badge top-right of the cover.
+
+        Refined per HTML CSS: tiny accent-on-translucent pill instead of
+        a chunky solid green oval. Accent fill is alpha 78% so it sits
+        on the cover image without blocking the art behind it.
+        """
         accent = QColor(T.tokens()["accent.primary"])
         on_accent = QColor(T.tokens()["accent.on_primary"])
+        # Translucent fill — image shows through faintly.
+        accent_bg = QColor(accent)
+        accent_bg.setAlpha(220)
         label = f"+{self._new_count} NEW"
 
-        font = QFont("Geist Mono", 9, QFont.Weight.Bold)
+        font = QFont()
         font.setFamilies(["Geist Mono", "JetBrains Mono", "Consolas", "monospace"])
+        font.setPointSizeF(8.5)
+        font.setWeight(QFont.Weight.Bold)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.4)
         p.setFont(font)
         fm = QFontMetrics(font)
         text_w = fm.horizontalAdvance(label)
-        pad_h, pad_v = 7, 3
+        pad_h, pad_v = 6, 1
         badge_w = text_w + pad_h * 2
-        badge_h = fm.height() + pad_v
-        x = self.width() - badge_w - 8
-        y = 8
+        badge_h = fm.height() + pad_v * 2
+        x = self.width() - badge_w - 6
+        y = 6
         badge_rect = QRectF(x, y, badge_w, badge_h)
-        p.setBrush(accent)
+        p.setBrush(accent_bg)
         p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(badge_rect, 999, 999)
+        # Tight rounded rect (not full pill) to read as a tag, not an oval.
+        p.drawRoundedRect(badge_rect, 4, 4)
         p.setPen(on_accent)
         p.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, label)
 

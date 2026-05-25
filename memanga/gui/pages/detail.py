@@ -205,38 +205,43 @@ class DetailPage(BasePage):
         info_layout.addSpacing(12)
 
         # ── Controls card (matches HTML spec.screens.manga_detail.controls_card)
+        # Two left-aligned columns inside a bg_1 card. Each column has a
+        # tiny uppercase label sitting directly above its dropdown — the
+        # dropdown sizes to a natural width instead of stretching to the
+        # full column, which had been making the layout look "ugly" with
+        # huge empty space around "Reading" / "Manual".
         controls_card = QFrame()
         controls_card.setProperty("role", "card")
         cc_l = QHBoxLayout(controls_card)
-        cc_l.setContentsMargins(14, 14, 14, 14)
-        cc_l.setSpacing(14)
+        cc_l.setContentsMargins(16, 12, 16, 12)
+        cc_l.setSpacing(28)
 
-        # Status dropdown col — custom widget with colored dots per option.
         from ..components.status_dropdown import StatusDropdown
-        status_col = QVBoxLayout()
-        status_col.setSpacing(4)
-        s_lbl = QLabel("STATUS")
-        s_lbl.setProperty("role", "section")
-        status_col.addWidget(s_lbl)
+        from ..components.mode_dropdown import ModeDropdown
+
+        def _control_column(label_text: str, widget: QWidget) -> QVBoxLayout:
+            col = QVBoxLayout()
+            col.setSpacing(6)
+            col.setContentsMargins(0, 0, 0, 0)
+            lbl = QLabel(label_text)
+            lbl.setProperty("role", "section")
+            col.addWidget(lbl, 0, Qt.AlignmentFlag.AlignLeft)
+            # Cap dropdown width so it doesn't float in a sea of whitespace.
+            widget.setMaximumWidth(200)
+            widget.setMinimumWidth(160)
+            col.addWidget(widget, 0, Qt.AlignmentFlag.AlignLeft)
+            return col
+
         self._status_combo = StatusDropdown(initial=manga.get("status", "reading"))
         self._status_combo.value_changed.connect(self._on_status_change)
-        status_col.addWidget(self._status_combo)
-        cc_l.addLayout(status_col, 1)
+        cc_l.addLayout(_control_column("STATUS", self._status_combo))
 
-        # Mode dropdown col (sits next to Status inside the controls card)
-        # Custom widget so it matches Status visually + adds the two-line
-        # description in the menu items.
-        from ..components.mode_dropdown import ModeDropdown
-        mode_col = QVBoxLayout()
-        mode_col.setSpacing(4)
-        m_lbl = QLabel("MODE")
-        m_lbl.setProperty("role", "section")
-        mode_col.addWidget(m_lbl)
         current_mode = manga.get("mode", "auto")
         self._mode_combo = ModeDropdown(initial=current_mode)
         self._mode_combo.value_changed.connect(self._on_mode_change)
-        mode_col.addWidget(self._mode_combo)
-        cc_l.addLayout(mode_col, 1)
+        cc_l.addLayout(_control_column("MODE", self._mode_combo))
+
+        cc_l.addStretch(1)  # push columns left, no centering void
 
         info_layout.addWidget(controls_card)
 
@@ -344,17 +349,17 @@ class DetailPage(BasePage):
 
         edit_inner.addWidget(QLabel("Title:"))
         self._edit_title = QLineEdit(title)
-        self._edit_title.setFixedHeight(32)
+        self._edit_title.setMinimumHeight(38)
         edit_inner.addWidget(self._edit_title)
 
         edit_inner.addWidget(QLabel("Primary URL:"))
         self._edit_url = QLineEdit(primary_url)
-        self._edit_url.setFixedHeight(32)
+        self._edit_url.setMinimumHeight(38)
         edit_inner.addWidget(self._edit_url)
 
         edit_inner.addWidget(QLabel("Backup URL (leave empty to remove):"))
         self._edit_backup = QLineEdit(backup_url)
-        self._edit_backup.setFixedHeight(32)
+        self._edit_backup.setMinimumHeight(38)
         edit_inner.addWidget(self._edit_backup)
 
         # Fallback delay — only meaningful with a backup source, but always
@@ -366,7 +371,7 @@ class DetailPage(BasePage):
         delay_row.addWidget(delay_lbl)
         self._edit_delay = QLineEdit(str(manga.get("fallback_delay_days", 2)))
         self._edit_delay.setFixedWidth(60)
-        self._edit_delay.setFixedHeight(28)
+        self._edit_delay.setMinimumHeight(36)
         delay_row.addWidget(self._edit_delay)
         delay_row.addStretch()
         edit_inner.addLayout(delay_row)
@@ -511,7 +516,9 @@ class DetailPage(BasePage):
         filter_row.addStretch(1)
         sort_combo = QComboBox()
         sort_combo.addItems(["Newest first", "Oldest first"])
-        sort_combo.setFixedWidth(150)
+        # Was 150 — the QSS adds 28px right padding for the caret, so
+        # "Newest first" wrapped/clipped the trailing 't'. 180 fits.
+        sort_combo.setMinimumWidth(180)
         sort_combo.currentTextChanged.connect(self._on_chapter_sort_change)
         self._chapter_sort = "Newest first"
         filter_row.addWidget(sort_combo)
@@ -561,20 +568,46 @@ class DetailPage(BasePage):
             ch_row.setContentsMargins(16, 10, 16, 10)
             ch_row.setSpacing(12)
 
-            # Status icon column (28x28 square, accent.soft if downloaded)
+            # Status icon column (28x28). Four distinct visual states so
+            # the user can scan chapter status at a glance:
+            #   * Read       → filled accent bg + on_accent check
+            #   * Downloaded → accent.soft bg + accent check-circle
+            #   * External   → warn.soft bg + warn external-link
+            #   * Not yet    → bg_2 + t_3 download-tray arrow
+            # Computed up-front so we can also drive the title style + label.
+            is_read = self.app.app_state.is_chapter_read(title, num)
             status_box = QLabel()
             status_box.setFixedSize(28, 28)
             status_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            if is_dl:
-                status_box.setPixmap(_ic("check", T.tokens()["accent.primary"], 14).pixmap(QSize(14, 14)))
+            toks = T.tokens()
+            if is_read:
+                # Filled bright accent — strongest visual weight.
+                status_box.setPixmap(
+                    _ic("check", toks["accent.on_primary"], 14).pixmap(QSize(14, 14)))
                 status_box.setStyleSheet(
-                    f"background-color: {T.tokens()['accent.soft_10']};"
+                    f"background-color: {toks['accent.primary']};"
+                    f"border-radius: 6px;"
+                )
+            elif is_dl:
+                # Subtle accent — file on disk, not opened yet.
+                status_box.setPixmap(
+                    _ic("check_circle", toks["accent.primary"], 16).pixmap(QSize(16, 16)))
+                status_box.setStyleSheet(
+                    f"background-color: {toks['accent.soft_10']};"
+                    f"border-radius: 6px;"
+                )
+            elif is_external:
+                status_box.setPixmap(
+                    _ic("external", toks["status.warn"], 14).pixmap(QSize(14, 14)))
+                status_box.setStyleSheet(
+                    f"background-color: {toks['status.warn_soft']};"
                     f"border-radius: 6px;"
                 )
             else:
-                status_box.setPixmap(_ic("download", T.tokens()["text.t_3"], 14).pixmap(QSize(14, 14)))
+                status_box.setPixmap(
+                    _ic("download_tray", toks["text.t_3"], 14).pixmap(QSize(14, 14)))
                 status_box.setStyleSheet(
-                    f"background-color: {T.tokens()['surfaces.bg_2']};"
+                    f"background-color: {toks['surfaces.bg_2']};"
                     f"border-radius: 6px;"
                 )
             ch_row.addWidget(status_box, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -590,8 +623,8 @@ class DetailPage(BasePage):
 
             # Title block — issue #18: distinguish "actually read in the
             # Reader" from "just downloaded". Dim read chapters' title so
-            # they visually fade like read mail.
-            is_read = self.app.app_state.is_chapter_read(title, num)
+            # they visually fade like read mail. (`is_read` was computed
+            # above next to the status-box selection.)
             ch_title_text = (entry.get("title") or "").strip()
             title_l = QVBoxLayout()
             title_l.setSpacing(2)

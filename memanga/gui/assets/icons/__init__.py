@@ -116,6 +116,43 @@ ICONS: dict[str, str] = {
         '<rect x="13" y="4" width="8" height="16" rx="1"/>'
         '</g></svg>'
     ),
+    # Open book glyph — used in chapter rows for "Read" (opened in
+    # Reader at least once). Visually distinct from "Downloaded" check.
+    "book_open": (
+        '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        '<g fill="none" stroke="{color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M2 4h7a3 3 0 0 1 3 3v13a2 2 0 0 0-2-2H2z"/>'
+        '<path d="M22 4h-7a3 3 0 0 0-3 3v13a2 2 0 0 1 2-2h8z"/>'
+        '</g></svg>'
+    ),
+    # Filled check-circle — used for chapter rows that have a file on
+    # disk but the user hasn't opened them yet ("Downloaded" sub-state).
+    "check_circle": (
+        '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        '<g fill="none" stroke="{color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+        '<circle cx="12" cy="12" r="9"/>'
+        '<path d="m8 12 3 3 5-6"/>'
+        '</g></svg>'
+    ),
+    # Down-arrow into tray — "Not downloaded" chapter rows.
+    "download_tray": (
+        '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        '<g fill="none" stroke="{color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M12 3v12"/>'
+        '<path d="m7 10 5 5 5-5"/>'
+        '<path d="M4 21h16"/>'
+        '</g></svg>'
+    ),
+    # External-link icon — chapter is marked "Read elsewhere" via the
+    # onboarding "I'm on chapter N" sentinel.
+    "external": (
+        '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        '<g fill="none" stroke="{color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>'
+        '<path d="M14 4h6v6"/>'
+        '<path d="m10 14 10-10"/>'
+        '</g></svg>'
+    ),
 }
 
 
