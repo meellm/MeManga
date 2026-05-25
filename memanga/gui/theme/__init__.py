@@ -62,13 +62,86 @@ def set_theme(name: str, qapp=None):
 
 
 def apply(qapp):
-    """Generate QSS for the current theme and apply to the QApplication."""
+    """Generate QSS + a matching QPalette for the current theme and apply
+    both to the QApplication.
+
+    The QSS handles every widget that respects stylesheet rules. The
+    QPalette covers the rest — Fusion's native frame backgrounds,
+    top-level frameless dialogs before QSS paints, scrollbar tracks
+    that don't go through QSS, tooltip text, text-selection highlight,
+    and any custom widget that calls ``self.palette().color(...)``.
+
+    Without the palette swap, Qt6 inherits the OS palette (light gray
+    on macOS / Windows light mode), which leaks through as a white
+    flash on launch and around the frameless modal panels.
+    """
     qapp.setStyleSheet(build_stylesheet(THEMES[current_theme()]))
+    qapp.setPalette(_build_palette(THEMES[current_theme()]))
     # Force a polish pass so style-property-driven selectors re-evaluate.
     try:
         qapp.style().polish(qapp)
     except Exception:
         pass
+
+
+def _build_palette(theme: dict):
+    """Translate our token table into a QPalette so widgets that ignore
+    QSS (or paint before QSS applies) still pick up our theme colors.
+
+    All three palette groups (Active / Inactive / Disabled) are set
+    explicitly — Qt copies them independently and missing groups would
+    fall back to OS-default colors.
+    """
+    from PySide6.QtGui import QPalette, QColor
+    from .tokens import flat
+
+    t = flat(theme)
+    p = QPalette()
+
+    bg_0 = QColor(t["surfaces.bg_0"])
+    bg_1 = QColor(t["surfaces.bg_1"])
+    bg_2 = QColor(t["surfaces.bg_2"])
+    bg_3 = QColor(t["surfaces.bg_3"])
+    t_1 = QColor(t["text.t_1"])
+    t_2 = QColor(t["text.t_2"])
+    t_3 = QColor(t["text.t_3"])
+    accent = QColor(t["accent.primary"])
+    on_accent = QColor(t["accent.on_primary"])
+
+    pairs = [
+        (QPalette.ColorRole.Window, bg_0),
+        (QPalette.ColorRole.WindowText, t_1),
+        (QPalette.ColorRole.Base, bg_1),
+        (QPalette.ColorRole.AlternateBase, bg_2),
+        (QPalette.ColorRole.ToolTipBase, bg_1),
+        (QPalette.ColorRole.ToolTipText, t_1),
+        (QPalette.ColorRole.Text, t_1),
+        (QPalette.ColorRole.Button, bg_2),
+        (QPalette.ColorRole.ButtonText, t_1),
+        (QPalette.ColorRole.BrightText, on_accent),
+        (QPalette.ColorRole.Link, accent),
+        (QPalette.ColorRole.LinkVisited, accent),
+        (QPalette.ColorRole.Highlight, accent),
+        (QPalette.ColorRole.HighlightedText, on_accent),
+        (QPalette.ColorRole.PlaceholderText, t_3),
+        (QPalette.ColorRole.Mid, bg_3),
+        (QPalette.ColorRole.Midlight, bg_2),
+        (QPalette.ColorRole.Dark, bg_0),
+        (QPalette.ColorRole.Shadow, bg_0),
+        (QPalette.ColorRole.Light, bg_2),
+    ]
+    # Apply to every state group so the OS palette never leaks back in.
+    for group in (QPalette.ColorGroup.Active,
+                  QPalette.ColorGroup.Inactive,
+                  QPalette.ColorGroup.Disabled):
+        for role, color in pairs:
+            p.setColor(group, role, color)
+    # Disabled text is dimmer.
+    for role in (QPalette.ColorRole.WindowText,
+                 QPalette.ColorRole.Text,
+                 QPalette.ColorRole.ButtonText):
+        p.setColor(QPalette.ColorGroup.Disabled, role, t_2)
+    return p
 
 
 def on_theme_change(callback):
