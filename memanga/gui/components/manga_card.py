@@ -55,12 +55,15 @@ class _CoverArea(QWidget):
     composition stays pixel-exact regardless of theme.
     """
 
-    def __init__(self, parent, *, cover_image: QPixmap, manga: dict, new_count: int):
+    def __init__(self, parent, *, cover_image: QPixmap, manga: dict, new_count: int,
+                 read_count: int = 0, total_count: int = 0):
         super().__init__(parent)
         self.setFixedSize(CARD_W, COVER_H)
         self._cover = cover_image if cover_image and not cover_image.isNull() else None
         self._manga = manga
         self._new_count = new_count
+        self._read_count = int(read_count or 0)
+        self._total_count = int(total_count or 0)
         # cached pixmap of placeholder paint per palette to avoid re-painting.
         self._placeholder_cache: QPixmap | None = None
         # Repaint when theme switches (status pill / NEW badge colors change).
@@ -227,9 +230,14 @@ class _CoverArea(QWidget):
         p.drawRect(rect)
 
     def _get_progress(self) -> float:
-        """Return chapter-read progress as %. 0 means none/unknown,
-        100 means fully read (caller hides the bar at extremes)."""
+        """Return READ-progress as % (issue #18). Falls back to the
+        downloaded ratio when no read tracking exists yet. 0 means
+        none/unknown; 100 means fully read (caller hides the bar at
+        extremes).
+        """
         try:
+            if self._total_count > 0:
+                return min(100, (self._read_count / self._total_count) * 100)
             total = int(self._manga.get("chapters_total") or 0)
             done = int(self._manga.get("chapters_downloaded") or 0)
             if total <= 0:
@@ -246,7 +254,8 @@ class MangaCard(QFrame):
     """
 
     def __init__(self, parent, manga: dict, cover_image: QPixmap = None,
-                 on_click=None, on_right_click=None, new_count: int = 0):
+                 on_click=None, on_right_click=None, new_count: int = 0,
+                 read_count: int = 0, total_count: int = 0):
         super().__init__(parent)
         self.setFixedSize(CARD_W, CARD_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -254,6 +263,10 @@ class MangaCard(QFrame):
         self._on_click = on_click
         self._on_right_click = on_right_click
         self._hover_offset = 0
+        # Issue #18: per-chapter read counts (passed in by Library so the
+        # card doesn't need to reach into State).
+        self._read_count = int(read_count or 0)
+        self._total_count = int(total_count or 0)
         self.setMouseTracking(True)
 
         layout = QVBoxLayout(self)
@@ -261,8 +274,12 @@ class MangaCard(QFrame):
         layout.setSpacing(4)
 
         # ── Cover area ──
+        # Pass read/total so the paint code can render the bottom
+        # progress bar based on READ progress (more useful to the user
+        # than downloaded progress for tracking what's left to read).
         self._cover_area = _CoverArea(
             self, cover_image=cover_image, manga=manga, new_count=new_count,
+            read_count=self._read_count, total_count=self._total_count,
         )
         layout.addWidget(self._cover_area)
 
@@ -278,7 +295,9 @@ class MangaCard(QFrame):
         title_lbl.setMaximumHeight(34)
         layout.addWidget(title_lbl)
 
-        sub_text = self._sub_text(manga, new_count)
+        sub_text = self._sub_text(manga, new_count,
+                                    read_count=self._read_count,
+                                    total_count=self._total_count)
         sub_lbl = QLabel(sub_text)
         sub_lbl.setStyleSheet(
             f"color: {T.tokens()['text.t_3']}; font-size: 9pt;"
@@ -338,12 +357,22 @@ class MangaCard(QFrame):
     # ── Helpers ──
 
     @staticmethod
-    def _sub_text(manga: dict, new_count: int) -> str:
-        ch_total = manga.get("chapters_total") or "?"
-        ch_done = manga.get("chapters_downloaded") or 0
+    def _sub_text(manga: dict, new_count: int,
+                  read_count: int = 0, total_count: int = 0) -> str:
+        """Sub-line shown under the title.
+
+        Prefers READ progress (issue #18). Falls back to downloaded
+        progress when read tracking isn't populated yet.
+        """
+        if total_count > 0:
+            base = f"Read {read_count}/{total_count}"
+        else:
+            ch_total = manga.get("chapters_total") or "?"
+            ch_done = manga.get("chapters_downloaded") or 0
+            base = f"Ch.{ch_done}/{ch_total}"
         if new_count > 0:
-            return f"Ch.{ch_done}/{ch_total} · +{new_count}"
-        return f"Ch.{ch_done}/{ch_total}"
+            return f"{base} · +{new_count}"
+        return base
 
     @staticmethod
     def _on_theme(title_lbl: QLabel, sub_lbl: QLabel):

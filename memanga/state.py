@@ -286,6 +286,43 @@ class State:
                     best = {"title": title, **progress}
         return best
 
+    # ── Per-chapter read tracking (issue #18) ──────────────────────────
+    # `reading_progress.last_chapter` only tracks the cursor (the most-
+    # recently-opened chapter). The set below tracks every individual
+    # chapter the user has opened in the Reader, so the Library card and
+    # Detail chapter rows can show a per-chapter read indicator.
+
+    def mark_chapter_read(self, manga_title: str, chapter):
+        """Add `chapter` to the per-manga read set (idempotent)."""
+        if chapter is None or str(chapter).strip() == "":
+            return
+        self._ensure_manga_entry(manga_title)
+        entry = self._data["manga"][manga_title]
+        read_list = entry.setdefault("read_chapters", [])
+        ch = str(chapter)
+        if ch not in read_list:
+            read_list.append(ch)
+            self._mark_dirty()
+
+    def unmark_chapter_read(self, manga_title: str, chapter):
+        entry = self._data.get("manga", {}).get(manga_title)
+        if not entry:
+            return
+        read_list = entry.get("read_chapters", [])
+        ch = str(chapter)
+        if ch in read_list:
+            read_list.remove(ch)
+            self._mark_dirty()
+
+    def is_chapter_read(self, manga_title: str, chapter) -> bool:
+        return str(chapter) in self.get_read_chapters(manga_title)
+
+    def get_read_chapters(self, manga_title: str) -> List[str]:
+        return list(self.get_manga_state(manga_title).get("read_chapters", []) or [])
+
+    def get_read_count(self, manga_title: str) -> int:
+        return len(self.get_manga_state(manga_title).get("read_chapters", []) or [])
+
     # ========================================================================
     # New Chapter Badges
     # ========================================================================

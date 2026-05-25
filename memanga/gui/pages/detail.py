@@ -487,13 +487,18 @@ class DetailPage(BasePage):
         chip_l = QHBoxLayout(chips_wrap)
         chip_l.setContentsMargins(3, 3, 3, 3)
         chip_l.setSpacing(0)
+        # Real per-chapter read tracking (issue #18). "Unread" now means
+        # actually-not-opened-in-Reader, not the "new since last check" badge.
+        read_set = set(self.app.app_state.get_read_chapters(title))
+        n_read = sum(1 for num in merged.keys() if num in read_set)
+        n_unread = n_total - n_read
         self._chapter_filter = "all"
         self._chapter_chips: dict = {}
         for key, label, count in [
             ("all", "All", n_total),
             ("downloaded", "Downloaded", n_dl),
             ("not_downloaded", "Not downloaded", n_total - n_dl),
-            ("unread", "Unread", n_new),
+            ("unread", "Unread", n_unread),
         ]:
             chip = QPushButton(f"{label}  {count}")
             chip.setProperty("variant", "chip")
@@ -541,7 +546,10 @@ class DetailPage(BasePage):
                 continue
             if f == "not_downloaded" and is_dl:
                 continue
-            if f == "unread" and (is_dl or is_external):
+            # Issue #18: Unread = actually not opened in Reader (read_set
+            # is the canonical source). is_external means "marked read
+            # elsewhere" so those are also excluded from Unread.
+            if f == "unread" and (num in read_set or is_external):
                 continue
 
             ch_frame = QFrame()
@@ -580,16 +588,28 @@ class DetailPage(BasePage):
             vol_lbl.setFixedWidth(60)
             ch_row.addWidget(vol_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
-            # Title block
+            # Title block — issue #18: distinguish "actually read in the
+            # Reader" from "just downloaded". Dim read chapters' title so
+            # they visually fade like read mail.
+            is_read = self.app.app_state.is_chapter_read(title, num)
             ch_title_text = (entry.get("title") or "").strip()
             title_l = QVBoxLayout()
             title_l.setSpacing(2)
             main_title = QLabel(ch_title_text or f"Chapter {num}")
+            title_color = T.tokens()["text.t_3"] if is_read else T.tokens()["text.t_1"]
+            title_weight = 400 if is_read else 500
             main_title.setStyleSheet(
-                f"font-size: 12pt; font-weight: 500; color: {T.tokens()['text.t_1']};"
+                f"font-size: 12pt; font-weight: {title_weight}; color: {title_color};"
             )
             title_l.addWidget(main_title)
-            sub_state = "Read" if is_dl else ("Read elsewhere" if is_external else "Not downloaded")
+            if is_read:
+                sub_state = "Read"
+            elif is_dl:
+                sub_state = "Downloaded"
+            elif is_external:
+                sub_state = "Read elsewhere"
+            else:
+                sub_state = "Not downloaded"
             sub_lbl = QLabel(sub_state)
             sub_lbl.setProperty("role", "hint")
             title_l.addWidget(sub_lbl)

@@ -139,10 +139,18 @@ class ReaderPage(BasePage):
         self._fit_width = True
         if self._manga and self._chapter:
             self._load_chapter()
-            # Save reading progress
             title = self._manga.get("title", "")
             if title:
+                # Cursor (most-recent) tracking + per-chapter read set
+                # (issue #18). The per-chapter set powers the Library's
+                # "X/N read" sub-line and the Detail chapter row badge.
                 self.app.app_state.set_reading_progress(title, str(self._chapter))
+                self.app.app_state.mark_chapter_read(title, str(self._chapter))
+                # Tell other pages (Library, Detail) to repaint without
+                # waiting for the next navigation.
+                self.app.events.publish("chapter_read", {
+                    "title": title, "chapter": str(self._chapter),
+                })
         self.setFocus()
 
     def on_hide(self):

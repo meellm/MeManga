@@ -31,6 +31,9 @@ class LibraryPage(BasePage):
         self.app.events.subscribe("cover_loaded", self._on_cover_loaded)
         self.app.events.subscribe("check_complete", lambda d: self._on_check_done())
         self.app.events.subscribe("download_complete", lambda d: self._on_check_done())
+        # Issue #18: repaint cards when a chapter is opened in the reader
+        # so the "Read X/N" sub-line + cover progress bar update live.
+        self.app.events.subscribe("chapter_read", lambda d: self._on_check_done())
         # Refresh when something edits/adds/removes a manga elsewhere
         # (Add Manga dialog, Detail page, cover backfill writes a URL).
         self.app.events.subscribe("library_updated", lambda d: self._on_check_done())
@@ -235,14 +238,20 @@ class LibraryPage(BasePage):
                     check_text = f"{int(elapsed // 86400)}d ago"
             except Exception:
                 pass
-        # Multi-part meta line per design spec: count \u00b7 chapters \u00b7 unread \u00b7 synced.
+        # Multi-part meta line per design spec: count \u00b7 chapters \u00b7 read \u00b7 unread \u00b7 synced.
         unread_total = sum(
             self.app.app_state.get_new_chapters(m.get("title", ""))
             for m in self.app.config.get("manga", [])
         )
+        # Issue #18: total chapters read across the whole library.
+        read_total = sum(
+            self.app.app_state.get_read_count(m.get("title", ""))
+            for m in self.app.config.get("manga", [])
+        )
         self._stats_label.setText(
             f"{stats['total_manga']} manga  \u00b7  {stats['total_chapters']} chapters tracked  "
-            f"\u00b7  {unread_total} unread  \u00b7  Synced {check_text}"
+            f"\u00b7  {read_total} read  \u00b7  {unread_total} unread  "
+            f"\u00b7  Synced {check_text}"
         )
         # "10 of 10 shown" format from spec.
         total_manga = stats['total_manga']
@@ -270,12 +279,18 @@ class LibraryPage(BasePage):
             cover_img = self.app.cover_cache.get_cover(cover_url, size=(T.CARD_WIDTH, T.CARD_COVER_HEIGHT))
             title = manga.get("title", "")
             new_count = self.app.app_state.get_new_chapters(title)
+            # Issue #18: pass per-chapter read / total counts so the card
+            # can render "Read X/N" and a read-based progress bar.
+            read_count = self.app.app_state.get_read_count(title)
+            total_count = len(self.app.app_state.get_available_chapters(title) or [])
 
             card = MangaCard(
                 self._scroll_content, manga=manga, cover_image=cover_img,
                 on_click=self._on_manga_click,
                 on_right_click=self._on_right_click,
                 new_count=new_count,
+                read_count=read_count,
+                total_count=total_count,
             )
             row = i // cols
             col = i % cols
