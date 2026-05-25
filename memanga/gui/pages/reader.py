@@ -128,6 +128,13 @@ class ReaderPage(BasePage):
         # batch them up before snapping to the next ZOOM_STEP.
         self._pinch_accum = 0.0
 
+        # ── Click-and-drag pan state (issue #21) ─────────────────────────
+        self._pan_active = False
+        self._pan_start_x = 0
+        self._pan_start_y = 0
+        self._pan_start_h = 0
+        self._pan_start_v = 0
+
     def on_show(self, **kwargs):
         manga = kwargs.get("manga")
         chapter = kwargs.get("chapter")
@@ -194,7 +201,8 @@ class ReaderPage(BasePage):
     # fall through to the scroll area's default page-scroll handling.
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.Wheel:
+        et = event.type()
+        if et == QEvent.Type.Wheel:
             mods = event.modifiers()
             is_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
             # On macOS, Cmd+wheel is the conventional zoom trigger.
@@ -214,7 +222,51 @@ class ReaderPage(BasePage):
                     self._zoom_out()
                 event.accept()
                 return True  # consumed — don't let viewport scroll too
+
+        # ── Click-and-drag pan (issue #21) ──────────────────────────────
+        # When zoomed in, let users drag the page around to navigate
+        # parts that don't fit the viewport. Works in both directions —
+        # vertical pan complements wheel scroll, horizontal pan is the
+        # only way to reach off-screen content when ZOOM is >= ~1.0.
+        elif et == QEvent.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton and self._scroll is not None:
+                self._pan_active = True
+                self._pan_start_x = event.position().x()
+                self._pan_start_y = event.position().y()
+                self._pan_start_h = self._scroll.horizontalScrollBar().value()
+                self._pan_start_v = self._scroll.verticalScrollBar().value()
+                self._scroll.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+                # Don't consume — let the press through in case child
+                # widgets want it (none do today, but safer).
+        elif et == QEvent.Type.MouseMove:
+            if getattr(self, "_pan_active", False) and self._scroll is not None:
+                dx = event.position().x() - self._pan_start_x
+                dy = event.position().y() - self._pan_start_y
+                hbar = self._scroll.horizontalScrollBar()
+                vbar = self._scroll.verticalScrollBar()
+                hbar.setValue(int(self._pan_start_h - dx))
+                vbar.setValue(int(self._pan_start_v - dy))
+                event.accept()
+                return True
+        elif et == QEvent.Type.MouseButtonRelease:
+            if getattr(self, "_pan_active", False):
+                self._pan_active = False
+                if self._scroll is not None:
+                    self._scroll.viewport().setCursor(self._idle_cursor())
+
         return super().eventFilter(obj, event)
+
+    def _idle_cursor(self):
+        """OpenHand when content overflows (panning available), else
+        ArrowCursor (no point hinting at drag if there's nothing to pan).
+        """
+        if self._scroll is None:
+            return Qt.CursorShape.ArrowCursor
+        h = self._scroll.horizontalScrollBar()
+        v = self._scroll.verticalScrollBar()
+        if h.maximum() > 0 or v.maximum() > 0:
+            return Qt.CursorShape.OpenHandCursor
+        return Qt.CursorShape.ArrowCursor
 
     # ── Touchpad pinch zoom (issue #16) ──────────────────────────────────
     # Two delivery paths converge here:
@@ -475,13 +527,28 @@ class ReaderPage(BasePage):
         # ── Scrollable image area (reader_body) ──
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Issue #21: allow horizontal scrollbar when zoomed images
+        # overflow the viewport. AsNeeded keeps it hidden at fit-width.
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._scroll.setStyleSheet(
             f"background-color: {T.tokens()['surfaces.bg_0']};"
         )
-        # Issue #16: intercept Ctrl/Cmd+wheel for zoom before the
-        # viewport scrolls. Plain wheel events fall through normally.
+        # Issue #16 + #21: intercept Ctrl/Cmd+wheel for zoom AND track
+        # mouse press/move for click-and-drag pan. Plain wheel events
+        # fall through to default scrolling.
         self._scroll.viewport().installEventFilter(self)
+        # Track movement even when no button is held — needed for the
+        # OpenHand-on-hover affordance to update as content overflows.
+        self._scroll.viewport().setMouseTracking(True)
+        self._scroll.viewport().setCursor(self._idle_cursor())
+        # Refresh cursor whenever the scrollable area changes size
+        # (e.g. after zoom rebuilds the images).
+        self._scroll.horizontalScrollBar().rangeChanged.connect(
+            lambda *_: self._scroll.viewport().setCursor(self._idle_cursor())
+        )
+        self._scroll.verticalScrollBar().rangeChanged.connect(
+            lambda *_: self._scroll.viewport().setCursor(self._idle_cursor())
+        )
 
         scroll_content = QWidget()
         self._image_layout = QVBoxLayout(scroll_content)
