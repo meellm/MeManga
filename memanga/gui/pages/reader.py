@@ -112,10 +112,13 @@ class ReaderPage(BasePage):
         self._page_labels: list = []
         self._zoom_level = 1.0
         self._fit_width = True
+        # Issue #24: dual-page (two-up) view mode, persisted across launches.
+        self._dual_page = bool(self.app.config.get("gui.reader_dual_page", False))
         self._content: Optional[QWidget] = None
         self._scroll = None
         self._image_layout = None
         self._page_indicator = None
+        self._dual_btn = None
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -192,6 +195,30 @@ class ReaderPage(BasePage):
         if self._zoom_level > self.ZOOM_MIN:
             self._zoom_level -= self.ZOOM_STEP
             self._rebuild_images()
+
+    # ── Dual-page view (issue #24) ────────────────────────────────────
+    def _toggle_dual_page(self):
+        """Flip between single + dual page view. Re-renders + persists."""
+        self._dual_page = not self._dual_page
+        self.app.config.set("gui.reader_dual_page", self._dual_page)
+        self.app.config.save()
+        self._refresh_dual_btn()
+        self._rebuild_images()
+
+    def _refresh_dual_btn(self):
+        """Sync the toggle button's icon + tooltip to the current mode."""
+        if not self._dual_btn:
+            return
+        from ..assets.icons import icon as _ic
+        from PySide6.QtCore import QSize
+        # Icon shows the CURRENT mode; tooltip explains the click action.
+        if self._dual_page:
+            self._dual_btn.setIcon(_ic("view_dual", T.tokens()["accent.primary"], 16))
+            self._dual_btn.setToolTip("Switch to single-page view")
+        else:
+            self._dual_btn.setIcon(_ic("view_single", T.tokens()["text.t_2"], 16))
+            self._dual_btn.setToolTip("Switch to dual-page view")
+        self._dual_btn.setIconSize(QSize(16, 16))
 
     # ── Ctrl+wheel zoom (issue #16) ──────────────────────────────────────
     # The scroll area's viewport eats wheel events for native scrolling.
@@ -342,12 +369,29 @@ class ReaderPage(BasePage):
         if not self._scroll or not self._images:
             return
 
+        # Drain the layout completely — labels AND the dual-page HBox
+        # spread layouts. Previously we only deleted labels, which left
+        # orphaned QHBoxLayout items behind on every dual<->single flip.
         for lbl in self._page_labels:
             try:
                 lbl.deleteLater()
             except Exception:
                 pass
         self._page_labels.clear()
+        if self._image_layout is not None:
+            i = self._image_layout.count() - 1
+            while i >= 0:
+                item = self._image_layout.itemAt(i)
+                w = item.widget() if item else None
+                if w:
+                    w.deleteLater()
+                    self._image_layout.removeWidget(w)
+                elif item and item.layout():
+                    self._clear_sub_layout(item.layout())
+                    self._image_layout.removeItem(item)
+                elif item:
+                    self._image_layout.removeItem(item)
+                i -= 1
 
         self._render_images()
 
@@ -355,6 +399,16 @@ class ReaderPage(BasePage):
             self._zoom_label.setText(f"{int(self._zoom_level * 100)}%")
         if self._page_indicator:
             self._page_indicator.setText(f"1 / {len(self._images)}")
+
+    def _clear_sub_layout(self, layout):
+        """Recursively drain a layout's children + delete widgets."""
+        while layout.count():
+            it = layout.takeAt(0)
+            w = it.widget() if it else None
+            if w:
+                w.deleteLater()
+            elif it and it.layout():
+                self._clear_sub_layout(it.layout())
 
     def _on_scroll(self, _value):
         """Update the sticky bottom progress bar from scroll position."""
@@ -372,6 +426,7 @@ class ReaderPage(BasePage):
             pass
 
     def _render_images(self):
+        # Total width the spread is allowed to occupy.
         if self._fit_width:
             try:
                 max_w = min(self._scroll.width() - 40, 1200)
@@ -384,25 +439,56 @@ class ReaderPage(BasePage):
 
         max_w = int(max_w * self._zoom_level)
 
-        for qimg in self._images:
+        def _scaled_pixmap(qimg, target_w):
+            """Scale qimg so its width fits target_w (with zoom factored in)."""
             w, h = qimg.width(), qimg.height()
-            if w > max_w:
-                ratio = max_w / w
+            if w > target_w:
+                ratio = target_w / w
                 new_w, new_h = int(w * ratio), int(h * ratio)
             else:
                 new_w = int(w * self._zoom_level)
                 new_h = int(h * self._zoom_level)
-
-            pm = QPixmap.fromImage(qimg).scaled(
+            return QPixmap.fromImage(qimg).scaled(
                 new_w, new_h,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            lbl = QLabel()
-            lbl.setPixmap(pm)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._image_layout.addWidget(lbl)
-            self._page_labels.append(lbl)
+
+        if not self._dual_page:
+            # ── Single-page (default) ──
+            for qimg in self._images:
+                lbl = QLabel()
+                lbl.setPixmap(_scaled_pixmap(qimg, max_w))
+                lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._image_layout.addWidget(lbl)
+                self._page_labels.append(lbl)
+            return
+
+        # ── Dual-page (issue #24): pairs of pages side-by-side ──
+        # Each spread = a horizontal row holding two QLabels (or one if
+        # the chapter has an odd page count). Allocate half max_w per
+        # side so the spread as a whole stays inside the viewport.
+        per_side = max(120, (max_w - 8) // 2)
+        i = 0
+        while i < len(self._images):
+            spread = QHBoxLayout()
+            spread.setSpacing(4)
+            spread.setContentsMargins(0, 0, 0, 0)
+            spread.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+            for j in (0, 1):
+                if i + j >= len(self._images):
+                    break
+                lbl = QLabel()
+                lbl.setPixmap(_scaled_pixmap(self._images[i + j], per_side))
+                lbl.setAlignment(Qt.AlignmentFlag.AlignTop | (
+                    Qt.AlignmentFlag.AlignRight if j == 0 else Qt.AlignmentFlag.AlignLeft
+                ))
+                spread.addWidget(lbl)
+                self._page_labels.append(lbl)
+
+            self._image_layout.addLayout(spread)
+            i += 2
 
     def _load_chapter(self):
         # Tear down previous content
@@ -471,6 +557,18 @@ class ReaderPage(BasePage):
             next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             next_btn.clicked.connect(lambda checked=False, c=next_ch: self._navigate_chapter(c))
             top_layout.addWidget(next_btn)
+
+        # ── Dual-page toggle (issue #24) ────────────────────────────────
+        # Same iconified style as the zoom +/- buttons. Tooltip names
+        # the mode the click WILL switch to (matches OS conventions).
+        from ..assets.icons import icon as _ic
+        from PySide6.QtCore import QSize
+        self._dual_btn = QPushButton()
+        self._dual_btn.setFixedSize(36, 28)
+        self._dual_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dual_btn.clicked.connect(self._toggle_dual_page)
+        self._refresh_dual_btn()
+        top_layout.addWidget(self._dual_btn)
 
         # Zoom chip
         zoom_minus = QPushButton("−")

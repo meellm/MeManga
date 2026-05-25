@@ -101,6 +101,21 @@ ICONS: dict[str, str] = {
         '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>'
         '<path d="M10 21a2 2 0 0 0 4 0"/></g></svg>'
     ),
+    # Single-page glyph: one upright rectangle (issue #24 dual-page toggle).
+    "view_single": (
+        '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        '<g fill="none" stroke="{color}" stroke-width="1.7" stroke-linejoin="round">'
+        '<rect x="6" y="3" width="12" height="18" rx="1"/>'
+        '</g></svg>'
+    ),
+    # Dual-page glyph: two side-by-side rectangles.
+    "view_dual": (
+        '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        '<g fill="none" stroke="{color}" stroke-width="1.7" stroke-linejoin="round">'
+        '<rect x="3" y="4" width="8" height="16" rx="1"/>'
+        '<rect x="13" y="4" width="8" height="16" rx="1"/>'
+        '</g></svg>'
+    ),
 }
 
 
