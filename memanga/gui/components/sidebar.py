@@ -110,6 +110,13 @@ class Sidebar(QWidget):
         self.app = app
         self.setObjectName("sidebar")
         self.setFixedWidth(232)
+        # Plain QWidget ignores QSS background-color unless we set this
+        # attribute. We pair it with an instance stylesheet so the bg
+        # wins over the QApplication palette (which would otherwise
+        # leak Window=bg_0 through).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._restyle()
+        T.on_theme_change(self._restyle)
 
         self._buttons: dict[str, _NavButton] = {}
         self._active = ""
@@ -165,6 +172,19 @@ class Sidebar(QWidget):
         self._tick.timeout.connect(self._refresh_sync_card)
         self._tick.start(30_000)
 
+    def _restyle(self):
+        """Re-apply theme-aware inline stylesheet. Needed because the
+        QApplication-level QSS rule `QWidget#sidebar { bg: bg_1 }`
+        doesn't always win over the QApplication palette (Window=bg_0).
+        Instance stylesheet has highest precedence."""
+        toks = T.tokens()
+        self.setStyleSheet(
+            f"#sidebar {{"
+            f"  background-color: {toks['surfaces.bg_1']};"
+            f"  border-right: 1px solid {toks['surfaces.border']};"
+            f"}}"
+        )
+
     # ── builders ──
 
     def _build_brand(self) -> QWidget:
@@ -209,6 +229,18 @@ class Sidebar(QWidget):
     def _build_footer(self) -> QWidget:
         w = QWidget()
         w.setObjectName("sidebar_footer")
+        # Same instance-stylesheet trick as the sidebar parent.
+        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        def _restyle():
+            toks = T.tokens()
+            w.setStyleSheet(
+                f"#sidebar_footer {{"
+                f"  background-color: {toks['surfaces.bg_1']};"
+                f"  border-top: 1px solid {toks['surfaces.border']};"
+                f"}}"
+            )
+        _restyle()
+        T.on_theme_change(_restyle)
         outer = QVBoxLayout(w)
         outer.setContentsMargins(12, 12, 12, 12)
         outer.setSpacing(0)

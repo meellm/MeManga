@@ -155,8 +155,10 @@ def launch_gui():
     _ensure_browsers()
 
     window = MeMangaApp()
-    # Re-apply on every theme switch so dropdown menus, dialogs and
-    # any reparented widgets pick up the new palette.
-    T.on_theme_change(lambda: T.apply(qapp))
+    # NOTE: don't subscribe `lambda: T.apply(qapp)` here.
+    # `T.set_theme(name, qapp)` already calls `apply(qapp)` BEFORE
+    # notifying subscribers, so a re-subscribed apply() would run a
+    # full QSS+palette+polish pass twice per theme switch — the
+    # noticeable freeze the user was seeing.
     window.show()
     sys.exit(qapp.exec())

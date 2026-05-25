@@ -59,7 +59,10 @@ class ContinueCard(QFrame):
             f"color: {T.tokens()['text.t_1']}; font-size: 12pt; font-weight: 600;"
         )
         title.setWordWrap(True)
-        title.setMaximumHeight(36)
+        # Bumped from 36 → 44 so descenders ('g', 'y', 'p') on the
+        # second line aren't clipped at the bottom (issue: bottom of 'g'
+        # was getting cropped on cards like "Chainsaw Man Chapter 5").
+        title.setMaximumHeight(44)
         info.addWidget(title)
 
         sub = QLabel(f"Last read: Ch. {last_chapter or '—'}")

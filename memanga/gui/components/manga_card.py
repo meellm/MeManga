@@ -291,8 +291,9 @@ class MangaCard(QFrame):
             f"color: {T.tokens()['text.t_1']}; font-size: 11pt; font-weight: 600;"
             f"padding: 4px 2px 0 2px;"
         )
-        # Two-line clamp via fixed height + ellipsis
-        title_lbl.setMaximumHeight(34)
+        # Two-line clamp — generous enough that descenders ('g', 'y', 'p',
+        # 'q') don't clip on the second line at 11pt + 1.45 line-height.
+        title_lbl.setMaximumHeight(44)
         layout.addWidget(title_lbl)
 
         sub_text = self._sub_text(manga, new_count,

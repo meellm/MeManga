@@ -152,27 +152,64 @@ class SettingsPage(BasePage):
         # content is. Matches HTML spec settings.general.sticky_save_bar.
         from ..assets.icons import icon as _ic
         from PySide6.QtCore import QSize
-        save_bar = QFrame()
-        save_bar.setStyleSheet(
-            f"QFrame {{"
-            f"  background-color: {T.tokens()['surfaces.bg_0']};"
-            f"  border-top: 1px solid {T.tokens()['surfaces.border']};"
-            f"}}"
-        )
-        sb_l = QHBoxLayout(save_bar)
-        sb_l.setContentsMargins(0, 12, 0, 0)
+        self._save_bar = QFrame()
+        sb_l = QHBoxLayout(self._save_bar)
+        sb_l.setContentsMargins(16, 12, 16, 12)
         sb_l.setSpacing(8)
         sb_l.addStretch(1)
-        self._save_bar_btn = QPushButton("  Save settings")
+        self._save_bar_btn = QPushButton("Save settings")
         self._save_bar_btn.setProperty("variant", "primary")
+        self._save_bar_btn.setMinimumHeight(36)
+        self._save_bar_btn.setMinimumWidth(170)
         self._save_bar_btn.setIcon(_ic("check", T.tokens()["accent.on_primary"], 14))
         self._save_bar_btn.setIconSize(QSize(14, 14))
         self._save_bar_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._save_bar_btn.clicked.connect(self._save)
         sb_l.addWidget(self._save_bar_btn)
-        right_l.addWidget(save_bar)
+        right_l.addWidget(self._save_bar)
+
+        # Theme-reactive styling — without these subscriptions the
+        # bar's bg + primary button kept their light/dark snapshot from
+        # construct time and never refreshed.
+        self._restyle_save_bar()
+        T.on_theme_change(self._restyle_save_bar)
 
         self._switch_tab("general")
+
+    def _restyle_save_bar(self):
+        """Re-apply theme-derived inline styles to the sticky save bar.
+
+        Bar bg + border + primary button colors all read tokens fresh,
+        so flipping themes from Settings → Appearance reaches them.
+        """
+        from ..assets.icons import icon as _ic
+        if not hasattr(self, "_save_bar"):
+            return
+        toks = T.tokens()
+        self._save_bar.setStyleSheet(
+            f"QFrame {{"
+            f"  background-color: {toks['surfaces.bg_0']};"
+            f"  border-top: 1px solid {toks['surfaces.border']};"
+            f"}}"
+        )
+        # Primary button — explicit stylesheet so frameless parents
+        # (when the page is reparented) still render the accent fill.
+        self._save_bar_btn.setStyleSheet(
+            f"QPushButton {{"
+            f"  background-color: {toks['accent.primary']};"
+            f"  color: {toks['accent.on_primary']};"
+            f"  border: 1px solid {toks['accent.primary']};"
+            f"  border-radius: 6px;"
+            f"  padding: 8px 18px;"
+            f"  font-weight: 600;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background-color: {toks['accent.primary_2']};"
+            f"  border-color: {toks['accent.primary_2']};"
+            f"}}"
+        )
+        # Re-render the icon at the new on-accent color too.
+        self._save_bar_btn.setIcon(_ic("check", toks["accent.on_primary"], 14))
 
     def _switch_tab(self, tab_name):
         self._current_tab = tab_name

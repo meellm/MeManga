@@ -640,16 +640,28 @@ class SourcesPage(BasePage):
                 row_layout.addWidget(name, 1)
 
                 # Lang tag (EN / JP / ES) — small uppercase pill
-                lang_tag = QLabel(self._lang_of(source))
-                lang_tag.setStyleSheet(
-                    f"background-color: {T.tokens()['surfaces.bg_2']};"
-                    f"color: {T.tokens()['text.t_3']};"
-                    f"font-family: 'Geist Mono', monospace; font-size: 9pt;"
-                    f"font-weight: 600; padding: 1px 7px; border-radius: 3px;"
+                # Small chip — sized to the text, not a big box.
+                # Match HTML: tiny uppercase tag, ~22px tall, hugs content.
+                lang_chip = QLabel(self._lang_of(source))
+                lang_chip.setStyleSheet(
+                    f"QLabel {{"
+                    f"  background-color: {T.tokens()['surfaces.bg_2']};"
+                    f"  color: {T.tokens()['text.t_3']};"
+                    f"  font-family: 'Geist Mono', monospace;"
+                    f"  font-size: 9pt; font-weight: 600;"
+                    f"  padding: 2px 6px; border-radius: 3px;"
+                    f"}}"
                 )
-                lang_tag.setFixedWidth(40)
-                lang_tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                row_layout.addWidget(lang_tag)
+                lang_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                # Reserve a thin column so the chip itself stays small
+                # but the latency/count columns still line up.
+                lang_wrap = QWidget()
+                lw_l = QHBoxLayout(lang_wrap)
+                lw_l.setContentsMargins(0, 0, 0, 0)
+                lw_l.addStretch(1)
+                lw_l.addWidget(lang_chip)
+                lang_wrap.setFixedWidth(48)
+                row_layout.addWidget(lang_wrap)
 
                 # Latency (if pinged) — fixed-width mono so columns align
                 lat = QLabel(f"{hh['latency_ms']}ms" if hh.get("latency_ms") is not None else "—")
