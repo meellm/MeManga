@@ -131,11 +131,32 @@ class AddMangaDialog(ModalDialog):
         bl.addWidget(self._backup_frame)
 
         # ── Foot: replace default Cancel with Cancel + primary "Add to library"
+        # Direct stylesheet on the primary button + the QSS variant so it
+        # looks right even on dialogs where the parent's QSS hasn't
+        # propagated (frameless top-level dialogs).
+        from PySide6.QtCore import QSize
         self.cancel_btn.setText("Cancel")
-        add_btn = QPushButton("  Add to library")
+        add_btn = QPushButton("Add to library")
         add_btn.setProperty("variant", "primary")
-        add_btn.setIcon(icon("plus", T.tokens()["accent.on_primary"], 14))
+        add_btn.setMinimumHeight(34)
+        add_btn.setMinimumWidth(170)
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_btn.setIcon(icon("plus", T.tokens()["accent.on_primary"], 14))
+        add_btn.setIconSize(QSize(14, 14))
+        add_btn.setStyleSheet(
+            f"QPushButton {{"
+            f"  background-color: {T.tokens()['accent.primary']};"
+            f"  color: {T.tokens()['accent.on_primary']};"
+            f"  border: 1px solid {T.tokens()['accent.primary']};"
+            f"  border-radius: 6px;"
+            f"  padding: 6px 14px;"
+            f"  font-weight: 600;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background-color: {T.tokens()['accent.primary_2']};"
+            f"  border-color: {T.tokens()['accent.primary_2']};"
+            f"}}"
+        )
         add_btn.clicked.connect(self._add_manga)
         self.foot_layout.addWidget(add_btn)
 

@@ -199,6 +199,12 @@ QPushButton[class="nav"][active="true"] {{
     color: {a_primary};
     background-color: {a_soft10};
 }}
+/* Nav button with a count badge needs extra right padding so the text
+   doesn't slide under the badge. */
+QPushButton[variant="nav"][hasBadge="true"],
+QPushButton[class="nav"][hasBadge="true"] {{
+    padding-right: 44px;
+}}
 
 /* Tabs */
 QPushButton[variant="tab"], QPushButton[class="tab"] {{

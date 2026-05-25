@@ -82,21 +82,24 @@ class _NavButton(QPushButton):
             x = self.width() - self._badge.width() - 12
             y = (self.height() - self._badge.height()) // 2
             self._badge.move(x, y)
-            # Pad the right side of the button text so the badge doesn't
-            # overlap the label characters.
-            pad_right = self._badge.width() + 20
-            self.setStyleSheet(f"QPushButton{{ padding-right: {pad_right}px; text-align: left; }}")
+            # Pad the right side of the button text via QSS property
+            # selector (defined in qss_builder) so the label can't slide
+            # under the badge. Avoids replacing the whole stylesheet,
+            # which would nuke the nav variant hover/active rules.
+            self.setProperty("hasBadge", "true")
             # Use accent variant when the nav button is active.
             self._badge.setProperty(
                 "role",
                 "badge_count_active" if self.property("active") == "true"
                 else "badge_count",
             )
-            self._badge.style().unpolish(self._badge)
-            self._badge.style().polish(self._badge)
         else:
             self._badge.hide()
-            self.setStyleSheet("")  # reset to default QSS padding
+            self.setProperty("hasBadge", "false")
+            self._badge.setProperty("role", "badge_count")
+        # Re-polish so the selector flip takes effect.
+        for w in (self, self._badge):
+            w.style().unpolish(w); w.style().polish(w)
 
 
 class Sidebar(QWidget):

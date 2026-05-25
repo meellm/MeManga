@@ -164,9 +164,9 @@ class SourcesPage(BasePage):
 
         filter_row = QHBoxLayout()
         self._filter_entry = QLineEdit()
-        self._filter_entry.setPlaceholderText("Filter…")
-        self._filter_entry.setFixedHeight(28)
-        self._filter_entry.setFixedWidth(220)
+        self._filter_entry.setPlaceholderText("Filter sources by domain…")
+        self._filter_entry.setMinimumWidth(280)
+        self._filter_entry.setMaximumWidth(360)
         # Debounce: rebuilding the supported list on every keystroke
         # gets stuttery as the scraper count grows. 150ms is short
         # enough to feel instant, long enough to coalesce typing.
@@ -198,6 +198,119 @@ class SourcesPage(BasePage):
         self._render_supported()
 
     def _render_active(self):
+        """Render active sources as a 3-col grid of accent-tinted cards
+        (HTML spec.screens.sources.active_sources)."""
+        return self._render_active_new()
+
+    def _render_active_new(self):
+        from PySide6.QtWidgets import QGridLayout
+
+        # Drain all child widgets + sublayouts from the slot.
+        for w in self._active_widgets:
+            try:
+                w.deleteLater()
+            except Exception:
+                pass
+        self._active_widgets.clear()
+        while self._active_layout.count():
+            it = self._active_layout.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+            elif it.layout():
+                sub = it.layout()
+                while sub.count():
+                    si = sub.takeAt(0)
+                    if si.widget():
+                        si.widget().deleteLater()
+
+        manga_list = self.app.config.get("manga", [])
+        source_manga: dict[str, list] = {}
+        for m in manga_list:
+            t = m.get("title", "")
+            srcs = m.get("sources", []) or []
+            if srcs:
+                for s in srcs:
+                    d = s.get("source", "")
+                    if d:
+                        source_manga.setdefault(d, []).append(t)
+            else:
+                d = m.get("source", "")
+                if d:
+                    source_manga.setdefault(d, []).append(t)
+
+        if not source_manga:
+            empty = QLabel("No active sources yet — add a manga to get started.")
+            empty.setProperty("role", "hint")
+            self._active_layout.addWidget(empty)
+            self._active_widgets.append(empty)
+            return
+
+        all_health = self.app.app_state.get_all_source_health()
+        color_map = {
+            "ok": T.tokens()["status.success"],
+            "warning": T.tokens()["status.warn"],
+            "error": T.tokens()["status.danger"],
+        }
+
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        grid.setContentsMargins(0, 0, 0, 0)
+
+        for idx, (domain, titles) in enumerate(sorted(source_manga.items())):
+            health = all_health.get(domain, {})
+            dot_color = color_map.get(
+                health.get("status", "unknown"), T.tokens()["text.t_3"],
+            )
+            latency = health.get("latency_ms")
+
+            card = QFrame()
+            card.setObjectName("active_src_card")
+            card.setStyleSheet(
+                f"#active_src_card {{"
+                f"  background-color: {T.tokens()['surfaces.bg_1']};"
+                f"  border: 1px solid {T.tokens()['accent.ring']};"
+                f"  border-radius: 8px;"
+                f"}}"
+            )
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(14, 12, 14, 12)
+            cl.setSpacing(6)
+
+            head = QHBoxLayout()
+            head.setSpacing(6)
+            head.setContentsMargins(0, 0, 0, 0)
+            dot_lbl = QLabel("●")  # ●
+            dot_lbl.setStyleSheet(f"color: {dot_color}; font-size: 11pt;")
+            head.addWidget(dot_lbl)
+            name = QLabel(domain)
+            name.setStyleSheet(
+                f"color: {T.tokens()['text.t_1']}; font-weight: 600; font-size: 13pt;"
+            )
+            head.addWidget(name, 1)
+            cl.addLayout(head)
+
+            meta_parts = [f"{len(titles)} manga in library"]
+            if latency is not None:
+                meta_parts.append(f"{latency}ms")
+            meta = QLabel("  ·  ".join(meta_parts))
+            meta.setStyleSheet(
+                f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                f"color: {T.tokens()['text.t_3']};"
+            )
+            cl.addWidget(meta)
+
+            row, col = divmod(idx, 3)
+            grid.addWidget(card, row, col)
+            self._active_widgets.append(card)
+
+        for c in range(3):
+            grid.setColumnStretch(c, 1)
+
+        self._active_layout.addLayout(grid)
+
+    def _render_active_DEPRECATED(self):
+        # Old single-row rendering kept temporarily so blame/diff
+        # readers can see the migration. Unreachable.
         for w in self._active_widgets:
             try:
                 w.deleteLater()

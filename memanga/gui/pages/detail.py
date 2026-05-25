@@ -224,16 +224,17 @@ class DetailPage(BasePage):
         cc_l.addLayout(status_col, 1)
 
         # Mode dropdown col (sits next to Status inside the controls card)
+        # Custom widget so it matches Status visually + adds the two-line
+        # description in the menu items.
+        from ..components.mode_dropdown import ModeDropdown
         mode_col = QVBoxLayout()
         mode_col.setSpacing(4)
         m_lbl = QLabel("MODE")
         m_lbl.setProperty("role", "section")
         mode_col.addWidget(m_lbl)
-        self._mode_combo = QComboBox()
-        self._mode_combo.addItems(["Auto", "Manual"])
         current_mode = manga.get("mode", "auto")
-        self._mode_combo.setCurrentText("Manual" if current_mode == "manual" else "Auto")
-        self._mode_combo.currentTextChanged.connect(self._on_mode_change)
+        self._mode_combo = ModeDropdown(initial=current_mode)
+        self._mode_combo.value_changed.connect(self._on_mode_change)
         mode_col.addWidget(self._mode_combo)
         cc_l.addLayout(mode_col, 1)
 
@@ -674,10 +675,16 @@ class DetailPage(BasePage):
     # ── Mode (Auto / Manual) ──
 
     def _on_mode_change(self, label: str):
-        """Persist the new mode for the current manga."""
+        """Persist the new mode for the current manga.
+
+        Accepts either a label ("Auto"/"Manual") or the internal key
+        ("auto"/"manual") — the new ModeDropdown emits the latter,
+        but the old QComboBox emitted the former.
+        """
         if not self._manga:
             return
-        new_mode = "manual" if label == "Manual" else "auto"
+        norm = (label or "").strip().lower()
+        new_mode = "manual" if norm == "manual" else "auto"
         manga_list = self.app.config.get("manga", [])
         for m in manga_list:
             if m.get("title") == self._manga.get("title"):

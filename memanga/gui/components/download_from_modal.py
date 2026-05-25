@@ -34,10 +34,10 @@ class DownloadFromModal(ModalDialog):
         bl.addWidget(field_label("Start downloading from chapter"))
         self._chapter_input = QLineEdit("1")
         self._chapter_input.setStyleSheet(
-            f"font-family: 'Geist Mono', monospace; font-size: 15pt;"
-            f"padding: 12px; text-align: center;"
+            "font-family: 'Geist Mono', monospace; font-size: 14pt;"
         )
         self._chapter_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._chapter_input.setMinimumHeight(42)
         bl.addWidget(self._chapter_input)
 
         # Hint with code-styled "0"
@@ -55,11 +55,32 @@ class DownloadFromModal(ModalDialog):
         self._skip_check.setChecked(False)
         bl.addWidget(self._skip_check)
 
-        # Foot: replace cancel + add primary "Start download"
-        start_btn = QPushButton("  Start download")
+        # Foot: add primary "Start download" next to Cancel.
+        # We set both the QSS property variant AND a direct stylesheet
+        # so the button looks right even on dialogs where the parent's
+        # QSS hasn't propagated (frameless top-level windows).
+        from PySide6.QtCore import QSize
+        start_btn = QPushButton("Start download")
         start_btn.setProperty("variant", "primary")
-        start_btn.setIcon(icon("download", T.tokens()["accent.on_primary"], 14))
+        start_btn.setMinimumHeight(34)
+        start_btn.setMinimumWidth(160)
         start_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        start_btn.setIcon(icon("download", T.tokens()["accent.on_primary"], 14))
+        start_btn.setIconSize(QSize(14, 14))
+        start_btn.setStyleSheet(
+            f"QPushButton {{"
+            f"  background-color: {T.tokens()['accent.primary']};"
+            f"  color: {T.tokens()['accent.on_primary']};"
+            f"  border: 1px solid {T.tokens()['accent.primary']};"
+            f"  border-radius: 6px;"
+            f"  padding: 6px 14px;"
+            f"  font-weight: 600;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background-color: {T.tokens()['accent.primary_2']};"
+            f"  border-color: {T.tokens()['accent.primary_2']};"
+            f"}}"
+        )
         start_btn.clicked.connect(self._do_confirm)
         self.foot_layout.addWidget(start_btn)
 

@@ -13,13 +13,10 @@ Matches memanga-pyside6-spec.json `components.modal` + `modal_overlay`:
 - Close on backdrop click, Esc, or close X button
 """
 
-from PySide6.QtCore import (
-    Qt, QPropertyAnimation, QEasingCurve, QPoint, QRect,
-)
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QGraphicsOpacityEffect,
 )
 
 from .. import theme as T
@@ -53,17 +50,11 @@ class ModalDialog(QDialog):
 
         self._panel_width = width
 
-        # ── Backdrop layer ──
-        # Painted in self.paintEvent; clicking it (anywhere outside the
-        # panel) closes the modal.
-
-        # ── Panel container, centered ──
+        # ── Panel container, centered via AlignCenter (stretches can
+        #    over-compress the panel when body content is tall).
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        outer.addStretch(1)
-
-        center_row = QHBoxLayout()
-        center_row.addStretch(1)
+        outer.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.panel = QFrame()
         self.panel.setObjectName("modal_panel")
@@ -75,10 +66,7 @@ class ModalDialog(QDialog):
             f"  border-radius: 12px;"
             f"}}"
         )
-        center_row.addWidget(self.panel)
-        center_row.addStretch(1)
-        outer.addLayout(center_row)
-        outer.addStretch(1)
+        outer.addWidget(self.panel, 0, Qt.AlignmentFlag.AlignCenter)
 
         panel_l = QVBoxLayout(self.panel)
         panel_l.setContentsMargins(0, 0, 0, 0)
@@ -140,24 +128,9 @@ class ModalDialog(QDialog):
         # available now.
         self.build_body()
 
-        # Fade-in + translate animation
-        self._eff = QGraphicsOpacityEffect(self.panel)
-        self._eff.setOpacity(0.0)
-        self.panel.setGraphicsEffect(self._eff)
-        self._fade = QPropertyAnimation(self._eff, b"opacity", self)
-        self._fade.setDuration(180)
-        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
-
     def build_body(self):
         """Subclass hook — populate self.body_layout with fields."""
         pass
-
-    def showEvent(self, ev):
-        super().showEvent(ev)
-        self._fade.stop()
-        self._fade.setStartValue(0.0)
-        self._fade.setEndValue(1.0)
-        self._fade.start()
 
     def paintEvent(self, _ev):
         # Dim backdrop.

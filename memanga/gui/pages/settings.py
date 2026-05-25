@@ -147,6 +147,31 @@ class SettingsPage(BasePage):
         right_l.addWidget(self._email_scroll, 1)
         right_l.addWidget(self._advanced_scroll, 1)
 
+        # Sticky save bar pinned to the bottom of the right pane — outside
+        # every scroll area so it stays visible no matter how tall the
+        # content is. Matches HTML spec settings.general.sticky_save_bar.
+        from ..assets.icons import icon as _ic
+        from PySide6.QtCore import QSize
+        save_bar = QFrame()
+        save_bar.setStyleSheet(
+            f"QFrame {{"
+            f"  background-color: {T.tokens()['surfaces.bg_0']};"
+            f"  border-top: 1px solid {T.tokens()['surfaces.border']};"
+            f"}}"
+        )
+        sb_l = QHBoxLayout(save_bar)
+        sb_l.setContentsMargins(0, 12, 0, 0)
+        sb_l.setSpacing(8)
+        sb_l.addStretch(1)
+        self._save_bar_btn = QPushButton("  Save settings")
+        self._save_bar_btn.setProperty("variant", "primary")
+        self._save_bar_btn.setIcon(_ic("check", T.tokens()["accent.on_primary"], 14))
+        self._save_bar_btn.setIconSize(QSize(14, 14))
+        self._save_bar_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._save_bar_btn.clicked.connect(self._save)
+        sb_l.addWidget(self._save_bar_btn)
+        right_l.addWidget(save_bar)
+
         self._switch_tab("general")
 
     def _switch_tab(self, tab_name):
@@ -178,16 +203,14 @@ class SettingsPage(BasePage):
         row.addWidget(lbl)
 
         entry = QLineEdit()
-        entry.setFixedHeight(30)
-        entry.setFixedWidth(220)
+        entry.setMinimumWidth(280)
         if placeholder:
             entry.setPlaceholderText(placeholder)
         if password:
             entry.setEchoMode(QLineEdit.EchoMode.Password)
         if value:
             entry.setText(str(value))
-        row.addWidget(entry)
-        row.addStretch()
+        row.addWidget(entry, 1)
         parent_layout.addLayout(row)
         return entry
 
@@ -247,37 +270,37 @@ class SettingsPage(BasePage):
         # Output format
         self._section(f, "Output Format")
         format_row = QHBoxLayout()
+        format_row.setSpacing(12)
         self._format_combo = QComboBox()
         self._format_combo.addItems(["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"])
         self._format_combo.setCurrentText(self.app.config.output_format)
-        self._format_combo.setFixedHeight(30)
-        self._format_combo.setFixedWidth(120)
+        self._format_combo.setMinimumWidth(160)
+        self._format_combo.currentTextChanged.connect(lambda _: self._refresh_filename_preview())
         format_row.addWidget(self._format_combo)
 
-        hint = QLabel("pdf/epub = e-reader | cbz/zip = archive")
-        hint.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        format_row.addWidget(hint)
-        format_row.addStretch()
+        hint = QLabel("pdf/epub = e-reader  |  cbz/zip = archive")
+        hint.setProperty("role", "hint")
+        format_row.addWidget(hint, 1)
         f.addLayout(format_row)
 
         # Concurrent downloads slider (1..8).
         from PySide6.QtWidgets import QSlider
         self._section(f, "Concurrent Downloads")
         slider_row = QHBoxLayout()
+        slider_row.setSpacing(14)
         slider_hint = QLabel("Higher = faster, may trip rate limits.")
         slider_hint.setProperty("role", "hint")
-        slider_hint.setFixedWidth(280)
         slider_row.addWidget(slider_hint)
 
         self._concurrent_slider = QSlider(Qt.Orientation.Horizontal)
         self._concurrent_slider.setMinimum(1)
         self._concurrent_slider.setMaximum(8)
         self._concurrent_slider.setSingleStep(1)
-        self._concurrent_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self._concurrent_slider.setTickInterval(1)
+        self._concurrent_slider.setMaximumWidth(280)
+        self._concurrent_slider.setMinimumWidth(160)
         current_concurrent = int(self.app.config.get("gui.max_concurrent_downloads", 2))
         self._concurrent_slider.setValue(max(1, min(8, current_concurrent)))
-        slider_row.addWidget(self._concurrent_slider, 1)
+        slider_row.addWidget(self._concurrent_slider)
 
         self._concurrent_value_lbl = QLabel(str(self._concurrent_slider.value()))
         self._concurrent_value_lbl.setStyleSheet(
@@ -288,6 +311,7 @@ class SettingsPage(BasePage):
             lambda v: self._concurrent_value_lbl.setText(str(v))
         )
         slider_row.addWidget(self._concurrent_value_lbl)
+        slider_row.addStretch(1)
         f.addLayout(slider_row)
 
         # Naming template
@@ -323,39 +347,25 @@ class SettingsPage(BasePage):
         f.addLayout(var_row)
 
         # Live preview of resolved filename.
-        preview_frame = QFrame()
-        preview_frame.setStyleSheet(
-            f"QFrame {{"
-            f"  background-color: {T.tokens()['surfaces.bg_0']};"
-            f"  border: 1px dashed {T.tokens()['surfaces.border_strong']};"
-            f"  border-radius: 6px;"
-            f"  padding: 8px 12px;"
-            f"}}"
-        )
-        pf_l = QHBoxLayout(preview_frame)
-        pf_l.setContentsMargins(0, 0, 0, 0)
+        self._preview_frame = QFrame()
+        pf_l = QHBoxLayout(self._preview_frame)
+        pf_l.setContentsMargins(12, 8, 12, 8)
+        pf_l.setSpacing(8)
         pf_label = QLabel("Preview:")
         pf_label.setProperty("role", "hint")
         pf_l.addWidget(pf_label)
         self._filename_preview = QLabel("")
-        self._filename_preview.setStyleSheet(
-            f"font-family: 'Geist Mono', monospace; font-size: 11pt;"
-            f"color: {T.tokens()['accent.primary']};"
-        )
         pf_l.addWidget(self._filename_preview)
         pf_l.addStretch(1)
-        f.addWidget(preview_frame)
+        f.addWidget(self._preview_frame)
+        # Style + restyle on theme change so it isn't stuck on the
+        # snapshot taken at construct time.
+        self._style_preview_frame()
+        T.on_theme_change(self._style_preview_frame)
         self._refresh_filename_preview()
 
-        f.addSpacing(T.PAD_LG)
-
-        # Save button
-        save_btn = QPushButton("Save Settings")
-        save_btn.setProperty("class", "accent")
-        save_btn.setFixedHeight(38)
-        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        save_btn.clicked.connect(self._save)
-        f.addWidget(save_btn)
+        # Save button moved to the sticky save bar at the bottom of the
+        # right pane (always visible regardless of scroll position).
 
     # ── Email Tab ──
 
@@ -417,15 +427,8 @@ class SettingsPage(BasePage):
         test_row.addStretch()
         f.addLayout(test_row)
 
-        f.addSpacing(T.PAD_LG)
-
-        # Save button
-        save_btn = QPushButton("Save Email Settings")
-        save_btn.setProperty("class", "accent")
-        save_btn.setFixedHeight(38)
-        save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        save_btn.clicked.connect(self._save)
-        f.addWidget(save_btn)
+        # Save button lives in the shared sticky bar at the bottom of
+        # the right pane (always visible regardless of scroll position).
 
     # ── Advanced Tab ──
 
@@ -445,8 +448,9 @@ class SettingsPage(BasePage):
         cron_row.addWidget(time_lbl)
 
         self._cron_time = QLineEdit(self.app.config.get("cron.time", "06:00"))
-        self._cron_time.setFixedHeight(28)
-        self._cron_time.setFixedWidth(60)
+        self._cron_time.setMinimumWidth(90)
+        self._cron_time.setMaximumWidth(120)
+        self._cron_time.setStyleSheet("font-family: 'Geist Mono', monospace;")
         cron_row.addWidget(self._cron_time)
         cron_row.addStretch()
         f.addLayout(cron_row)
@@ -631,6 +635,23 @@ class SettingsPage(BasePage):
         except (ValueError, IndexError):
             return False
 
+    def _style_preview_frame(self):
+        """Apply theme colors to the filename preview frame + its label.
+        Called once at build + again on every theme switch."""
+        if not hasattr(self, "_preview_frame"):
+            return
+        self._preview_frame.setStyleSheet(
+            f"QFrame {{"
+            f"  background-color: {T.tokens()['surfaces.bg_0']};"
+            f"  border: 1px dashed {T.tokens()['surfaces.border_strong']};"
+            f"  border-radius: 6px;"
+            f"}}"
+        )
+        self._filename_preview.setStyleSheet(
+            f"font-family: 'Geist Mono', monospace; font-size: 11pt;"
+            f"color: {T.tokens()['accent.primary']};"
+        )
+
     def _insert_template_var(self, var: str):
         """Insert a {variable} token at the cursor of the naming template."""
         cur = self._naming_entry.cursorPosition()
@@ -642,6 +663,10 @@ class SettingsPage(BasePage):
 
     def _refresh_filename_preview(self):
         """Render a live preview of the filename template + extension."""
+        # Guard: format-combo's setCurrentText fires while the preview
+        # widgets are still being built. Skip until both exist.
+        if not (hasattr(self, "_naming_entry") and hasattr(self, "_filename_preview")):
+            return
         template = self._naming_entry.text().strip() or "{title} - Chapter {chapter}"
         from datetime import datetime
         sample = {
