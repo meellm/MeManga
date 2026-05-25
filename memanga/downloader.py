@@ -408,8 +408,13 @@ def download_chapter(
                     cover_path = None
 
         # Convert to output format
-        output_dir.mkdir(parents=True, exist_ok=True)
         safe_title = _sanitize_filename(title)
+        # Issue #21: every format gets its own per-manga subfolder
+        # (<dir>/<manga_name>/…). Image format already did this; the
+        # archive/document formats used to land at the dir root, which
+        # broke the Reader's file lookup (it searches <dir>/<title>/).
+        manga_dir = output_dir / safe_title
+        manga_dir.mkdir(parents=True, exist_ok=True)
 
         # Zero-pad chapter numbers for proper sorting
         chapter_str = _format_chapter_number(chapter.number)
@@ -423,32 +428,32 @@ def download_chapter(
         )
 
         if output_format == "epub":
-            output_path = output_dir / f"{base_name}.epub"
+            output_path = manga_dir / f"{base_name}.epub"
             try:
                 _images_to_epub(image_paths, output_path, title, chapter.number, cover_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create EPUB: {e}")
         elif output_format == "cbz":
-            output_path = output_dir / f"{base_name}.cbz"
+            output_path = manga_dir / f"{base_name}.cbz"
             try:
                 _images_to_cbz(image_paths, output_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create CBZ: {e}")
         elif output_format == "zip":
-            output_path = output_dir / f"{base_name}.zip"
+            output_path = manga_dir / f"{base_name}.zip"
             try:
                 _images_to_cbz(image_paths, output_path)  # Reuse CBZ logic (same ZIP format)
             except Exception as e:
                 raise DownloaderError(f"Failed to create ZIP: {e}")
         elif output_format in ("jpg", "png", "webp"):
-            chapter_folder = output_dir / safe_title / f"Chapter {chapter_str}"
+            chapter_folder = manga_dir / f"Chapter {chapter_str}"
             try:
                 _images_to_folder(image_paths, chapter_folder, output_format)
             except Exception as e:
                 raise DownloaderError(f"Failed to save images: {e}")
             output_path = chapter_folder  # Return the directory path
         else:
-            output_path = output_dir / f"{base_name}.pdf"
+            output_path = manga_dir / f"{base_name}.pdf"
             try:
                 _images_to_pdf(image_paths, output_path)
             except Exception as e:
