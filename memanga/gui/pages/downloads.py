@@ -552,9 +552,19 @@ class DownloadsPage(BasePage):
         global_kindle = self.app.config.delivery_mode == "email" and self.app.config.email_enabled
         naming_template = self.app.config.get("delivery.naming_template")
 
+        skipped = 0
         for r in auto_results:
             manga = r["manga"]
+            m_title = manga.get("title", "")
             for ch in r["chapters"]:
+                # Issue #15: never re-queue a chapter that's already on
+                # disk. Belt-and-suspenders against any caller that
+                # didn't filter beforehand (Library "Download All",
+                # auto-check, etc.).
+                if self.app.app_state.is_chapter_downloaded(m_title, str(ch.number)):
+                    skipped += 1
+                    continue
+
                 kindle_cfg = None
                 if global_kindle and manga.get("send_to_kindle", True):
                     from ...config import get_app_password
@@ -573,3 +583,5 @@ class DownloadsPage(BasePage):
                     state=self.app.app_state, kindle_cfg=kindle_cfg,
                     naming_template=naming_template,
                 )
+        if skipped:
+            Toast(self, f"Skipped {skipped} chapter(s) already on disk", kind="info")

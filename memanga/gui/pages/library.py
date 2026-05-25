@@ -433,7 +433,13 @@ class LibraryPage(BasePage):
         self.app.show_page("downloads")
 
     def _ctx_download_all(self, manga):
-        self.app.app_state.reset_manga_progress(manga.get("title", ""), from_chapter=0)
+        # Issue #15: don't wipe the `downloaded` list — that's what was
+        # causing already-on-disk (already read) chapters to be queued
+        # again. We only reset `last_chapter` so check_for_updates returns
+        # the full chapter list, then the queue step in DownloadsPage
+        # skips anything `is_chapter_downloaded` already covers.
+        title = manga.get("title", "")
+        self.app.app_state.set_last_chapter(title, None)
         self.app.worker.check_updates([manga], self.app.app_state, self.app.config)
         self.app.show_page("downloads")
 
