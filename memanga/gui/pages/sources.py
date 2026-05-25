@@ -79,9 +79,88 @@ class SourcesPage(BasePage):
             self._render_active()
             self._render_supported()
 
+    def _show_active_more(self, domain: str):
+        """Quick-actions menu for an active source card."""
+        from PySide6.QtWidgets import QMenu
+        from PySide6.QtGui import QAction, QCursor
+        from ..components.toast import Toast
+        menu = QMenu(self)
+        a_recheck = QAction(f"Re-check {domain}", self)
+        a_recheck.triggered.connect(
+            lambda: self.app.worker.ping_sources([domain], self.app.app_state)
+        )
+        menu.addAction(a_recheck)
+        a_disable = QAction("Disable in search", self)
+        a_disable.triggered.connect(lambda: self._on_toggle(domain, False))
+        menu.addAction(a_disable)
+        menu.exec(QCursor.pos())
+
     def _on_library_updated(self):
         if self.isVisible():
             self._render_active()
+            self._refresh_header_meta()
+
+    # ── Language tag lookup ─────────────────────────────────────────────
+    # Backend doesn't expose per-scraper language. Until it does, infer
+    # from domain TLD / known clusters: ".es" → ES, japanese-known hosts
+    # → JP, everything else defaults to EN. Returned tag must match the
+    # chip keys exactly ("EN" / "JP" / "ES" / "OTHER").
+
+    _JP_HOSTS = {"mangago.me", "mangamonk.com", "tortugaceviri.com"}
+
+    @classmethod
+    def _lang_of(cls, domain: str) -> str:
+        d = domain.lower()
+        if d.endswith(".es") or "comics.es" in d:
+            return "ES"
+        if d in cls._JP_HOSTS or d.endswith(".jp"):
+            return "JP"
+        return "EN"
+
+    def _set_lang_filter(self, key: str):
+        if key == self._lang_filter:
+            return
+        self._lang_filter = key
+        for k, btn in self._lang_chips.items():
+            btn.setProperty("active", "true" if k == key else "false")
+            btn.style().unpolish(btn); btn.style().polish(btn)
+        self._render_supported()
+
+    def _refresh_header_meta(self):
+        """Recompute the multi-part header meta line from live state."""
+        if not self._all_sources:
+            try:
+                from ...downloader import get_supported_sources
+                self._all_sources = sorted(get_supported_sources())
+            except Exception:
+                self._all_sources = []
+        total = len(self._all_sources)
+        disabled = set(self.app.config.get("sources.disabled", []) or [])
+        # Count "active" = enabled AND actually used by a manga in the library.
+        used = self._domains_in_library()
+        active = [s for s in self._all_sources
+                  if s not in disabled and s in used]
+        # Per-lang breakdown of those active sources (matches HTML
+        # "3 EN, 0 JP, 0 ES selected" semantics).
+        en = sum(1 for s in active if self._lang_of(s) == "EN")
+        jp = sum(1 for s in active if self._lang_of(s) == "JP")
+        es = sum(1 for s in active if self._lang_of(s) == "ES")
+        self._meta_label.setText(
+            f"{len(active)} active  ·  {total} available  "
+            f"·  {en} EN, {jp} JP, {es} ES selected"
+        )
+
+    def _domains_in_library(self) -> set[str]:
+        out: set[str] = set()
+        for m in self.app.config.get("manga", []) or []:
+            for s in m.get("sources", []) or []:
+                d = s.get("source", "")
+                if d:
+                    out.add(d)
+            d = m.get("source", "")
+            if d:
+                out.add(d)
+        return out
 
     # ── Layout ──────────────────────────────────────────────────────────
 
@@ -112,9 +191,12 @@ class SourcesPage(BasePage):
         top_row.addWidget(self._recheck_btn)
         h_layout.addLayout(top_row)
 
-        sub = QLabel("Toggle which sources Search should query.")
-        sub.setProperty("role", "meta")
-        h_layout.addWidget(sub)
+        # Multi-part meta line matching HTML spec.screens.sources.header:
+        # "{active} active · {total} available · {en} EN, {jp} JP, {es} ES selected".
+        # Rebuilt on every refresh by _refresh_header_meta().
+        self._meta_label = QLabel("")
+        self._meta_label.setProperty("role", "meta")
+        h_layout.addWidget(self._meta_label)
         root.addWidget(header_w)
 
         sep = QFrame()
@@ -140,14 +222,17 @@ class SourcesPage(BasePage):
         self._scroll.setWidget(scroll_content)
         layout.addWidget(self._scroll, 1)
 
-        # ── Active section ──
-        active_lbl = QLabel("Active sources")
-        active_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
-        self._content_layout.addWidget(active_lbl)
-
-        active_sub = QLabel("Used by manga in your library — always included in search.")
-        active_sub.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        self._content_layout.addWidget(active_sub)
+        # ── Active section: uppercase label on the left + hint on the right
+        active_head = QHBoxLayout()
+        active_head.setContentsMargins(0, 0, 0, 6)
+        active_lbl = QLabel("ACTIVE SOURCES")
+        active_lbl.setProperty("role", "section")
+        active_head.addWidget(active_lbl)
+        active_head.addStretch(1)
+        active_hint = QLabel("Always included in search · used by manga in your library")
+        active_hint.setProperty("role", "hint")
+        active_head.addWidget(active_hint)
+        self._content_layout.addLayout(active_head)
 
         self._active_container = QWidget()
         self._active_layout = QVBoxLayout(self._active_container)
@@ -158,21 +243,50 @@ class SourcesPage(BasePage):
         self._content_layout.addSpacing(T.PAD_LG)
 
         # ── All supported section ──
-        supported_lbl = QLabel("All supported sources")
-        supported_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
+        supported_lbl = QLabel("ALL SUPPORTED SOURCES")
+        supported_lbl.setProperty("role", "section")
+        supported_lbl.setContentsMargins(0, 0, 0, 6)
         self._content_layout.addWidget(supported_lbl)
 
+        # Toolbar row: filter + lang chips + sort dropdown.
         filter_row = QHBoxLayout()
+        filter_row.setSpacing(10)
         self._filter_entry = QLineEdit()
         self._filter_entry.setPlaceholderText("Filter sources by domain…")
-        self._filter_entry.setMinimumWidth(280)
-        self._filter_entry.setMaximumWidth(360)
-        # Debounce: rebuilding the supported list on every keystroke
-        # gets stuttery as the scraper count grows. 150ms is short
-        # enough to feel instant, long enough to coalesce typing.
+        self._filter_entry.setMinimumWidth(220)
+        self._filter_entry.setMaximumWidth(300)
         self._filter_entry.textChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self._filter_entry)
-        filter_row.addStretch()
+
+        # Language chip-row (All / EN / JP / ES / Other). Selecting one
+        # filters the supported list to sources tagged with that lang.
+        self._lang_filter = "all"
+        self._lang_chips: dict[str, QPushButton] = {}
+        chips_wrap = QFrame()
+        chips_wrap.setProperty("role", "card_2")
+        chips_l = QHBoxLayout(chips_wrap)
+        chips_l.setContentsMargins(3, 3, 3, 3)
+        chips_l.setSpacing(0)
+        for key, label in [("all","All"),("EN","EN"),("JP","JP"),
+                            ("ES","ES"),("OTHER","Other")]:
+            chip = QPushButton(label)
+            chip.setProperty("variant", "chip")
+            chip.setProperty("active", "true" if key == self._lang_filter else "false")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.clicked.connect(lambda _, k=key: self._set_lang_filter(k))
+            chips_l.addWidget(chip)
+            self._lang_chips[key] = chip
+        filter_row.addWidget(chips_wrap)
+
+        filter_row.addStretch(1)
+
+        from PySide6.QtWidgets import QComboBox
+        self._sort_combo = QComboBox()
+        self._sort_combo.addItems(["Sort: A–Z", "Sort: Z–A", "Sort: Latency", "Sort: In library"])
+        self._sort_combo.setMaximumWidth(160)
+        self._sort_combo.currentTextChanged.connect(lambda *_: self._render_supported())
+        filter_row.addWidget(self._sort_combo)
+
         self._count_lbl = QLabel("")
         self._count_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
         filter_row.addWidget(self._count_lbl)
@@ -194,6 +308,7 @@ class SourcesPage(BasePage):
                 self._all_sources = sorted(get_supported_sources())
             except Exception:
                 self._all_sources = []
+        self._refresh_header_meta()
         self._render_active()
         self._render_supported()
 
@@ -279,7 +394,7 @@ class SourcesPage(BasePage):
             head = QHBoxLayout()
             head.setSpacing(6)
             head.setContentsMargins(0, 0, 0, 0)
-            dot_lbl = QLabel("●")  # ●
+            dot_lbl = QLabel("●")
             dot_lbl.setStyleSheet(f"color: {dot_color}; font-size: 11pt;")
             head.addWidget(dot_lbl)
             name = QLabel(domain)
@@ -287,9 +402,22 @@ class SourcesPage(BasePage):
                 f"color: {T.tokens()['text.t_1']}; font-weight: 600; font-size: 13pt;"
             )
             head.addWidget(name, 1)
+            # "..." more menu — opens a small QMenu with quick actions.
+            more_btn = QPushButton("⋯")
+            more_btn.setFixedSize(24, 22)
+            more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            more_btn.setStyleSheet(
+                f"QPushButton {{ background: transparent; border: none;"
+                f" color: {T.tokens()['text.t_3']}; font-size: 14pt;"
+                f" padding: 0; border-radius: 4px; }}"
+                f"QPushButton:hover {{ background-color: {T.tokens()['surfaces.bg_2']};"
+                f" color: {T.tokens()['text.t_1']}; }}"
+            )
+            more_btn.clicked.connect(lambda _, d=domain: self._show_active_more(d))
+            head.addWidget(more_btn)
             cl.addLayout(head)
 
-            meta_parts = [f"{len(titles)} manga in library"]
+            meta_parts = [f"{len(titles)} manga in library", self._lang_of(domain)]
             if latency is not None:
                 meta_parts.append(f"{latency}ms")
             meta = QLabel("  ·  ".join(meta_parts))
@@ -393,12 +521,24 @@ class SourcesPage(BasePage):
         self._supported_widgets.clear()
 
         query = self._filter_entry.text().strip().lower() if self._filter_entry else ""
-        filtered = [s for s in self._all_sources if not query or query in s.lower()]
-        self._count_lbl.setText(f"{len(filtered)} of {len(self._all_sources)}")
+        lang_key = getattr(self, "_lang_filter", "all")
+
+        def _lang_match(s):
+            if lang_key == "all":
+                return True
+            tag = self._lang_of(s)
+            if lang_key == "OTHER":
+                return tag not in ("EN", "JP", "ES")
+            return tag == lang_key
+
+        filtered = [
+            s for s in self._all_sources
+            if (not query or query in s.lower()) and _lang_match(s)
+        ]
 
         disabled = set(self.app.config.get("sources.disabled", []) or [])
 
-        # Count manga per source (for the trailing "N manga" label).
+        # Per-source manga count (used for "{n} in library" + sort).
         per_source: dict[str, int] = {}
         for m in self.app.config.get("manga", []):
             for s in m.get("sources", []) or []:
@@ -409,43 +549,65 @@ class SourcesPage(BasePage):
             if d:
                 per_source[d] = per_source.get(d, 0) + 1
 
+        # Sort dropdown — re-orders the filtered list before grouping.
+        sort_choice = self._sort_combo.currentText() if hasattr(self, "_sort_combo") else "Sort: A–Z"
+        if sort_choice == "Sort: Z–A":
+            filtered.sort(reverse=True)
+        elif sort_choice == "Sort: Latency":
+            def _lat(s):
+                hh = self.app.app_state.get_source_health(s) or {}
+                return hh.get("latency_ms") or 10**9  # unpinged = bottom
+            filtered.sort(key=_lat)
+        elif sort_choice == "Sort: In library":
+            filtered.sort(key=lambda s: -per_source.get(s, 0))
+        else:
+            filtered.sort()
+
+        self._count_lbl.setText(f"{len(filtered)} of {len(self._all_sources)}")
+
         # Letter-group the filtered list (matches HTML spec.screens.sources
-        # supported_sources.letter_group_head).
+        # supported_sources.letter_group_head). Skipped when sorting by
+        # something other than name — letter groups would look random.
         from collections import OrderedDict
         groups: OrderedDict[str, list[str]] = OrderedDict()
-        for source in filtered:
-            letter = (source[0] if source else "?").upper()
-            if not letter.isalpha():
-                letter = "#"
-            groups.setdefault(letter, []).append(source)
+        group_by_letter = sort_choice in ("Sort: A–Z", "Sort: Z–A")
+        if group_by_letter:
+            for source in filtered:
+                letter = (source[0] if source else "?").upper()
+                if not letter.isalpha():
+                    letter = "#"
+                groups.setdefault(letter, []).append(source)
+        else:
+            groups[""] = filtered  # one big un-headered group
 
         for letter, sources_in_grp in groups.items():
-            # Group header strip
-            head = QFrame()
-            head.setStyleSheet(
-                f"QFrame {{"
-                f"  background-color: {T.tokens()['surfaces.bg_2']};"
-                f"  border: none;"
-                f"}}"
-            )
-            head.setFixedHeight(28)
-            head_l = QHBoxLayout(head)
-            head_l.setContentsMargins(16, 0, 16, 0)
-            letter_lbl = QLabel(letter)
-            letter_lbl.setStyleSheet(
-                f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
-                f"color: {T.tokens()['text.t_3']}; font-weight: 600;"
-            )
-            head_l.addWidget(letter_lbl)
-            head_l.addStretch(1)
-            count_lbl = QLabel(str(len(sources_in_grp)))
-            count_lbl.setStyleSheet(
-                f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
-                f"color: {T.tokens()['text.t_3']};"
-            )
-            head_l.addWidget(count_lbl)
-            self._supported_layout.addWidget(head)
-            self._supported_widgets.append(head)
+            if letter:
+                # Group header strip (only when sorting alphabetically)
+                head = QFrame()
+                head.setStyleSheet(
+                    f"QFrame {{"
+                    f"  background-color: {T.tokens()['surfaces.bg_2']};"
+                    f"  border: none;"
+                    f"}}"
+                )
+                head.setFixedHeight(28)
+                head_l = QHBoxLayout(head)
+                head_l.setContentsMargins(16, 0, 16, 0)
+                letter_lbl = QLabel(letter)
+                letter_lbl.setStyleSheet(
+                    f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                    f"color: {T.tokens()['text.t_3']}; font-weight: 600;"
+                )
+                head_l.addWidget(letter_lbl)
+                head_l.addStretch(1)
+                count_lbl = QLabel(str(len(sources_in_grp)))
+                count_lbl.setStyleSheet(
+                    f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                    f"color: {T.tokens()['text.t_3']};"
+                )
+                head_l.addWidget(count_lbl)
+                self._supported_layout.addWidget(head)
+                self._supported_widgets.append(head)
 
             for source in sources_in_grp:
                 row = QFrame()
@@ -453,6 +615,7 @@ class SourcesPage(BasePage):
                 row.setFixedHeight(34)
                 row_layout = QHBoxLayout(row)
                 row_layout.setContentsMargins(T.PAD_SM, 0, T.PAD_SM, 0)
+                row_layout.setSpacing(10)
 
                 check = QCheckBox()
                 check.setChecked(source not in disabled)
@@ -461,25 +624,53 @@ class SourcesPage(BasePage):
                 )
                 row_layout.addWidget(check)
 
+                # Status dot + name
+                hh = self.app.app_state.get_source_health(source) or {}
+                dot_color = {
+                    "ok": T.tokens()["status.success"],
+                    "warning": T.tokens()["status.warn"],
+                    "error": T.tokens()["status.danger"],
+                }.get(hh.get("status", "unknown"), T.tokens()["text.t_4"])
+                dot = QLabel("●")
+                dot.setStyleSheet(f"color: {dot_color}; font-size: 8pt;")
+                row_layout.addWidget(dot)
+
                 name = QLabel(source)
                 name.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
                 row_layout.addWidget(name, 1)
 
-                # Health latency (if pinged)
-                hh = self.app.app_state.get_source_health(source) or {}
-                if hh.get("latency_ms") is not None:
-                    lat = QLabel(f"{hh['latency_ms']}ms")
-                    lat.setStyleSheet(
-                        f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
-                        f"color: {T.tokens()['text.t_3']};"
-                    )
-                    row_layout.addWidget(lat)
+                # Lang tag (EN / JP / ES) — small uppercase pill
+                lang_tag = QLabel(self._lang_of(source))
+                lang_tag.setStyleSheet(
+                    f"background-color: {T.tokens()['surfaces.bg_2']};"
+                    f"color: {T.tokens()['text.t_3']};"
+                    f"font-family: 'Geist Mono', monospace; font-size: 9pt;"
+                    f"font-weight: 600; padding: 1px 7px; border-radius: 3px;"
+                )
+                lang_tag.setFixedWidth(40)
+                lang_tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                row_layout.addWidget(lang_tag)
 
+                # Latency (if pinged) — fixed-width mono so columns align
+                lat = QLabel(f"{hh['latency_ms']}ms" if hh.get("latency_ms") is not None else "—")
+                lat.setStyleSheet(
+                    f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                    f"color: {T.tokens()['text.t_3']};"
+                )
+                lat.setFixedWidth(64)
+                lat.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                row_layout.addWidget(lat)
+
+                # "{n} manga" count column — always present so columns line up
                 n = per_source.get(source, 0)
-                if n:
-                    used = QLabel(f"{n} in library")
-                    used.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-                    row_layout.addWidget(used)
+                used = QLabel(f"{n} manga")
+                used.setStyleSheet(
+                    f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
+                    f"color: {T.tokens()['text.t_3'] if n == 0 else T.tokens()['text.t_2']};"
+                )
+                used.setFixedWidth(76)
+                used.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                row_layout.addWidget(used)
 
                 self._supported_layout.addWidget(row)
                 self._supported_widgets.append(row)
