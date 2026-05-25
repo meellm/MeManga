@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget,
 )
 from PySide6.QtGui import QPixmap, QImage, QKeyEvent, QShortcut
-from PySide6.QtCore import Qt, QByteArray, QBuffer
+from PySide6.QtCore import Qt, QByteArray, QBuffer, QEvent, QObject
 
 from .base import BasePage
 from .. import theme as T
@@ -119,6 +119,15 @@ class ReaderPage(BasePage):
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
+        # ── Touchpad pinch zoom (issue #16) ──────────────────────────────
+        # Grab the high-level PinchGesture on Windows/Linux. On macOS the
+        # OS sends NativeGesture events instead — those are caught in
+        # event() below. Both paths converge on _apply_zoom_factor().
+        self.grabGesture(Qt.GestureType.PinchGesture)
+        # Pinch accumulator: native-gesture deltas are tiny per-tick so we
+        # batch them up before snapping to the next ZOOM_STEP.
+        self._pinch_accum = 0.0
+
     def on_show(self, **kwargs):
         manga = kwargs.get("manga")
         chapter = kwargs.get("chapter")
@@ -168,6 +177,102 @@ class ReaderPage(BasePage):
         if self._zoom_level > self.ZOOM_MIN:
             self._zoom_level -= self.ZOOM_STEP
             self._rebuild_images()
+
+    # ── Ctrl+wheel zoom (issue #16) ──────────────────────────────────────
+    # The scroll area's viewport eats wheel events for native scrolling.
+    # We install ourselves as an event filter on the viewport AFTER the
+    # scroll area is created in _load_chapter, so we can peek at wheel
+    # events and consume them when Ctrl is held. Otherwise we let them
+    # fall through to the scroll area's default page-scroll handling.
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Wheel:
+            mods = event.modifiers()
+            is_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
+            # On macOS, Cmd+wheel is the conventional zoom trigger.
+            # KeyboardModifier.MetaModifier is Cmd on macOS, Win key on
+            # other OSes — both unusual enough to safely treat as zoom.
+            is_cmd = bool(mods & Qt.KeyboardModifier.MetaModifier)
+            if is_ctrl or is_cmd:
+                # angleDelta().y() is in 1/8 degree units; positive = up.
+                # We also fall back to pixelDelta for high-precision
+                # touchpads (some Apple drivers fire pixelDelta only).
+                delta = event.angleDelta().y()
+                if delta == 0:
+                    delta = event.pixelDelta().y()
+                if delta > 0:
+                    self._zoom_in()
+                elif delta < 0:
+                    self._zoom_out()
+                event.accept()
+                return True  # consumed — don't let viewport scroll too
+        return super().eventFilter(obj, event)
+
+    # ── Touchpad pinch zoom (issue #16) ──────────────────────────────────
+    # Two delivery paths converge here:
+    #   1. QGestureEvent (Windows/Linux + Qt's gesture framework) — fires
+    #      via grabGesture(PinchGesture) in __init__. Pinch.totalScaleFactor
+    #      is multiplicative: 1.10 = 10% bigger than gesture start.
+    #   2. QNativeGestureEvent (macOS trackpad) — fires per OS gesture
+    #      tick. event.value() is a small additive delta (~0.04 per tick).
+    # We accumulate deltas until they cross ZOOM_STEP, then snap.
+
+    def event(self, ev):
+        if ev.type() == QEvent.Type.Gesture:
+            from PySide6.QtWidgets import QGesture
+            pinch = ev.gesture(Qt.GestureType.PinchGesture)
+            if pinch is not None:
+                self._handle_pinch(pinch)
+                ev.accept()
+                return True
+        elif ev.type() == QEvent.Type.NativeGesture:
+            # macOS trackpad gestures
+            try:
+                gt = ev.gestureType()
+            except AttributeError:
+                gt = None
+            # Qt.NativeGestureType.ZoomNativeGesture is the pinch on Mac.
+            if gt == Qt.NativeGestureType.ZoomNativeGesture:
+                self._pinch_accum += float(ev.value())
+                self._flush_pinch_accum()
+                ev.accept()
+                return True
+        return super().event(ev)
+
+    def _handle_pinch(self, pinch):
+        """Snap a PinchGesture's `totalScaleFactor` onto our discrete
+        ZOOM_STEP ladder. Starts fresh on each gesture, so users always
+        feel deterministic step behavior even after multiple pinches.
+        """
+        from PySide6.QtWidgets import QGesture
+        state = pinch.state()
+        if state == Qt.GestureState.GestureStarted:
+            self._pinch_baseline = self._zoom_level
+            return
+        # On Update/Finished, compute target from baseline * totalScaleFactor.
+        if state in (Qt.GestureState.GestureUpdated, Qt.GestureState.GestureFinished):
+            try:
+                factor = float(pinch.totalScaleFactor())
+            except Exception:
+                factor = 1.0
+            baseline = getattr(self, "_pinch_baseline", self._zoom_level)
+            target = max(self.ZOOM_MIN, min(self.ZOOM_MAX, baseline * factor))
+            # Snap to the nearest ZOOM_STEP so we don't constantly
+            # re-render at fractional sizes.
+            stepped = round(target / self.ZOOM_STEP) * self.ZOOM_STEP
+            if abs(stepped - self._zoom_level) >= self.ZOOM_STEP / 2:
+                self._zoom_level = stepped
+                self._rebuild_images()
+
+    def _flush_pinch_accum(self):
+        """Drain the macOS native-gesture accumulator one ZOOM_STEP at a time."""
+        # value() is additive per tick on macOS; positive = zoom in.
+        while self._pinch_accum >= self.ZOOM_STEP / 4:
+            self._zoom_in()
+            self._pinch_accum -= self.ZOOM_STEP / 4
+        while self._pinch_accum <= -self.ZOOM_STEP / 4:
+            self._zoom_out()
+            self._pinch_accum += self.ZOOM_STEP / 4
 
     def _toggle_fit_width(self):
         self._fit_width = not self._fit_width
@@ -366,6 +471,9 @@ class ReaderPage(BasePage):
         self._scroll.setStyleSheet(
             f"background-color: {T.tokens()['surfaces.bg_0']};"
         )
+        # Issue #16: intercept Ctrl/Cmd+wheel for zoom before the
+        # viewport scrolls. Plain wheel events fall through normally.
+        self._scroll.viewport().installEventFilter(self)
 
         scroll_content = QWidget()
         self._image_layout = QVBoxLayout(scroll_content)
