@@ -439,12 +439,33 @@ class DownloadsPage(BasePage):
         # _start_next_download can pop a queued item between us cancelling
         # actives and clearing — and that fresh task wouldn't have its
         # cancel flag set, defeating Round 2's whole cancel fix.
+        #
+        # Also issue #14: queued tasks that get cleared from the worker
+        # queue never actually run, so `_run_download` never publishes
+        # download_cancelled for them, so the UI rows ("Waiting…") would
+        # linger forever. Capture the queued task_ids while we still
+        # hold the lock and synthesize the cancel event ourselves below.
         with self.app.worker._lock:
+            queued_task_ids = [it["task_id"] for it in self.app.worker._download_queue]
             for item in self.app.worker._download_queue:
                 item["cancel"].set()
             self.app.worker._download_queue.clear()
-        for task_id in list(self._active_items.keys()):
+
+        # Real cancel-flag set for actually-running tasks. _run_download
+        # will publish download_cancelled when its inner loop sees the flag.
+        running_task_ids = [
+            tid for tid in self._active_items.keys()
+            if tid not in queued_task_ids
+        ]
+        for task_id in running_task_ids:
             self.app.worker.cancel_download(task_id)
+
+        # Synthesize download_cancelled for items that were ONLY queued —
+        # they never enter _run_download, so we have to publish on their
+        # behalf to drain the UI list and refresh badges/tab counts.
+        for task_id in queued_task_ids:
+            self.app.events.publish("download_cancelled", {"task_id": task_id})
+
         Toast(self, "Cancelled all downloads", kind="warning")
 
     def _move_to_completed(self, task_id, data):
