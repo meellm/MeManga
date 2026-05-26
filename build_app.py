@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""
+MeManga RELEASE build — single-file end-user executable.
+
+    python build_app.py
+
+Output:
+    ./MeManga.exe   (Windows)
+    ./MeManga       (macOS / Linux)
+
+This produces the binary that ships on the GitHub release page:
+    - No console window (clean double-click on Windows)
+    - GUI only — no separate CLI .exe
+    - Single self-extracting file; no `dist/` folder of loose files
+    - On first launch the app downloads Playwright's Firefox driver
+      under the user's local %APPDATA% (~80 MB, one-time) so we
+      don't have to bundle 200 MB of browser into every download.
+
+If you want a dev build with the console + tracebacks, run
+`python build.py` instead.
+"""
+
+from __future__ import annotations
+
+import os
+import platform
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+PACKAGING = ROOT / "packaging"
+SPEC = PACKAGING / "memanga-release.spec"
+BUILD_TMP = ROOT / "build"
+DIST_TMP = ROOT / "dist"
+
+
+def install_dependencies() -> bool:
+    print("=== Installing dependencies ===")
+    req = ROOT / "requirements.txt"
+    if req.exists():
+        r = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", str(req), "-q"],
+        )
+        if r.returncode != 0:
+            print("  ! pip install -r requirements.txt failed")
+            return False
+        print("  ✓ requirements.txt")
+    r = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "pyinstaller", "certifi", "-q"],
+    )
+    if r.returncode != 0:
+        print("  ! pip install pyinstaller/certifi failed")
+        return False
+    print("  ✓ pyinstaller + certifi")
+    return True
+
+
+def verify_imports() -> bool:
+    print("\n=== Verifying imports ===")
+    modules = [
+        "img2pdf", "PIL", "ebooklib", "bs4", "cloudscraper", "pikepdf",
+        "yaml", "PySide6", "certifi", "requests", "rich", "playwright",
+        "playwright_stealth",
+    ]
+    missing = []
+    for mod in modules:
+        try:
+            __import__(mod)
+            print(f"  ✓ {mod}")
+        except ImportError:
+            print(f"  ✗ {mod}")
+            missing.append(mod)
+    if missing:
+        print(f"\nMissing: {' '.join(missing)} — run `pip install -r requirements.txt`")
+        return False
+    return True
+
+
+def run_pyinstaller() -> bool:
+    print("\n=== Building release (PyInstaller, one-file, no console) ===")
+    if not SPEC.exists():
+        print(f"  ! spec missing: {SPEC}")
+        return False
+    cmd = [
+        sys.executable, "-m", "PyInstaller",
+        str(SPEC),
+        "--noconfirm",
+        "--clean",
+        "--distpath", str(DIST_TMP),
+        "--workpath", str(BUILD_TMP),
+    ]
+    r = subprocess.run(cmd)
+    return r.returncode == 0
+
+
+def _exe_name() -> str:
+    return "MeManga.exe" if platform.system() == "Windows" else "MeManga"
+
+
+def collect_artifact() -> Path | None:
+    src = DIST_TMP / _exe_name()
+    if not src.exists():
+        print(f"\n! Expected output not found: {src}")
+        return None
+    dest = ROOT / _exe_name()
+    if dest.exists():
+        dest.unlink()
+    shutil.move(str(src), str(dest))
+    try:
+        dest.chmod(dest.stat().st_mode | 0o755)
+    except Exception:
+        pass
+    # Sweep — release builds leave nothing but the .exe.
+    for d in (BUILD_TMP, DIST_TMP):
+        if d.exists():
+            shutil.rmtree(d, ignore_errors=True)
+    return dest
+
+
+def main() -> int:
+    os.chdir(ROOT)
+    if not install_dependencies():
+        return 1
+    if not verify_imports():
+        return 1
+    if not run_pyinstaller():
+        print("\n! PyInstaller failed — leaving build/ + dist/ for inspection")
+        return 1
+    artifact = collect_artifact()
+    if not artifact:
+        return 1
+    size_mb = artifact.stat().st_size / (1024 * 1024)
+    print(f"\n=== Release build complete ===")
+    print(f"Output: {artifact}  ({size_mb:.1f} MB)")
+    print("Upload this single file to the GitHub release page.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

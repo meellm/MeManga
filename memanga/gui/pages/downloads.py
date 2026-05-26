@@ -421,13 +421,16 @@ class DownloadsPage(BasePage):
         """Open the download directory in the OS file manager."""
         import platform, subprocess
         from pathlib import Path
+        from .._subprocess import no_window_kwargs
         path = Path(self.app.config.download_dir)
         path.mkdir(parents=True, exist_ok=True)
         try:
+            # no_window_kwargs() prevents a cmd window from flashing
+            # on Windows when launching explorer from the release exe.
             if platform.system() == "Darwin":
                 subprocess.run(["open", str(path)])
             elif platform.system() == "Windows":
-                subprocess.run(["explorer", str(path)])
+                subprocess.run(["explorer", str(path)], **no_window_kwargs())
             else:
                 subprocess.run(["xdg-open", str(path)])
         except Exception:
@@ -500,12 +503,13 @@ class DownloadsPage(BasePage):
         self._update_empty_state()
 
     def _open_folder(self, path):
+        from .._subprocess import no_window_kwargs
         try:
             folder = str(Path(path).parent)
             if sys.platform == "darwin":
                 subprocess.Popen(["open", folder])
             elif sys.platform == "win32":
-                subprocess.Popen(["explorer", folder])
+                subprocess.Popen(["explorer", folder], **no_window_kwargs())
             else:
                 subprocess.Popen(["xdg-open", folder])
         except Exception:

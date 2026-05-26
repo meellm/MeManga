@@ -38,3 +38,23 @@ Thumbs.db
 
 # Test output
 test-output/
+
+# PyInstaller scratch dirs — build/ is the temp area, dist/ is the
+# default output location. Our build scripts move the final .exe to
+# the repo root and remove both, but on a failed build they may
+# linger; never commit them.
+build/
+dist/
+
+# Final build artifacts — single-file PyInstaller output lands at
+# the repo root, not in dist/. Don't ever check the binaries into
+# git; they belong in GitHub Releases.
+MeManga.exe
+MeManga-Dev.exe
+MeManga
+MeManga-Dev
+*.exe
+*.app
+
+# pytest cache
+.pytest_cache/

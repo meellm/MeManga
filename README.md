@@ -138,6 +138,29 @@ Downloads to `~/.config/memanga/downloads/`
 3. Implement `search()`, `get_chapters()`, `get_pages()`
 4. Register in `memanga/scrapers/__init__.py`
 
+## 📦 Building an Executable
+
+Two paths depending on what you want:
+
+### `python build.py` — developer build
+Produces a single **`MeManga-Dev.exe`** (or `MeManga-Dev` on macOS/Linux)
+at the repo root. Console window stays open so tracebacks surface.
+Use this while iterating on the code.
+
+### `python build_app.py` — release build
+Produces a single **`MeManga.exe`** (or `MeManga`) at the repo root —
+no console, GUI only, ready to upload to the GitHub release page.
+This is what end users download; double-click and it runs (Playwright
+auto-downloads its Firefox driver on first launch).
+
+Both scripts:
+- Install all dependencies (`requirements.txt` + PyInstaller) into the
+  current Python env.
+- Run PyInstaller in one-file mode against the matching spec in
+  `packaging/`.
+- Move the final binary to the repo root and delete `build/` + `dist/`
+  so nothing else lingers.
+
 ## 📝 Notes
 
 - Playwright scrapers use Firefox (better at bypassing bot detection)

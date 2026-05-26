@@ -42,8 +42,14 @@ def _install_playwright_browsers():
             # Force the standard user cache dir so `_check_playwright_browsers`
             # on next launch finds the freshly-installed browser.
             env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
+            # no_window_kwargs() keeps Windows from flashing a cmd window
+            # for the Playwright install. The release exe has
+            # console=False, so any subprocess would otherwise pop its
+            # own console.
+            from ._subprocess import no_window_kwargs
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=600, env=env,
+                **no_window_kwargs(),
             )
             if result.returncode == 0:
                 return True, ""

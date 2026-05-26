@@ -58,5 +58,39 @@ else:
 
 from memanga.gui import launch_gui
 
+
+def _install_crash_logger():
+    """Route uncaught exceptions to a log file.
+
+    The release exe is built with `console=False` so a Python traceback
+    that escapes `launch_gui()` would otherwise vanish into the void —
+    the user sees the window blink shut and has no idea why. Hooking
+    sys.excepthook lets us drop a one-file crash log under the same
+    config dir we already use for state, which they can attach to a
+    bug report.
+    """
+    import traceback
+    from datetime import datetime
+    from pathlib import Path
+
+    config_dir = Path.home() / ".config" / "memanga"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    log_path = config_dir / "crash.log"
+
+    def _hook(exc_type, exc, tb):
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{'=' * 70}\n{datetime.now().isoformat()}\n")
+                traceback.print_exception(exc_type, exc, tb, file=f)
+        except Exception:
+            pass
+        # Still also print to stderr — caught by the dev build's
+        # console, ignored in the release build.
+        traceback.print_exception(exc_type, exc, tb)
+
+    sys.excepthook = _hook
+
+
 if __name__ == "__main__":
+    _install_crash_logger()
     launch_gui()

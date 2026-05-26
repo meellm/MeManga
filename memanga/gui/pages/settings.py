@@ -647,13 +647,16 @@ class SettingsPage(BasePage):
         """
         import platform, subprocess
         from pathlib import Path
+        from .._subprocess import no_window_kwargs
         path = Path(self.app.config.config_dir)
         path.mkdir(parents=True, exist_ok=True)
         try:
+            # no_window_kwargs() prevents a cmd window from flashing
+            # when launching explorer from the windowed release exe.
             if platform.system() == "Darwin":
                 subprocess.run(["open", str(path)])
             elif platform.system() == "Windows":
-                subprocess.run(["explorer", str(path)])
+                subprocess.run(["explorer", str(path)], **no_window_kwargs())
             else:
                 subprocess.run(["xdg-open", str(path)])
             Toast(self, f"Opened {path}", kind="info")
