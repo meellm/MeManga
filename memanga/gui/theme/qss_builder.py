@@ -189,7 +189,7 @@ QPushButton[variant="nav"], QPushButton[class="nav"] {{
     border-radius: {rsm}px;
     color: {t_2};
     text-align: left;
-    padding: 8px 12px 12px 12px;
+    padding: 8px 12px 13px 12px;
     font-size: {sz_body}pt;
     font-weight: 500;
 }}

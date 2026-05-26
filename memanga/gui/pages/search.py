@@ -13,14 +13,80 @@ from ..components.search_result import SearchResultRow
 from ..components.toast import Toast
 
 
+# Sources we know are broken or dead — skip them in search so we don't
+# waste a worker slot waiting for a timeout. Verified 2026-05 via the
+# live probe in /tmp/probe_search.py.
+#
+# Reasons:
+#   - SHUTDOWN:     site shows a "shutdown" page (mangasee123)
+#   - DEAD_DNS:     domain resolves nowhere, every request times out
+#   - REPLACED:     domain forwards to an unrelated site (mangakakalot →
+#                   spinzywheel.com gambling page)
+#   - NEEDS_JS_API: site has an SPA + client-side search API that the
+#                   plain HTML doesn't expose (asurascans, mgeko.cc)
+BROKEN_SEARCH_SOURCES = {
+    # SHUTDOWN
+    "mangasee123.com",            # serves a "shutdown" image
+    # DEAD_DNS / unreachable
+    "mangareader.to",
+    "chapmanganato.to",
+    "readmanganato.com",
+    "manganato.com",
+    "mangakakalot.com",           # → spinzywheel.com
+    "mangakakalot.to",
+    "manga4life.com",             # ex-mangasee mirror, also dead
+    "mangalife.us",
+    # REPLACED / regional block / chronic timeout
+    "mangatown.com", "www.mangatown.com",
+    "manhwa18.cc",
+    "mangafreak.me", "mangafreak.ws", "ww2.mangafreak.me",
+    "bato.to", "batoto.to",
+    # NEEDS_JS_API — static HTML returns 0 hits, real search is client-side
+    "asuracomic.net", "asurascans.com", "asuratoon.com",
+    "mgeko.cc",
+    "mangabolt.com",
+    "truemanga.com", "mangamonk.com",
+    "mangahub.us",                # search endpoint requires headless JS
+    "hivetoons.org", "hivetoon.com",
+    "isekaiscan.com",
+    "zinmanga.com",
+    "kunmanga.com",
+    "flamecomics.xyz",            # SPA, search via API only
+    # Strong Cloudflare interactive challenge — even cloudscraper gets a
+    # 403. Would need a real headless browser. Drops them from search;
+    # user can still add manga from these by URL.
+    "manhuafast.com",
+    "manhuaus.org",
+    # Manganato.gg also serves the Cloudflare "Just a moment..." page
+    # to plain requests + Playwright without a deep wait. Its existing
+    # Playwright scraper times out at the 60s mark in practice.
+    "manganato.gg",
+}
+
+
 def _compute_search_sources(app) -> list[str]:
     """Build the source list for the search worker.
 
-    Library sources are always included (they're proven-usable for this
-    user). Everything else from the supported set is included unless the
-    user disabled it on the Sources page (`config["sources.disabled"]`).
+    The previous behaviour searched every supported source (~290), most
+    of which are template-based single-manga sites (dddmanga.com,
+    chainsawdevil.com, …). Their `search()` is hard-wired to their one
+    manga's keywords, so searching "Blue Lock" against them is pure
+    wasted network. We now restrict by default to:
+
+      1. Real aggregators (general-purpose sources, hand-curated list).
+      2. Every source the user has in their library — they've proven
+         useful for this user already.
+      3. Minus anything disabled on the Sources page.
+      4. Minus sites that are known dead / not searchable from plain
+         HTML (BROKEN_SEARCH_SOURCES — verified against the live
+         probe; updating that set is the supported way to re-enable a
+         source once its scraper is fixed).
     """
-    from ...downloader import get_supported_sources
+    from memanga.scrapers import SCRAPERS
+    try:
+        from memanga.scrapers.registry import TEMPLATE_SCRAPERS
+    except Exception:
+        TEMPLATE_SCRAPERS = {}
 
     disabled = set(app.config.get("sources.disabled", []) or [])
     library: set[str] = set()
@@ -33,12 +99,31 @@ def _compute_search_sources(app) -> list[str]:
         if d:
             library.add(d)
 
-    try:
-        supported = set(get_supported_sources())
-    except Exception:
-        supported = set()
+    # Real aggregators: anything in SCRAPERS that's NOT a template-based
+    # single-manga site. Template scrapers' search() only matches their
+    # configured keywords, so we'd just be probing the network for no
+    # reason.
+    template_domains = set(TEMPLATE_SCRAPERS.keys())
+    aggregators = {d for d in SCRAPERS.keys() if d not in template_domains}
 
-    return sorted(library | (supported - disabled))
+    # De-dupe canonical hostnames — many aliases map to the same scraper
+    # class (e.g. tcbscans.com / tcbscans.me / tcbonepiecechapters.com
+    # all hit the same TCBScansScraper). We can just collapse via
+    # set-of-classes lookup keyed on identity.
+    canonical: dict = {}
+    for d in (library | aggregators):
+        if d in disabled:
+            continue
+        if d in BROKEN_SEARCH_SOURCES:
+            continue
+        cls = SCRAPERS.get(d)
+        if cls is None:
+            continue
+        key = id(cls)
+        # Prefer library domain over alias domain when both exist.
+        if key not in canonical or d in library:
+            canonical[key] = d
+    return sorted(canonical.values())
 
 
 class SearchPage(BasePage):
@@ -48,11 +133,17 @@ class SearchPage(BasePage):
         super().__init__(parent, app)
         self._results = []
         self._result_widgets = []
+        # Per-source progress counters reset on each new search.
+        self._sources_total = 0
+        self._sources_done = 0
+        self._sources_failed: list[tuple[str, str]] = []
         self._build()
 
         self.app.events.subscribe("search_result", self._on_result)
         self.app.events.subscribe("search_complete", self._on_complete)
         self.app.events.subscribe("search_started", self._on_started)
+        self.app.events.subscribe("search_source_done", self._on_source_done)
+        self.app.events.subscribe("search_source_failed", self._on_source_failed)
 
     def _build(self):
         from PySide6.QtWidgets import QFrame
@@ -142,19 +233,7 @@ class SearchPage(BasePage):
         self._status_label.setProperty("role", "hint")
         hero_l.addWidget(self._status_label)
 
-        # Recent searches chip row (persisted across launches).
-        recents_wrap = QWidget()
-        rec_l = QHBoxLayout(recents_wrap)
-        rec_l.setContentsMargins(0, 6, 0, 0)
-        rec_l.setSpacing(6)
-        rec_lbl = QLabel("Recent:")
-        rec_lbl.setProperty("role", "hint")
-        rec_l.addWidget(rec_lbl)
-        self._recent_row = rec_l  # so _refresh_recents can append/clear
-        self._recents_wrap = recents_wrap
-        rec_l.addStretch(1)
-        hero_l.addWidget(recents_wrap)
-        self._refresh_recents()
+        # (Recent searches chip row removed per user request.)
 
         layout.addWidget(hero)
         layout.addSpacing(8)
@@ -171,24 +250,13 @@ class SearchPage(BasePage):
         layout.addWidget(self._scroll, 1)
 
     def on_show(self, **kwargs):
-        # Refresh recent-search chips when the user navigates back
-        # (e.g. after searching twice from elsewhere).
-        try:
-            self._refresh_recents()
-        except Exception:
-            pass
+        # No-op — recent searches chip row was removed.
+        pass
 
     def _do_search(self):
         query = self._search_entry.text().strip()
         if not query:
             return
-
-        # Persist the query for the recent-chip row (deduped + capped at 8).
-        try:
-            self.app.app_state.add_search_query(query)
-            self._refresh_recents()
-        except Exception:
-            pass
 
         # Clear old results
         for w in self._result_widgets:
@@ -198,54 +266,26 @@ class SearchPage(BasePage):
                 pass
         self._result_widgets.clear()
         self._results.clear()
+        self._sources_done = 0
+        self._sources_failed = []
 
         sources = _compute_search_sources(self.app)
+        self._sources_total = len(sources)
         if not sources:
             self._status_label.setText(
                 "No sources enabled — enable some on the Sources tab."
             )
             return
-        self._status_label.setText(f"Searching {len(sources)} source(s)…")
+        self._status_label.setText(
+            f"Searching {len(sources)} source(s)…  0 done · 0 results"
+        )
         self.app.worker.search_manga(query, sources)
 
-    def _refresh_recents(self):
-        """Rebuild the recent-search chip row from persisted state."""
-        if not hasattr(self, "_recent_row"):
-            return
-        # Wipe existing chips (keep the "Recent:" label at index 0 and the
-        # trailing stretch at the end).
-        layout = self._recent_row
-        while layout.count() > 2:
-            item = layout.takeAt(1)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-
-        try:
-            recents = self.app.app_state.get_recent_searches(limit=8)
-        except Exception:
-            recents = []
-
-        if not recents:
-            self._recents_wrap.setVisible(False)
-            return
-
-        self._recents_wrap.setVisible(True)
-        from PySide6.QtWidgets import QPushButton as _QPB
-        for q in recents:
-            chip = _QPB(f"⌘  {q}")
-            chip.setProperty("variant", "chip")
-            chip.setCursor(Qt.CursorShape.PointingHandCursor)
-            chip.clicked.connect(lambda _, query=q: self._run_recent(query))
-            # Insert just before the trailing stretch (index = count() - 1).
-            layout.insertWidget(layout.count() - 1, chip)
-
-    def _run_recent(self, query: str):
-        self._search_entry.setText(query)
-        self._do_search()
-
     def _on_started(self, data):
-        self._status_label.setText(f"Searching for '{data['query']}'...")
+        total = data.get("total_sources", self._sources_total)
+        self._status_label.setText(
+            f"Searching '{data['query']}' across {total} sources…  0 done"
+        )
         self._search_btn.setEnabled(False)
 
     def _on_result(self, data):
@@ -253,15 +293,50 @@ class SearchPage(BasePage):
         row = SearchResultRow(self._scroll_content, result=data, on_add=self._add_result)
         self._results_layout.addWidget(row)
         self._result_widgets.append(row)
-        self._status_label.setText(f"{len(self._results)} results found...")
+        self._update_progress_label()
+
+    def _on_source_done(self, data):
+        self._sources_done += 1
+        self._update_progress_label()
+
+    def _on_source_failed(self, data):
+        self._sources_done += 1
+        self._sources_failed.append(
+            (data.get("source", "?"), data.get("error", "")[:80])
+        )
+        self._update_progress_label()
+
+    def _update_progress_label(self):
+        done = self._sources_done
+        total = self._sources_total or 1
+        ok = done - len(self._sources_failed)
+        n = len(self._results)
+        parts = [f"{done}/{total} sources",
+                 f"{n} result{'s' if n != 1 else ''}"]
+        if self._sources_failed:
+            parts.append(f"{len(self._sources_failed)} failed")
+        self._status_label.setText("  ·  ".join(parts))
 
     def _on_complete(self, data):
         self._search_btn.setEnabled(True)
         count = len(self._results)
         if count == 0:
-            self._status_label.setText("No results found. Try a different query or source.")
+            msg = "No results found. Try a different query."
+            if self._sources_failed:
+                # Surface the first couple of failed source names so the
+                # user knows which scrapers are broken.
+                preview = ", ".join(s for s, _ in self._sources_failed[:5])
+                more = (f" (+{len(self._sources_failed) - 5} more)"
+                        if len(self._sources_failed) > 5 else "")
+                msg += f"\nFailed: {preview}{more}"
+            self._status_label.setText(msg)
         else:
-            self._status_label.setText(f"{count} results found")
+            failed_n = len(self._sources_failed)
+            ok_n = self._sources_done - failed_n
+            suffix = f"  ·  {failed_n} failed" if failed_n else ""
+            self._status_label.setText(
+                f"{count} results from {ok_n} source(s){suffix}"
+            )
 
     def _add_result(self, result):
         """Open Add Manga dialog with prefilled data from search result."""

@@ -13,10 +13,10 @@ from .base import BaseScraper, Chapter, Manga
 
 class ManhuaFastScraper(BaseScraper):
     """Scraper for ManhuaFast."""
-    
+
     name = "manhuafast"
     base_url = "https://manhuafast.com"
-    
+
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title."""
         from bs4 import BeautifulSoup

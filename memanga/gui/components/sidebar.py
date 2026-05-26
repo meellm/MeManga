@@ -45,10 +45,11 @@ class _NavButton(QPushButton):
         super().__init__("  " + label, parent)
         self.setProperty("variant", "nav")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        # 40 — generous height so descenders ('y' in "Library", 'g' in
-        # "Settings", 'p' in "Apps") fully render on Windows where Qt's
-        # text metrics round more aggressively than on macOS.
-        self.setFixedHeight(40)
+        # 42 — Windows still clipped the 'g' tail in "Settings" at 40
+        # with the current font metric rounding. Two more px buys the
+        # descender enough room without changing the visual rhythm of
+        # the nav list.
+        self.setFixedHeight(42)
         self._icon_name = icon_name
         self._refresh_icon()
         # Recolor icon on theme change.
@@ -97,6 +98,11 @@ class _NavButton(QPushButton):
                 else "badge_count",
             )
         else:
+            # Clear the text too — set_active() later re-reads it to
+            # restore the badge when the active nav item changes, and a
+            # stale "1" there would resurrect the badge after Mark
+            # all read.
+            self._badge.setText("")
             self._badge.hide()
             self.setProperty("hasBadge", "false")
             self._badge.setProperty("role", "badge_count")
@@ -410,9 +416,11 @@ class Sidebar(QWidget):
             btn.style().polish(btn)
             # Recolor leading icon to match active/idle text color.
             btn._refresh_icon()
-            # Refresh the badge so the active color variant kicks in.
-            btn.set_count(btn._badge.text() and int(btn._badge.text() or 0) or 0)
         self._active = page_name
+        # Re-derive every badge from live state — never from the badge's
+        # own text, which can be stale right after Mark all read (set_count(0)
+        # hides the widget without clearing the text).
+        self._refresh_badges()
 
 
 # ─────────────────────────────────────────────────────────────────────────

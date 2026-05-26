@@ -302,29 +302,84 @@ class BackgroundWorker:
     # ------------------------------------------------------------------
 
     def search_manga(self, query: str, sources: List[str]):
-        """Search across multiple sources in parallel."""
-        def _search_source(source_domain):
+        """Search across multiple sources in parallel.
+
+        Each scraper's `search()` returns a list of `Manga` dataclasses
+        — we convert each into a dict the UI can render directly and
+        publish it as a `search_result` event. Per-source success and
+        failure are published as `search_source_done` /
+        `search_source_failed` so the UI can show progress instead of
+        silently hiding broken sources.
+        """
+        from concurrent.futures import as_completed
+
+        def _search_source(source_domain: str):
             from ..scrapers import get_scraper
             try:
                 scraper = get_scraper(source_domain)
-                results = scraper.search(query)
-                for r in results:
-                    r["source"] = source_domain
-                    self._events.publish("search_result", r)
-            except Exception:
-                pass
+            except Exception as e:
+                self._events.publish("search_source_failed", {
+                    "source": source_domain,
+                    "error": f"no scraper: {e}"[:160],
+                })
+                return 0
+            try:
+                results = scraper.search(query) or []
+            except Exception as e:
+                self._events.publish("search_source_failed", {
+                    "source": source_domain,
+                    "error": f"{type(e).__name__}: {e}"[:160],
+                })
+                return 0
+            count = 0
+            for m in results:
+                # Tolerate both Manga dataclass (the contract) and plain
+                # dict (older scrapers / future variants).
+                if hasattr(m, "title") and hasattr(m, "url"):
+                    payload = {
+                        "title": getattr(m, "title", ""),
+                        "url": getattr(m, "url", ""),
+                        "cover_url": getattr(m, "cover_url", None),
+                        "description": getattr(m, "description", None),
+                        "source": source_domain,
+                    }
+                elif isinstance(m, dict):
+                    payload = dict(m)
+                    payload["source"] = source_domain
+                else:
+                    continue
+                if not payload.get("title") or not payload.get("url"):
+                    continue
+                self._events.publish("search_result", payload)
+                count += 1
+            self._events.publish("search_source_done", {
+                "source": source_domain, "count": count,
+            })
+            return count
 
         def _task():
-            self._events.publish("search_started", {"query": query})
-            futures = []
-            with ThreadPoolExecutor(max_workers=5, thread_name_prefix="search") as pool:
-                for src in sources:
-                    futures.append(pool.submit(_search_source, src))
-                for f in futures:
+            self._events.publish("search_started", {
+                "query": query, "total_sources": len(sources),
+            })
+            # Cap concurrency — 290 supported sources × 1 thread each
+            # would saturate the network stack and spin up a flood of
+            # Playwright browsers. 8 keeps it responsive without
+            # melting the laptop.
+            with ThreadPoolExecutor(max_workers=8,
+                                     thread_name_prefix="search") as pool:
+                futures = {pool.submit(_search_source, src): src for src in sources}
+                # as_completed gives each future the full timeout window
+                # instead of serializing — one slow source no longer
+                # eats every subsequent source's budget.
+                for f in as_completed(futures, timeout=None):
+                    src = futures[f]
                     try:
-                        f.result(timeout=30)
-                    except Exception:
-                        pass
+                        f.result(timeout=20)
+                    except Exception as e:
+                        self._events.publish("search_source_failed", {
+                            "source": src,
+                            "error": f"timeout/{type(e).__name__}",
+                        })
             self._events.publish("search_complete", {"query": query})
 
         self._safe_submit(_task)
