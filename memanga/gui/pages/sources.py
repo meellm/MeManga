@@ -283,7 +283,11 @@ class SourcesPage(BasePage):
         from PySide6.QtWidgets import QComboBox
         self._sort_combo = QComboBox()
         self._sort_combo.addItems(["Sort: A–Z", "Sort: Z–A", "Sort: Latency", "Sort: In library"])
-        self._sort_combo.setMaximumWidth(160)
+        # Was setMaximumWidth(160) — the QSS reserves 28 px on the right
+        # for the caret, leaving only ~130 px for text. "Sort: In library"
+        # is 17 chars and clipped to "Sort: In librai". Use minimum
+        # width sized to the widest label.
+        self._sort_combo.setMinimumWidth(190)
         self._sort_combo.currentTextChanged.connect(lambda *_: self._render_supported())
         filter_row.addWidget(self._sort_combo)
 

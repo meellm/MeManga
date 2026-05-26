@@ -338,10 +338,14 @@ class MeMangaApp(QMainWindow):
 
         if total_new > 0:
             self.app_state.add_notification("check", f"Found {total_new} new chapter(s)")
-        else:
-            self.app_state.add_notification("check", "No new chapters found")
-        self.events.publish("notification_added", {})
+            self.events.publish("notification_added", {})
+        # No-news checks are silent — adding a "No new chapters found"
+        # notification on every auto-check makes the sidebar bell badge
+        # bounce back to "1" right after Mark all read.
         self.app_state.update_last_check(new_chapters=total_new)
+        # Still nudge the sidebar so the "Synced just now" timestamp
+        # refreshes even when there's nothing new.
+        self.events.publish("check_complete_silent", {})
 
     def _on_kindle_sent(self, data):
         self.app_state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")

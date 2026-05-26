@@ -37,6 +37,19 @@ class LibraryPage(BasePage):
         # Refresh when something edits/adds/removes a manga elsewhere
         # (Add Manga dialog, Detail page, cover backfill writes a URL).
         self.app.events.subscribe("library_updated", lambda d: self._on_check_done())
+        # Silent auto-checks (no new chapters) still need to bump the
+        # "Synced just now" stamp — otherwise it stays at the same
+        # value for as long as the user is on the Library tab.
+        self.app.events.subscribe("check_complete_silent",
+                                    lambda d: self._refresh_meta_only())
+
+        # Tick the "Synced Xm ago" stamp once a minute while the page
+        # is visible. Without this it freezes at the value rendered
+        # when on_show fired and only updates on tab-switch.
+        from PySide6.QtCore import QTimer as _QT
+        self._meta_tick = _QT(self)
+        self._meta_tick.timeout.connect(self._refresh_meta_only)
+        self._meta_tick.start(30_000)
 
     def _build(self):
         layout = QVBoxLayout(self)
@@ -73,7 +86,9 @@ class LibraryPage(BasePage):
         h_layout.addLayout(top_row)
 
         # Multi-part meta line: "{n} manga · {ch} chapters · {unread} unread · Synced {ago}"
-        self._stats_label = QLabel("")
+        # Render a placeholder so the header height is stable from the
+        # very first paint; the real numbers fill in once on_show fires.
+        self._stats_label = QLabel("0 manga  ·  0 chapters tracked  ·  0 read  ·  0 unread  ·  Synced never")
         self._stats_label.setProperty("role", "meta")
         h_layout.addWidget(self._stats_label)
 
@@ -207,6 +222,90 @@ class LibraryPage(BasePage):
 
     def on_show(self, **kwargs):
         self._refresh()
+        # Remember the grid column count we just laid out for so resize
+        # events can tell whether they need to re-layout or not.
+        self._last_grid_cols = self._current_col_count()
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        # When the window changes size enough that the manga grid needs
+        # a different number of columns (e.g. fullscreen toggle), the
+        # existing card positions stay in their old slots until the
+        # next refresh. Detect that and re-layout the grid in place.
+        try:
+            new_cols = self._current_col_count()
+            if new_cols != getattr(self, "_last_grid_cols", -1):
+                self._last_grid_cols = new_cols
+                # Defer to next event tick so the scroll area has its
+                # final width when we recompute.
+                from PySide6.QtCore import QTimer as _QT
+                _QT.singleShot(0, self._relayout_grid)
+        except Exception:
+            pass
+
+    def _current_col_count(self) -> int:
+        if not hasattr(self, "_scroll") or not self._scroll:
+            return -1
+        cols = max(1, (self._scroll.width() - 40) // (T.CARD_WIDTH + T.PAD_MD))
+        return int(cols)
+
+    def _relayout_grid(self):
+        """Re-position the existing card widgets into the new column
+        count without rebuilding them (preserves loaded covers + hover
+        state). Cheap compared to a full `_refresh()`.
+        """
+        if self._view_mode != "grid" or not self._cards:
+            return
+        cols = self._current_col_count()
+        if cols <= 0:
+            return
+        # Detach + re-add in row/col order.
+        for i, (_m, card) in enumerate(self._cards):
+            self._grid_layout.removeWidget(card)
+        for i, (_m, card) in enumerate(self._cards):
+            row = i // cols
+            col = i % cols
+            self._grid_layout.addWidget(card, row, col, Qt.AlignmentFlag.AlignTop)
+
+    def _refresh_meta_only(self):
+        """Lightweight refresh — only updates the "Synced Xm ago" meta
+        line. Avoids rebuilding the whole grid (and re-fetching every
+        cover) just to bump a timestamp.
+        """
+        try:
+            from datetime import datetime
+            stats = self.app.app_state.get_stats()
+            last_check = self.app.app_state.get("last_check")
+            check_text = "never"
+            if last_check:
+                try:
+                    elapsed = (datetime.now() - datetime.fromisoformat(last_check)).total_seconds()
+                    if elapsed < 60:
+                        check_text = "just now"
+                    elif elapsed < 3600:
+                        check_text = f"{int(elapsed // 60)}m ago"
+                    elif elapsed < 86400:
+                        check_text = f"{int(elapsed // 3600)}h ago"
+                    else:
+                        check_text = f"{int(elapsed // 86400)}d ago"
+                except Exception:
+                    pass
+            unread_total = sum(
+                self.app.app_state.get_new_chapters(m.get("title", ""))
+                for m in self.app.config.get("manga", [])
+            )
+            read_total = sum(
+                self.app.app_state.get_read_count(m.get("title", ""))
+                for m in self.app.config.get("manga", [])
+            )
+            self._stats_label.setText(
+                f"{stats['total_manga']} manga  ·  {stats['total_chapters']} chapters tracked  "
+                f"·  {read_total} read  ·  {unread_total} unread  "
+                f"·  Synced {check_text}"
+            )
+        except Exception:
+            # Tick must never raise — it fires on a timer.
+            pass
 
     def _refresh(self):
         # Continue Reading rail first

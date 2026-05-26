@@ -179,17 +179,17 @@ QPushButton[size="sm"] {{
     border-radius: {rxs}px;
 }}
 
-/* Nav items (sidebar) — extra bottom padding so descenders ('g' in
-   "Settings", 'y' in "Library") render fully inside the fixed-height
-   button. Without it Qt clips the bottom 1-2 px on certain DPI/font
-   combos. */
+/* Nav items (sidebar) — symmetric padding pulls the text upward in
+   the 40-px button so descenders ('g' in "Settings", 'y' in
+   "Library") get the full bottom margin. The button height already
+   accounts for the extra room. */
 QPushButton[variant="nav"], QPushButton[class="nav"] {{
     background: transparent;
     border: none;
     border-radius: {rsm}px;
     color: {t_2};
     text-align: left;
-    padding: 7px 12px 11px 12px;
+    padding: 8px 12px 12px 12px;
     font-size: {sz_body}pt;
     font-weight: 500;
 }}

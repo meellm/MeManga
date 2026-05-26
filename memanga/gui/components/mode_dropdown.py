@@ -146,14 +146,16 @@ class ModeDropdown(QToolButton):
         # Caret on the right edge — same look as StatusDropdown.
         from PySide6.QtGui import QPen
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(T.tokens()["text.t_3"]))
-        pen.setWidthF(1.5)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        ax = self.width() - 18
-        ay = self.height() // 2 - 2
-        p.drawLine(ax, ay, ax + 4, ay + 4)
-        p.drawLine(ax + 4, ay + 4, ax + 8, ay)
-        p.end()
+        try:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen = QPen(QColor(T.tokens()["text.t_3"]))
+            pen.setWidthF(1.5)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            ax = self.width() - 18
+            ay = self.height() // 2 - 2
+            p.drawLine(ax, ay, ax + 4, ay + 4)
+            p.drawLine(ax + 4, ay + 4, ax + 8, ay)
+        finally:
+            p.end()

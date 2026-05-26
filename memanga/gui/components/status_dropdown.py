@@ -10,7 +10,7 @@ Reading=accent, On hold=warn, Completed=lilac, Dropped=danger, Plan=info.
 """
 
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QAction, QPainter, QColor, QFont, QFontMetrics
+from PySide6.QtGui import QAction, QPainter, QColor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import (
     QToolButton, QMenu, QWidget, QHBoxLayout, QLabel, QSizePolicy,
 )
@@ -124,29 +124,33 @@ class StatusDropdown(QToolButton):
     def paintEvent(self, ev):
         super().paintEvent(ev)
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        try:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Dot — 7×7 to match CSS `.dropdown .dd-trigger .val .dot`.
-        from ..theme.tokens import STATUS_TOKEN
-        dot_token = STATUS_TOKEN.get(self._value, "accent.primary")
-        dot_color = QColor(T.tokens()[dot_token])
-        p.setBrush(dot_color)
-        p.setPen(Qt.PenStyle.NoPen)
-        d = 7
-        cx = 16
-        cy = self.height() // 2
-        p.drawEllipse(cx - d // 2, cy - d // 2, d, d)
+            # Dot — 7×7 to match CSS `.dropdown .dd-trigger .val .dot`.
+            from ..theme.tokens import STATUS_TOKEN
+            dot_token = STATUS_TOKEN.get(self._value, "accent.primary")
+            dot_color = QColor(T.tokens()[dot_token])
+            p.setBrush(dot_color)
+            p.setPen(Qt.PenStyle.NoPen)
+            d = 7
+            cx = 16
+            cy = self.height() // 2
+            p.drawEllipse(cx - d // 2, cy - d // 2, d, d)
 
-        # Caret — 8×8 chevron (right+bottom borders rotated 45deg in CSS).
-        # We approximate with two 1.5-px stroked lines.
-        cr_col = QColor(T.tokens()["text.t_3"])
-        pen = QPen(cr_col)
-        pen.setWidthF(1.5)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        ax = self.width() - 18
-        ay = self.height() // 2 - 2
-        p.drawLine(ax, ay, ax + 4, ay + 4)
-        p.drawLine(ax + 4, ay + 4, ax + 8, ay)
-        p.end()
+            # Caret — 8×8 chevron (right+bottom borders rotated 45deg).
+            cr_col = QColor(T.tokens()["text.t_3"])
+            pen = QPen(cr_col)
+            pen.setWidthF(1.5)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(pen)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            ax = self.width() - 18
+            ay = self.height() // 2 - 2
+            p.drawLine(ax, ay, ax + 4, ay + 4)
+            p.drawLine(ax + 4, ay + 4, ax + 8, ay)
+        finally:
+            # Always end() — otherwise an exception leaves the QPainter
+            # active and Qt floods the log with QBackingStore::endPaint
+            # warnings.
+            p.end()

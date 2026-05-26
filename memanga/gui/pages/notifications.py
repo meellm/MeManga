@@ -238,6 +238,18 @@ class NotificationsPage(BasePage):
 
     def _mark_all_read(self):
         self.app.app_state.mark_notifications_read()
+        # Also force-flush to disk so a quick app restart doesn't show
+        # the badge again from stale on-disk state.
+        try:
+            self.app.app_state.flush()
+        except Exception:
+            pass
+        # Refresh the sidebar bell badge synchronously — don't rely on
+        # the EventBus poll loop, which can be 100 ms behind.
+        try:
+            self.app._sidebar._refresh_badges()
+        except Exception:
+            pass
         self.app.events.publish("notification_added", {})
         self._refresh()
 

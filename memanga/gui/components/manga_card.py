@@ -74,55 +74,60 @@ class _CoverArea(QWidget):
 
     def paintEvent(self, _ev):
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        try:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
 
-        rect = QRectF(0, 0, self.width(), self.height())
-        radius = 8
+            rect = QRectF(0, 0, self.width(), self.height())
+            radius = 8
 
-        # Path clipping so all overlays + image are clipped to the rounded card
-        path = self._rounded_path(rect, radius)
-        p.setClipPath(path)
+            # Path clipping so all overlays + image are clipped to the rounded card
+            path = self._rounded_path(rect, radius)
+            p.setClipPath(path)
 
-        # 1. Cover image OR paint placeholder
-        if self._cover is not None:
-            scaled = self._cover.scaled(
-                self.size(),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            # Centered crop
-            x = (scaled.width() - self.width()) // 2
-            y = (scaled.height() - self.height()) // 2
-            p.drawPixmap(0, 0, scaled, x, y, self.width(), self.height())
-        else:
-            self._paint_placeholder(p, rect)
+            # 1. Cover image OR paint placeholder
+            if self._cover is not None:
+                scaled = self._cover.scaled(
+                    self.size(),
+                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                # Centered crop
+                x = (scaled.width() - self.width()) // 2
+                y = (scaled.height() - self.height()) // 2
+                p.drawPixmap(0, 0, scaled, x, y, self.width(), self.height())
+            else:
+                self._paint_placeholder(p, rect)
 
-        # 2. Gradient overlay (bottom-half dim) for text legibility
-        grad = QLinearGradient(QPointF(0, 0), QPointF(0, self.height()))
-        grad.setColorAt(0.0, QColor(0, 0, 0, 0))
-        grad.setColorAt(0.55, QColor(0, 0, 0, 0))
-        grad.setColorAt(1.0, QColor(0, 0, 0, 217))  # 0.85 alpha
-        p.fillRect(rect, QBrush(grad))
+            # 2. Gradient overlay (bottom-half dim) for text legibility
+            grad = QLinearGradient(QPointF(0, 0), QPointF(0, self.height()))
+            grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+            grad.setColorAt(0.55, QColor(0, 0, 0, 0))
+            grad.setColorAt(1.0, QColor(0, 0, 0, 217))  # 0.85 alpha
+            p.fillRect(rect, QBrush(grad))
 
-        # 3. Top-right corner "+N NEW" badge
-        if self._new_count > 0:
-            self._paint_new_badge(p)
+            # 3. Top-right corner "+N NEW" badge
+            if self._new_count > 0:
+                self._paint_new_badge(p)
 
-        # 4. Bottom-left status pill (dot + status text)
-        self._paint_status_pill(p)
+            # 4. Bottom-left status pill (dot + status text)
+            self._paint_status_pill(p)
 
-        # 5. Progress bar (3px at very bottom) if progress > 0 < 100
-        progress = self._get_progress()
-        if 0 < progress < 100:
-            self._paint_progress_bar(p, progress)
+            # 5. Progress bar (3px at very bottom) if progress > 0 < 100
+            progress = self._get_progress()
+            if 0 < progress < 100:
+                self._paint_progress_bar(p, progress)
 
-        # 6. Border on top so it isn't hidden by overlays
-        p.setClipping(False)
-        p.setPen(QPen(QColor(T.tokens()["surfaces.border"]), 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawPath(path)
-        p.end()
+            # 6. Border on top so it isn't hidden by overlays
+            p.setClipping(False)
+            p.setPen(QPen(QColor(T.tokens()["surfaces.border"]), 1))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(path)
+        finally:
+            # Always end() — otherwise an exception leaves the QPainter
+            # active and Qt floods the log with QBackingStore::endPaint
+            # warnings (and may crash on the next paint pass).
+            p.end()
 
     # ── helpers ──
 
@@ -356,13 +361,25 @@ class MangaCard(QFrame):
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
     # ── Hover animation ──
+    #
+    # The animation needs to lift the card 2 px up without fighting the
+    # layout. Earlier impl snapshotted self.pos().y() ONCE on first
+    # show and used self.move() during animation — that snapshot went
+    # stale on fullscreen toggle or window resize, causing cards to
+    # jump to phantom coordinates and (on Windows) sometimes crash the
+    # paint pass mid-relayout.
+    #
+    # Fix: track the layout's current Y via moveEvent whenever we're
+    # not mid-animation. enterEvent re-snapshots from the live pos.
+    # Resize / fullscreen now correctly resets the baseline.
 
     def get_offset(self):
         return self._hover_offset
 
     def set_offset(self, val):
         self._hover_offset = val
-        self.move(self.pos().x(), self._initial_y + val if hasattr(self, "_initial_y") else self.pos().y())
+        if hasattr(self, "_initial_y"):
+            self.move(self.pos().x(), self._initial_y + val)
 
     _offset = Property(int, get_offset, set_offset)
 
@@ -371,12 +388,27 @@ class MangaCard(QFrame):
         if not hasattr(self, "_initial_y"):
             self._initial_y = self.pos().y()
 
+    def moveEvent(self, ev):
+        """Re-anchor the hover-animation baseline when the layout
+        repositions us (window resize, fullscreen toggle, grid reflow).
+        We only update when there's no active animation, otherwise the
+        animator's interpolated moves would feed back into themselves.
+        """
+        super().moveEvent(ev)
+        if self._hover_offset == 0 and (
+            not self._anim or self._anim.state() != QPropertyAnimation.State.Running
+        ):
+            self._initial_y = self.pos().y()
+
     def enterEvent(self, ev):
-        if hasattr(self, "_initial_y"):
-            self._anim.stop()
-            self._anim.setStartValue(self._hover_offset)
-            self._anim.setEndValue(-2)
-            self._anim.start()
+        # Always re-snapshot from the live pos so layout reflows
+        # (fullscreen toggle, window resize) can't make the snapshot
+        # stale between hovers.
+        self._initial_y = self.pos().y() - self._hover_offset
+        self._anim.stop()
+        self._anim.setStartValue(self._hover_offset)
+        self._anim.setEndValue(-2)
+        self._anim.start()
         super().enterEvent(ev)
 
     def leaveEvent(self, ev):
