@@ -1,0 +1,14 @@
+# Test dependencies — install with:
+#   pip install -r tests/requirements-test.txt
+#
+# pytest-qt provides the qapp/qtbot fixtures used by every GUI test.
+# pytest-mock is the project standard for monkey-patching.
+
+pytest>=8.0
+pytest-qt>=4.4
+pytest-mock>=3.12
+pytest-env>=1.1
+# Speed up the suite by running unrelated test files in parallel.
+pytest-xdist>=3.5
+# Coverage report:  pytest --cov=memanga --cov-report=html
+pytest-cov>=4.1
