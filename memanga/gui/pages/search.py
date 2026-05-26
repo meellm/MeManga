@@ -203,8 +203,10 @@ class SearchPage(BasePage):
         hero_l.setContentsMargins(22, 22, 22, 22)
         hero_l.setSpacing(14)
 
-        # Inner search bar: bg_0 container, leading magnifier icon, ⌘K kbd hint,
-        # accent Search button on the right.
+        # Inner search bar: bg_0 container, leading magnifier icon,
+        # accent Search button on the right. (⌘K kbd-hint chip removed
+        # per user request — Ctrl/Cmd+K still focuses this input,
+        # it's just no longer surfaced visually.)
         bar_wrap = QFrame()
         bar_wrap.setProperty("role", "card_2")
         bar = QHBoxLayout(bar_wrap)
@@ -223,15 +225,6 @@ class SearchPage(BasePage):
         self._search_entry.setStyleSheet("border: none; background: transparent; font-size: 13pt;")
         self._search_entry.returnPressed.connect(self._do_search)
         bar.addWidget(self._search_entry, 1)
-
-        # ⌘K kbd hint chip
-        kbd = QLabel("⌘K")
-        kbd.setProperty("role", "mono_meta")
-        kbd.setStyleSheet(
-            f"background: {T.tokens()['surfaces.bg_3']}; color: {T.tokens()['text.t_3']};"
-            f"padding: 3px 8px; border-radius: 4px;"
-        )
-        bar.addWidget(kbd, 0, Qt.AlignmentFlag.AlignVCenter)
 
         self._search_btn = QPushButton("Search")
         self._search_btn.setProperty("variant", "primary")
@@ -316,8 +309,20 @@ class SearchPage(BasePage):
     def _on_result(self, data):
         self._results.append(data)
         row = SearchResultRow(self._scroll_content, result=data, on_add=self._add_result)
-        self._results_layout.addWidget(row)
-        self._result_widgets.append(row)
+        # Insert at the correct popularity-sorted position so MangaDex
+        # results stay above WeebCentral results regardless of which
+        # source's network was fastest. The list is built incrementally
+        # so most cases are O(n) anyway — no perf concern below 1000
+        # results.
+        from ..workers import source_rank
+        new_rank = source_rank(data.get("source", ""))
+        insert_at = self._results_layout.count()
+        for i, existing in enumerate(self._result_widgets):
+            if source_rank(existing._result.get("source", "")) > new_rank:
+                insert_at = i
+                break
+        self._results_layout.insertWidget(insert_at, row)
+        self._result_widgets.insert(insert_at, row)
         self._update_progress_label()
 
     def _on_source_done(self, data):

@@ -3,6 +3,7 @@ Background worker for long-running operations.
 Wraps ThreadPoolExecutor; publishes events to the EventBus.
 """
 
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
@@ -10,6 +11,95 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .events import EventBus
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Search relevance filter — many "single-manga" scrapers in the
+# registry (BeastarsManga, TGManga, AjimeNoIppo, …) hard-code
+# `search()` to return their one manga regardless of the query
+# string. Without this filter, searching "Blue Lock" returns Beastars,
+# Tokyo Ghoul, Hajime no Ippo, etc. We compare the returned title
+# against the query tokens and drop everything that's obviously
+# unrelated. Cheap and idempotent — scrapers that already do
+# server-side search (MangaDex API, etc.) pass through unchanged.
+# ─────────────────────────────────────────────────────────────────────
+
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _result_matches_query(title: str, query: str) -> bool:
+    """Decide whether `title` is a plausible match for `query`.
+
+    Rules:
+      - Empty query → everything passes.
+      - Whole query substring in title → pass.
+      - Tokenise both, drop common stopwords. Short queries (1-2
+        tokens) require ALL tokens to be present in the title. Longer
+        queries require ≥ 60% of tokens.
+    """
+    if not query:
+        return True
+    title_l = (title or "").lower()
+    query_l = query.lower().strip()
+    if not title_l:
+        return False
+    if query_l in title_l:
+        return True
+    q_tokens = [t for t in _WORD_RE.findall(query_l) if len(t) >= 2]
+    if not q_tokens:
+        return True
+    t_tokens = set(_WORD_RE.findall(title_l))
+    matched = sum(1 for t in q_tokens if t in t_tokens or t in title_l)
+    if len(q_tokens) <= 2:
+        return matched == len(q_tokens)
+    return matched / len(q_tokens) >= 0.6
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Popularity ranking — sources we hit first (and present first in the
+# results list). Earlier in the list = more popular / more trusted.
+# Anything not listed gets rank=999 (shown after the named ones,
+# stable alphabetical order between them).
+# ─────────────────────────────────────────────────────────────────────
+
+
+SOURCE_POPULARITY = [
+    "mangadex.org",
+    "mangapill.com",
+    "mangafire.to",
+    "mangabuddy.com",
+    "weebcentral.com",
+    "mangakatana.com",
+    "comick.io",
+    "mangahub.io",
+    "mangahere.cc",
+    "manganato.gg",
+    "mangapanda.onl",
+    "mangaclash.com",
+    "mangahere.onl",
+    "mangataro.org",
+    "luminousscans.com",
+    "tcbonepiecechapters.com",
+    "fanfox.net",
+    "1manga.co",
+    "coffeemanga.io",
+    "manhuaplus.org",
+    "mangaeffect.com",
+    "mangafox.fun",
+    "mangayy.org",
+]
+_POPULARITY_RANK = {d: i for i, d in enumerate(SOURCE_POPULARITY)}
+
+
+def source_rank(domain: str) -> int:
+    """Lower = more popular. Unranked sources sort after named ones."""
+    return _POPULARITY_RANK.get(domain, 999)
+
+
+def sort_sources_by_popularity(sources: List[str]) -> List[str]:
+    """Return `sources` ordered most-popular-first, then alphabetical."""
+    return sorted(sources, key=lambda d: (source_rank(d), d))
 
 
 class BackgroundWorker:
@@ -357,6 +447,13 @@ class BackgroundWorker:
         failure are published as `search_source_done` /
         `search_source_failed` so the UI can show progress instead of
         silently hiding broken sources.
+
+        Results are filtered for relevance before publishing:
+            - Single-manga aggregators (BeastarsManga, TGManga, etc.)
+              blindly return their one manga regardless of the query.
+              We drop those when the query terms don't appear in the
+              returned title — otherwise searching "Blue Lock" returns
+              Beastars, Tokyo Ghoul, Akira, …
         """
         # Bail immediately if the network is down — searching 100+
         # sources with 30 s timeouts would freeze the bar for minutes.
@@ -407,6 +504,11 @@ class BackgroundWorker:
                     continue
                 if not payload.get("title") or not payload.get("url"):
                     continue
+                if not _result_matches_query(payload.get("title", ""), query):
+                    # Single-manga site returned its manga for an
+                    # unrelated query. Drop it silently — counted as
+                    # source_done with 0 below.
+                    continue
                 self._events.publish("search_result", payload)
                 count += 1
             self._events.publish("search_source_done", {
@@ -415,8 +517,15 @@ class BackgroundWorker:
             return count
 
         def _task():
+            # Submit in popularity order so MangaDex / MangaPill /
+            # MangaFire etc. always start before the long tail. The
+            # worker pool has 8 slots, so the 8 most popular sources
+            # are running before any unranked one starts. UI sort
+            # below uses the same rank to keep results in popularity
+            # order regardless of which source's network was fastest.
+            ordered = sort_sources_by_popularity(sources)
             self._events.publish("search_started", {
-                "query": query, "total_sources": len(sources),
+                "query": query, "total_sources": len(ordered),
             })
             # Cap concurrency — 290 supported sources × 1 thread each
             # would saturate the network stack and spin up a flood of
@@ -424,7 +533,7 @@ class BackgroundWorker:
             # melting the laptop.
             with ThreadPoolExecutor(max_workers=8,
                                      thread_name_prefix="search") as pool:
-                futures = {pool.submit(_search_source, src): src for src in sources}
+                futures = {pool.submit(_search_source, src): src for src in ordered}
                 # as_completed gives each future the full timeout window
                 # instead of serializing — one slow source no longer
                 # eats every subsequent source's budget.

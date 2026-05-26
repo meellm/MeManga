@@ -497,7 +497,15 @@ class DetailPage(BasePage):
         read_set = set(self.app.app_state.get_read_chapters(title))
         n_read = sum(1 for num in merged.keys() if num in read_set)
         n_unread = n_total - n_read
-        self._chapter_filter = "all"
+        # Preserve the user's chip choice across rebuilds — _build_chapter_list
+        # runs on every chip click via _set_chapter_filter, so resetting to
+        # "all" here would clobber the click before the new chips paint.
+        # Same fix-shape as the Newest/Oldest sort combo two sessions ago.
+        valid_filters = {"all", "downloaded", "not_downloaded", "unread"}
+        current_filter = getattr(self, "_chapter_filter", "all")
+        if current_filter not in valid_filters:
+            current_filter = "all"
+        self._chapter_filter = current_filter
         self._chapter_chips: dict = {}
         for key, label, count in [
             ("all", "All", n_total),

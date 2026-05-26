@@ -93,7 +93,12 @@ class SettingsPage(BasePage):
             btn = QPushButton("  " + label)
             btn.setProperty("variant", "nav")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(34)
+            # 42 px — same as the sidebar nav buttons. The nav QSS
+            # variant now uses 8/12/13/12 padding to keep descenders
+            # ('g' in "General"/"Settings", 'l' in "Kindle / Email")
+            # from clipping on Windows; the button needs the full
+            # height to honour the padding.
+            btn.setFixedHeight(42)
             btn.setIcon(icon(icon_name, T.tokens()["text.t_2"], 16))
             from PySide6.QtCore import QSize
             btn.setIconSize(QSize(16, 16))
