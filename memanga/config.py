@@ -78,6 +78,15 @@ class Config:
             },
         }
     
+    def reload(self):
+        """Re-read config from disk, discarding any in-memory changes.
+
+        Useful when another process (e.g. the CLI) has updated the file
+        and this instance needs to pick up the changes.
+        """
+        with self._lock:
+            self._data = self._load()
+
     def get(self, key, default=None):
         """Get a config value."""
         keys = key.split(".")

@@ -26,6 +26,7 @@ class BackgroundWorker:
 
     def shutdown(self):
         """Clean up the thread pool."""
+        self._shutdown = True
         self._pool.shutdown(wait=False)
 
     def submit_task(self, fn):
@@ -33,8 +34,22 @@ class BackgroundWorker:
 
         Use this for one-off background work (e.g. cover backfill) so
         callers don't have to reach into ``_pool`` directly.
+
+        Becomes a no-op after :meth:`shutdown` — guards against
+        QTimer-driven callbacks firing during application close (and
+        keeps tests that re-use a process across many windows clean).
         """
-        return self._pool.submit(fn)
+        return self._safe_submit(fn)
+
+    def _safe_submit(self, fn, *args, **kwargs):
+        """Internal pool.submit wrapper that becomes a no-op after
+        shutdown instead of raising ``RuntimeError``."""
+        if getattr(self, "_shutdown", False):
+            return None
+        try:
+            return self._pool.submit(fn, *args, **kwargs)
+        except RuntimeError:
+            return None
 
     # ------------------------------------------------------------------
     # Cover fetching
@@ -55,7 +70,7 @@ class BackgroundWorker:
                     cache.mark_failed(url)
                 self._events.publish("cover_loaded", {"url": url, "error": True})
 
-        self._pool.submit(_task)
+        self._safe_submit(_task)
 
     # ------------------------------------------------------------------
     # Chapter checking
@@ -133,7 +148,7 @@ class BackgroundWorker:
             print(f"[Check] Done. Total results: {len(results)} manga with new chapters", flush=True)
             self._events.publish("check_complete", {"results": results})
 
-        self._pool.submit(_task)
+        self._safe_submit(_task)
 
     # ------------------------------------------------------------------
     # Downloading
@@ -162,7 +177,7 @@ class BackgroundWorker:
             paused = getattr(self, "_paused", False)
             if (not paused) and self._active_downloads < self._max_concurrent_downloads:
                 self._active_downloads += 1
-                self._pool.submit(self._run_download, item)
+                self._safe_submit(self._run_download, item)
             else:
                 # While paused or saturated, always queue.
                 self._download_queue.append(item)
@@ -280,7 +295,7 @@ class BackgroundWorker:
                 self._active_downloads += 1
         # Submit outside lock to avoid deadlock
         if next_item:
-            self._pool.submit(self._run_download, next_item)
+            self._safe_submit(self._run_download, next_item)
 
     # ------------------------------------------------------------------
     # Search
@@ -312,7 +327,7 @@ class BackgroundWorker:
                         pass
             self._events.publish("search_complete", {"query": query})
 
-        self._pool.submit(_task)
+        self._safe_submit(_task)
 
     # ------------------------------------------------------------------
     # Storage
@@ -334,7 +349,7 @@ class BackgroundWorker:
             total_mb = total / (1024 * 1024)
             self._events.publish("storage_calculated", {"total_mb": total_mb})
 
-        self._pool.submit(_task)
+        self._safe_submit(_task)
 
     # ------------------------------------------------------------------
     # Source health pings
@@ -375,7 +390,7 @@ class BackgroundWorker:
                 list(ex.map(_ping_one, sources))
             self._events.publish("sources_health_updated", {"count": len(sources)})
 
-        self._pool.submit(_task)
+        self._safe_submit(_task)
 
     # ------------------------------------------------------------------
     # Pause / resume

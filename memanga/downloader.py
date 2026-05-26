@@ -99,9 +99,15 @@ def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
         for s in manga["sources"]:
             if isinstance(s, dict):
                 url = s.get("url", "")
+                if not url:
+                    # Skip blank-URL entries — they'd crash downstream
+                    # in get_chapters("") with no useful error.
+                    continue
                 source = s.get("source") or _extract_source(url)
                 sources.append({"source": source, "url": url})
             elif isinstance(s, str):
+                if not s:
+                    continue
                 # Just a URL string
                 sources.append({"source": _extract_source(s), "url": s})
         return sources
