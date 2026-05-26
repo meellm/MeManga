@@ -144,6 +144,7 @@ class SearchPage(BasePage):
         self.app.events.subscribe("search_started", self._on_started)
         self.app.events.subscribe("search_source_done", self._on_source_done)
         self.app.events.subscribe("search_source_failed", self._on_source_failed)
+        self.app.events.subscribe("search_chapter_count", self._on_chapter_count)
         # Reflect connectivity in the status line so the user always
         # knows why the search button does nothing.
         self.app.events.subscribe("network_offline", lambda _d: self._on_offline())
@@ -324,6 +325,27 @@ class SearchPage(BasePage):
         self._results_layout.insertWidget(insert_at, row)
         self._result_widgets.insert(insert_at, row)
         self._update_progress_label()
+
+        # Fire-and-forget chapter-count probe so the chip can replace
+        # the "—" once the scraper finishes get_chapters(). The worker
+        # uses a 3-slot pool so these naturally serialise behind any
+        # active download.
+        try:
+            self.app.worker.count_chapters(data.get("source", ""),
+                                             data.get("url", ""))
+        except Exception:
+            pass
+
+    def _on_chapter_count(self, data):
+        """search_chapter_count → find the matching row + update its chip."""
+        url = data.get("url", "")
+        count = data.get("count", -1)
+        if not url:
+            return
+        for row in self._result_widgets:
+            if row.url == url:
+                row.set_chapter_count(count)
+                break
 
     def _on_source_done(self, data):
         self._sources_done += 1

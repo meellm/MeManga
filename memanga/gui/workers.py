@@ -550,6 +550,34 @@ class BackgroundWorker:
 
         self._safe_submit(_task)
 
+    def count_chapters(self, source_domain: str, manga_url: str):
+        """Fetch the chapter count for a single search result in the
+        background. Publishes ``search_chapter_count`` with
+        ``{source, url, count}`` once known (count = -1 on error so
+        the row can drop the chip).
+
+        Skipped when offline; the row simply stays without a chip.
+        """
+        if self._is_offline() or not manga_url:
+            return
+
+        def _task():
+            from ..scrapers import get_scraper
+            count = -1
+            try:
+                scraper = get_scraper(source_domain)
+                chapters = scraper.get_chapters(manga_url) or []
+                count = len(chapters)
+            except Exception:
+                count = -1
+            self._events.publish("search_chapter_count", {
+                "source": source_domain,
+                "url": manga_url,
+                "count": count,
+            })
+
+        self._safe_submit(_task)
+
     # ------------------------------------------------------------------
     # Storage
     # ------------------------------------------------------------------
