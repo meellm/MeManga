@@ -73,19 +73,26 @@ class ModeDropdown(QToolButton):
         self.setArrowType(Qt.ArrowType.NoArrow)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Matches CSS `.dropdown .dd-trigger` (same as StatusDropdown).
+        # Strips Qt's built-in ::menu-indicator so it doesn't stack on
+        # top of our hand-painted caret.
         self.setStyleSheet(
             f"QToolButton {{"
             f"  background-color: {T.tokens()['surfaces.bg_1']};"
             f"  color: {T.tokens()['text.t_1']};"
             f"  border: 1px solid {T.tokens()['surfaces.border']};"
             f"  border-radius: 6px;"
-            f"  padding: 6px 22px 6px 12px;"
+            f"  padding: 7px 28px 7px 12px;"
             f"  text-align: left;"
             f"  min-width: 140px;"
-            f"  font-size: 12pt;"
+            f"  font-size: 10pt;"
             f"}}"
             f"QToolButton:hover {{"
             f"  border-color: {T.tokens()['surfaces.border_strong']};"
+            f"}}"
+            f"QToolButton::menu-indicator {{"
+            f"  image: none; width: 0; height: 0;"
+            f"  subcontrol-position: right center;"
             f"}}"
         )
 
@@ -137,9 +144,14 @@ class ModeDropdown(QToolButton):
     def paintEvent(self, ev):
         super().paintEvent(ev)
         # Caret on the right edge — same look as StatusDropdown.
+        from PySide6.QtGui import QPen
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QColor(T.tokens()["text.t_3"]))
+        pen = QPen(QColor(T.tokens()["text.t_3"]))
+        pen.setWidthF(1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
         ax = self.width() - 18
         ay = self.height() // 2 - 2
         p.drawLine(ax, ay, ax + 4, ay + 4)

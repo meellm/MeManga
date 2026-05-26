@@ -45,7 +45,10 @@ class _NavButton(QPushButton):
         super().__init__("  " + label, parent)
         self.setProperty("variant", "nav")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(34)
+        # 36 (was 34) — buys 2 extra px so descenders in "Settings" /
+        # "Library" / "Notifications" render fully under the bumped QSS
+        # bottom padding.
+        self.setFixedHeight(36)
         self._icon_name = icon_name
         self._refresh_icon()
         # Recolor icon on theme change.

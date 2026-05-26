@@ -40,19 +40,30 @@ class StatusDropdown(QToolButton):
         self.setArrowType(Qt.ArrowType.NoArrow)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Matches CSS `.dropdown .dd-trigger`:
+        #   padding: 7px 10px 7px 12px; font-size: 13px (~10pt);
+        #   min-width: 140px; border-radius: var(--r-sm) (6px)
+        # Right padding = 28px so the hand-painted caret has room without
+        # overlapping the value text. The ::menu-indicator rule strips
+        # Qt's built-in dropdown arrow that would otherwise stack on top
+        # of our caret on macOS.
         self.setStyleSheet(
             f"QToolButton {{"
             f"  background-color: {T.tokens()['surfaces.bg_1']};"
             f"  color: {T.tokens()['text.t_1']};"
             f"  border: 1px solid {T.tokens()['surfaces.border']};"
             f"  border-radius: 6px;"
-            f"  padding: 6px 10px 6px 12px;"
+            f"  padding: 7px 28px 7px 12px;"
             f"  text-align: left;"
             f"  min-width: 140px;"
-            f"  font-size: 12pt;"
+            f"  font-size: 10pt;"
             f"}}"
             f"QToolButton:hover {{"
             f"  border-color: {T.tokens()['surfaces.border_strong']};"
+            f"}}"
+            f"QToolButton::menu-indicator {{"
+            f"  image: none; width: 0; height: 0;"
+            f"  subcontrol-position: right center;"
             f"}}"
         )
 
@@ -115,20 +126,24 @@ class StatusDropdown(QToolButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Dot
+        # Dot — 7×7 to match CSS `.dropdown .dd-trigger .val .dot`.
         from ..theme.tokens import STATUS_TOKEN
         dot_token = STATUS_TOKEN.get(self._value, "accent.primary")
         dot_color = QColor(T.tokens()[dot_token])
         p.setBrush(dot_color)
         p.setPen(Qt.PenStyle.NoPen)
         d = 7
-        cx = 14
+        cx = 16
         cy = self.height() // 2
         p.drawEllipse(cx - d // 2, cy - d // 2, d, d)
 
-        # Caret (chevron-down)
+        # Caret — 8×8 chevron (right+bottom borders rotated 45deg in CSS).
+        # We approximate with two 1.5-px stroked lines.
         cr_col = QColor(T.tokens()["text.t_3"])
-        p.setPen(cr_col)
+        pen = QPen(cr_col)
+        pen.setWidthF(1.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         ax = self.width() - 18
         ay = self.height() // 2 - 2

@@ -29,7 +29,10 @@ from .. import theme as T
 
 CARD_W = 170
 COVER_H = int(CARD_W * 1.5)  # 2:3 ratio → 255
-CARD_H = COVER_H + 50         # cover + title + sub
+# cover (255) + 4px spacing + title max 2 lines (~46) + 4px spacing
+# + sub line (~18) + 4px bottom padding = 331. Use 332 so descenders
+# on the second title line never spill onto the card below.
+CARD_H = COVER_H + 77
 
 
 # A small rotation of gradient + JP text combos for the placeholder paint.
@@ -196,41 +199,63 @@ class _CoverArea(QWidget):
         p.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, label)
 
     def _paint_status_pill(self, p: QPainter):
+        """Tiny uppercase pill — matches HTML/CSS `.manga-card .status-pill`:
+            padding: 2px 8px;
+            font-size: 10px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.06em;
+            background: rgba(0,0,0,0.6);
+            border-radius: 10px (true pill at this height);
+        """
         status = (self._manga.get("status") or "reading").lower()
         from ..theme.tokens import STATUS_TOKEN
         dot_token = STATUS_TOKEN.get(status, "accent.primary")
         dot_color = QColor(T.tokens()[dot_token])
 
-        label = status.replace("-", " ").title()
+        # Map the human label to match the design ("paused" → "Paused" in
+        # CSS, but rendered uppercase). "On hold" → "ON HOLD".
+        label = status.replace("-", " ").upper()
+
+        # 10px in CSS ≈ 7.5pt at 96dpi. Use 7.5pt + letter-spacing.
         font = QFont()
-        font.setPointSize(9)
-        font.setWeight(QFont.Weight.Bold)
+        font.setPointSizeF(7.5)
+        font.setWeight(QFont.Weight.DemiBold)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
         p.setFont(font)
         fm = QFontMetrics(font)
         text_w = fm.horizontalAdvance(label)
-        dot_size = 6
-        gap = 6
-        pad_h, pad_v = 9, 3
-        pill_w = dot_size + gap + text_w + pad_h * 2
-        pill_h = fm.height() + pad_v
+        dot_size = 5            # CSS: 5px
+        dot_gap = 5             # CSS: margin-right: 5px
+        pad_h = 8               # CSS: padding 2px 8px
+        pad_v = 2
+        # Use cap_height-style measurement: tighter than fm.height() so
+        # the pill stays slim — that's what makes it read as a tiny chip
+        # instead of a chunky badge.
+        text_h = fm.ascent()
+        pill_h = text_h + pad_v * 2 + 2   # +2 for breathing room
+        pill_w = dot_size + dot_gap + text_w + pad_h * 2
 
-        # Pill bg (semi-transparent black)
-        x = 8
-        y = self.height() - pill_h - 12
+        # Bottom-left, matching CSS bottom:10px left:10px.
+        x = 10
+        y = self.height() - pill_h - 10
         pill_rect = QRectF(x, y, pill_w, pill_h)
-        p.setBrush(QColor(0, 0, 0, 153))  # 0.6 alpha
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawRoundedRect(pill_rect, 999, 999)
 
-        # Status dot
+        # Translucent black with subtle white border (CSS:
+        # background rgba(0,0,0,0.6) + border rgba(255,255,255,0.08))
+        p.setBrush(QColor(0, 0, 0, 153))
+        p.setPen(QPen(QColor(255, 255, 255, 20), 1))
+        # True pill — radius = half-height.
+        p.drawRoundedRect(pill_rect, pill_h / 2, pill_h / 2)
+
+        # Status dot — vertically centered.
         p.setBrush(dot_color)
+        p.setPen(Qt.PenStyle.NoPen)
         dot_x = x + pad_h
         dot_y = y + (pill_h - dot_size) / 2
         p.drawEllipse(QRectF(dot_x, dot_y, dot_size, dot_size))
 
-        # Label
-        p.setPen(QColor("#FFFFFF"))
-        text_rect = QRectF(dot_x + dot_size + gap, y, text_w, pill_h)
+        # Label — bright white, vertically centered.
+        p.setPen(QColor(255, 255, 255, 242))   # CSS rgba(255,255,255,0.95)
+        text_rect = QRectF(dot_x + dot_size + dot_gap, y, text_w, pill_h)
         p.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, label)
 
     def _paint_progress_bar(self, p: QPainter, progress: float):
@@ -304,9 +329,12 @@ class MangaCard(QFrame):
             f"color: {T.tokens()['text.t_1']}; font-size: 11pt; font-weight: 600;"
             f"padding: 4px 2px 0 2px;"
         )
-        # Two-line clamp — generous enough that descenders ('g', 'y', 'p',
-        # 'q') don't clip on the second line at 11pt + 1.45 line-height.
-        title_lbl.setMaximumHeight(44)
+        # Two-line clamp + headroom for descenders ('g', 'y', 'p', 'q')
+        # on the SECOND line. 11pt × 1.45 line-height = ~21px per line;
+        # 48px gives 2 lines + ~6px breathing room so the bottom of 'g'
+        # / 'y' never spills onto the card below it.
+        title_lbl.setMaximumHeight(48)
+        title_lbl.setMinimumHeight(48)
         layout.addWidget(title_lbl)
 
         sub_text = self._sub_text(manga, new_count,

@@ -519,8 +519,16 @@ class DetailPage(BasePage):
         # Was 150 — the QSS adds 28px right padding for the caret, so
         # "Newest first" wrapped/clipped the trailing 't'. 180 fits.
         sort_combo.setMinimumWidth(180)
+        # Preserve the current sort across rebuilds — _build_chapter_list
+        # runs whenever the chapter list refreshes (status flip, download
+        # complete, sort change). If we hard-reset to "Newest first"
+        # here, clicking "Oldest first" would flip back immediately.
+        current_sort = getattr(self, "_chapter_sort", "Newest first")
+        if current_sort not in ("Newest first", "Oldest first"):
+            current_sort = "Newest first"
+        sort_combo.setCurrentText(current_sort)
+        self._chapter_sort = current_sort
         sort_combo.currentTextChanged.connect(self._on_chapter_sort_change)
-        self._chapter_sort = "Newest first"
         filter_row.addWidget(sort_combo)
         layout.addLayout(filter_row)
         layout.addSpacing(6)
