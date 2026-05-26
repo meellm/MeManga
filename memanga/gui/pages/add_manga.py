@@ -260,33 +260,41 @@ class AddMangaDialog(ModalDialog):
         self.app.config.save()
 
         # Cover fetch in background (scraper first, MangaDex fallback).
-        def _fetch_cover():
-            cover = None
-            try:
-                from ...scrapers import get_scraper
-                scraper = get_scraper(domain)
-                if hasattr(scraper, "get_cover_url"):
-                    cover = scraper.get_cover_url(url)
-            except Exception:
+        # Skip while offline — the manga is still added to the library
+        # (we have a placeholder cover paint), and the next "Check
+        # all" while online will trigger the cover backfill flow.
+        net = getattr(self.app, "network", None)
+        is_offline = net is not None and not net.is_online
+        if not is_offline:
+            def _fetch_cover():
                 cover = None
-            if not cover:
                 try:
-                    from ..cover_fallback import fetch_mangadex_cover
-                    cover = fetch_mangadex_cover(title)
+                    from ...scrapers import get_scraper
+                    scraper = get_scraper(domain)
+                    if hasattr(scraper, "get_cover_url"):
+                        cover = scraper.get_cover_url(url)
                 except Exception:
                     cover = None
-            if cover:
-                manga_list = self.app.config.get("manga", [])
-                for m in manga_list:
-                    if m.get("title") == title:
-                        m["cover_url"] = cover
-                        break
-                self.app.config.save()
+                if not cover:
+                    try:
+                        from ..cover_fallback import fetch_mangadex_cover
+                        cover = fetch_mangadex_cover(title)
+                    except Exception:
+                        cover = None
+                if cover:
+                    manga_list = self.app.config.get("manga", [])
+                    for m in manga_list:
+                        if m.get("title") == title:
+                            m["cover_url"] = cover
+                            break
+                    self.app.config.save()
 
-        threading.Thread(target=_fetch_cover, daemon=True).start()
+            threading.Thread(target=_fetch_cover, daemon=True).start()
 
-        # Auto-check for chapters
-        self.app.worker.check_updates([entry], self.app.app_state, self.app.config)
+            # Auto-check for chapters
+            self.app.worker.check_updates([entry], self.app.app_state, self.app.config)
+        # When offline, the worker's check_updates() would already
+        # short-circuit; skip both calls here to keep the add flow snappy.
 
         self.app.events.publish("library_updated", {"title": title, "action": "add"})
         self.accept()

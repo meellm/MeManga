@@ -55,6 +55,15 @@ class SourcesPage(BasePage):
         ``sources_health_updated`` event when the probes finish.
         """
         from ..components.toast import Toast
+        # No point pinging individual sources when the box itself is
+        # offline — would just light up every source as red and
+        # confuse the user.
+        net = getattr(self.app, "network", None)
+        if net is not None and not net.is_online:
+            Toast(self,
+                   "You're offline — health checks resume when reconnected.",
+                   kind="warn")
+            return
         if not self._all_sources:
             try:
                 from ...downloader import get_supported_sources

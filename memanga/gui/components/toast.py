@@ -6,7 +6,13 @@ from PySide6.QtWidgets import QLabel, QWidget, QGraphicsOpacityEffect
 from PySide6.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve
 from .. import theme as T
 
-_COLORS = {"info": T.ACCENT, "success": T.SUCCESS, "warning": T.WARNING, "error": T.ERROR}
+_COLORS = {
+    "info": T.ACCENT,
+    "success": T.SUCCESS,
+    "warning": T.WARNING,
+    "warn": T.WARNING,      # alias for callers using the shorter name
+    "error": T.ERROR,
+}
 
 
 class Toast(QLabel):

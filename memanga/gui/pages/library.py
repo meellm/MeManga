@@ -587,6 +587,15 @@ class LibraryPage(BasePage):
         self._refresh()
 
     def _check_all(self):
+        # Pre-flight check — if we already know we're offline, tell
+        # the user instead of queueing a job that will instantly
+        # publish a check_error.
+        net = getattr(self.app, "network", None)
+        if net is not None and not net.is_online:
+            Toast(self,
+                   "You're offline — connect to check for updates.",
+                   kind="warn")
+            return
         manga_list = self.app.config.get("manga", [])
         if manga_list:
             self.app.worker.check_updates(manga_list, self.app.app_state, self.app.config)

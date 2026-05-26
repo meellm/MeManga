@@ -14,8 +14,10 @@ from ..state import State
 from .events import EventBus
 from .workers import BackgroundWorker
 from .cache import CoverCache
+from .network_status import NetworkMonitor
 from . import theme as T
 from .components.sidebar import Sidebar
+from .components.offline_banner import OfflineBanner
 from .pages.base import BasePage
 
 
@@ -39,6 +41,17 @@ class MeMangaApp(QMainWindow):
         except Exception:
             pass
         self.cover_cache = CoverCache(self.config.config_dir, self.events)
+
+        # Centralised network status — probes connectivity in a daemon
+        # thread, publishes `network_online` / `network_offline` events.
+        # Workers and pages subscribe to short-circuit / disable
+        # network-bound actions while offline.
+        self.network = NetworkMonitor(self.events)
+        # Hand the same monitor to the worker so its entry points
+        # (search, check, download, cover fetch) can bail fast when
+        # offline instead of timing out per-source.
+        self.worker.network = self.network
+        self.network.start()
 
         # Wire up event handlers
         self.events.subscribe("cover_fetch_request", self._on_cover_fetch_request)
@@ -66,11 +79,26 @@ class MeMangaApp(QMainWindow):
         self._sidebar = Sidebar(central, app=self)
         main_layout.addWidget(self._sidebar)
 
+        # Main column = offline banner (top, hidden when online) +
+        # page stack. We wrap them in a vertical QWidget so the banner
+        # can sit above the stack without disturbing the sidebar.
+        from PySide6.QtWidgets import QVBoxLayout
+        main_col = QWidget()
+        main_col.setObjectName("main_area")
+        col_layout = QVBoxLayout(main_col)
+        col_layout.setContentsMargins(0, 0, 0, 0)
+        col_layout.setSpacing(0)
+
+        self._offline_banner = OfflineBanner(
+            main_col, events=self.events,
+            on_retry=self.network.force_recheck,
+        )
+        col_layout.addWidget(self._offline_banner)
+
         # Page stack (instant page switching — no destroy/rebuild)
-        # objectName "main_area" so the QSS bg_0 rule kicks in.
         self._stack = QStackedWidget()
-        self._stack.setObjectName("main_area")
-        main_layout.addWidget(self._stack, 1)
+        col_layout.addWidget(self._stack, 1)
+        main_layout.addWidget(main_col, 1)
 
         # Pages registry
         self._pages: dict[str, BasePage] = {}
@@ -99,6 +127,12 @@ class MeMangaApp(QMainWindow):
         # show blank cards; this pass populates them quietly in the
         # background.
         QTimer.singleShot(5000, self._backfill_missing_covers)
+
+        # When connectivity returns after a drop, retry the things we
+        # would have done on startup — silently kick off another
+        # auto-check + cover backfill so the library catches up.
+        self.events.subscribe("network_online",
+                                lambda _d: self._on_network_recovered())
 
         # ── Global shortcuts ──
         # Ctrl/Cmd+K from anywhere → focus the Search input.
@@ -363,6 +397,11 @@ class MeMangaApp(QMainWindow):
         don't re-query MangaDex on every launch for titles it doesn't
         carry. The flag clears on title rename (Detail → Edit).
         """
+        # Bail when offline — we'd just mark every title as failed,
+        # which the on-recovery hook then has to clean up. The
+        # `network_online` subscriber re-runs this when we come back.
+        if hasattr(self, "network") and not self.network.is_online:
+            return
         manga_list = self.config.get("manga", [])
         # Skip entries that have a cover OR that we already tried and missed.
         missing = [
@@ -412,7 +451,32 @@ class MeMangaApp(QMainWindow):
 
         self.worker.submit_task(_task)
 
+    def _on_network_recovered(self):
+        """Connectivity came back — silently retry the startup-time
+        actions the user would otherwise have to trigger manually.
+
+        Notifies the rest of the app via existing events so library /
+        sources pages re-render.
+        """
+        # Toast so the user knows the app picked up the recovery.
+        try:
+            from .components.toast import Toast
+            page = self._stack.currentWidget() if hasattr(self, "_stack") else None
+            if page is not None:
+                Toast(page, "Back online", kind="success")
+        except Exception:
+            pass
+        # Re-run the deferred startup actions.
+        QTimer.singleShot(500, self._backfill_missing_covers)
+        if self.config.get("gui.auto_check", True):
+            QTimer.singleShot(800, self._auto_check)
+
     def _auto_check(self):
+        # Network gate — the worker would also short-circuit, but
+        # bailing here avoids advancing last_check and creating an
+        # empty "0 new chapters" event.
+        if hasattr(self, "network") and not self.network.is_online:
+            return
         interval = self.config.get("gui.auto_check_interval", 3600)
         last_check = self.app_state.get("last_check")
 
@@ -434,4 +498,6 @@ class MeMangaApp(QMainWindow):
     def closeEvent(self, event):
         self.app_state.flush()
         self.worker.shutdown()
+        if hasattr(self, "network"):
+            self.network.stop()
         super().closeEvent(event)

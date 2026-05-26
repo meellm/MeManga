@@ -144,6 +144,20 @@ class SearchPage(BasePage):
         self.app.events.subscribe("search_started", self._on_started)
         self.app.events.subscribe("search_source_done", self._on_source_done)
         self.app.events.subscribe("search_source_failed", self._on_source_failed)
+        # Reflect connectivity in the status line so the user always
+        # knows why the search button does nothing.
+        self.app.events.subscribe("network_offline", lambda _d: self._on_offline())
+        self.app.events.subscribe("network_online", lambda _d: self._on_online())
+
+    def _on_offline(self):
+        if hasattr(self, "_status_label"):
+            self._status_label.setText(
+                "You're offline — search resumes when the connection comes back."
+            )
+
+    def _on_online(self):
+        if hasattr(self, "_status_label"):
+            self._status_label.setText("Type a title and press Enter to search.")
 
     def _build(self):
         from PySide6.QtWidgets import QFrame
@@ -269,6 +283,17 @@ class SearchPage(BasePage):
         self._sources_done = 0
         self._sources_failed = []
 
+        # Refuse the request locally when we know we're offline,
+        # rather than handing it to the worker just to have it
+        # publish search_complete with no results. Gives the user
+        # an immediate reason.
+        net = getattr(self.app, "network", None)
+        if net is not None and not net.is_online:
+            self._status_label.setText(
+                "You're offline — connect to the internet to search."
+            )
+            return
+
         sources = _compute_search_sources(self.app)
         self._sources_total = len(sources)
         if not sources:
@@ -319,6 +344,13 @@ class SearchPage(BasePage):
 
     def _on_complete(self, data):
         self._search_btn.setEnabled(True)
+        # Worker tagged the response as offline → tell the user that's
+        # why nothing came back, not "no results".
+        if data.get("offline"):
+            self._status_label.setText(
+                "You're offline — search resumes when the connection comes back."
+            )
+            return
         count = len(self._results)
         if count == 0:
             msg = "No results found. Try a different query."

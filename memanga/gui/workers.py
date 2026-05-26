@@ -23,6 +23,18 @@ class BackgroundWorker:
         self._max_concurrent_downloads = 2
         self._lock = threading.Lock()
         self._cancel_flags: Dict[str, threading.Event] = {}
+        # Optional NetworkMonitor — wired up by MeMangaApp after both
+        # the worker and the monitor exist. When set, network-bound
+        # entry points short-circuit (with a friendly event) instead
+        # of timing out per-source against an unreachable host.
+        self.network = None
+
+    def _is_offline(self) -> bool:
+        """True only when we've actively confirmed we're offline.
+        Defaults to optimistic (online) if no monitor is wired —
+        keeps existing test setups working.
+        """
+        return self.network is not None and not self.network.is_online
 
     def shutdown(self):
         """Clean up the thread pool."""
@@ -57,6 +69,18 @@ class BackgroundWorker:
 
     def fetch_cover(self, url: str, size=(180, 230), cache=None):
         """Download a cover image in the background. Only saves bytes to disk — no CTkImage."""
+        # Skip silently when offline — covers are best-effort and we
+        # don't want the cover backfill to flood the network as soon
+        # as the user opens the library while their wifi is down.
+        # When they come back online, the next library refresh kicks
+        # off another round.
+        if self._is_offline():
+            if cache:
+                cache.mark_failed(url)
+            self._events.publish("cover_loaded", {"url": url, "error": True,
+                                                    "offline": True})
+            return
+
         def _task():
             try:
                 resp = requests.get(url, timeout=15, headers={
@@ -79,6 +103,16 @@ class BackgroundWorker:
     def check_updates(self, manga_list: list, state, config):
         """Check for new chapters across manga list."""
         import sys as _sys
+        # Short-circuit when we know we're offline. Every per-manga
+        # check_for_updates() would otherwise burn 30 s × 3 retries
+        # against an unreachable host.
+        if self._is_offline():
+            self._events.publish("check_error", {
+                "title": "Offline",
+                "error": "Can't check for updates while offline.",
+            })
+            self._events.publish("check_complete", {"results": []})
+            return
         print(f"[Check] check_updates called with {len(manga_list)} manga", flush=True)
         for m in manga_list:
             print(f"[Check]   - '{m.get('title')}' source={m.get('source', '')} status={m.get('status', 'reading')}", flush=True)
@@ -158,6 +192,19 @@ class BackgroundWorker:
                          kindle_cfg=None, naming_template=None):
         """Queue a chapter download."""
         task_id = f"{manga['title']}:{chapter.number}"
+        # Refuse to enqueue while offline — the request would just
+        # block a worker slot until per-source retries time out.
+        # Surfacing `download_error` lets the Downloads page + Toast
+        # show the user a clean reason.
+        if self._is_offline():
+            self._events.publish("download_error", {
+                "task_id": task_id,
+                "title": manga.get("title", ""),
+                "chapter": getattr(chapter, "number", ""),
+                "error": "Offline — connect to the internet and try again.",
+                "offline": True,
+            })
+            return
         cancel = threading.Event()
         self._cancel_flags[task_id] = cancel
 
@@ -311,6 +358,16 @@ class BackgroundWorker:
         `search_source_failed` so the UI can show progress instead of
         silently hiding broken sources.
         """
+        # Bail immediately if the network is down — searching 100+
+        # sources with 30 s timeouts would freeze the bar for minutes.
+        if self._is_offline():
+            self._events.publish("search_started", {
+                "query": query, "total_sources": 0,
+            })
+            self._events.publish("search_complete", {
+                "query": query, "offline": True,
+            })
+            return
         from concurrent.futures import as_completed
 
         def _search_source(source_domain: str):
@@ -415,6 +472,16 @@ class BackgroundWorker:
         its health entry in :class:`State`. Publishes
         ``sources_health_updated`` for the UI when done.
         """
+        # No point pinging individual sources when we can't even reach
+        # the open internet — the eventual results would all be
+        # "error". Just bounce so the UI doesn't show a frozen
+        # "rechecking…" spinner.
+        if self._is_offline():
+            self._events.publish("sources_health_updated", {
+                "count": 0, "offline": True,
+            })
+            return
+
         def _ping_one(domain: str):
             url = f"https://{domain}/"
             import time
