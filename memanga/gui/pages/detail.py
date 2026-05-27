@@ -981,9 +981,9 @@ class DetailPage(BasePage):
 
         When ``skip_existing`` is True we don't reset progress for chapters
         already in the downloaded set, so the worker re-issues just the
-        gaps. (Backend doesn't yet expose a per-chapter skip — see
-        NOT_IMPLEMENTED.md — but the flag is propagated so wiring is
-        unblocked once it lands.)
+        gaps. (Backend doesn't yet expose a per-chapter skip flag — for
+        now the value is propagated and ignored downstream, so wiring is
+        unblocked once the downloader grows that knob.)
         """
         return self._do_download_from(value)
 

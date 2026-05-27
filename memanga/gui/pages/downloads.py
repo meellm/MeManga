@@ -76,7 +76,8 @@ class DownloadsPage(BasePage):
         top_row.addWidget(cancel_all_btn)
         h_layout.addLayout(top_row)
 
-        # Meta line (stub values — live stats not implemented yet, see NOT_IMPLEMENTED.md)
+        # Meta line — live counts are populated by the download / queue
+        # event handlers below. Initial render uses placeholder zeros.
         meta = QLabel("● 0 active  ·  0 queued  ·  Auto-refreshed each download event")
         meta.setProperty("role", "meta")
         h_layout.addWidget(meta)

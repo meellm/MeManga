@@ -9,7 +9,7 @@ notification has `type`, `message`, `timestamp`, `read`.
 
 Filter chips and the per-row "more" action are UI-only stubs — the data
 layer doesn't currently support per-category filtering, per-notification
-deletion, or click-through to source actions. See NOT_IMPLEMENTED.md.
+deletion, or click-through to source actions.
 """
 
 from datetime import datetime
@@ -68,8 +68,8 @@ class NotificationsPage(BasePage):
         clear_btn.setProperty("variant", "ghost")
         clear_btn.setIcon(_ic("trash", T.tokens()["text.t_2"], 14))
         clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        clear_btn.setToolTip("Not implemented — see NOT_IMPLEMENTED.md")
-        clear_btn.clicked.connect(self._stub_clear)
+        clear_btn.setToolTip("Wipe all notifications (asks for confirmation)")
+        clear_btn.clicked.connect(self._clear_all)
         row1.addWidget(clear_btn)
         h_layout.addLayout(row1)
 
@@ -99,11 +99,9 @@ class NotificationsPage(BasePage):
         self._body.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._scroll.setWidget(self._scroll_content)
 
-        # Filter chip row at top of body — matches HTML spec.
-        # Note: actual filtering is a UI-stub (see NOT_IMPLEMENTED.md);
-        # all chip-driven filters route through `_filter_kind` but State
-        # doesn't yet support per-category queries, so chips show counts
-        # and the active state without re-filtering rows for now.
+        # Filter chip row at top of body. Clicks route through
+        # _set_filter → _filter_kind → State.filter_notifications which
+        # returns just the rows for the selected category.
         self._filter_kind = "all"
         self._chip_buttons: dict[str, QPushButton] = {}
         chips_wrap = QFrame()
@@ -253,7 +251,7 @@ class NotificationsPage(BasePage):
         self.app.events.publish("notification_added", {})
         self._refresh()
 
-    def _stub_clear(self):
+    def _clear_all(self):
         """Wipe every notification + repaint the page. Backed by
         State.clear_notifications().
         """

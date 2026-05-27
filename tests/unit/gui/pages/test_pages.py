@@ -162,7 +162,7 @@ class TestNotificationsPage:
             lambda *a, **k: k.get("on_confirm", lambda: None)()
         )
         page = app_window._pages["notifications"]
-        page._stub_clear()
+        page._clear_all()
         assert app_window.app_state.get_notifications() == []
 
     def test_filter_chip_active_state(self, app_window):

@@ -53,7 +53,7 @@ class SettingsPage(BasePage):
         reset_btn.setProperty("variant", "ghost")
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         reset_btn.setIcon(icon("refresh", T.tokens()["text.t_2"], 14))
-        reset_btn.setToolTip("Not implemented — see NOT_IMPLEMENTED.md")
+        reset_btn.setToolTip("Reset all settings to defaults (coming soon)")
         top_row.addWidget(reset_btn)
         h_layout.addLayout(top_row)
 
