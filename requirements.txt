@@ -27,4 +27,7 @@ playwright-stealth>=1.0.0
 # GUI
 PySide6>=6.5.0
 
+# SSL CA bundle — pinned here too so build scripts can resolve it
+certifi>=2024.7.0
+
 # Email (stdlib, no extra deps needed)

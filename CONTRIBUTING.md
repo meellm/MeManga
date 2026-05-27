@@ -121,6 +121,36 @@ python build_app.py    # Single-file release exe, no console (MeManga.exe)
 Both scripts move the final binary to the repo root and sweep the
 `build/` + `dist/` scratch directories.
 
+### Dependency pinning for release builds
+
+The dev build (`build.py`) installs from `requirements.txt`
+(`>=` ranges) so you get the latest patch-level updates while
+iterating.
+
+The release build (`build_app.py`) installs from
+**`requirements-lock.txt`** — exact pins for every direct **and
+transitive** dependency. This is what makes the binary on every
+GitHub release reproducible six months later from the same git tag.
+
+**When to refresh the lock:**
+- Any time you bump a dependency in `requirements.txt`.
+- Before cutting a release tag.
+
+**How to refresh:**
+
+```bash
+pip install pip-tools
+pip-compile --output-file=requirements-lock.txt --strip-extras requirements.txt
+git add requirements-lock.txt
+git commit -m "chore(deps): refresh requirements-lock.txt"
+```
+
+`pip-compile` walks the full transitive tree once and writes one
+row per package with the resolved version + the chain that pulled
+it in. If a security advisory drops, bump the offending package in
+`requirements.txt` and re-run pip-compile — the lock will
+recompute consistently.
+
 ## Reporting issues
 
 See [SECURITY.md](SECURITY.md) for vulnerability reports. For

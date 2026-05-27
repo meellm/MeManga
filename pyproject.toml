@@ -22,11 +22,18 @@ dependencies = [
     "pikepdf>=8.0.0",
     "keyring>=24.0.0",
     "playwright-stealth>=1.0.0",
-    "customtkinter>=5.2.0",
+    "PySide6>=6.5.0",
+    "certifi>=2024.7.0",
 ]
 
 [project.optional-dependencies]
-build = ["pyinstaller>=6.0"]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-qt>=4.2.0",
+    "pytest-mock>=3.12.0",
+    "pytest-env>=1.1.0",
+]
+build = ["pyinstaller>=6.0", "certifi>=2024.7.0"]
 
 [project.scripts]
 memanga = "memanga.cli:main"
