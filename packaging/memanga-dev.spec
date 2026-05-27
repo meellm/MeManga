@@ -26,8 +26,12 @@ from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
-# Resolve project root from this spec file's location: ../
-project_root = os.path.abspath(os.path.join(os.path.dirname(SPECPATH), ".."))
+# Resolve project root: SPECPATH is the dir CONTAINING the spec
+# (`packaging/`), so one `..` lands at the repo root. Old version
+# did `os.path.dirname(SPECPATH) + ".."` which walked two levels up
+# and looked for `memanga/scrapers/` next to the repo instead of
+# inside it.
+project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 certifi_dir = os.path.dirname(certifi.where())
 stealth_path = os.path.dirname(playwright_stealth.__file__)
 

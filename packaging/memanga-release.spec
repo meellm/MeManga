@@ -25,7 +25,10 @@ from PyInstaller.utils.hooks import collect_data_files
 
 block_cipher = None
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(SPECPATH), ".."))
+# SPECPATH is the dir containing the spec (`packaging/`), so one
+# `..` lands at the repo root. Earlier version walked an extra
+# level up via os.path.dirname(SPECPATH) and missed the source tree.
+project_root = os.path.abspath(os.path.join(SPECPATH, ".."))
 certifi_dir = os.path.dirname(certifi.where())
 stealth_path = os.path.dirname(playwright_stealth.__file__)
 
