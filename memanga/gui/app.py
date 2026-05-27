@@ -30,6 +30,7 @@ class MeMangaApp(QMainWindow):
         # Shared state
         self.config = Config()
         self.app_state = State()
+        self._seed_default_sources_if_first_launch()
         self.events = EventBus()
         self.worker = BackgroundWorker(self.events)
         # Honor the persisted concurrency setting on startup so the slider
@@ -384,6 +385,54 @@ class MeMangaApp(QMainWindow):
     def _on_kindle_sent(self, data):
         self.app_state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")
         self.events.publish("notification_added", {})
+
+    # ---- First-launch source seeding ----
+
+    def _seed_default_sources_if_first_launch(self):
+        """Pre-tick only the 15 most popular working sources on a
+        fresh install.
+
+        Without this, a brand-new user opens the app and every supported
+        source is enabled — so the first multi-source search probes
+        100+ sites and takes minutes. Seeding ships with a curated
+        working subset enabled and leaves the long tail disabled but
+        toggleable from the Sources tab.
+
+        Guarded by `sources.first_run_seeded` so we ONLY run once,
+        ever. Existing users with their own selection (or veteran
+        users who liked the everything-on default) never get their
+        config overwritten by a future re-launch.
+        """
+        if self.config.get("sources.first_run_seeded"):
+            return
+        try:
+            from ..scrapers import (
+                SCRAPERS, DEFAULT_ENABLED_SOURCES,
+            )
+            from ..scrapers.registry import TEMPLATE_SCRAPERS
+        except Exception:
+            # If anything goes wrong loading the curated list, just
+            # mark seeded so we don't keep retrying forever — the
+            # app stays in the "everything enabled" legacy mode.
+            self.config.set("sources.first_run_seeded", True)
+            self.config.save()
+            return
+
+        # We disable everything that isn't in DEFAULT_ENABLED_SOURCES,
+        # but we also keep TEMPLATE single-manga sites enabled. Those
+        # are excluded from the multi-source search sweep anyway and
+        # users add them by URL — disabling them would only show
+        # confusing red dots all over the Sources tab for sources
+        # the user never sees in search.
+        enabled = set(DEFAULT_ENABLED_SOURCES)
+        template_domains = set(TEMPLATE_SCRAPERS.keys())
+        disabled = sorted(
+            d for d in SCRAPERS.keys()
+            if d not in enabled and d not in template_domains
+        )
+        self.config.set("sources.disabled", disabled)
+        self.config.set("sources.first_run_seeded", True)
+        self.config.save()
 
     # ---- Auto-Check ----
 

@@ -61,34 +61,14 @@ def _result_matches_query(title: str, query: str) -> bool:
 # results list). Earlier in the list = more popular / more trusted.
 # Anything not listed gets rank=999 (shown after the named ones,
 # stable alphabetical order between them).
+#
+# Single source of truth lives in memanga.scrapers.POPULAR_SOURCES so
+# the same order drives both the search-time submission queue and
+# the first-launch "which sources are pre-checked" seeding.
 # ─────────────────────────────────────────────────────────────────────
 
 
-SOURCE_POPULARITY = [
-    "mangadex.org",
-    "mangapill.com",
-    "mangafire.to",
-    "mangabuddy.com",
-    "weebcentral.com",
-    "mangakatana.com",
-    "comick.io",
-    "mangahub.io",
-    "mangahere.cc",
-    "manganato.gg",
-    "mangapanda.onl",
-    "mangaclash.com",
-    "mangahere.onl",
-    "mangataro.org",
-    "luminousscans.com",
-    "tcbonepiecechapters.com",
-    "fanfox.net",
-    "1manga.co",
-    "coffeemanga.io",
-    "manhuaplus.org",
-    "mangaeffect.com",
-    "mangafox.fun",
-    "mangayy.org",
-]
+from ..scrapers import POPULAR_SOURCES as SOURCE_POPULARITY  # noqa: E402
 _POPULARITY_RANK = {d: i for i, d in enumerate(SOURCE_POPULARITY)}
 
 

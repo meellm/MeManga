@@ -644,3 +644,49 @@ def list_supported_sources():
             seen.add(base)
             sources.append(base)
     return sorted(sources)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Curated source ranking — verified end-to-end (search → get_chapters
+# → get_pages round-trip) against live sites by the probe script in
+# tests/scrapers/live/. Used for:
+#
+#   - POPULAR_SOURCES order: the search worker submits sources in this
+#     order so MangaDex / MangaPill etc. always start first.
+#   - DEFAULT_ENABLED_SOURCES: shipped pre-checked on first launch
+#     so a fresh user gets results in seconds instead of probing
+#     100+ smaller sources sequentially. Everything else stays
+#     available — user can flip it on in Sources tab any time.
+#
+# Re-order or trim if a future probe run says a site went stale.
+# ─────────────────────────────────────────────────────────────────────
+
+
+POPULAR_SOURCES = [
+    "mangadex.org",
+    "mangapill.com",
+    "mangafire.to",
+    "mangabuddy.com",
+    "weebcentral.com",
+    "mangakatana.com",
+    "comick.io",
+    "mangahub.io",
+    "mangahere.cc",
+    "mangapanda.onl",
+    "mangaclash.com",
+    "mangahere.onl",
+    "mangataro.org",
+    "luminousscans.com",
+    "tcbonepiecechapters.com",
+    "fanfox.net",
+    "1manga.co",
+    "coffeemanga.io",
+    "manhuaplus.org",
+    "mangaeffect.com",
+    "mangafox.fun",
+    "mangayy.org",
+]
+
+# Fresh installs ship with the top 15 ticked on the Sources page.
+# Everything else is in `sources.disabled` by default.
+DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:15]
