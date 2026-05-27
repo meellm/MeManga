@@ -1,12 +1,13 @@
 # 📖 MeManga
 
-**Automatic manga downloader with Kindle support.**
+**Automatic manga downloader with desktop GUI + Kindle support.**
 
-Track manga from multiple sources, download chapters as PDF/EPUB/CBZ, and optionally send them directly to your Kindle via email.
+Track manga from multiple sources, read downloaded chapters in the built-in reader, and optionally email them to your Kindle.
 
 ## ✨ Features
 
-- 📚 **Track multiple manga** from 260+ scrapers / 300+ domains
+- 🖥️ **Desktop GUI** — Library, Detail, Reader, Search, Downloads, Sources, Settings (PySide6)
+- 📚 **Track multiple manga** from 224 scrapers / 319 domains
 - 🔍 **Automatic updates** — knows what you've already downloaded
 - 🔄 **Backup sources** — fallback to secondary sources after N days
 - 📊 **Status tracking** — reading, on-hold, dropped, completed
@@ -18,37 +19,45 @@ Track manga from multiple sources, download chapters as PDF/EPUB/CBZ, and option
 
 ## 🚀 Quick Start
 
+### Desktop app (no Python required)
+Grab the latest **`MeManga.exe`** (Windows) / **`MeManga`** (macOS, Linux)
+from the [GitHub releases page](https://github.com/meellm/MeManga/releases),
+double-click, done. On first launch the app downloads Playwright's
+Firefox driver (~80 MB, one-time, behind a progress dialog).
+
+### From source (contributors)
+
 ```bash
 git clone https://github.com/meellm/MeManga.git
 cd MeManga
-python setup.py
+python setup.py            # creates venv + installs deps
+python -m memanga.gui      # launch the GUI
+python -m memanga --help   # or use the CLI
 ```
-
-Then:
-```bash
-./scripts/run.sh add -i      # Add manga interactively
-./scripts/run.sh check       # Check for new chapters
-./scripts/run.sh             # Launch interactive TUI
-```
-
-> **Windows:** Use `.\scripts\windows\run.bat` instead of `./scripts/run.sh`
 
 ## 🌐 Popular Sources
+
+A curated 15-source subset is pre-enabled on first launch
+(MangaDex, MangaPill, MangaFire, MangaBuddy, WeebCentral,
+MangaKatana, Comick, MangaHub, MangaHere, MangaPanda, MangaClash,
+MangaHere.onl, MangaTaro, LuminousScans, TCBScans). The
+remaining ~180 aggregators are available — flip any of them on
+in the **Sources** tab.
 
 | Source | Type | Notes |
 |--------|------|-------|
 | mangadex.org | API | Largest fan translation library |
-| weebcentral.com | Playwright | 1000+ series, fast search |
+| weebcentral.com | Playwright | 1000+ series |
 | mangafire.to | Playwright | VRF bypass + image descrambling |
 | mangapill.com | Requests | Fast, no Cloudflare |
-| bato.to | Requests | Community-driven |
-| comick.io | Requests | Clean API |
-| tcbscans.com | Requests | Jump manga (One Piece, JJK) |
-| asuracomic.net | Playwright | Manhwa/Webtoons |
-| mangakakalot.com | Requests | Huge library |
-| mangasee123.com | Requests | High quality scans |
+| mangakatana.com | Playwright | General library |
+| comick.io | Playwright | Clean API |
+| mangabuddy.com | Playwright | Popular aggregator |
+| mangahub.io | Requests | Huge library |
+| tcbonepiecechapters.com | Requests | Jump manga (One Piece, JJK, MHA) |
+| mangaclash.com | Requests | Manhwa heavy |
 
-**[→ Full list of 300+ supported domains](docs/SUPPORTED_SOURCES.md)**
+**[→ Full list of 319 supported domains](docs/SUPPORTED_SOURCES.md)**
 
 > **Note:** Playwright scrapers use Firefox headless browser for JavaScript rendering and bot detection bypass.
 
@@ -154,8 +163,10 @@ This is what end users download; double-click and it runs (Playwright
 auto-downloads its Firefox driver on first launch).
 
 Both scripts:
-- Install all dependencies (`requirements.txt` + PyInstaller) into the
-  current Python env.
+- Install dependencies + PyInstaller into the current Python env.
+  `build_app.py` uses `requirements-lock.txt` (exact pins) for
+  reproducible release bytes; `build.py` uses `requirements.txt`
+  ranges so contributors get the latest patch updates.
 - Run PyInstaller in one-file mode against the matching spec in
   `packaging/`.
 - Move the final binary to the repo root and delete `build/` + `dist/`

@@ -6,7 +6,6 @@ A friendly CLI for tracking and downloading manga chapters.
 
 import argparse
 import json
-import os
 import platform
 import sys
 import subprocess

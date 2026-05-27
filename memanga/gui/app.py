@@ -9,7 +9,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QShortcut, QKeySequence
 
 from .. import __version__
-from ..config import Config, get_app_password, set_app_password
+from ..config import Config
 from ..state import State
 from .events import EventBus
 from .workers import BackgroundWorker

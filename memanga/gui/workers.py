@@ -138,7 +138,9 @@ class BackgroundWorker:
     # ------------------------------------------------------------------
 
     def fetch_cover(self, url: str, size=(180, 230), cache=None):
-        """Download a cover image in the background. Only saves bytes to disk — no CTkImage."""
+        """Download a cover image in the background and save the raw
+        bytes to the cover cache. The GUI promotes them to QPixmap
+        lazily, on the main thread, when a card actually paints."""
         # Skip silently when offline — covers are best-effort and we
         # don't want the cover backfill to flood the network as soon
         # as the user opens the library while their wifi is down.

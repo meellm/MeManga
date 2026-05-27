@@ -1,25 +1,41 @@
 {
-  "_comment": "MeManga State Example - Copy to ~/.config/memanga/state.json",
+  "_comment": "MeManga state example. The app creates and maintains this file automatically at ~/.config/memanga/state.json — you should not need to edit it by hand. Included only as a schema reference.",
+
   "manga": {
     "One Piece": {
-      "url": "https://tcbonepiecechapters.com/mangas/5/one-piece",
-      "source": "tcbonepiecechapters.com",
-      "last_check": "2026-02-07T12:00:00",
-      "downloaded_chapters": [
-        "1130",
-        "1131",
-        "1132"
-      ]
-    },
-    "Solo Leveling": {
-      "url": "https://weebcentral.com/series/01J76XY3AT9SP84Z61DXS2V1FC/Solo-Leveling",
-      "source": "weebcentral.com",
-      "last_check": "2026-02-07T12:00:00",
-      "downloaded_chapters": [
-        "1",
-        "2",
-        "3"
-      ]
+      "downloaded_chapters": ["1130", "1131", "1132"],
+      "read_chapters": ["1130"],
+      "available_chapters": ["1130", "1131", "1132"]
+    }
+  },
+  "last_check": "2026-05-27T12:00:00",
+  "check_history": [
+    { "timestamp": "2026-05-27T12:00:00", "new_chapters": 2 }
+  ],
+  "notifications": [
+    {
+      "type": "check",
+      "message": "Found 2 new chapter(s)",
+      "timestamp": "2026-05-27T12:00:00",
+      "read": false
+    }
+  ],
+  "download_history": [
+    {
+      "title": "One Piece",
+      "chapter": "1132",
+      "format": "pdf",
+      "path": "/home/me/Downloads/MeManga/One Piece/Chapter 1132.pdf",
+      "size_mb": 4.2,
+      "timestamp": "2026-05-27T12:01:30"
+    }
+  ],
+  "source_health": {
+    "mangadex.org": {
+      "status": "ok",
+      "last_success": "2026-05-27T12:00:00",
+      "latency_ms": 220,
+      "error_count": 0
     }
   }
 }
