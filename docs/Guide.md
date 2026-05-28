@@ -1,14 +1,13 @@
-# MeManga Setup & Usage Guide
+# MeManga Setup & Usage Guide (CLI)
 
-Automatic manga downloader with desktop GUI + Kindle support. Track
-manga from 224 scrapers / 319 domains, download chapters as
-PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP, and optionally email
-them to your Kindle.
+Automatic manga downloader with Kindle support. Track manga from 224
+scrapers / 319 domains, download chapters as PDF / EPUB / CBZ / ZIP /
+JPG / PNG / WEBP, and optionally email them to your Kindle.
 
-> This guide covers the CLI flow only. For the desktop app, grab the
-> latest `MeManga.exe` / `MeManga` from the
-> [GitHub releases page](https://github.com/meellm/MeManga/releases)
-> and double-click — there's nothing to configure up front.
+> This guide covers the CLI flow. For the desktop app, switch to the
+> [`main` branch](https://github.com/meellm/MeManga/tree/main) and
+> follow that README — the GUI ships there as a single-file
+> `MeManga.exe` / `MeManga`.
 
 ---
 

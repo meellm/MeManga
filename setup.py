@@ -91,16 +91,14 @@ def main():
     
     if is_windows:
         print("Quick start (Windows):")
-        print(r"  venv\Scripts\python -m memanga.gui    # Desktop app (recommended)")
-        print(r"  venv\Scripts\python -m memanga --help # CLI")
-        print(r"  scripts\windows\run.bat add -i        # CLI: add manga to track")
-        print(r"  scripts\windows\run.bat check         # CLI: check for new chapters")
+        print(r"  venv\Scripts\python -m memanga --help # List every command")
+        print(r"  scripts\windows\run.bat add -i        # Add manga to track")
+        print(r"  scripts\windows\run.bat check         # Check for new chapters")
     else:
         print("Quick start:")
-        print("  ./venv/bin/python -m memanga.gui   # Desktop app (recommended)")
-        print("  ./venv/bin/python -m memanga --help # CLI")
-        print("  ./scripts/run.sh add -i            # CLI: add manga to track")
-        print("  ./scripts/run.sh check             # CLI: check for new chapters")
+        print("  ./venv/bin/python -m memanga --help # List every command")
+        print("  ./scripts/run.sh add -i             # Add manga to track")
+        print("  ./scripts/run.sh check              # Check for new chapters")
 
 if __name__ == "__main__":
     main()

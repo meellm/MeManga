@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "memanga"
 version = "0.2.0"
-description = "Automatic manga downloader with Kindle support"
+description = "Automatic manga downloader with Kindle support (CLI)"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
@@ -18,26 +18,23 @@ dependencies = [
     "ebooklib>=0.18",
     "beautifulsoup4>=4.12.0",
     "playwright>=1.40.0",
+    "playwright-stealth>=1.0.0",
     "cloudscraper>=1.2.71",
     "pikepdf>=8.0.0",
     "keyring>=24.0.0",
-    "playwright-stealth>=1.0.0",
-    "PySide6>=6.5.0",
+    "pywin32-ctypes>=0.2.0; sys_platform == 'win32'",
     "certifi>=2024.7.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.0",
-    "pytest-qt>=4.2.0",
     "pytest-mock>=3.12.0",
     "pytest-env>=1.1.0",
 ]
-build = ["pyinstaller>=6.0", "certifi>=2024.7.0"]
 
 [project.scripts]
 memanga = "memanga.cli:main"
-memanga-gui = "memanga.gui:launch_gui"
 
 [tool.setuptools.packages.find]
 include = ["memanga*"]

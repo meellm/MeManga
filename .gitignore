@@ -39,28 +39,10 @@ Thumbs.db
 # Test output
 test-output/
 
-# PyInstaller scratch dirs — build/ is the temp area, dist/ is the
-# default output location. Our build scripts move the final .exe to
-# the repo root and remove both, but on a failed build they may
-# linger; never commit them.
+# Generic build / dist scratch dirs (unused on this branch but kept
+# ignored in case a downstream user runs setup.py with extras).
 build/
 dist/
-
-# Final build artifacts — single-file PyInstaller output lands at
-# the repo root, not in dist/. Don't ever check the binaries into
-# git; they belong in GitHub Releases.
-# Windows release binaries (handled by *.exe below — kept here for
-# discoverability).
-/MeManga.exe
-/MeManga-Dev.exe
-*.exe
-*.app
-# NOTE: the bare-name macOS/Linux PyInstaller outputs (`MeManga`,
-# `MeManga-Dev` at the repo root) are *not* ignored by name. On
-# case-insensitive macOS filesystems a `/MeManga` ignore rule also
-# matches the lowercase `memanga/` source directory and blocks
-# tracking every file under it. After a local build on macOS or
-# Linux just `rm MeManga` (or move it to dist/, which IS ignored).
 
 # pytest cache
 .pytest_cache/

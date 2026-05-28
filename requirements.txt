@@ -21,17 +21,12 @@ pikepdf>=8.0.0
 # Secure credential storage
 keyring>=24.0.0
 # Backs keyring's Windows Credential Manager backend. keyring declares
-# this as a conditional dep already but we pin it explicitly so the
-# Windows build machine doesn't silently drop it on a version bump,
-# which would leave the frozen exe using keyring's Null backend
-# (silently throwing away saved email passwords).
+# this as a conditional dep already; pinning it explicitly shields
+# against version drift dropping it silently.
 pywin32-ctypes>=0.2.0; sys_platform == "win32"
 
 # Stealth mode for Playwright scrapers
 playwright-stealth>=1.0.0
-
-# GUI
-PySide6>=6.5.0
 
 # SSL CA bundle — pinned here too so build scripts can resolve it
 certifi>=2024.7.0
