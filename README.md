@@ -205,6 +205,11 @@ PDFs over 18 MB are split automatically; EPUB / CBZ files can't be split so they
 
 # Part 2 — Command-line interface
 
+> **Just want the CLI?** A dedicated [`cli` branch](https://github.com/meellm/MeManga/tree/cli)
+> strips PySide6 and the GUI module out of the tree — leaner venv,
+> faster `pip install`, no Qt runtime to worry about, ideal for
+> headless servers and Docker images. `main` keeps both.
+
 The CLI ships in the source tree (not the release binary). It's the
 right tool for cron jobs, headless servers, batch operations, and
 scripting. The desktop app and the CLI share the same config, state,
