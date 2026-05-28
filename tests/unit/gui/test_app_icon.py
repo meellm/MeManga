@@ -40,4 +40,25 @@ def test_packaging_ico_and_icns_present():
     assert Path("packaging/icon.ico").exists(), \
         "packaging/icon.ico missing — Windows build will fail"
     # icns only exists on macOS build hosts (iconutil); on CI Linux
-    # hosts the spec falls back to .ico, so we don't require it here.
+    # hosts the spec falls back to .ico, so it isn't required here.
+
+
+def test_packaging_ico_contains_multiple_resolutions():
+    """Regression for the "199-byte stub ICO" bug: PIL's
+    `Image.save(format='ICO', sizes=...)` silently drops every section
+    but the first when the source image is smaller than the requested
+    sizes. The result is a valid-but-useless .ico containing only the
+    16×16 frame, which Windows Explorer rejects in favour of the
+    default exe glyph. Verify all the sizes the PyInstaller spec
+    expects are actually present.
+    """
+    from PIL import Image
+    expected = {(16, 16), (32, 32), (48, 48),
+                (64, 64), (128, 128), (256, 256)}
+    with Image.open("packaging/icon.ico") as im:
+        present = set(im.info.get("sizes", set()))
+    missing = expected - present
+    assert not missing, (
+        f"packaging/icon.ico is missing sizes {sorted(missing)} — "
+        f"present: {sorted(present)}. Re-run scripts/generate_icon.py."
+    )

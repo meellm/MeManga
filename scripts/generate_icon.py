@@ -179,13 +179,17 @@ def _build_png_set(out_dir: Path) -> dict[int, Path]:
 
 
 def _build_ico(png_paths: dict[int, Path], dest: Path):
-    """Bundle a multi-resolution Windows .ico from the PNG set."""
-    images = [Image.open(png_paths[s]).convert("RGBA") for s in ICO_SIZES]
-    images[0].save(
-        dest, format="ICO",
-        sizes=[(s, s) for s in ICO_SIZES],
-        append_images=images[1:],
-    )
+    """Bundle a multi-resolution Windows .ico from the PNG set.
+
+    PIL's ICO writer wants the LARGEST source image and a `sizes` kwarg
+    listing the section sizes to downscale into. Passing the 16×16 PNG
+    and a list of larger sizes silently drops every section but the
+    16×16 one, leaving a 199-byte stub that Windows Explorer falls
+    back to the default exe glyph for.
+    """
+    master = max(s for s in ICO_SIZES if s in png_paths)
+    img = Image.open(png_paths[master]).convert("RGBA")
+    img.save(dest, format="ICO", sizes=[(s, s) for s in ICO_SIZES])
 
 
 def _build_icns(png_paths: dict[int, Path], dest: Path) -> bool:

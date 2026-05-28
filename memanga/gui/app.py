@@ -67,6 +67,18 @@ class MeMangaApp(QMainWindow):
         self.resize(1100, 750)
         self.setMinimumSize(900, 600)
 
+        # Explicit window icon — QApplication.setWindowIcon is the
+        # global default but on Windows individual top-level windows
+        # sometimes don't inherit it (Qt quirk around HICON vs
+        # taskbar icon), so set it on this window directly too.
+        try:
+            from . import _load_app_icon
+            _icon = _load_app_icon()
+            if _icon is not None:
+                self.setWindowIcon(_icon)
+        except Exception:
+            pass
+
         # Central widget
         central = QWidget()
         central.setObjectName("central")

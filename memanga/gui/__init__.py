@@ -303,11 +303,36 @@ def _load_app_icon():
     return icon if found else None
 
 
+def _set_windows_app_user_model_id():
+    """Tell Windows this process is its own application identity so
+    the taskbar groups it under our custom icon rather than the
+    default Python launcher icon.
+
+    Without an explicit AppUserModelID, a PyInstaller-frozen Qt app
+    on Windows inherits the python.exe AppID and the taskbar shows
+    the generic Python feather even when the window itself has a
+    custom QIcon set. No-op on non-Windows.
+    """
+    import os
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "MeManga.MeManga.GUI.1"
+        )
+    except Exception:
+        pass
+
+
 def launch_gui():
     """Launch the MeManga GUI application."""
     from PySide6.QtWidgets import QApplication
     from .app import MeMangaApp
     from . import theme as T
+
+    # Must run before QApplication() so the taskbar honours our icon.
+    _set_windows_app_user_model_id()
 
     qapp = QApplication(sys.argv)
     qapp.setStyle("Fusion")
@@ -319,7 +344,8 @@ def launch_gui():
     # Set the app icon globally — covers the window title bar, dock /
     # task bar entry, and the About dialog without any per-window
     # plumbing. setWindowIcon on QApplication is the global fallback;
-    # individual top-level windows inherit it.
+    # individual top-level windows inherit it (and MeMangaApp also
+    # re-applies it on its own window for the Windows edge case).
     app_icon = _load_app_icon()
     if app_icon is not None:
         qapp.setWindowIcon(app_icon)
