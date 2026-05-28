@@ -1,15 +1,16 @@
 """Modal first-run dialog for downloading Playwright's Firefox build.
 
 The Playwright Firefox build is ~90 MB and download time is dominated
-by the user's connection speed (anywhere from 20 s to several minutes).
-A blank "please wait" message during that window looks like the app is
-hung. This dialog streams the subprocess output, parses the percentage
-out of the progress line Playwright already prints, and surfaces both
-a progress bar and the raw log (collapsible) so failures are diagnosable.
+by network speed (anywhere from 20 s to several minutes). A blank
+"please wait" message during that window looks like the app is hung.
+This dialog streams the subprocess output, parses the percentage out
+of the progress line Playwright already prints, and surfaces both a
+progress bar and the raw log (collapsible) so failures are
+diagnosable.
 
-Used by :func:`memanga.gui._ensure_browsers` when a QApplication exists.
-Falls back to the legacy QMessageBox flow if Qt isn't available at the
-call site (CLI-driven fallback path).
+Used by :func:`memanga.gui._ensure_browsers` when a QApplication
+exists. Falls back to the legacy QMessageBox flow if Qt isn't
+available at the call site (CLI-driven fallback path).
 """
 
 from __future__ import annotations
@@ -98,7 +99,7 @@ class FirefoxInstallDialog(QDialog):
         layout.addWidget(self._subtitle)
 
         self._bar = QProgressBar()
-        # Start indeterminate (busy stripe) until we see a percentage.
+        # Start indeterminate (busy stripe) until a percentage arrives.
         self._bar.setRange(0, 0)
         layout.addWidget(self._bar)
 
@@ -194,8 +195,8 @@ class FirefoxInstallDialog(QDialog):
             self._status_label.setText("Installation complete.")
             self._bar.setRange(0, 100)
             self._bar.setValue(100)
-            # Brief pause so the user sees the full bar before the dialog
-            # disappears.
+            # Brief pause so the filled bar is visible before the
+            # dialog disappears.
             QTimer.singleShot(400, self.accept)
             return
 
@@ -213,8 +214,8 @@ class FirefoxInstallDialog(QDialog):
         self._log.appendPlainText("")
         self._log.appendPlainText("--- summary ---")
         self._log.appendPlainText(error or "(no detail)")
-        # Swap Cancel → Close so the user can dismiss without a
-        # second connection attempt.
+        # Swap Cancel → Close so the dialog can be dismissed without
+        # kicking off a second install attempt.
         self._cancel_btn.setText("Close")
         try:
             self._cancel_btn.clicked.disconnect()

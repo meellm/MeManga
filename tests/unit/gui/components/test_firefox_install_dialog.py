@@ -56,7 +56,7 @@ class TestDialogConstruction:
         # Bar starts indeterminate (range 0,0 = busy spinner).
         assert dlg._bar.maximum() == 0
         assert dlg._status_label.text() == "Connecting…"
-        # Log is hidden until the user opts in or the install fails.
+        # Log is hidden until "Show log" is clicked or the install fails.
         # Use isHidden() rather than isVisible() — the dialog isn't
         # realized in tests so isVisible() always returns False.
         assert dlg._log.isHidden()
@@ -223,13 +223,13 @@ class TestStreamingInstaller:
 
 class TestCheckPlaywrightBrowsers:
     """Regression for the "MangaFire works but WeebCentral crashes"
-    bug: the old check only looked for *any* `firefox-*` dir under
-    `ms-playwright`. A user upgrading to a newer release exe whose
-    bundled Playwright pins a different Firefox revision passed the
-    check (their old build was still there) and then crashed at
+    bug: an older check looked for *any* `firefox-*` dir under
+    `ms-playwright`. Upgrading to a release exe whose bundled
+    Playwright pinned a different Firefox revision satisfied that
+    check (the old build was still on disk) and then crashed at
     runtime with "Executable doesn't exist at .../firefox-<NEW>". The
     fix consults Playwright's own `executable_path` so the exact
-    expected binary is what we look for.
+    expected binary is what gets verified.
     """
 
     def test_returns_false_when_expected_binary_missing(self, monkeypatch, tmp_path):

@@ -13,17 +13,16 @@ def _check_playwright_browsers():
     """True only when a Firefox build matching the *bundled* Playwright
     package's expected revision is installed on disk.
 
-    The old "is there ANY firefox-* directory under ms-playwright?"
-    check was too lenient: a user with an older Firefox build from a
-    previous Playwright install (e.g. ``firefox-1466``) would pass it,
-    then crash at runtime when the newer Playwright wired into the
-    release exe tried to launch a different build (``firefox-1522``).
-    The crash is fatal for every Playwright-based scraper — but
-    invisible to AJAX-only scrapers like MangaFire's chapter list, so
-    users saw a confusing "some sources work, others don't" pattern.
+    A "is there ANY firefox-* directory under ms-playwright?" check is
+    too lenient — an older Firefox build from a previous Playwright
+    install (e.g. ``firefox-1466``) satisfies it, then every
+    Playwright-based scraper crashes at runtime when the newer bundled
+    Playwright tries to launch a different build (``firefox-1522``).
+    AJAX-only paths like MangaFire's chapter list keep working, which
+    produces a confusing "some sources work, others don't" pattern.
 
-    We now ask Playwright itself where it expects Firefox to live and
-    check that exact path. Slightly slower at startup (~200 ms for the
+    Ask Playwright itself where it expects Firefox to live and check
+    that exact path. Slightly slower at startup (~200 ms for the
     Playwright import) but correctness over speed.
     """
     try:
@@ -104,8 +103,9 @@ def _install_playwright_browsers():
     def _run(cmd, label):
         try:
             env = dict(os.environ)
-            # Force the standard user cache dir so `_check_playwright_browsers`
-            # on next launch finds the freshly-installed browser.
+            # Force the standard per-account cache dir so
+            # `_check_playwright_browsers` on next launch finds the
+            # freshly-installed browser.
             env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
             # no_window_kwargs() prevents Windows from flashing a cmd
             # window for the install subprocess — release builds use
@@ -143,8 +143,8 @@ def _install_playwright_browsers():
 def _install_playwright_browsers_stream(on_line, cancelled):
     """Streaming variant — calls ``on_line(text)`` per stdout line.
 
-    ``cancelled`` is a callable returning ``True`` when the user has
-    asked to abort; checked between lines. Returns ``(ok, error_text)``
+    ``cancelled`` is a callable returning ``True`` when the operation
+    should abort; checked between lines. Returns ``(ok, error_text)``
     with the same semantics as the blocking variant. Used by the
     FirefoxInstallDialog progress UI.
     """
@@ -208,10 +208,10 @@ def _install_playwright_browsers_stream(on_line, cancelled):
         ok, _ = _stream(argv, label)
         if ok:
             return True, ""
-        # If `_stream` returned because the user clicked Cancel mid-
-        # download, don't quietly fall through to the next strategy and
-        # kick off another (potentially long) attempt — surface the
-        # cancel.
+        # If `_stream` returned because Cancel was clicked mid-
+        # download, don't quietly fall through to the next strategy
+        # and kick off another (potentially long) attempt — surface
+        # the cancel.
         if cancelled():
             return False, "cancelled by user"
 
@@ -221,10 +221,10 @@ def _install_playwright_browsers_stream(on_line, cancelled):
 def _ensure_browsers():
     """Ensure Playwright Firefox is installed.
 
-    Drives the user through the install with the streaming progress
-    dialog (:class:`FirefoxInstallDialog`). If the install fails, the
-    dialog shows the captured subprocess log so the failure cause is
-    diagnosable; the user can retry or quit.
+    Drives the install via the streaming progress dialog
+    (:class:`FirefoxInstallDialog`). If the install fails, the dialog
+    surfaces the captured subprocess log so the failure cause is
+    diagnosable; the surrounding loop offers a retry/quit choice.
     """
     if _check_playwright_browsers():
         return True
@@ -252,8 +252,8 @@ def _ensure_browsers():
         if ok:
             return True
 
-        # The dialog already surfaced the captured log to the user via
-        # its own UI; offer a retry or quit choice and loop.
+        # The dialog already surfaced the captured log in its own UI;
+        # offer a retry-or-quit choice and loop.
         detail = (error_text or "unknown error")[:1200]
         retry = QMessageBox.question(
             None, "Installation Failed",

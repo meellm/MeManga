@@ -438,6 +438,68 @@ class TestWeebCentralChapterListStability:
         assert final == 0
 
 
+class TestWeebCentralChapterUrlSelfHeal:
+    """Regression: legacy library entries from older builds occasionally
+    stored a chapter URL (/chapters/<id>) as the manga's source URL
+    instead of the series URL (/series/<id>/<slug>). Calling
+    ``get_chapters`` on the chapter URL loads the reader, which has
+    zero series-chapter-list links, so check-updates silently
+    returns "0 new chapters" forever.
+
+    The scraper now detects this case, finds the parent series link
+    on the chapter page, and re-navigates before extracting.
+    """
+
+    def test_resolve_series_url_picks_series_link_ignoring_random(self):
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        class _FakePage:
+            def evaluate(self, _expr):
+                # The /series/random link must be filtered out — it's
+                # the "Random series" affordance present on every page.
+                return [
+                    "/series/random",
+                    "/series/01J76XYD7E91K8QP6CY0Y53900/Blue-Lock",
+                ]
+
+        scraper = WeebCentralScraper()
+        url = scraper._resolve_series_url(_FakePage())
+        assert url == "https://weebcentral.com/series/01J76XYD7E91K8QP6CY0Y53900/Blue-Lock"
+
+    def test_resolve_series_url_returns_none_when_only_random(self):
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        class _FakePage:
+            def evaluate(self, _expr):
+                return ["/series/random"]
+
+        scraper = WeebCentralScraper()
+        assert scraper._resolve_series_url(_FakePage()) is None
+
+    def test_resolve_series_url_handles_absolute_href(self):
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        class _FakePage:
+            def evaluate(self, _expr):
+                return [
+                    "https://weebcentral.com/series/01ABC/Other",
+                ]
+
+        scraper = WeebCentralScraper()
+        url = scraper._resolve_series_url(_FakePage())
+        assert url == "https://weebcentral.com/series/01ABC/Other"
+
+    def test_resolve_series_url_returns_none_on_evaluate_failure(self):
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        class _FakePage:
+            def evaluate(self, _expr):
+                raise RuntimeError("page closed")
+
+        scraper = WeebCentralScraper()
+        assert scraper._resolve_series_url(_FakePage()) is None
+
+
 class TestPlaywrightScraperPerSubclassExecutor:
     """Regression: every PlaywrightScraper subclass used to inherit ONE
     shared `_executor = ThreadPoolExecutor(max_workers=1)` from the

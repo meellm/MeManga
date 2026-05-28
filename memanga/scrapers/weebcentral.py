@@ -1,15 +1,14 @@
 """WeebCentral scraper — full Playwright (the site is fully JS-rendered).
 
-Hardened against the failure modes a normal user hits in the wild:
-  * Cloudflare interstitial on first contact (pre-warm homepage to seed
-    cookies, retry once on empty result).
-  * "show all chapters" button gated behind a slow HTMX swap — wait for
-    the link list to actually appear instead of a blind fixed sleep.
-  * Lazy-loaded chapter images that may be hidden below 12 000 px —
-    scroll until page height stops growing instead of a fixed
-    iteration count.
-  * Browser-wedged-after-prior-failure cases — caller can request a
-    one-shot retry via the internal helpers.
+Hardened against the common runtime failure modes:
+  * Cloudflare interstitial on first contact — pre-warm the homepage
+    to seed cookies, retry once on empty result.
+  * "show all chapters" button gated behind a slow HTMX swap — wait
+    for the link list to actually appear instead of a blind fixed sleep.
+  * Lazy-loaded chapter images hidden below 12 000 px — scroll until
+    page height stops growing instead of a fixed iteration count.
+  * Browser wedged after a prior failure — the internal helpers expose
+    a one-shot retry path.
 """
 
 from __future__ import annotations
@@ -64,8 +63,8 @@ class WeebCentralScraper(PlaywrightScraper):
 
     def _restart_browser_in_thread(self):
         """Tear down the thread-local Firefox so the next call starts
-        fresh. Used after a hard failure (CF wall, navigation hang) so
-        we don't keep reusing a session the site has fingerprinted.
+        fresh. Used after a hard failure (CF wall, navigation hang) to
+        drop any session the site may have fingerprinted.
         """
         try:
             cleanup_browsers()
@@ -225,8 +224,8 @@ class WeebCentralScraper(PlaywrightScraper):
                     return True
             except Exception as e:
                 # Try the next selector — WeebCentral has shipped a
-                # couple of label variants over time and we don't want
-                # one stale match to crash the whole flow.
+                # couple of label variants over time and one stale
+                # match shouldn't crash the whole flow.
                 print(f"[WeebCentral] selector {selector!r} failed: {e}")
                 continue
         return False
@@ -237,11 +236,10 @@ class WeebCentralScraper(PlaywrightScraper):
         """Block until the chapter-link count stops growing.
 
         The "show all chapters" button triggers an HTMX swap that
-        streams links in batches. Returning as soon as we see "more
-        than the initial 5" leaves us with whatever fraction of the
-        list happened to land in the first frame (frequently <10
-        out of a 300-chapter series). Poll the count until two
-        consecutive passes report the same number, then return.
+        streams links in batches. Bailing as soon as the count crosses
+        "more than the initial 5" can leave only the first frame of
+        a 300-chapter series rendered. Poll until two consecutive
+        passes report the same number, then return.
         """
         last = -1
         stable = 0
@@ -308,6 +306,39 @@ class WeebCentralScraper(PlaywrightScraper):
                 continue
         return out
 
+    def _resolve_series_url(self, page) -> Optional[str]:
+        """Find the parent /series/<id>/<slug> link on the current
+        page, ignoring the /series/random "Random series" affordance.
+
+        Used to self-heal library entries whose stored URL is a
+        chapter URL (``/chapters/<id>``) instead of a series URL.
+        Older builds of the scraper occasionally saved the chapter URL
+        as the manga's source URL; on those entries, calling
+        ``get_chapters`` on the raw value loads the chapter reader,
+        which has zero series-chapter-list links.
+        """
+        try:
+            links = page.evaluate(
+                "() => Array.from(document.querySelectorAll('a[href*=\"/series/\"]'))"
+                "  .map(a => a.getAttribute('href'))"
+                "  .filter(v => v && !v.includes('/series/random'))"
+            )
+        except Exception:
+            return None
+        if not links:
+            return None
+        # Defensive Python-side filter: the JS expression already drops
+        # /series/random but we re-check here so the helper stays
+        # correct even when a test or future caller hands it a raw
+        # link list.
+        for href in links:
+            if not href or "/series/random" in href:
+                continue
+            if not href.startswith("http"):
+                href = self.base_url + href
+            return href
+        return None
+
     def _do_chapters_once(self, manga_url: str) -> List[Chapter]:
         chapters: List[Chapter] = []
         _, _, page = self._new_page()
@@ -322,6 +353,23 @@ class WeebCentralScraper(PlaywrightScraper):
 
             if _looks_like_cloudflare(page.content(), page.title() or ""):
                 raise RuntimeError("cloudflare interstitial")
+
+            # Self-heal: if the stored URL is a chapter URL instead of
+            # a series URL (legacy library entries from before the
+            # search-results URL shape was nailed down), find the link
+            # back to the series and re-navigate. Without this
+            # fallback such entries return 0 chapters forever, making
+            # check-updates indistinguishable from a genuinely empty
+            # upstream series.
+            if "/chapters/" in manga_url and "/series/" not in manga_url:
+                series_url = self._resolve_series_url(page)
+                if series_url and series_url != manga_url:
+                    print(f"[WeebCentral] resolved chapter URL → series URL: {series_url}")
+                    page.goto(series_url, wait_until="domcontentloaded",
+                              timeout=60000)
+                    page.wait_for_timeout(1500)
+                else:
+                    print(f"[WeebCentral] could not resolve series URL from chapter page {manga_url}")
 
             self._expand_all_chapters(page)
             chapters = self._collect_chapters(page)
@@ -384,11 +432,11 @@ class WeebCentralScraper(PlaywrightScraper):
         """Scroll the chapter reader until the document height stops
         growing.
 
-        WeebCentral lazy-loads chapter images as the user scrolls. The
-        old code did a fixed 15 × 800 px scroll which capped us at
-        12 000 px — chapters above ~40 pages got truncated. We now
-        scroll until two consecutive measurements show the same body
-        scrollHeight, or until ``max_passes`` is hit.
+        WeebCentral lazy-loads chapter images on scroll. A fixed
+        15 × 800 px sweep caps coverage at 12 000 px — chapters above
+        ~40 pages get truncated. Instead, scroll until two
+        consecutive measurements report the same body scrollHeight,
+        or until ``max_passes`` is hit.
         """
         last_height = 0
         stable = 0
