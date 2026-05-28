@@ -10,17 +10,41 @@ def _is_frozen():
 
 
 def _check_playwright_browsers():
-    from pathlib import Path
-    import os
-    if os.name == 'nt':
-        browsers_path = Path.home() / "AppData" / "Local" / "ms-playwright"
-    else:
-        browsers_path = Path.home() / ".cache" / "ms-playwright"
-    if browsers_path.exists():
-        firefox_dirs = [d for d in browsers_path.iterdir()
-                        if d.is_dir() and 'firefox' in d.name.lower()]
-        return len(firefox_dirs) > 0
-    return False
+    """True only when a Firefox build matching the *bundled* Playwright
+    package's expected revision is installed on disk.
+
+    The old "is there ANY firefox-* directory under ms-playwright?"
+    check was too lenient: a user with an older Firefox build from a
+    previous Playwright install (e.g. ``firefox-1466``) would pass it,
+    then crash at runtime when the newer Playwright wired into the
+    release exe tried to launch a different build (``firefox-1522``).
+    The crash is fatal for every Playwright-based scraper — but
+    invisible to AJAX-only scrapers like MangaFire's chapter list, so
+    users saw a confusing "some sources work, others don't" pattern.
+
+    We now ask Playwright itself where it expects Firefox to live and
+    check that exact path. Slightly slower at startup (~200 ms for the
+    Playwright import) but correctness over speed.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return False
+    try:
+        with sync_playwright() as pw:
+            try:
+                expected = pw.firefox.executable_path
+            except Exception:
+                # `executable_path` is a property on BrowserType that
+                # raises if the binary is missing on older Playwright
+                # versions — treat that as "not installed".
+                return False
+            if not expected:
+                return False
+            from pathlib import Path
+            return Path(expected).exists()
+    except Exception:
+        return False
 
 
 def _resolve_install_strategies():

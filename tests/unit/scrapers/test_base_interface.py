@@ -272,6 +272,7 @@ class TestWeebCentralSearchHitsDataEndpoint:
             def goto(self, url, **kw): visited["url"] = url
             def wait_for_selector(self, *a, **kw): pass
             def content(self): return "<html></html>"
+            def title(self): return ""
             def close(self): pass
 
         class _FakeContext:
@@ -315,6 +316,7 @@ class TestWeebCentralSearchHitsDataEndpoint:
             def goto(self, url, **kw): pass
             def wait_for_selector(self, *a, **kw): pass
             def content(self): return html
+            def title(self): return ""
             def close(self): pass
 
         class _FakeContext:
@@ -332,6 +334,108 @@ class TestWeebCentralSearchHitsDataEndpoint:
         assert "Blue Lock" in titles, \
             f"'Official' badge prefix not stripped: {titles}"
         assert "Other Title" in titles
+
+
+class TestWeebCentralCloudflareDetection:
+    """Cloudflare interstitials show up as a "Just a moment…" challenge
+    page instead of the real result HTML. The scraper must detect that
+    on the first attempt and retry once after a homepage warm-up
+    (which seeds the CF cookies on the persistent browser context)
+    instead of silently returning zero results.
+    """
+
+    def test_looks_like_cloudflare_matches_known_phrases(self):
+        from memanga.scrapers.weebcentral import _looks_like_cloudflare
+        assert _looks_like_cloudflare("", "Just a moment...")
+        assert _looks_like_cloudflare(
+            "<html><body>Checking your browser…</body></html>",
+        )
+        assert _looks_like_cloudflare("DDoS protection by Cloudflare")
+        # A normal results page must NOT trip the detector.
+        assert not _looks_like_cloudflare(
+            "<html><a href='/series/abc'>Blue Lock</a></html>",
+            "WeebCentral — Search",
+        )
+
+    def test_search_retries_after_cloudflare_interstitial(self, monkeypatch):
+        """If the first /search/data response is a CF challenge, the
+        scraper must warm up the homepage and retry once.
+        """
+        from memanga.scrapers import weebcentral as wc
+
+        # First _do_search_once: CF (raises RuntimeError).
+        # Second _do_search_once: returns one Manga.
+        calls = {"n": 0}
+
+        def fake(self, query):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("cloudflare interstitial")
+            return [wc.Manga(title="Blue Lock", url="https://x/m")]
+
+        monkeypatch.setattr(wc.WeebCentralScraper, "_do_search_once", fake)
+
+        # Stub the homepage warm-up so it doesn't try to open a real page.
+        class _StubPage:
+            def goto(self, *a, **k): pass
+            def wait_for_timeout(self, *a, **k): pass
+            def close(self): pass
+        monkeypatch.setattr(
+            wc.WeebCentralScraper, "_new_page",
+            lambda self: (None, None, _StubPage()),
+        )
+
+        scraper = wc.WeebCentralScraper()
+        results = scraper._search_in_thread("Blue Lock")
+
+        assert calls["n"] == 2, f"expected 2 attempts, got {calls['n']}"
+        assert results and results[0].title == "Blue Lock"
+
+
+class TestWeebCentralChapterListStability:
+    """Regression for the "only 9 of 349 chapters returned" bug. The
+    HTMX swap that lands the full chapter list arrives in batches; the
+    scraper must wait for the count to stabilise rather than returning
+    after the first batch crosses some threshold.
+    """
+
+    def test_waits_until_link_count_stops_growing(self):
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        # Simulate the HTMX swap by returning a growing count from
+        # `page.evaluate(...)` until it plateaus.
+        sequence = iter([5, 12, 80, 200, 340, 349, 349, 349])
+
+        class _FakePage:
+            def evaluate(self, _expr):
+                return next(sequence, 349)
+            def wait_for_timeout(self, _ms):
+                pass
+
+        scraper = WeebCentralScraper()
+        final = scraper._wait_for_chapter_list_stable(
+            _FakePage(), max_passes=20, interval_ms=0,
+        )
+        assert final == 349, f"expected 349, got {final}"
+
+    def test_returns_when_count_never_grows_past_zero(self):
+        """A page with no chapter links at all must still terminate
+        (don't sit on max_passes × interval just because the count is
+        stuck at zero)."""
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        class _FakePage:
+            def evaluate(self, _expr):
+                return 0
+            def wait_for_timeout(self, _ms):
+                pass
+
+        scraper = WeebCentralScraper()
+        # Bound the call so a regression wouldn't hang the suite.
+        final = scraper._wait_for_chapter_list_stable(
+            _FakePage(), max_passes=5, interval_ms=0,
+        )
+        assert final == 0
 
 
 class TestPlaywrightScraperPerSubclassExecutor:

@@ -1,10 +1,11 @@
-"""Unit tests for the first-run Firefox install dialog.
+"""Unit tests for the first-run Firefox install flow.
 
 These cover the parts that DON'T need a real Playwright install:
   - progress-line parsing (regex used to pull the percentage out of
     Playwright's stdout)
   - dialog construction + slot behaviour
   - the streaming subprocess runner's success / failure / cancel paths
+  - the version-aware browser-presence check
 """
 
 from __future__ import annotations
@@ -213,3 +214,75 @@ class TestStreamingInstaller:
         )
         assert ok is False
         assert "no install strategy available" in err
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Version-aware browser presence check
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestCheckPlaywrightBrowsers:
+    """Regression for the "MangaFire works but WeebCentral crashes"
+    bug: the old check only looked for *any* `firefox-*` dir under
+    `ms-playwright`. A user upgrading to a newer release exe whose
+    bundled Playwright pins a different Firefox revision passed the
+    check (their old build was still there) and then crashed at
+    runtime with "Executable doesn't exist at .../firefox-<NEW>". The
+    fix consults Playwright's own `executable_path` so the exact
+    expected binary is what we look for.
+    """
+
+    def test_returns_false_when_expected_binary_missing(self, monkeypatch, tmp_path):
+        from memanga import gui as gui_pkg
+
+        missing = tmp_path / "firefox-9999" / "nope.exe"
+        # Build a fake `sync_playwright()` context that hands back a
+        # Playwright object whose firefox.executable_path points at a
+        # path that doesn't exist.
+        class _FakeFirefox:
+            executable_path = str(missing)
+
+        class _FakePW:
+            firefox = _FakeFirefox()
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: _FakePW())
+        assert gui_pkg._check_playwright_browsers() is False
+
+    def test_returns_true_when_expected_binary_exists(self, monkeypatch, tmp_path):
+        from memanga import gui as gui_pkg
+
+        fake_bin = tmp_path / "firefox-1234" / "firefox.exe"
+        fake_bin.parent.mkdir(parents=True)
+        fake_bin.write_bytes(b"\x00")
+
+        class _FakeFirefox:
+            executable_path = str(fake_bin)
+
+        class _FakePW:
+            firefox = _FakeFirefox()
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: _FakePW())
+        assert gui_pkg._check_playwright_browsers() is True
+
+    def test_returns_false_when_playwright_import_fails(self, monkeypatch):
+        """If `playwright` can't be imported at all (corrupt install,
+        broken venv), we must treat that as "not installed" and trigger
+        the install dialog rather than crash on startup."""
+        from memanga import gui as gui_pkg
+
+        import builtins
+        real_import = builtins.__import__
+
+        def boom(name, *a, **k):
+            if name == "playwright.sync_api":
+                raise ImportError("simulated")
+            return real_import(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", boom)
+        assert gui_pkg._check_playwright_browsers() is False
