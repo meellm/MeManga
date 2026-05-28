@@ -81,6 +81,12 @@ hidden_imports += [
 datas = [
     (certifi_dir, "certifi"),
     (stealth_path, "playwright_stealth"),
+    # Bundle the app icon assets so the runtime QIcon loader can find
+    # them inside the frozen binary (sys._MEIPASS staging dir).
+    (
+        os.path.join(project_root, "memanga", "gui", "assets", "icon"),
+        os.path.join("memanga", "gui", "assets", "icon"),
+    ),
 ]
 datas += collect_data_files("playwright", include_py_files=False)
 
@@ -140,6 +146,17 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# Pick the right platform-specific icon file. PyInstaller wants .ico
+# on Windows and .icns on macOS; on Linux the icon arg is ignored so
+# we leave it set to .ico for the source-control simplicity and the
+# runtime QIcon loader handles the actual window-decoration icon
+# from the PNG set bundled in `datas` above.
+import sys as _sys
+if _sys.platform == "darwin":
+    _icon = os.path.join(project_root, "packaging", "icon.icns")
+else:
+    _icon = os.path.join(project_root, "packaging", "icon.ico")
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -158,6 +175,7 @@ exe = EXE(
     # user when they double-click. Tracebacks still go to a log file
     # under %APPDATA%/memanga/error.log if anything crashes.
     console=False,
+    icon=_icon,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

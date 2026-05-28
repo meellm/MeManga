@@ -23,16 +23,57 @@ def _check_playwright_browsers():
     return False
 
 
+def _resolve_install_strategies():
+    """Yield ``(label, argv)`` for each Playwright install strategy.
+
+    Tried in order at launch time. Centralised here so both the
+    blocking `_install_playwright_browsers` and the streaming
+    `_install_playwright_browsers_stream` share the same resolution
+    logic.
+    """
+    import shutil
+
+    # Strategy 1: bundled driver (node + cli.js). compute_driver_executable
+    # returns a (node_path, cli_js_path) tuple on playwright >= 1.40; the
+    # tuple must be unpacked into argv, not stringified, or the spawn
+    # raises FileNotFoundError.
+    try:
+        from playwright._impl._driver import compute_driver_executable
+        driver = compute_driver_executable()
+        if isinstance(driver, tuple) and len(driver) == 2:
+            node_path, cli_path = driver
+            yield "bundled driver", [node_path, cli_path, "install", "firefox"]
+        else:
+            # Back-compat for older Playwright (single string).
+            yield "bundled driver", [str(driver), "install", "firefox"]
+    except Exception as e:  # pragma: no cover - import-time guard
+        yield "bundled driver", _ImportError(f"import failed: {e}")
+
+    # Strategy 2: system-installed `playwright` CLI (dev machines).
+    playwright_bin = shutil.which("playwright")
+    if playwright_bin:
+        yield "system cli", [playwright_bin, "install", "firefox"]
+
+    # Strategy 3: python -m playwright install (source-only, not frozen).
+    if not _is_frozen():
+        yield "python -m", [sys.executable, "-m", "playwright", "install", "firefox"]
+
+
+class _ImportError:
+    """Sentinel for a strategy whose argv couldn't be resolved."""
+    def __init__(self, msg: str):
+        self.msg = msg
+
+
 def _install_playwright_browsers():
-    """Try every install strategy we know about.
+    """Run the install non-streaming. Used by the legacy QMessageBox path.
 
     Returns ``(ok, error_text)``. ``error_text`` is a short human-readable
-    string the caller can drop into a dialog so the user sees *why* the
-    install failed instead of a generic "try again" message.
+    string the caller can drop into a dialog so the failure cause is
+    visible instead of a generic "try again" message.
     """
     import os
     import subprocess
-    import shutil
 
     errors: list[str] = []
 
@@ -42,10 +83,10 @@ def _install_playwright_browsers():
             # Force the standard user cache dir so `_check_playwright_browsers`
             # on next launch finds the freshly-installed browser.
             env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
-            # no_window_kwargs() keeps Windows from flashing a cmd window
-            # for the Playwright install. The release exe has
-            # console=False, so any subprocess would otherwise pop its
-            # own console.
+            # no_window_kwargs() prevents Windows from flashing a cmd
+            # window for the install subprocess — release builds use
+            # console=False so any naked subprocess would otherwise pop
+            # its own console.
             from ._subprocess import no_window_kwargs
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=600, env=env,
@@ -64,58 +105,116 @@ def _install_playwright_browsers():
             errors.append(f"[{label}] {type(e).__name__}: {e}")
         return False, ""
 
-    # Strategy 1: bundled driver (node + cli.js). compute_driver_executable
-    # returns a (node_path, cli_js_path) tuple on playwright >= 1.40; the
-    # tuple must be unpacked into argv, not stringified, or the spawn
-    # raises FileNotFoundError.
-    try:
-        from playwright._impl._driver import compute_driver_executable
-        driver = compute_driver_executable()
-        if isinstance(driver, tuple) and len(driver) == 2:
-            node_path, cli_path = driver
-            ok, _ = _run([node_path, cli_path, "install", "firefox"], "bundled driver")
-        else:
-            # Back-compat for older Playwright (single string).
-            ok, _ = _run([str(driver), "install", "firefox"], "bundled driver")
-        if ok:
-            return True, ""
-    except Exception as e:
-        errors.append(f"[bundled driver] import failed: {e}")
-
-    # Strategy 2: system-installed `playwright` CLI (dev machines).
-    playwright_bin = shutil.which("playwright")
-    if playwright_bin:
-        ok, _ = _run([playwright_bin, "install", "firefox"], "system cli")
-        if ok:
-            return True, ""
-
-    # Strategy 3: python -m playwright install (source-only, not frozen).
-    if not _is_frozen():
-        ok, _ = _run(
-            [sys.executable, "-m", "playwright", "install", "firefox"],
-            "python -m",
-        )
+    for label, argv in _resolve_install_strategies():
+        if isinstance(argv, _ImportError):
+            errors.append(f"[{label}] {argv.msg}")
+            continue
+        ok, _ = _run(argv, label)
         if ok:
             return True, ""
 
     return False, "\n".join(errors) if errors else "no install strategy available"
 
 
+def _install_playwright_browsers_stream(on_line, cancelled):
+    """Streaming variant — calls ``on_line(text)`` per stdout line.
+
+    ``cancelled`` is a callable returning ``True`` when the user has
+    asked to abort; checked between lines. Returns ``(ok, error_text)``
+    with the same semantics as the blocking variant. Used by the
+    FirefoxInstallDialog progress UI.
+    """
+    import os
+    import subprocess
+
+    errors: list[str] = []
+
+    def _stream(cmd, label):
+        try:
+            env = dict(os.environ)
+            env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
+            from ._subprocess import no_window_kwargs
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=env,
+                **no_window_kwargs(),
+            )
+            tail: list[str] = []
+            assert proc.stdout is not None
+            for line in iter(proc.stdout.readline, ""):
+                if cancelled():
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    return False, "cancelled by user"
+                tail.append(line)
+                # Keep memory bounded — only the most recent 200 lines
+                # are needed for failure diagnostics.
+                if len(tail) > 200:
+                    del tail[: len(tail) - 200]
+                try:
+                    on_line(line)
+                except Exception:
+                    # Never let a UI hiccup take down the install.
+                    pass
+            proc.stdout.close()
+            rc = proc.wait()
+            if rc == 0:
+                return True, ""
+            err = "".join(tail[-20:]).strip()
+            errors.append(f"[{label}] exit {rc}: {err[:400]}")
+            return False, err
+        except FileNotFoundError as e:
+            errors.append(f"[{label}] not found: {e}")
+        except Exception as e:
+            errors.append(f"[{label}] {type(e).__name__}: {e}")
+        return False, ""
+
+    for label, argv in _resolve_install_strategies():
+        if cancelled():
+            return False, "cancelled by user"
+        if isinstance(argv, _ImportError):
+            errors.append(f"[{label}] {argv.msg}")
+            continue
+        ok, _ = _stream(argv, label)
+        if ok:
+            return True, ""
+        # If `_stream` returned because the user clicked Cancel mid-
+        # download, don't quietly fall through to the next strategy and
+        # kick off another (potentially long) attempt — surface the
+        # cancel.
+        if cancelled():
+            return False, "cancelled by user"
+
+    return False, "\n".join(errors) if errors else "no install strategy available"
+
+
 def _ensure_browsers():
-    """Ensure Playwright Firefox is installed. Uses Qt message boxes."""
+    """Ensure Playwright Firefox is installed.
+
+    Drives the user through the install with the streaming progress
+    dialog (:class:`FirefoxInstallDialog`). If the install fails, the
+    dialog shows the captured subprocess log so the failure cause is
+    diagnosable; the user can retry or quit.
+    """
     if _check_playwright_browsers():
         return True
 
     from PySide6.QtWidgets import QMessageBox
+    from .components.firefox_install_dialog import FirefoxInstallDialog
 
     while True:
-        answer = QMessageBox.question(
-            None, "MeManga - Browser Required",
+        confirm = QMessageBox.question(
+            None, "MeManga — Browser Required",
             "MeManga needs Firefox browser components to scrape manga.\n\n"
-            "Download now? (~150 MB, requires internet)",
+            "Download now? (~90 MB, requires internet)",
         )
-
-        if answer != QMessageBox.StandardButton.Yes:
+        if confirm != QMessageBox.StandardButton.Yes:
             quit_answer = QMessageBox.question(
                 None, "MeManga",
                 "MeManga cannot work without browser components.\n\nQuit?",
@@ -124,25 +223,60 @@ def _ensure_browsers():
                 sys.exit(0)
             continue
 
-        installed, error_text = _install_playwright_browsers()
-
-        if installed:
-            QMessageBox.information(None, "Success", "Browser components installed!")
+        dlg = FirefoxInstallDialog()
+        ok, error_text = dlg.run_install()
+        if ok:
             return True
 
-        # Surface the actual error to the user — previously they got a
-        # generic "try again" and had no idea whether it was a network
-        # issue, missing driver, permission problem, or the tuple bug.
+        # The dialog already surfaced the captured log to the user via
+        # its own UI; offer a retry or quit choice and loop.
         detail = (error_text or "unknown error")[:1200]
         retry = QMessageBox.question(
             None, "Installation Failed",
             "Browser installation failed.\n\n"
-            "Make sure you have internet and try again.\n\n"
-            "You can also install manually:\n  playwright install firefox\n\n"
+            "Check your internet connection and try again.\n\n"
+            "You can also install manually with:\n"
+            "    playwright install firefox\n\n"
             f"--- details ---\n{detail}",
         )
         if retry != QMessageBox.StandardButton.Yes:
             sys.exit(0)
+
+
+def _load_app_icon():
+    """Return a multi-resolution :class:`QIcon` for the app, or ``None``.
+
+    Looks up ``memanga/gui/assets/icon/icon-{32,64,128,256,512}.png``
+    bundled alongside the package; works for both source installs and
+    PyInstaller-frozen builds (PyInstaller stages the assets directory
+    under ``sys._MEIPASS``).
+    """
+    from PySide6.QtGui import QIcon
+    from pathlib import Path
+
+    # When frozen, PyInstaller stages bundled data under sys._MEIPASS.
+    # Source install: assets live next to this module.
+    base = Path(getattr(sys, "_MEIPASS", "")) if _is_frozen() else None
+    candidates = []
+    if base is not None:
+        candidates.append(base / "memanga" / "gui" / "assets" / "icon")
+    candidates.append(Path(__file__).resolve().parent / "assets" / "icon")
+
+    icon_dir = next((c for c in candidates if c.exists()), None)
+    if icon_dir is None:
+        return None
+
+    icon = QIcon()
+    found = False
+    # Adding multiple sizes lets Qt pick the sharpest for the task bar
+    # / dock / window title / about box without resampling. addFile
+    # detects the native size from the PNG itself.
+    for size in (16, 32, 48, 64, 128, 256, 512):
+        p = icon_dir / f"icon-{size}.png"
+        if p.exists():
+            icon.addFile(str(p))
+            found = True
+    return icon if found else None
 
 
 def launch_gui():
@@ -157,6 +291,14 @@ def launch_gui():
     # Apply the persisted theme (dark by default). Switching themes from
     # Settings re-runs T.apply(qapp) without a restart.
     T.apply(qapp)
+
+    # Set the app icon globally — covers the window title bar, dock /
+    # task bar entry, and the About dialog without any per-window
+    # plumbing. setWindowIcon on QApplication is the global fallback;
+    # individual top-level windows inherit it.
+    app_icon = _load_app_icon()
+    if app_icon is not None:
+        qapp.setWindowIcon(app_icon)
 
     _ensure_browsers()
 

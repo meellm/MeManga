@@ -84,6 +84,12 @@ hidden_imports += [
 datas = [
     (certifi_dir, "certifi"),
     (stealth_path, "playwright_stealth"),
+    # Bundle the app icon assets so the runtime QIcon loader can find
+    # them inside the frozen binary (sys._MEIPASS staging dir).
+    (
+        os.path.join(project_root, "memanga", "gui", "assets", "icon"),
+        os.path.join("memanga", "gui", "assets", "icon"),
+    ),
 ]
 # Playwright's driver tree (node binary + cli.js) — needed at runtime
 # for `playwright install firefox` on first launch.
@@ -143,6 +149,12 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 # Single EXE with binaries + datas embedded. No COLLECT step, no dist
 # folder of loose files. Output: dist/MeManga-Dev[.exe], which
 # build.py then moves to repo root.
+import sys as _sys
+if _sys.platform == "darwin":
+    _icon = os.path.join(project_root, "packaging", "icon.icns")
+else:
+    _icon = os.path.join(project_root, "packaging", "icon.ico")
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -158,6 +170,7 @@ exe = EXE(
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,   # keep terminal so dev builds surface tracebacks
+    icon=_icon,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
