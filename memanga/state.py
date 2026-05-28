@@ -423,14 +423,14 @@ class State:
         return self.get_manga_state(manga_title).get("available_chapters", [])
 
     # ========================================================================
-    # External Chapters (read elsewhere — user said "I'm on chapter N")
+    # External Chapters (already read outside the app)
     # ========================================================================
 
     def mark_external_chapter(self, manga_title: str, chapter: str):
-        """Record a chapter the user already read outside MeManga.
+        """Record a chapter that was read outside MeManga.
 
-        Stored separately from `downloaded` so we never lie about what's on
-        disk; the Detail page renders these as "Read elsewhere" rows.
+        Stored separately from `downloaded` so the app never lies about what's
+        on disk; the Detail page renders these as "Read elsewhere" rows.
         """
         self._ensure_manga_entry(manga_title)
         entry = self._data["manga"][manga_title]

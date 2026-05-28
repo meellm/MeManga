@@ -162,8 +162,8 @@ def test_scraper_parses_live_site(domain, description, probe, health_recorder):
 
 # ─────────────────────────────────────────────────────────────────────
 # Summary test — runs LAST, prints a one-page status table covering
-# everything probed in this session. Always passes (it's reporting,
-# not validation). Useful in CI artifacts.
+# everything probed in this run. Always passes (it's reporting, not
+# validation). Useful in CI artifacts.
 # ─────────────────────────────────────────────────────────────────────
 
 

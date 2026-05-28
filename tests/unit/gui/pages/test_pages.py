@@ -136,8 +136,8 @@ class TestSearchPage:
         # No worker call expected — nothing to assert except no crash.
 
     def test_no_recent_chip_row(self, app_window, qapp):
-        # Recent-searches chip row was removed by user request — the
-        # corresponding attributes should be gone too.
+        # Recent-searches chip row is intentionally absent — the
+        # corresponding attributes must not exist on the page.
         page = app_window._pages["search"]
         assert not hasattr(page, "_recent_row")
         assert not hasattr(page, "_recents_wrap")

@@ -65,9 +65,9 @@ def _install_playwright_browsers():
         return False, ""
 
     # Strategy 1: bundled driver (node + cli.js). compute_driver_executable
-    # returns a (node_path, cli_js_path) tuple on playwright >= 1.40 —
-    # previously we were passing str(tuple) as argv[0], which always
-    # raised FileNotFoundError and got swallowed.
+    # returns a (node_path, cli_js_path) tuple on playwright >= 1.40; the
+    # tuple must be unpacked into argv, not stringified, or the spawn
+    # raises FileNotFoundError.
     try:
         from playwright._impl._driver import compute_driver_executable
         driver = compute_driver_executable()

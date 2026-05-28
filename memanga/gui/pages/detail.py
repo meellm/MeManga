@@ -451,9 +451,9 @@ class DetailPage(BasePage):
             num = str(ch_num)
             if num and num not in merged:
                 merged[num] = {"number": num}
-        # External-only entries (user said "I'm on chapter N" but the cached
-        # list hasn't been pulled yet) — render them too so the user sees the
-        # state was recorded. They'll get proper source metadata once a check
+        # External-only entries (marked as "read elsewhere" before the
+        # chapter list has been fetched) — render them too so the recorded
+        # state is visible. They get proper source metadata once a check
         # populates available_chapters.
         for ch_num in external:
             num = str(ch_num)
@@ -824,9 +824,9 @@ class DetailPage(BasePage):
     def _refetch_cover(self, title: str, url: str, domain: str):
         """Spawn a background cover lookup (scraper → MangaDex fallback).
 
-        Used when the user renames a manga and we want to give them
-        another shot at finding a cover for the corrected title.
-        Mirrors the chain in ``add_manga.py:_fetch_cover``.
+        Called after a manga is renamed so the corrected title gets
+        another chance to resolve to a cover image. Mirrors the chain
+        in ``add_manga.py:_fetch_cover``.
         """
         import threading
 

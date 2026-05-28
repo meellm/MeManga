@@ -279,12 +279,11 @@ class VRFGenerator:
     # Search via persistent browser
     # ------------------------------------------------------------------
     # MangaFire returns 403 to plain HTTP (Cloudflare), so search must
-    # go through a real browser. The OLD MangaFireScraper.search()
-    # launched a fresh Firefox per call (~5-10 s startup + page load on
-    # cold cache) which made it the slowest of the top-15 sources and
-    # the most prone to "didn't return in time" complaints from users
-    # on slow networks. Reusing the VRFGenerator's persistent browser
-    # cuts per-search cost to ~0.5 s after warm-up.
+    # go through a real browser. Launching a fresh Firefox per call
+    # adds ~5-10 s of cold-start latency on top of the actual search
+    # work, which on slower networks pushes MangaFire past the point
+    # the GUI considers it usable. Reusing the persistent VRFGenerator
+    # browser drops per-search cost to ~0.5 s after warm-up.
     def _search_in_thread(self, query: str) -> List[Manga]:
         """Run a search using the persistent Firefox in this thread.
 
@@ -503,12 +502,10 @@ class MangaFireScraper(BaseScraper):
     def search(self, query: str) -> List[Manga]:
         """Search for manga via the persistent VRFGenerator browser.
 
-        Previously this launched a fresh Firefox per call, costing
-        5-10 s of cold start on top of the actual search. Routing
-        through `get_vrf_generator()` (a process-wide singleton that
-        keeps Firefox open across calls) drops per-search latency to
-        <1 s on warm cache, which is what surfaces MangaFire results
-        in the GUI before the user assumes the source is broken.
+        Routes through `get_vrf_generator()` (a process-wide singleton
+        that keeps Firefox open across calls) instead of launching a
+        fresh browser per query, so per-search latency stays under a
+        second once the browser is warm.
         """
         return get_vrf_generator().search(query)
 

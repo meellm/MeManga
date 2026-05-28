@@ -188,13 +188,12 @@ class TestGetScraperRegistry:
 
 
 class TestMangaFireSearchUsesPersistentBrowser:
-    """Regression: MangaFireScraper.search used to launch a fresh
-    Firefox per call (~5-10 s cold start). On users with slow networks
-    that pushed it past the search worker's per-source budget and
-    MangaFire never appeared in the result list. The fix routes
-    search() through VRFGenerator, which keeps Firefox open across
-    calls (chapter-pages already did this; search now joins the same
-    persistent browser).
+    """Regression: launching a fresh Firefox per call adds ~5-10 s of
+    cold-start latency, which on slower networks pushes MangaFire past
+    the search worker's per-source budget and the source never makes
+    it into the result list. search() must route through VRFGenerator,
+    which keeps Firefox open across calls (chapter-page extraction
+    already does this; search joins the same persistent browser).
     """
 
     def test_search_delegates_to_vrf_generator(self, monkeypatch):
@@ -219,9 +218,8 @@ class TestMangaFireSearchUsesPersistentBrowser:
 
     def test_search_does_not_launch_new_firefox(self, monkeypatch):
         """Hard guard: calling MangaFireScraper.search() must NOT
-        invoke `playwright.firefox.launch` directly. If anyone re-
-        adds the per-call launch pattern this test catches it before
-        it hits production.
+        invoke `playwright.firefox.launch` directly. Re-introducing the
+        per-call launch pattern fails this test.
         """
         from memanga.scrapers import mangafire as mf
         # Stub the VRF generator so the real persistent browser doesn't
@@ -252,3 +250,145 @@ class TestMangaFireSearchUsesPersistentBrowser:
         scraper = mf.MangaFireScraper()
         scraper.search("x")
         assert called["n"] == 0, "search should reuse VRF browser, not launch a new one"
+
+
+class TestWeebCentralSearchHitsDataEndpoint:
+    """Regression: typing into the quick-search sidebar and pressing
+    Enter does not filter WeebCentral's main result grid — the page
+    returns the unfiltered series list, the worker's relevance filter
+    drops every row, and the GUI ends up rendering zero WeebCentral
+    results even though the scraper appears to "succeed". The fix
+    navigates directly to /search/data?text=<query>&… which is the
+    real HTMX endpoint the page itself calls.
+    """
+
+    def test_navigates_to_search_data_endpoint_with_query(self, monkeypatch):
+        from memanga.scrapers import weebcentral as wc
+
+        # Capture the URL that goto() is called with.
+        visited = {"url": None}
+
+        class _FakePage:
+            def goto(self, url, **kw): visited["url"] = url
+            def wait_for_selector(self, *a, **kw): pass
+            def content(self): return "<html></html>"
+            def close(self): pass
+
+        class _FakeContext:
+            def new_page(self): return _FakePage()
+
+        monkeypatch.setattr(
+            wc.WeebCentralScraper, "_get_browser_in_thread",
+            lambda self: (None, _FakeContext()),
+        )
+
+        scraper = wc.WeebCentralScraper()
+        scraper._search_in_thread("Blue Lock")
+
+        url = visited["url"] or ""
+        # Must hit the real data endpoint, not /search.
+        assert "/search/data" in url, f"expected /search/data, got {url}"
+        # Must encode the query into the text param so the server
+        # actually filters.
+        assert "text=Blue+Lock" in url or "text=Blue%20Lock" in url, \
+            f"query missing from URL: {url}"
+
+    def test_strips_official_badge_from_titles(self, monkeypatch):
+        """Result titles from /search/data are prefixed with an
+        "Official" badge text — strip it so the rendered row shows
+        "Blue Lock" not "OfficialBlue Lock".
+        """
+        from memanga.scrapers import weebcentral as wc
+
+        html = """
+        <html><body>
+        <a href="/series/abc/Blue-Lock">
+          <span>Official</span>Blue Lock
+        </a>
+        <a href="/series/def/Other">
+          <abbr title="Other Title">Other Title</abbr>
+        </a>
+        </body></html>
+        """
+
+        class _FakePage:
+            def goto(self, url, **kw): pass
+            def wait_for_selector(self, *a, **kw): pass
+            def content(self): return html
+            def close(self): pass
+
+        class _FakeContext:
+            def new_page(self): return _FakePage()
+
+        monkeypatch.setattr(
+            wc.WeebCentralScraper, "_get_browser_in_thread",
+            lambda self: (None, _FakeContext()),
+        )
+
+        scraper = wc.WeebCentralScraper()
+        results = scraper._search_in_thread("Blue Lock")
+
+        titles = [r.title for r in results]
+        assert "Blue Lock" in titles, \
+            f"'Official' badge prefix not stripped: {titles}"
+        assert "Other Title" in titles
+
+
+class TestPlaywrightScraperPerSubclassExecutor:
+    """Regression: every PlaywrightScraper subclass used to inherit ONE
+    shared `_executor = ThreadPoolExecutor(max_workers=1)` from the
+    base class, so WeebCentral / Comick / MangaKatana / MangaClash /
+    MangaHere all queued serially on a single browser thread inside the
+    search worker's 8-slot pool. The first slow scraper blocked every
+    other Playwright source. Each subclass must now own its own
+    executor + lock pair.
+    """
+
+    def test_each_subclass_has_distinct_executor(self):
+        from memanga.scrapers.playwright_base import PlaywrightScraper
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+        from memanga.scrapers.comick import ComickScraper
+
+        # Two subclasses → two distinct executors and two distinct locks.
+        assert WeebCentralScraper._executor is not ComickScraper._executor
+        assert WeebCentralScraper._executor_lock is not ComickScraper._executor_lock
+
+    def test_get_browser_in_thread_rolls_back_partial_init(self, monkeypatch):
+        """When firefox.launch raises, neither `_thread_local.playwright`
+        nor `_thread_local.browser` may be left in a half-set state —
+        the next call must be able to retry cleanly.
+        """
+        from memanga.scrapers import playwright_base as pb
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        # Reset any prior thread-local state
+        pb.cleanup_browsers()
+
+        class _BoomPW:
+            firefox = type("_F", (), {
+                "launch": staticmethod(
+                    lambda *a, **k: (_ for _ in ()).throw(
+                        RuntimeError("firefox missing"),
+                    )
+                ),
+            })()
+            stopped = False
+            def stop(self): _BoomPW.stopped = True
+
+        boom = _BoomPW()
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: type("_S", (), {
+            "start": staticmethod(lambda: boom),
+        })())
+
+        scraper = WeebCentralScraper()
+        with pytest.raises(RuntimeError):
+            scraper._get_browser_in_thread()
+
+        # State must be fully cleaned: no dangling playwright/browser/context.
+        assert not hasattr(pb._thread_local, "playwright"), \
+            "partial init left _thread_local.playwright set"
+        assert not hasattr(pb._thread_local, "browser")
+        assert not hasattr(pb._thread_local, "context")
+        # And `pw.stop()` must have been called to release native resources.
+        assert _BoomPW.stopped, "partial init didn't call pw.stop()"

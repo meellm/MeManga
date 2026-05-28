@@ -1,4 +1,4 @@
-"""Regression tests for every numbered bug we've already fixed.
+"""Regression tests for previously-fixed numbered bugs.
 
 If any of these go red, a previously-fixed bug has come back.
 

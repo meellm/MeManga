@@ -132,10 +132,9 @@ class TestCountChapters:
         assert seen and seen[0]["count"] == -1
 
     def test_retries_on_transient_failure(self, event_bus, monkeypatch):
-        """A transient failure should be retried — as long as the user
-        stays on the same search, the chip eventually fills in once
-        the source comes back. (Per-user request: don't give up
-        silently on the first failure.)
+        """A transient failure must be retried so the chip fills in
+        once the source recovers, instead of staying blank after a
+        single network blip.
         """
         from memanga.gui.workers import BackgroundWorker
         w = BackgroundWorker(event_bus)
@@ -196,8 +195,8 @@ class TestSearchRelevanceFilter:
 
     def test_unrelated_singleton_dropped(self):
         from memanga.gui.workers import _result_matches_query
-        # Same shape as a single-manga scraper returning its manga
-        # for a totally unrelated query — the user reported this.
+        # Single-manga scrapers return their hard-coded title regardless
+        # of the query; the filter must drop those mismatches.
         assert not _result_matches_query("Beastars", "blue lock")
         assert not _result_matches_query("Tokyo Ghoul", "blue lock")
         assert not _result_matches_query("Hajime no Ippo", "blue lock")

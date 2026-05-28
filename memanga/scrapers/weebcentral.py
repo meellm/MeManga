@@ -16,50 +16,71 @@ class WeebCentralScraper(PlaywrightScraper):
     name = "weebcentral"
     base_url = "https://weebcentral.com"
 
+    # WeebCentral's advanced search is an HTMX form whose visible URL is
+    # /search but whose actual filtered data endpoint is /search/data.
+    # The old implementation typed into the quick-search bar and pressed
+    # Enter — but the quick-search input only POSTs to a side-panel,
+    # NOT the main result grid, so Enter never filtered anything and
+    # we got the full unfiltered series list back (64+ rows, none
+    # matching the query → relevance filter dropped them all → user
+    # saw zero WeebCentral results). Hitting /search/data with the
+    # full filter param set is the same request the page itself makes
+    # and returns Blue Lock in ~400 ms.
+    _SEARCH_URL_FMT = (
+        "{base}/search/data?text={q}"
+        "&sort=Best+Match&order=Descending"
+        "&official=Any&anime=Any&adult=Any"
+        "&display_mode=Full+Display"
+    )
+
     def _search_in_thread(self, query: str) -> List[Manga]:
         """Search using Playwright - runs in executor thread."""
         from bs4 import BeautifulSoup
+        from urllib.parse import quote_plus
 
         browser, context = self._get_browser_in_thread()
         page = context.new_page()
         results = []
 
         try:
-            # Use advanced search page
-            page.goto(f"{self.base_url}/search", wait_until='domcontentloaded', timeout=60000)
-            # Wait for the search input to be ready rather than a fixed 2s.
-            try:
-                page.wait_for_selector(
-                    'input[type="text"], input[type="search"]', timeout=10000,
-                )
-            except Exception:
-                pass
-
-            # Fill search input
-            search_input = page.locator('input[type="text"], input[type="search"]').first
-            search_input.fill(query)
-            search_input.press('Enter')
-            # Wait for the first /series/ link instead of a blind 3s
-            # sleep — empty queries return faster, popular queries
-            # render their first row in <500 ms. Old fixed-sleep meant
-            # every search paid 3 s minimum.
+            search_url = self._SEARCH_URL_FMT.format(
+                base=self.base_url, q=quote_plus(query),
+            )
+            page.goto(search_url, wait_until='domcontentloaded', timeout=30000)
+            # Wait for at least one real series link OR the empty-state
+            # render, then snapshot. wait_for_selector returns instantly
+            # when the link already exists in the static HTML the
+            # /search/data endpoint returns.
             try:
                 page.wait_for_selector(
                     'a[href*="/series/"]:not([href*="/series/random"])',
-                    timeout=10000,
+                    timeout=8000,
                 )
             except Exception:
                 pass
 
-            # Get results
-            content = page.content()
-            soup = BeautifulSoup(content, 'html.parser')
+            soup = BeautifulSoup(page.content(), 'html.parser')
 
             for link in soup.select('a[href*="/series/"]'):
                 href = link.get('href', '')
                 if '/series/random' in href:
                     continue
-                title = link.get_text(strip=True)
+                # /search/data wraps the title in nested spans alongside
+                # an "Official" badge. Grab the deepest title node by
+                # preferring an <abbr title="..."> when present, else
+                # strip the leading "Official" / "Unofficial" prefix
+                # from the collapsed text.
+                title = ""
+                abbr = link.select_one('abbr[title]')
+                if abbr and abbr.get("title"):
+                    title = abbr.get("title").strip()
+                if not title:
+                    title = link.get_text(separator=" ", strip=True)
+                    for prefix in ("Official ", "Unofficial ",
+                                    "Official", "Unofficial"):
+                        if title.startswith(prefix):
+                            title = title[len(prefix):].lstrip()
+                            break
                 if not title or len(title) < 2:
                     continue
                 if not href.startswith('http'):

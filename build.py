@@ -141,8 +141,8 @@ def collect_artifact() -> Path | None:
     except Exception:
         pass
 
-    # Sweep PyInstaller scratch dirs — the user wanted "only the .exe
-    # to be created. Not folder or the files inside it."
+    # Sweep PyInstaller scratch dirs so the only build artefact left
+    # behind is the single executable at the repo root.
     for d in (BUILD_TMP, DIST_TMP):
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)

@@ -13,9 +13,9 @@ from ..components.search_result import SearchResultRow
 from ..components.toast import Toast
 
 
-# Sources we know are broken or dead — skip them in search so we don't
-# waste a worker slot waiting for a timeout. Verified 2026-05 via the
-# live probe in /tmp/probe_search.py.
+# Sources known to be broken or dead — skipped in search so a worker
+# slot doesn't wait out the full timeout. Re-run tests/scrapers/live/
+# against a candidate domain before re-enabling it here.
 #
 # Reasons:
 #   - SHUTDOWN:     site shows a "shutdown" page (mangasee123)
@@ -211,9 +211,8 @@ class SearchPage(BasePage):
         hero_l.setSpacing(14)
 
         # Inner search bar: bg_0 container, leading magnifier icon,
-        # accent Search button on the right. (⌘K kbd-hint chip removed
-        # per user request — Ctrl/Cmd+K still focuses this input,
-        # it's just no longer surfaced visually.)
+        # accent Search button on the right. Ctrl/Cmd+K still focuses
+        # this input; the kbd hint chip is intentionally not surfaced.
         bar_wrap = QFrame()
         bar_wrap.setProperty("role", "card_2")
         bar = QHBoxLayout(bar_wrap)
@@ -246,8 +245,6 @@ class SearchPage(BasePage):
         self._status_label = QLabel("Type a title and press Enter to search.")
         self._status_label.setProperty("role", "hint")
         hero_l.addWidget(self._status_label)
-
-        # (Recent searches chip row removed per user request.)
 
         layout.addWidget(hero)
         layout.addSpacing(8)
