@@ -13,10 +13,10 @@ from .base import BaseScraper, Chapter, Manga
 
 class ManhuaUsScraper(BaseScraper):
     """Scraper for ManhuaUs.org"""
-    
+
     name = "manhuaus"
     base_url = "https://manhuaus.org"
-    
+
     def search(self, query: str) -> List[Manga]:
         from bs4 import BeautifulSoup
         url = f"{self.base_url}/?s={query.replace(' ', '+')}&post_type=wp-manga"

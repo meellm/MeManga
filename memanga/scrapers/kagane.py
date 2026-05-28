@@ -271,8 +271,9 @@ class KaganeScraper(PlaywrightScraper):
 
     def _capture_image_urls(self, url: str) -> List[str]:
         """Run image capture in thread pool (avoids asyncio conflicts)."""
-        future = self._executor.submit(self._capture_image_urls_in_thread, url)
-        return future.result(timeout=180)
+        return self._run_serialized(
+            self._capture_image_urls_in_thread, url, timeout=180,
+        )
 
     def download_image(self, url: str, path: Path) -> bool:
         """Download image with kagane-specific headers."""

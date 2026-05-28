@@ -1,150 +1,425 @@
 # 📖 MeManga
 
-**Automatic manga downloader with Kindle support.**
+**Automatic manga downloader with a desktop app and a power-user CLI.**
 
-Track manga from multiple sources, download chapters as PDF/EPUB/CBZ, and optionally send them directly to your Kindle via email.
+Track manga across 224 scrapers / 319 domains, read downloaded chapters
+in the built-in reader, and optionally email them to your Kindle.
+Works offline once chapters are downloaded.
 
-## ✨ Features
+<p align="center">
+  <!-- [SCREENSHOT: hero — the Library page in dark theme,
+       maximized window, a few visible cards with covers + status pills
+       + "+N NEW" badges, sidebar showing Library/Downloads/Search etc.
+       This is the first thing visitors see — pick a screenshot where
+       multiple cards have real covers loaded.] -->
+  <img src="docs/screenshots/hero-library.png" alt="MeManga Library — dark theme grid of manga covers" width="900">
+</p>
 
-- 📚 **Track multiple manga** from 260+ scrapers / 300+ domains
-- 🔍 **Automatic updates** — knows what you've already downloaded
-- 🔄 **Backup sources** — fallback to secondary sources after N days
-- 📊 **Status tracking** — reading, on-hold, dropped, completed
-- 📥 **Bulk downloads** — download from chapter 1 with `--from` flag
-- 📄 **PDF/EPUB/CBZ/ZIP/JPG/PNG/WEBP output** — for e-readers, comic viewers, and local reading
-- 📧 **Kindle delivery** — automatic email to your device
-- ⏰ **Scheduled checks** — daily cron job support
-- 🖥️ **Cross-platform** — Windows, macOS, Linux, Raspberry Pi
+<p align="center">
+  <a href="https://github.com/meellm/MeManga/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/meellm/MeManga"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <img alt="platforms" src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-supported-success">
+  <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue">
+</p>
 
-## 🚀 Quick Start
+---
+
+## ✨ Highlights
+
+- 🖥️ **Single-file desktop app** — `MeManga.exe` / `MeManga`, no Python install required
+- 📚 **Library tracking** — your read/unread state survives reboots
+- 🔍 **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
+- 📖 **Built-in reader** — zoom, fit-to-page, keyboard nav, no external viewer needed
+- 📥 **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output
+- 📧 **Kindle delivery** — auto-send chapters by email after download
+- 🔄 **Backup sources** — fall back to a second source if the primary stops updating
+- 🌐 **Offline-aware** — gracefully disables network actions, auto-resumes when wifi returns
+- 🤝 **Power-user CLI** — same engine, scriptable, cron-friendly, works on headless servers
+- 🔒 **No telemetry, no accounts, no cloud** — everything stays on your machine
+
+---
+
+## 📥 Download
+
+The fastest path is the release binary. Nothing to install — double-click and you're in.
+
+| OS | File |
+|---|---|
+| Windows | [`MeManga-windows-x64.exe`](https://github.com/meellm/MeManga/releases/latest) |
+| macOS (Apple Silicon) | [`MeManga-macos-arm64`](https://github.com/meellm/MeManga/releases/latest) |
+| Linux (x86_64) | [`MeManga-linux-x64`](https://github.com/meellm/MeManga/releases/latest) |
+
+> **First launch downloads Firefox** (~80 MB, one-time, behind a progress dialog).
+> Playwright uses it under the hood to scrape JS-heavy sources like MangaFire and WeebCentral.
+>
+> **Windows SmartScreen** may warn the first time — click "More info → Run anyway".
+> The app is not yet code-signed.
+>
+> **macOS Gatekeeper** — right-click → Open the first time; future launches are normal.
+
+Prefer building from source? See [Build from source](#-build-from-source) below.
+
+---
+
+# Part 1 — Desktop App
+
+## 🚀 First five minutes
+
+When you open MeManga for the first time:
+
+1. The Library page is empty — click **+ Add manga** in the header.
+2. Paste a manga URL from any [supported source](docs/SUPPORTED_SOURCES.md), or click **Search** in the sidebar and type the title.
+3. The app remembers what you added, what you've downloaded, and what you've read — across restarts and across machines (config lives in `~/.config/memanga/`).
+
+<p align="center">
+  <!-- [SCREENSHOT: the Add Manga modal open on top of the
+       Library page. Paste a URL like https://mangadex.org/title/...
+       so the dialog shows the URL field filled. ~600px wide. ] -->
+  <img src="docs/screenshots/add-manga-modal.png" alt="Add Manga dialog" width="700">
+</p>
+
+## 📚 Library
+
+The Library page is your home. Cards show the cover, status pill
+(`READING`, `COMPLETED`, …), an unread badge when there are new
+chapters, and an in-progress bar for the current chapter you're on.
+
+<p align="center">
+  <!-- [SCREENSHOT: a Library page with 8–12 cards in a 4-column grid.
+       Mix of statuses so the Reading/On hold/Completed pills are
+       visible. Ideally have one card with the "+N NEW" badge in the
+       corner. ~900px wide.] -->
+  <img src="docs/screenshots/library-grid.png" alt="Library page with mixed manga statuses" width="900">
+</p>
+
+- Click a card → **Detail** page (chapter list, status, mode, Kindle toggle)
+- Right-click → quick actions (mark as read, change status, remove)
+- Top-right chip row filters by status; the chip count updates live
+
+## 📖 Reader
+
+Click any downloaded chapter on the Detail page to open it in the built-in reader.
+
+<p align="center">
+  <!-- [SCREENSHOT: Reader page open on a real chapter. Show ~2 manga
+       pages stacked vertically; zoom buttons + chapter nav controls
+       visible at the top/bottom. Crop so a recognizable page is in
+       the middle. ~700px tall.] -->
+  <img src="docs/screenshots/reader-view.png" alt="Built-in reader showing a chapter" width="700">
+</p>
+
+| Key / mouse | Action |
+|---|---|
+| `↑ ↓` / scroll wheel | Scroll within page |
+| `← →` / `Page Up Page Down` | Previous / next chapter |
+| `Ctrl/Cmd + scroll` | Zoom in/out |
+| `Ctrl/Cmd + 0` | Reset zoom |
+| Click-drag while zoomed | Pan |
+| `Esc` | Back to Detail |
+
+## 🔍 Search
+
+Search hits **only the 15 most popular working aggregators by default** —
+MangaDex, MangaPill, MangaFire, MangaBuddy, WeebCentral, MangaKatana,
+Comick, MangaHub, MangaHere, MangaPanda, MangaClash, MangaHere.onl,
+MangaTaro, LuminousScans, TCBScans. Flip more on in the **Sources** tab
+if you want a wider net (the long-tail aggregators are usually slower
+or have stale catalogs).
+
+<p align="center">
+  <!-- [SCREENSHOT: Search page after typing "Blue Lock", results
+       streaming in. Show at least: status line with "8/15 sources ·
+       23 results", several result rows with title + source domain +
+       the "47 ch" chip + the green "+ Add" button on the right.
+       ~900px wide.] -->
+  <img src="docs/screenshots/search-results.png" alt='Search results for "Blue Lock" with chapter-count chips' width="900">
+</p>
+
+Each result row shows the source domain, a `47 ch` chip telling you
+how many chapters that source has, and a `+ Add` button that drops it
+straight into your library.
+
+## 📥 Downloads
+
+The Downloads page shows what's currently downloading and what just
+finished. Each row has progress, cancel, and "open folder" buttons.
+Cancel-all drains the queue cleanly.
+
+<p align="center">
+  <!-- [SCREENSHOT: Downloads page mid-download. Top section should
+       show 2–3 active rows with progress bars at various percentages
+       + a queued count badge. Bottom section should show 3–4 recently
+       completed entries with sizes. ~900px wide.] -->
+  <img src="docs/screenshots/downloads-page.png" alt="Downloads page with active + completed rows" width="900">
+</p>
+
+If a chapter fails partway through, MeManga retries the failed pages
+up to 3× with exponential back-off. If pages are still missing, the
+chapter is **not** marked as downloaded — next "Check" will pick it
+back up.
+
+## 🌐 Sources
+
+The Sources page shows every supported domain with its current health
+status (latency, last successful check, last error). Toggle individual
+sources on/off; your selection persists across restarts.
+
+<p align="center">
+  <!-- [SCREENSHOT: Sources page showing the toggle list. Mix of green
+       (ok), warn (slow), and gray (disabled) dots. The "Active sources"
+       summary line at the top should read something like "12 active ·
+       180 available · 9 EN, 1 JP selected". ~900px wide.] -->
+  <img src="docs/screenshots/sources-page.png" alt="Sources page with toggle list and health badges" width="900">
+</p>
+
+Hit **Re-check health** to ping every enabled source.
+
+## ⚙️ Settings
+
+- **General** — output format (PDF/EPUB/CBZ/…), download folder, theme, concurrency
+- **Kindle / Email** — Gmail App Password setup for sending chapters to your Kindle
+- **Advanced** — fallback-source delay, cron, cache management
+
+<p align="center">
+  <!-- [SCREENSHOT: Settings page with the "Kindle / Email" tab open
+       so the SMTP fields are visible. The form should be populated
+       with example values (kindle email, sender email, smtp server,
+       port). ~900px wide.] -->
+  <img src="docs/screenshots/settings-kindle.png" alt="Settings page — Kindle/Email tab" width="900">
+</p>
+
+### Setting up Kindle delivery
+
+1. [Generate a Gmail App Password](https://support.google.com/accounts/answer/185833)
+   (regular passwords won't work; Google blocks them for SMTP).
+2. Add your Gmail address to your
+   [Amazon "Approved Personal Document E-mail List"](https://www.amazon.com/hz/mycd/myx#/home/settings/payment).
+3. In **Settings → Kindle / Email**, paste your Kindle email, sender Gmail,
+   and the App Password. Hit "Test" — you'll get a "Test email sent" toast
+   when it works.
+4. On the Detail page of any manga, toggle **Send to Kindle after download**.
+
+PDFs over 18 MB are split automatically; EPUB / CBZ files can't be split so they fail-loud with a size warning.
+
+---
+
+# Part 2 — Command-line interface
+
+> **Just want the CLI?** A dedicated [`cli` branch](https://github.com/meellm/MeManga/tree/cli)
+> strips PySide6 and the GUI module out of the tree — leaner venv,
+> faster `pip install`, no Qt runtime to worry about, ideal for
+> headless servers and Docker images. `main` keeps both.
+
+The CLI ships in the source tree (not the release binary). It's the
+right tool for cron jobs, headless servers, batch operations, and
+scripting. The desktop app and the CLI share the same config, state,
+and download files — you can drive your library from both
+interchangeably.
+
+## Install
 
 ```bash
 git clone https://github.com/meellm/MeManga.git
 cd MeManga
-python setup.py
+python setup.py            # creates a venv + installs everything
 ```
 
-Then:
+The CLI lives at `python -m memanga` once the venv is active.
+On Windows, prefer:
+
+```cmd
+.\scripts\windows\setup.bat
+.\scripts\windows\run.bat <command>
+```
+
+On macOS / Linux:
+
 ```bash
-./scripts/run.sh add -i      # Add manga interactively
-./scripts/run.sh check       # Check for new chapters
-./scripts/run.sh             # Launch interactive TUI
+./scripts/run.sh <command>
 ```
 
-> **Windows:** Use `scripts\windows\run.bat` instead of `./scripts/run.sh`
+## Commands
 
-## 🌐 Popular Sources
+| Command | Purpose |
+|---|---|
+| `list` (`ls`) | Show every tracked manga with status + chapter counts |
+| `add` | Add a manga; supports `-t TITLE -u URL [-b BACKUP_URL]` or `-i` interactive |
+| `set TITLE STATUS` | `reading` / `on-hold` / `dropped` / `completed` |
+| `remove TITLE` (`rm`) | Drop a manga from tracking |
+| `update TITLE …` | Edit URL, backup source, or rename |
+| `check [TITLE] [--from N] [--auto] [--safe]` | Look for new chapters, optionally download them |
+| `failed [--retry] [--clear]` | List / re-attempt / clear partially-failed downloads |
+| `status` | Show config dir, download dir, manga count, last check time |
+| `config` | Interactive settings editor |
+| `cron install [--time 06:00]` | Schedule a daily `check --auto` job |
+| `cron status` / `cron remove` | Inspect / uninstall the cron job |
+| `sources` | List all 319 supported domains, marking which ones are healthy |
+| `export FILE` / `import FILE` | Back up or restore your library + state as JSON |
+| `tui` | Launch the in-terminal interactive view |
+
+Run any subcommand with `--help` for full flags.
+
+## Common recipes
+
+### Add a manga with a backup source
+
+```bash
+python -m memanga add \
+    -t "Blue Lock" \
+    -u "https://mangapill.com/manga/580/blue-lock" \
+    -b "https://mangadex.org/title/4141c5dc-c525-4df5-afd7-cc7d192a832f"
+```
+
+If MangaPill stops updating, MeManga falls back to MangaDex after
+`fallback_delay_days` (default 2) — long enough for a slow-translating
+primary to catch up.
+
+### Backfill an entire series from chapter 1
+
+```bash
+python -m memanga check -t "Blue Lock" --from 1 --auto --safe
+```
+
+`--safe` restarts the browser every 3 chapters to keep memory usage
+flat across long bulk runs.
+
+### Schedule daily checks
+
+```bash
+# Linux/macOS — installs a crontab entry
+python -m memanga cron install --time 06:00
+
+# Windows — register a Task Scheduler entry (run as your user)
+python -m memanga cron install --time 06:00
+```
+
+### Retry every failed chapter
+
+```bash
+python -m memanga failed --retry
+```
+
+`failed` is the safety net for the "downloaded but incomplete" class of
+errors — the modern downloader refuses to mark a chapter complete if
+any page failed, and tracks the failure so you can batch-retry later.
+
+---
+
+## 🌐 Sources
+
+The default search sweep covers these 15 verified working
+aggregators (popularity order):
 
 | Source | Type | Notes |
-|--------|------|-------|
-| mangadex.org | API | Largest fan translation library |
-| weebcentral.com | Playwright | 1000+ series, fast search |
-| mangafire.to | Playwright | VRF bypass + image descrambling |
+|---|---|---|
+| mangadex.org | API | Largest fan-translation library |
 | mangapill.com | Requests | Fast, no Cloudflare |
-| bato.to | Requests | Community-driven |
-| comick.io | Requests | Clean API |
-| tcbscans.com | Requests | Jump manga (One Piece, JJK) |
-| asuracomic.net | Playwright | Manhwa/Webtoons |
-| mangakakalot.com | Requests | Huge library |
-| mangasee123.com | Requests | High quality scans |
+| mangafire.to | Playwright | VRF bypass + image descrambling |
+| mangabuddy.com | Playwright | Popular aggregator |
+| weebcentral.com | Playwright | 1000+ series |
+| mangakatana.com | Playwright | General library |
+| comick.io | Playwright | Clean API |
+| mangahub.io | Requests | Huge library |
+| mangahere.cc | Requests | Reliable mirror |
+| mangapanda.onl | Requests | MangaHub network |
+| mangaclash.com | Playwright | Manhwa-heavy |
+| mangahere.onl | Playwright | Alternate mirror |
+| mangataro.org | Requests | ComicK replacement |
+| luminousscans.com | Requests | Scanlation focus |
+| tcbonepiecechapters.com | Requests | Jump titles (One Piece, JJK, MHA) |
 
-**[→ Full list of 300+ supported domains](docs/SUPPORTED_SOURCES.md)**
+200+ more aggregators are in the registry — toggle them on in the
+**Sources** tab or via `python -m memanga sources`. See the
+[full domain list](docs/SUPPORTED_SOURCES.md).
 
-> **Note:** Playwright scrapers use Firefox headless browser for JavaScript rendering and bot detection bypass.
+---
 
-## 📋 Commands
-
-| Command | Description |
-|---------|-------------|
-| `run` | Interactive TUI |
-| `run list` | Show tracked manga with status |
-| `run add -i` | Add manga interactively |
-| `run add -t "Title" -u URL -b BACKUP` | Add with backup source |
-| `run check` | Check for new chapters |
-| `run check --auto` | Auto-download all new |
-| `run check -t "Title" --from 1 --auto --safe` | Download from chapter 1 |
-| `run set "Title" on-hold` | Set manga status |
-| `run remove "Title"` | Remove manga |
-| `run config` | Configure settings |
-| `run cron install` | Set up daily checks |
-| `run sources` | List all sources |
-
-### Status System
-
-Track your reading progress:
+## 🛠️ Build from source
 
 ```bash
-run set "Manga Title" reading     # Currently reading (checked daily)
-run set "Manga Title" on-hold     # Paused (skipped during check)
-run set "Manga Title" dropped     # Dropped (skipped during check)
-run set "Manga Title" completed   # Finished (skipped during check)
+git clone https://github.com/meellm/MeManga.git
+cd MeManga
+python setup.py            # one-time venv setup
+
+# Dev build — console window stays open for tracebacks
+python build.py            # → ./MeManga-Dev.exe (or ./MeManga-Dev)
+
+# Release build — no console, identical pins as the GitHub release
+python build_app.py        # → ./MeManga.exe (or ./MeManga)
 ```
 
-### Bulk Downloads
+Both scripts produce a single file at the repo root and sweep their
+`build/` + `dist/` scratch dirs after. The release build pulls from
+`requirements-lock.txt` (exact pins for every transitive dep) so the
+binary you rebuild from a tagged commit in six months matches what
+shipped on the release day.
 
-Download a manga from scratch:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for project layout, test
+commands, scraper-add walkthroughs, and the lock-refresh flow.
 
-```bash
-# Download all chapters from beginning
-run check -t "Manga Title" --from 1 --auto --safe
+---
 
-# Start from specific chapter
-run check -t "Manga Title" --from 50 --auto --safe
-```
+## 📂 Where your data lives
 
-> **Note:** Use `--safe` for bulk downloads — it restarts the browser every 3 chapters to prevent memory issues.
+| Path | What |
+|---|---|
+| `~/.config/memanga/config.yaml` | Library, settings, source toggles, theme |
+| `~/.config/memanga/state.json` | Read/unread state, download history, source health |
+| `~/.config/memanga/covers/` | Cover image cache |
+| `~/.config/memanga/crash.log` | Uncaught exceptions from the windowed release exe |
+| `~/Downloads/MeManga/<title>/` | Default download folder (changeable in Settings) |
 
-## ⚙️ Configuration
+Sensitive credentials (SMTP App Password) are stored in the OS keyring
+(Keychain on macOS, Credential Manager on Windows, Secret Service on
+Linux) — never in plain text on disk.
 
-Config files are stored in `~/.config/memanga/`. See `examples/` folder for templates:
-- `examples/config.example.yaml` — configuration template
-- `examples/state.example.json` — state file format
+---
 
-### Backup Sources
+## ❓ FAQ
 
-Configure primary and backup sources for each manga:
+**Will my downloads work without internet?**
+Yes — once a chapter is on disk it opens in the reader instantly. The
+app gracefully disables network actions (Search, Check, Download)
+when it detects you're offline and re-enables them when the wifi
+returns.
 
-```yaml
-manga:
-- title: My Manga
-  fallback_delay_days: 2  # Wait 2 days before using backup
-  sources:
-    - url: https://mangafire.to/manga/my-manga.xxx    # Primary
-    - url: https://mangadex.org/title/uuid-here       # Backup
-```
+**Does it phone home / send analytics?**
+No. The app talks only to the manga sources you enable. No telemetry,
+no crash reports auto-sent. Crash dumps go to `crash.log` locally —
+if you want to share one in a bug report, you can.
 
-### Delivery Modes
+**Why does the first launch take a while?**
+It's downloading Playwright's Firefox driver (~80 MB) so it can
+scrape JS-heavy sites. One-time, behind a progress dialog. After
+that, startup is ~2 seconds.
 
-**Local (default):**
-Downloads to `~/.config/memanga/downloads/`
+**A source I use stopped working — what now?**
+- Check **Sources → Re-check health** for status. If it's red, the
+  site is genuinely down or changed its HTML. File an issue with the
+  **Scraper broken** template.
+- Use the [search-result chapter chip](#-search) to spot dead sources
+  at a glance — they'll show no `N ch` chip.
+- Switch your manga to a backup source (Detail page → Edit) until
+  the scraper is fixed.
 
-**Email to Kindle:**
-1. Get a [Gmail App Password](https://support.google.com/accounts/answer/185833)
-2. Add your Gmail to [Amazon's Approved List](https://www.amazon.com/hz/mycd/myx#/home/settings/payment)
-3. Run `run config` and enter your details
+**Can I use this on a Raspberry Pi?**
+The CLI runs anywhere Python 3.10+ runs. The GUI works too if you
+have a display, but on a headless Pi you'd typically use cron + the
+CLI's `--auto` flag and `xvfb-run` for Playwright sources.
 
-### Automatic Checking
+---
 
-```bash
-./scripts/run.sh cron install           # Daily at 06:00
-./scripts/run.sh cron install --time 07:30  # Custom time
-./scripts/run.sh cron status            # Check status
-```
+## 🤝 Contributing
 
-## 🛠️ Adding a Source
+PRs welcome — bug fixes, new scrapers, GUI polish, all of it.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, test
+commands, and PR checklist. There are issue templates for
+[bugs](.github/ISSUE_TEMPLATE/bug_report.md),
+[features](.github/ISSUE_TEMPLATE/feature_request.md), and
+[broken scrapers](.github/ISSUE_TEMPLATE/scraper_broken.md).
 
-1. Create `memanga/scrapers/newsite.py`
-2. Inherit from `BaseScraper` or `PlaywrightScraper`
-3. Implement `search()`, `get_chapters()`, `get_pages()`
-4. Register in `memanga/scrapers/__init__.py`
-
-## 📝 Notes
-
-- Playwright scrapers use Firefox (better at bypassing bot detection)
-- MangaDex skips chapters with external URLs (official Shueisha)
-- TCBScans is fastest (no browser automation)
-- MangaFire includes image descrambling for protected content
+For security-sensitive reports, see [SECURITY.md](SECURITY.md).
 
 ## 📄 License
 
-MIT
+MIT — see [LICENSE](LICENSE).

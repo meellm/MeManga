@@ -155,6 +155,9 @@ from .bluelockreadww2 import BlueLockReadWW2Scraper
 from .mashlemangaonline import MashleMangaOnlineScraper
 from .readonepunchonline import ReadOnePunchOnlineScraper
 from .bakirahen import BakiRahenScraper
+from .blamemanga import BlameMangaScraper
+from .jjkmanga import JJKMangaScraper
+from .kagane import KaganeScraper
 
 # ── Scrapers kept as individual files (unique domain mappings) ──
 
@@ -594,6 +597,17 @@ SCRAPERS = {
 
     # BakiRahen - Baki Rahen dedicated (WordPress Ifenzi v2 + cdn.readkakegurui.com CDN)
     "bakirahen.com": BakiRahenScraper,
+
+    # BlameManga - BLAME! dedicated (WordPress Comic Easel + Blogger CDN)
+    "blame-manga.com": BlameMangaScraper,
+    "w9.blame-manga.com": BlameMangaScraper,
+
+    # JJKManga - Jujutsu Kaisen dedicated (cloudscraper + pic.readkakegurui.com CDN)
+    "jjkmanga.net": JJKMangaScraper,
+
+    # Kagane - Multi-manga REST API + Playwright for DRM-protected images
+    "kagane.org": KaganeScraper,
+    "www.kagane.org": KaganeScraper,
 }
 
 # Merge template-based scrapers into SCRAPERS dict
@@ -630,3 +644,49 @@ def list_supported_sources():
             seen.add(base)
             sources.append(base)
     return sorted(sources)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Curated source ranking — verified end-to-end (search → get_chapters
+# → get_pages round-trip) against live sites by the probe script in
+# tests/scrapers/live/. Used for:
+#
+#   - POPULAR_SOURCES order: the search worker submits sources in this
+#     order so MangaDex / MangaPill etc. always start first.
+#   - DEFAULT_ENABLED_SOURCES: shipped pre-checked on first launch
+#     so a fresh user gets results in seconds instead of probing
+#     100+ smaller sources sequentially. Everything else stays
+#     available — user can flip it on in Sources tab any time.
+#
+# Re-order or trim if a future probe run says a site went stale.
+# ─────────────────────────────────────────────────────────────────────
+
+
+POPULAR_SOURCES = [
+    "mangadex.org",
+    "mangapill.com",
+    "mangafire.to",
+    "mangabuddy.com",
+    "weebcentral.com",
+    "mangakatana.com",
+    "comick.io",
+    "mangahub.io",
+    "mangahere.cc",
+    "mangapanda.onl",
+    "mangaclash.com",
+    "mangahere.onl",
+    "mangataro.org",
+    "luminousscans.com",
+    "tcbonepiecechapters.com",
+    "fanfox.net",
+    "1manga.co",
+    "coffeemanga.io",
+    "manhuaplus.org",
+    "mangaeffect.com",
+    "mangafox.fun",
+    "mangayy.org",
+]
+
+# Fresh installs ship with the top 15 ticked on the Sources page.
+# Everything else is in `sources.disabled` by default.
+DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:15]

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <div>
+    <a href="/manga/123/one-piece">
+      <img src="https://cdn.mangapill.com/cov/one-piece.jpg" alt="One Piece">
+      One Piece
+    </a>
+  </div>
+  <div>
+    <a href="/manga/456/naruto">
+      <img data-src="https://cdn.mangapill.com/cov/naruto.jpg" alt="">
+      Naruto
+    </a>
+  </div>
+  <!-- duplicate href -->
+  <div>
+    <a href="/manga/123/one-piece">One Piece dup</a>
+  </div>
+  <!-- title-less link, alt-less image: should fall back to URL slug -->
+  <div>
+    <a href="/manga/789/some-cool-series"><img src="x.jpg"></a>
+  </div>
+</body>
+</html>

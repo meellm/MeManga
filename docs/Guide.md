@@ -1,6 +1,14 @@
 # MeManga Setup & Usage Guide
 
-Automatic manga downloader with Kindle support. Track manga from 260+ scrapers / 300+ domains, download chapters as PDF/EPUB/CBZ/ZIP/JPG/PNG/WEBP, and optionally send them directly to your Kindle.
+Automatic manga downloader with desktop GUI + Kindle support. Track
+manga from 224 scrapers / 319 domains, download chapters as
+PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP, and optionally email
+them to your Kindle.
+
+> This guide covers the CLI flow only. For the desktop app, grab the
+> latest `MeManga.exe` / `MeManga` from the
+> [GitHub releases page](https://github.com/meellm/MeManga/releases)
+> and double-click — there's nothing to configure up front.
 
 ---
 
@@ -54,13 +62,13 @@ py setup.py
 
 Alternatively, use the provided batch script:
 ```
-scripts\windows\setup.bat
+.\scripts\windows\setup.bat
 ```
 
 ### Verify Installation
 
 ```
-scripts\windows\run.bat --help
+.\scripts\windows\run.bat --help
 ```
 
 You should see the help output with available commands.
@@ -70,15 +78,15 @@ You should see the help output with available commands.
 From now on, launch MeManga with:
 
 ```
-scripts\windows\run.bat
+.\scripts\windows\run.bat
 ```
 
 This opens the interactive TUI. For specific commands:
 
 ```
-scripts\windows\run.bat list
-scripts\windows\run.bat add -i
-scripts\windows\run.bat check
+.\scripts\windows\run.bat list
+.\scripts\windows\run.bat add -i
+.\scripts\windows\run.bat check
 ```
 
 Or run directly through the virtual environment:
@@ -246,7 +254,7 @@ Or run directly through the virtual environment:
 ## Your First Manga
 
 > In all examples below, `run` means the launcher for your platform:
-> - **Windows:** `scripts\windows\run.bat`
+> - **Windows:** `.\scripts\windows\run.bat`
 > - **macOS / Linux:** `./scripts/run.sh`
 
 ### Interactive mode (recommended)
@@ -676,7 +684,7 @@ run update 1 -u "https://new-source.com/one-piece"
 Install a daily scheduled task:
 
 ```
-scripts\windows\run.bat cron install
+.\scripts\windows\run.bat cron install
 ```
 
 You'll be asked what time to run (default: 06:00):
@@ -689,13 +697,13 @@ Check time (HH:MM): 07:30
 Check if it's active:
 
 ```
-scripts\windows\run.bat cron status
+.\scripts\windows\run.bat cron status
 ```
 
 Remove it:
 
 ```
-scripts\windows\run.bat cron remove
+.\scripts\windows\run.bat cron remove
 ```
 
 The task is named `MeManga_AutoCheck` and can also be seen in Windows Task Scheduler (`taskschd.msc`).
@@ -832,7 +840,7 @@ python setup.py
 Or:
 
 ```
-scripts\windows\setup.bat
+.\scripts\windows\setup.bat
 ```
 
 ### Playwright browsers fail to launch

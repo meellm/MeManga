@@ -1,0 +1,41 @@
+{
+  "data": [
+    {
+      "id": "ch-001",
+      "attributes": {
+        "chapter": "1",
+        "title": "First Chapter",
+        "publishAt": "2020-01-01T00:00:00Z",
+        "pages": 20
+      }
+    },
+    {
+      "id": "ch-002",
+      "attributes": {
+        "chapter": "2",
+        "title": null,
+        "publishAt": "2020-01-08T00:00:00Z",
+        "pages": 18
+      }
+    },
+    {
+      "id": "ch-ext",
+      "attributes": {
+        "chapter": "3",
+        "title": "External",
+        "publishAt": "2020-01-15T00:00:00Z",
+        "pages": 0,
+        "externalUrl": "https://external.example.com/ch3"
+      }
+    },
+    {
+      "id": "ch-dup",
+      "attributes": {
+        "chapter": "1",
+        "title": "Different scanlator, same chapter",
+        "publishAt": "2020-01-02T00:00:00Z",
+        "pages": 20
+      }
+    }
+  ]
+}

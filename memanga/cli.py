@@ -6,7 +6,6 @@ A friendly CLI for tracking and downloading manga chapters.
 
 import argparse
 import json
-import os
 import platform
 import sys
 import subprocess
@@ -22,7 +21,7 @@ from rich import box
 
 from .config import Config, get_app_password, set_app_password
 from .state import State
-from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers
+from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga
 from .scrapers import get_scraper
 from .emailer import send_to_kindle, EmailError
 
@@ -386,11 +385,17 @@ def cmd_check(args):
             return
     
     from_chapter = getattr(args, 'from_chapter', None)
+    if getattr(args, 'all', False):
+        from_chapter = 0
     dry_run = getattr(args, 'dry_run', False)
+
+    console.print(f"[dim]=== {datetime.now().strftime('%Y-%m-%d %H:%M')} ===[/dim]")
 
     if dry_run:
         console.print(Panel("[bold]🔍 Dry Run — Checking for New Chapters[/bold]", border_style="yellow"))
-    elif from_chapter:
+    elif from_chapter is not None and from_chapter == 0:
+        console.print(Panel("[bold]📥 Downloading All Chapters[/bold]", border_style="green"))
+    elif from_chapter is not None:
         console.print(Panel(f"[bold]📥 Downloading from Chapter {from_chapter}[/bold]", border_style="green"))
     else:
         console.print(Panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
@@ -398,7 +403,8 @@ def cmd_check(args):
     
     total_new = 0
     total_downloaded = 0
-    
+    total_failed = 0
+
     delivery_mode = config.delivery_mode
     download_dir = config.download_dir
     output_format = getattr(args, 'format', None) or config.output_format
@@ -452,9 +458,10 @@ def cmd_check(args):
                     source_info = ""
                     if isinstance(ch, ChapterWithSource) and ch.is_backup:
                         source_info = f" [yellow](from backup: {ch.source})[/yellow]"
-                    
+
                     console.print(f"     [dim]⬇️  Downloading {ch_label}...{source_info}[/dim]")
-                    file_path = download_chapter(manga, ch, download_dir, output_format)
+                    max_retries = getattr(args, 'retries', 3)
+                    file_path = download_chapter(manga, ch, download_dir, output_format, max_retries=max_retries)
                     is_image_folder = file_path.is_dir()
 
                     if is_image_folder:
@@ -486,20 +493,54 @@ def cmd_check(args):
 
                             except EmailError as e:
                                 console.print(f"     [red]📧 Email failed: {e}[/red]")
-                    
+
                     # Update state
                     state.add_downloaded_chapter(title, ch.number)
-                    # Clear pending backup if this was from backup (or if primary caught up)
                     state.clear_pending_backup(title, ch.number)
+                    state.clear_failed_chapter(title, ch.number)
                     total_downloaded += 1
-                    
+
                     # Safe mode: restart browser every 3 chapters to free memory
                     safe_mode = getattr(args, 'safe', False)
                     if safe_mode and total_downloaded % 3 == 0:
                         restart_browsers()
-                    
+
                 except DownloaderError as e:
-                    console.print(f"     [red]❌ Failed: {e}[/red]")
+                    ch_source = ch.source if isinstance(ch, ChapterWithSource) else "unknown"
+                    is_from_backup = isinstance(ch, ChapterWithSource) and ch.is_backup
+
+                    # Auto-fallback to backup source when the primary source fails
+                    backup_tried = False
+                    if not is_from_backup:
+                        backup_ch = _find_chapter_on_backup(manga, ch.number)
+                        if backup_ch:
+                            backup_tried = True
+                            console.print(f"     [yellow]⚠️  Primary failed ({e}), trying backup ({backup_ch.source})...[/yellow]")
+                            try:
+                                file_path = download_chapter(manga, backup_ch, download_dir, output_format, max_retries=max_retries)
+                                is_image_folder = file_path.is_dir()
+                                if is_image_folder:
+                                    console.print(f"     [green]✅ Saved from backup: {file_path.parent.name}/{file_path.name}/[/green]")
+                                else:
+                                    console.print(f"     [green]✅ Saved from backup: {file_path.name}[/green]")
+                                state.add_downloaded_chapter(title, ch.number)
+                                state.clear_pending_backup(title, ch.number)
+                                state.clear_failed_chapter(title, ch.number)
+                                total_downloaded += 1
+                            except DownloaderError as backup_e:
+                                console.print(f"     [red]❌ Backup also failed: {backup_e}[/red]")
+                                state.add_failed_chapter(
+                                    title, ch.number,
+                                    f"{ch_source}+{backup_ch.source}",
+                                    f"Primary: {e}; Backup: {backup_e}",
+                                )
+                                total_failed += 1
+
+                    if not backup_tried:
+                        # No backup available (or this chapter was already from backup source)
+                        console.print(f"     [red]❌ Failed: {e}[/red]")
+                        state.add_failed_chapter(title, ch.number, ch_source, str(e))
+                        total_failed += 1
                     
         except DownloaderError as e:
             console.print(f"  [red]└─ Error: {e}[/red]")
@@ -519,6 +560,8 @@ def cmd_check(args):
         console.print(f"[green]📊 Summary: {total_downloaded}/{total_new} chapters downloaded[/green]")
         if delivery_mode == "local":
             console.print(f"[dim]📁 Downloads: {download_dir}[/dim]")
+    if total_failed > 0:
+        console.print(f"[yellow]⚠️  {total_failed} chapter(s) failed — run 'memanga failed' for details.[/yellow]")
 
 
 def cmd_status(args):
@@ -940,6 +983,149 @@ def cmd_import(args):
         console.print(f"[green]Imported: {added} added, {skipped} skipped (duplicate)[/green]")
 
 
+def cmd_failed(args):
+    """List and manage chapters that failed to download."""
+    all_failed = state.get_all_failed_chapters()
+
+    # Filter by title if requested
+    if args.title:
+        all_failed = {
+            t: chapters for t, chapters in all_failed.items()
+            if args.title.lower() in t.lower()
+        }
+
+    if not all_failed:
+        console.print("[dim]No failed chapters recorded.[/dim]")
+        return
+
+    table = Table(
+        title="⚠️  Failed Chapter Downloads",
+        box=box.ROUNDED,
+        show_lines=True,
+    )
+    table.add_column("Manga", style="cyan bold")
+    table.add_column("Chapter", style="yellow", justify="center")
+    table.add_column("Failed At", style="dim")
+    table.add_column("Source", style="green")
+    table.add_column("Pages Failed", justify="center")
+    table.add_column("Attempts", justify="center")
+    table.add_column("Error", style="red", no_wrap=False, max_width=40)
+
+    for manga_title, chapters in sorted(all_failed.items()):
+        for chapter_num, info in sorted(chapters.items(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else 0):
+            failed_at = info.get("failed_at", "")[:16].replace("T", " ")
+            pages = info.get("failed_pages", [])
+            pages_str = str(pages) if pages else "—"
+            table.add_row(
+                manga_title,
+                chapter_num,
+                failed_at,
+                info.get("source", "?"),
+                pages_str,
+                str(info.get("attempts", 1)),
+                info.get("error", ""),
+            )
+
+    console.print(table)
+    console.print()
+
+    if args.clear:
+        for manga_title, chapters in all_failed.items():
+            for chapter_num in list(chapters):
+                state.clear_failed_chapter(manga_title, chapter_num)
+        console.print("[green]✅ Cleared all failure records.[/green]")
+        return
+
+    if args.retry:
+        manga_list = config.get("manga", [])
+        manga_by_title = {m["title"]: m for m in manga_list}
+        delivery_mode = config.delivery_mode
+        download_dir = config.download_dir
+        output_format = config.output_format
+        email_cfg = config.get("email", {})
+        retried = 0
+        succeeded = 0
+
+        for manga_title, chapters in all_failed.items():
+            manga = manga_by_title.get(manga_title)
+            if not manga:
+                console.print(f"  [yellow]⚠️  Manga not found in config: {manga_title}[/yellow]")
+                continue
+
+            for chapter_num, info in sorted(chapters.items(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else 0):
+                sources = _get_sources_from_manga(manga)
+                if not sources:
+                    continue
+
+                # Build a minimal Chapter object from primary source
+                src = sources[0]
+                try:
+                    scraper = get_scraper(src["source"])
+                    all_chapters = scraper.get_chapters(src["url"])
+                    ch_obj = next((c for c in all_chapters if c.number == chapter_num), None)
+                except Exception:
+                    ch_obj = None
+
+                if not ch_obj:
+                    console.print(f"  [yellow]⚠️  Could not find Chapter {chapter_num} of {manga_title} on primary source[/yellow]")
+                    # Try backup directly
+                    ch_obj = _find_chapter_on_backup(manga, chapter_num)
+                    if not ch_obj:
+                        console.print(f"  [red]❌ Chapter {chapter_num} not found on any source[/red]")
+                        retried += 1
+                        continue
+                else:
+                    ch_obj = ChapterWithSource(ch_obj, src["source"], src["url"], is_backup=False)
+
+                console.print(f"  [dim]⬇️  Retrying {manga_title} Chapter {chapter_num}...[/dim]")
+                retried += 1
+                try:
+                    file_path = download_chapter(manga, ch_obj, download_dir, output_format)
+                    is_image_folder = file_path.is_dir()
+                    if is_image_folder:
+                        console.print(f"  [green]✅ Saved: {file_path.parent.name}/{file_path.name}/[/green]")
+                    else:
+                        console.print(f"  [green]✅ Saved: {file_path.name}[/green]")
+
+                    if delivery_mode == "email" and email_cfg.get("kindle_email") and not is_image_folder:
+                        try:
+                            send_to_kindle(
+                                pdf_path=file_path,
+                                kindle_email=email_cfg["kindle_email"],
+                                sender_email=email_cfg["sender_email"],
+                                smtp_server=email_cfg.get("smtp_server", "smtp.gmail.com"),
+                                smtp_port=email_cfg.get("smtp_port", 587),
+                                app_password=get_app_password(config),
+                            )
+                            console.print(f"  [green]📬 Sent to Kindle![/green]")
+                        except EmailError as email_e:
+                            console.print(f"  [red]📧 Email failed: {email_e}[/red]")
+
+                    state.add_downloaded_chapter(manga_title, chapter_num)
+                    state.clear_failed_chapter(manga_title, chapter_num)
+                    succeeded += 1
+                except DownloaderError as retry_e:
+                    # Try backup if available
+                    backup_ch = _find_chapter_on_backup(manga, chapter_num)
+                    if backup_ch:
+                        console.print(f"  [yellow]⚠️  Primary failed, trying backup ({backup_ch.source})...[/yellow]")
+                        try:
+                            file_path = download_chapter(manga, backup_ch, download_dir, output_format)
+                            state.add_downloaded_chapter(manga_title, chapter_num)
+                            state.clear_failed_chapter(manga_title, chapter_num)
+                            label = f"{file_path.parent.name}/{file_path.name}/" if file_path.is_dir() else file_path.name
+                            console.print(f"  [green]✅ Saved from backup: {label}[/green]")
+                            succeeded += 1
+                            continue
+                        except DownloaderError:
+                            pass
+                    state.add_failed_chapter(manga_title, chapter_num, info.get("source", "?"), str(retry_e))
+                    console.print(f"  [red]❌ Still failing: {retry_e}[/red]")
+
+        console.print()
+        console.print(f"[green]📊 Retry summary: {succeeded}/{retried} chapters recovered[/green]")
+
+
 def cmd_tui(args):
     """Run interactive TUI."""
     while True:
@@ -956,27 +1142,28 @@ def cmd_tui(args):
             ("2", "➕ Add Manga", "Track a new manga"),
             ("3", "🗑️  Remove Manga", "Stop tracking a manga"),
             ("4", "🔍 Check Now", "Check for new chapters"),
-            ("5", "⚙️  Configure", "Change settings"),
-            ("6", "⏰ Cron", "Manage auto-check schedule"),
-            ("7", "📊 Status", "View status & config"),
-            ("8", "✏️  Update Manga", "Change URL, backup, or title"),
-            ("9", "📤 Export", "Export manga list to JSON"),
-            ("0", "📥 Import", "Import manga list from JSON"),
+            ("5", "⚠️  Failed Chapters", "View/retry failed downloads"),
+            ("6", "⚙️  Configure", "Change settings"),
+            ("7", "⏰ Cron", "Manage auto-check schedule"),
+            ("8", "📊 Status", "View status & config"),
+            ("9", "✏️  Update Manga", "Change URL, backup, or title"),
+            ("e", "📤 Export", "Export manga list to JSON"),
+            ("i", "📥 Import", "Import manga list from JSON"),
             ("q", "🚪 Quit", "Exit"),
         ]
-        
+
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column(style="bold cyan", width=3)
         table.add_column(style="bold white", width=18)
         table.add_column(style="dim")
-        
+
         for key, title, desc in menu_items:
             table.add_row(f"[{key}]", title, desc)
-        
+
         console.print(table)
         console.print()
-        
-        choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "q"], default="4")
+
+        choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "e", "i", "q"], default="4")
         
         if choice == "q":
             console.print("[dim]Goodbye! 📖[/dim]")
@@ -1013,11 +1200,13 @@ def cmd_tui(args):
 
                 # Start from chapter?
                 from_input = Prompt.ask(
-                    "Start from chapter? (Enter for latest, or type a number)",
+                    "Start from chapter? (Enter for latest, 0 or 'all' for all chapters, or type a number)",
                     default="",
                 )
                 from_chapter = None
-                if from_input.strip():
+                if from_input.strip().lower() == "all":
+                    from_chapter = 0
+                elif from_input.strip():
                     try:
                         from_chapter = float(from_input)
                     except ValueError:
@@ -1042,17 +1231,21 @@ def cmd_tui(args):
                     safe=safe,
                     dry_run=False,
                     format=fmt,
+                    retries=3,
                 ))
         elif choice == "5":
-            cmd_config(argparse.Namespace(show=False))
+            retry = Confirm.ask("Retry all failed downloads?", default=False)
+            cmd_failed(argparse.Namespace(title=None, retry=retry, clear=False))
         elif choice == "6":
+            cmd_config(argparse.Namespace(show=False))
+        elif choice == "7":
             console.print("[1] Status  [2] Install  [3] Remove")
             cron_choice = Prompt.ask("Select", choices=["1", "2", "3"], default="1")
             action = {"1": "status", "2": "install", "3": "remove"}[cron_choice]
             cmd_cron(argparse.Namespace(action=action, time=None))
-        elif choice == "7":
-            cmd_status(argparse.Namespace())
         elif choice == "8":
+            cmd_status(argparse.Namespace())
+        elif choice == "9":
             cmd_list(argparse.Namespace())
             target = Prompt.ask("\nEnter # or title to update (or 'b' to go back)")
             if target != 'b':
@@ -1060,10 +1253,10 @@ def cmd_tui(args):
                 backup = Prompt.ask("New backup URL (leave blank to skip)", default="") or None
                 new_title = Prompt.ask("New title (leave blank to skip)", default="") or None
                 cmd_update(argparse.Namespace(target=target, url=url, backup=backup, title=new_title))
-        elif choice == "9":
+        elif choice == "e":
             file_path = Prompt.ask("Export file", default="memanga_export.json")
             cmd_export(argparse.Namespace(file=file_path))
-        elif choice == "0":
+        elif choice == "i":
             file_path = Prompt.ask("Import file path")
             if file_path:
                 replace = Confirm.ask("Replace all data? (No = merge)", default=False)
@@ -1090,8 +1283,10 @@ Examples:
   memanga check --auto                  # Auto-download new chapters
   memanga cron install                  # Set up daily checks
   memanga config                        # Configure settings
+  memanga --gui                         # Launch graphical interface
         """,
     )
+    parser.add_argument("--gui", action="store_true", help="Launch the graphical user interface")
     
     subparsers = parser.add_subparsers(dest="command", title="commands")
     
@@ -1132,12 +1327,14 @@ Examples:
     p_check = subparsers.add_parser("check", help="Check for new chapters")
     p_check.add_argument("-t", "--title", help="Check specific manga only")
     p_check.add_argument("-f", "--from", dest="from_chapter", type=float, help="Start from chapter N (for fresh downloads)")
+    p_check.add_argument("--all", action="store_true", help="Download all chapters from the beginning")
     p_check.add_argument("-a", "--auto", action="store_true", help="Auto-download without prompts")
     p_check.add_argument("-y", "--yes", action="store_true", help="Say yes to all prompts")
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")
     p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
     p_check.add_argument("-n", "--dry-run", action="store_true", help="List new chapters without downloading")
     p_check.add_argument("--format", choices=["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"], help="Output format (overrides config)")
+    p_check.add_argument("--retries", type=int, default=3, metavar="N", help="Retry failed page downloads N times (default: 3, 0 to disable)")
     p_check.set_defaults(func=cmd_check)
     
     # status
@@ -1170,12 +1367,24 @@ Examples:
     p_import.add_argument("--replace", action="store_true", help="Replace all data instead of merging")
     p_import.set_defaults(func=cmd_import)
 
+    # failed
+    p_failed = subparsers.add_parser("failed", help="List chapters with download failures")
+    p_failed.add_argument("-t", "--title", help="Filter by manga title")
+    p_failed.add_argument("--retry", action="store_true", help="Attempt to re-download all listed failed chapters")
+    p_failed.add_argument("--clear", action="store_true", help="Clear failure records without retrying")
+    p_failed.set_defaults(func=cmd_failed)
+
     # tui (default if no command)
     p_tui = subparsers.add_parser("tui", help="Interactive terminal UI")
     p_tui.set_defaults(func=cmd_tui)
     
     args = parser.parse_args()
-    
+
+    if args.gui:
+        from .gui import launch_gui
+        launch_gui()
+        return
+
     if args.command is None:
         # Default to TUI
         cmd_tui(args)

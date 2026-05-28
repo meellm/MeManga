@@ -10,6 +10,7 @@ Handles:
 """
 
 import io
+import time
 import atexit
 import tempfile
 import shutil
@@ -99,9 +100,15 @@ def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
         for s in manga["sources"]:
             if isinstance(s, dict):
                 url = s.get("url", "")
+                if not url:
+                    # Skip blank-URL entries — they'd crash downstream
+                    # in get_chapters("") with no useful error.
+                    continue
                 source = s.get("source") or _extract_source(url)
                 sources.append({"source": source, "url": url})
             elif isinstance(s, str):
+                if not s:
+                    continue
                 # Just a URL string
                 sources.append({"source": _extract_source(s), "url": s})
         return sources
@@ -114,13 +121,14 @@ def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
 
 
 def check_for_updates(
-    manga: Dict[str, Any], 
+    manga: Dict[str, Any],
     state: State,
     from_chapter: Optional[float] = None,
-) -> List[ChapterWithSource]:
+    return_all: bool = False,
+):
     """
     Check if a manga has new chapters, with backup source support.
-    
+
     Logic:
     1. Check primary source first
     2. If new chapter on primary → return it
@@ -131,14 +139,22 @@ def check_for_updates(
          - No → skip (still waiting)
        - Not in pending_backup? Add it, skip (start waiting)
     5. If primary gets the chapter later, we prefer primary
-    
+
     Args:
         manga: Manga entry from config with title, sources (or url/source)
         state: State manager to check last downloaded chapter
         from_chapter: Override starting chapter (for downloading from scratch)
-    
+        return_all: If True, return a tuple ``(new_chapters, all_chapters)``
+            where ``all_chapters`` is the full chapter list from the primary
+            source wrapped as :class:`ChapterWithSource` (used by the GUI
+            Detail page to show every chapter as Read/Download). When False
+            (default), returns just the filtered new-chapter list — preserves
+            the original CLI signature.
+
     Returns:
-        List of ChapterWithSource objects (includes source info)
+        ``List[ChapterWithSource]`` (default) or
+        ``Tuple[List[ChapterWithSource], List[ChapterWithSource]]`` when
+        ``return_all=True``.
     """
     title = manga["title"]
     sources = _get_sources_from_manga(manga)
@@ -157,38 +173,57 @@ def check_for_updates(
     
     # Results to return
     chapters_to_download: List[ChapterWithSource] = []
-    
+
     # Track what we found on each source
     primary_chapters: Dict[str, Chapter] = {}  # chapter_num -> Chapter
     backup_chapters: Dict[str, Tuple[Chapter, str, str]] = {}  # chapter_num -> (Chapter, source, url)
-    
+
+    # Full chapter list from the primary source (every chapter, downloaded or not).
+    # Used by the GUI Detail page when return_all=True so it can render every
+    # chapter as Read or Download without re-scraping.
+    primary_all: List[ChapterWithSource] = []
+
     # Check each source
+    source_errors = []
+    sources_checked = 0
     for i, src in enumerate(sources):
         source = src["source"]
         url = src["url"]
         is_primary = (i == 0)
-        
+
         try:
             scraper = get_scraper(source)
             all_chapters = scraper.get_chapters(url)
+            sources_checked += 1
         except ValueError as e:
             # Unsupported source - skip but warn
+            source_errors.append(f"{source}: {e}")
             print(f"  [Warning] Unsupported source '{source}': {e}")
             continue
         except Exception as e:
             # Failed to fetch - skip but warn
+            source_errors.append(f"{source}: {e}")
             print(f"  [Warning] Failed to fetch from {source}: {e}")
             continue
-        
+
+        # Capture the full chapter list from the primary source for the
+        # Detail-page cache. Backup sources are intentionally skipped here —
+        # we don't want backup-only chapters polluting the canonical list.
+        if is_primary:
+            primary_all = [
+                ChapterWithSource(ch, source, url, is_backup=False)
+                for ch in all_chapters
+            ]
+
         # Filter to new chapters
         new_chapters = [
             ch for ch in all_chapters
             if ch.numeric > last_num and not state.is_chapter_downloaded(title, ch.number)
         ]
-        
+
         for ch in new_chapters:
             ch_num = ch.number
-            
+
             if is_primary:
                 primary_chapters[ch_num] = ch
             else:
@@ -196,6 +231,12 @@ def check_for_updates(
                 if ch_num not in primary_chapters:
                     backup_chapters[ch_num] = (ch, source, url)
     
+    # If ALL sources failed, raise so the caller knows
+    if sources_checked == 0 and source_errors:
+        raise DownloaderError(
+            f"All sources failed for '{title}': " + "; ".join(source_errors)
+        )
+
     # Process primary chapters first (always download these)
     for ch_num, ch in primary_chapters.items():
         primary_src = sources[0]
@@ -229,8 +270,40 @@ def check_for_updates(
         else:
             # First time seeing this on backup, start waiting
             state.set_pending_backup(title, ch_num, backup_source, ch.url)
-    
-    return sorted(chapters_to_download)
+
+    new_sorted = sorted(chapters_to_download)
+    if return_all:
+        return new_sorted, sorted(primary_all)
+    return new_sorted
+
+
+def _find_chapter_on_backup(
+    manga: Dict[str, Any],
+    chapter_num_str: str,
+) -> Optional["ChapterWithSource"]:
+    """
+    Find a chapter on backup sources.
+
+    Used when the primary source download fails — looks up the same chapter
+    number on any configured backup sources and returns it ready to download.
+    """
+    sources = _get_sources_from_manga(manga)
+    backup_sources = sources[1:]  # Everything after primary
+
+    for src in backup_sources:
+        source = src["source"]
+        url = src["url"]
+        try:
+            scraper = get_scraper(source)
+            all_chapters = scraper.get_chapters(url)
+        except Exception:
+            continue
+
+        for ch in all_chapters:
+            if ch.number == chapter_num_str:
+                return ChapterWithSource(ch, source, url, is_backup=True)
+
+    return None
 
 
 def download_chapter(
@@ -239,22 +312,35 @@ def download_chapter(
     output_dir: Path,
     output_format: OutputFormat = "pdf",
     state: Optional[State] = None,
+    progress_callback=None,
+    naming_template: Optional[str] = None,
+    cancel_event=None,
+    max_retries: int = 3,
 ) -> Optional[Path]:
     """
     Download a chapter and convert to PDF or EPUB.
-    
+
     Args:
         manga: Manga entry from config
         chapter: Chapter to download (can be ChapterWithSource)
         output_dir: Directory to save the file
         output_format: "pdf" or "epub"
         state: State manager (for clearing pending backup after download)
-    
+        progress_callback: Optional callable(current, total) for progress updates
+        cancel_event: Optional threading.Event — when set, raises
+            InterruptedError before/during page fetching to abort the download.
+        max_retries: Number of times to retry failed page downloads
+            (with exponential back-off). 0 to disable.
+
     Returns:
         Path to downloaded file, or None if failed
     """
     title = manga["title"]
-    
+
+    def _check_cancel():
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("Download cancelled")
+
     # Get source from chapter if available (ChapterWithSource), else from manga config
     if isinstance(chapter, ChapterWithSource):
         source = chapter.source
@@ -263,28 +349,32 @@ def download_chapter(
         sources = _get_sources_from_manga(manga)
         source = sources[0]["source"] if sources else ""
         is_backup = False
-    
+
     # Get scraper
     try:
         scraper = get_scraper(source)
     except ValueError as e:
         raise DownloaderError(f"Unsupported source: {e}")
-    
+
+    # Bail before kicking off any expensive work if already cancelled.
+    _check_cancel()
+
     # Create temp directory for images
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
-        
+
         # Get page URLs
         try:
             page_urls = scraper.get_pages(chapter.url)
         except Exception as e:
             raise DownloaderError(f"Failed to get pages: {e}")
-        
+
+        _check_cancel()
+
         if not page_urls:
             raise DownloaderError("No pages found for chapter")
-        
+
         # Download images concurrently
-        image_paths = []
         download_tasks = []
         for i, url in enumerate(page_urls):
             ext = _get_extension(url)
@@ -292,26 +382,77 @@ def download_chapter(
             download_tasks.append((i, url, img_path))
 
         results: Dict[int, Path] = {}
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        total_pages = len(download_tasks)
+        completed_count = 0
+        # Manually manage the pool so we can `cancel_futures=True` and bail
+        # without waiting for in-flight image fetches when the user cancels.
+        executor = ThreadPoolExecutor(max_workers=4)
+        cancelled = False
+        try:
             futures = {
-                executor.submit(scraper.download_image, url, img_path): (idx, img_path)
+                executor.submit(scraper.download_image, url, img_path): (idx, url, img_path)
                 for idx, url, img_path in download_tasks
             }
             for future in as_completed(futures):
-                idx, img_path = futures[future]
+                idx, url, img_path = futures[future]
                 try:
                     if future.result():
                         results[idx] = img_path
-                    else:
-                        print(f"  Warning: Failed to download page {idx+1}")
                 except Exception:
-                    print(f"  Warning: Failed to download page {idx+1}")
+                    # Per-page failure — silent; retry loop below decides
+                    # whether to give up. Old code printed a warning but
+                    # the new failed-chapter handling does that more
+                    # usefully via DownloaderError + state.add_failed_chapter.
+                    pass
+                completed_count += 1
+                if progress_callback:
+                    progress_callback(completed_count, total_pages)
+                if cancel_event is not None and cancel_event.is_set():
+                    cancelled = True
+                    break
+        finally:
+            # cancel_futures only ditches futures that haven't started yet;
+            # in-flight ones still run to completion but we don't wait on them.
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        if cancelled:
+            raise InterruptedError("Download cancelled")
+
+        # Retry individually any pages that failed the first pass.
+        # Issue #26: silent partial failures used to produce a tiny
+        # incomplete CBZ and mark the chapter as "downloaded".
+        # Now we retry up to `max_retries` times then raise so the
+        # caller can record the failure and try the backup source.
+        if max_retries > 0:
+            for attempt in range(1, max_retries + 1):
+                failed = [(idx, url, img_path)
+                          for idx, url, img_path in download_tasks
+                          if idx not in results]
+                if not failed:
+                    break
+                print(
+                    f"  Retrying {len(failed)} failed page(s), "
+                    f"attempt {attempt}/{max_retries}..."
+                )
+                time.sleep(2 ** (attempt - 1))
+                for idx, url, img_path in failed:
+                    _check_cancel()
+                    try:
+                        if scraper.download_image(url, img_path):
+                            results[idx] = img_path
+                    except Exception:
+                        pass
+
+        still_failed = [idx for idx, _, _ in download_tasks if idx not in results]
+        if still_failed:
+            failed_page_nums = [i + 1 for i in still_failed]
+            raise DownloaderError(
+                f"Incomplete download: {len(still_failed)}/{len(page_urls)} "
+                f"pages failed (pages {failed_page_nums})"
+            )
 
         # Preserve page order
         image_paths = [results[i] for i in sorted(results)]
-        
-        if not image_paths:
-            raise DownloaderError("Failed to download any pages")
 
         # Download cover image for EPUB
         cover_path = None
@@ -337,39 +478,52 @@ def download_chapter(
                     cover_path = None
 
         # Convert to output format
-        output_dir.mkdir(parents=True, exist_ok=True)
         safe_title = _sanitize_filename(title)
+        # Issue #21: every format gets its own per-manga subfolder
+        # (<dir>/<manga_name>/…). Image format already did this; the
+        # archive/document formats used to land at the dir root, which
+        # broke the Reader's file lookup (it searches <dir>/<title>/).
+        manga_dir = output_dir / safe_title
+        manga_dir.mkdir(parents=True, exist_ok=True)
 
         # Zero-pad chapter numbers for proper sorting
         chapter_str = _format_chapter_number(chapter.number)
 
+        # Build filename from template
+        template = naming_template or "{title} - Chapter {chapter}"
+        base_name = _sanitize_filename(
+            template.replace("{title}", title)
+                    .replace("{chapter}", chapter_str)
+                    .replace("{source}", source)
+        )
+
         if output_format == "epub":
-            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.epub"
+            output_path = manga_dir / f"{base_name}.epub"
             try:
                 _images_to_epub(image_paths, output_path, title, chapter.number, cover_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create EPUB: {e}")
         elif output_format == "cbz":
-            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.cbz"
+            output_path = manga_dir / f"{base_name}.cbz"
             try:
                 _images_to_cbz(image_paths, output_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create CBZ: {e}")
         elif output_format == "zip":
-            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.zip"
+            output_path = manga_dir / f"{base_name}.zip"
             try:
                 _images_to_cbz(image_paths, output_path)  # Reuse CBZ logic (same ZIP format)
             except Exception as e:
                 raise DownloaderError(f"Failed to create ZIP: {e}")
         elif output_format in ("jpg", "png", "webp"):
-            chapter_folder = output_dir / safe_title / f"Chapter {chapter_str}"
+            chapter_folder = manga_dir / f"Chapter {chapter_str}"
             try:
                 _images_to_folder(image_paths, chapter_folder, output_format)
             except Exception as e:
                 raise DownloaderError(f"Failed to save images: {e}")
             output_path = chapter_folder  # Return the directory path
         else:
-            output_path = output_dir / f"{safe_title} - Chapter {chapter_str}.pdf"
+            output_path = manga_dir / f"{base_name}.pdf"
             try:
                 _images_to_pdf(image_paths, output_path)
             except Exception as e:

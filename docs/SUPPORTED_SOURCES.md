@@ -1,6 +1,12 @@
 # Supported Sources
 
-MeManga supports **260+ scrapers** covering **300+ domains**. This document lists all supported sources.
+MeManga supports **224 scrapers** covering **319 domains**. This document lists all supported sources.
+
+> Some sites listed below are unreachable as of the last audit
+> (mangakakalot.com / mangasee123.com / mangareader.to /
+> manganato.com and friends) — they remain in the registry so
+> existing libraries don't break, but the search sweep skips them.
+> See `memanga/gui/pages/search.py:BROKEN_SEARCH_SOURCES`.
 
 For basic usage, see the main [README](../README.md).
 

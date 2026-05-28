@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="images-container">
+    <img src="https://images.mangafreak.me/manga/1.jpg">
+    <img data-src="https://images.mangafreak.me/manga/2.jpg">
+    <img data-lazy-src="https://images.mangafreak.me/manga/3.webp">
+    <!-- wp-content fallback path: should match because "wp-content/uploads" present -->
+    <img src="https://hxhmanga.com/wp-content/uploads/p4.jpg">
+    <!-- but logos/icons under that path must be skipped -->
+    <img src="https://hxhmanga.com/wp-content/uploads/logo.png">
+    <!-- non-CDN, non-uploads — ignored -->
+    <img src="https://otherhost.com/img.jpg">
+  </div>
+</body>
+</html>
