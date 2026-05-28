@@ -55,6 +55,16 @@ hidden_imports += [
     "cloudscraper",
     "keyring",
     "keyring.backends",
+    # Windows Credential Manager backend + its ctypes shim. PyInstaller
+    # would skip these because the imports are inside keyring's
+    # platform-detect branch (resolved at runtime, not import time).
+    # Without them, the frozen exe on Windows falls back to keyring's
+    # `Null` backend and `keyring.get_password` always returns None —
+    # no email password persists across launches.
+    "keyring.backends.Windows",
+    "pywin32_ctypes",
+    "pywin32_ctypes.pywintypes",
+    "pywin32_ctypes.win32cred",
     "yaml",
     "bs4",
     "playwright",

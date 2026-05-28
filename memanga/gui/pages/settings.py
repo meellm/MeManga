@@ -866,6 +866,7 @@ class SettingsPage(BasePage):
             Toast(self, f"Error: {str(e)[:40]}", kind="error")
 
     def _install_cron_windows(self, project_dir, cron_time):
+        from .._subprocess import no_window_kwargs
         python_path = sys.executable
         venv_python = project_dir / "venv" / "Scripts" / "python.exe"
         if venv_python.exists():
@@ -873,14 +874,18 @@ class SettingsPage(BasePage):
         task_name = "MeManga_AutoCheck"
         cmd = f'"{python_path}" -m memanga check --auto --quiet'
         try:
+            # no_window_kwargs(): release exe is console=False, so any
+            # naked subprocess.run() would flash a black cmd box for a
+            # frame. schtasks runs headless on a normal admin install,
+            # but we still want zero visual noise.
             subprocess.run(
                 ["schtasks", "/Delete", "/TN", task_name, "/F"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, **no_window_kwargs(),
             )
             result = subprocess.run(
                 ["schtasks", "/Create", "/TN", task_name, "/SC", "DAILY",
                  "/ST", cron_time, "/TR", cmd, "/F"],
-                capture_output=True, text=True,
+                capture_output=True, text=True, **no_window_kwargs(),
             )
             if result.returncode == 0:
                 self.app.config.set("cron.enabled", True)
@@ -894,10 +899,11 @@ class SettingsPage(BasePage):
 
     def _remove_cron(self):
         if platform.system() == "Windows":
+            from .._subprocess import no_window_kwargs
             try:
                 subprocess.run(
                     ["schtasks", "/Delete", "/TN", "MeManga_AutoCheck", "/F"],
-                    capture_output=True, text=True,
+                    capture_output=True, text=True, **no_window_kwargs(),
                 )
                 Toast(self, "Task removed", kind="success")
             except Exception:
@@ -920,10 +926,11 @@ class SettingsPage(BasePage):
 
     def _check_cron_status(self):
         if platform.system() == "Windows":
+            from .._subprocess import no_window_kwargs
             try:
                 result = subprocess.run(
                     ["schtasks", "/Query", "/TN", "MeManga_AutoCheck"],
-                    capture_output=True, text=True,
+                    capture_output=True, text=True, **no_window_kwargs(),
                 )
                 text = "Task installed" if result.returncode == 0 else "No task found"
                 color = T.SUCCESS if result.returncode == 0 else T.WARNING

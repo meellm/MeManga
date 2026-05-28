@@ -62,6 +62,12 @@ hidden_imports += [
     "cloudscraper",
     "keyring",
     "keyring.backends",
+    # See memanga-release.spec for the full rationale — keyring's
+    # Windows backend is loaded dynamically and PyInstaller misses it.
+    "keyring.backends.Windows",
+    "pywin32_ctypes",
+    "pywin32_ctypes.pywintypes",
+    "pywin32_ctypes.win32cred",
     "yaml",
     "bs4",
     "playwright",
