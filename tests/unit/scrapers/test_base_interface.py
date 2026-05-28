@@ -185,3 +185,70 @@ class TestGetScraperRegistry:
         # Returned object must satisfy the API contract.
         for m in REQUIRED_METHODS:
             assert hasattr(s, m), f"{domain} scraper missing {m}"
+
+
+class TestMangaFireSearchUsesPersistentBrowser:
+    """Regression: MangaFireScraper.search used to launch a fresh
+    Firefox per call (~5-10 s cold start). On users with slow networks
+    that pushed it past the search worker's per-source budget and
+    MangaFire never appeared in the result list. The fix routes
+    search() through VRFGenerator, which keeps Firefox open across
+    calls (chapter-pages already did this; search now joins the same
+    persistent browser).
+    """
+
+    def test_search_delegates_to_vrf_generator(self, monkeypatch):
+        from memanga.scrapers import mangafire as mf
+
+        captured = {"called_with": None, "n": 0}
+
+        class _FakeVRF:
+            def search(self, query):
+                captured["called_with"] = query
+                captured["n"] += 1
+                return [mf.Manga(title="Stub", url="https://x/m")]
+
+        monkeypatch.setattr(mf, "get_vrf_generator", lambda: _FakeVRF())
+
+        scraper = mf.MangaFireScraper()
+        results = scraper.search("Blue Lock")
+
+        assert captured["n"] == 1
+        assert captured["called_with"] == "Blue Lock"
+        assert results and results[0].title == "Stub"
+
+    def test_search_does_not_launch_new_firefox(self, monkeypatch):
+        """Hard guard: calling MangaFireScraper.search() must NOT
+        invoke `playwright.firefox.launch` directly. If anyone re-
+        adds the per-call launch pattern this test catches it before
+        it hits production.
+        """
+        from memanga.scrapers import mangafire as mf
+        # Stub the VRF generator so the real persistent browser doesn't
+        # spin up either — we only care that no fresh launch happens.
+        monkeypatch.setattr(
+            mf, "get_vrf_generator",
+            lambda: type("V", (), {"search": lambda self, q: []})(),
+        )
+        # Trap any direct sync_playwright().start() call.
+        called = {"n": 0}
+
+        class _BoomPW:
+            def __enter__(self): called["n"] += 1; return self
+            def __exit__(self, *a): pass
+            firefox = type("_F", (), {
+                "launch": staticmethod(
+                    lambda *a, **k: (_ for _ in ()).throw(
+                        AssertionError("search must not launch a fresh Firefox"),
+                    )
+                ),
+            })()
+            def start(self): called["n"] += 1; return self
+            def stop(self): pass
+
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: _BoomPW())
+
+        scraper = mf.MangaFireScraper()
+        scraper.search("x")
+        assert called["n"] == 0, "search should reuse VRF browser, not launch a new one"

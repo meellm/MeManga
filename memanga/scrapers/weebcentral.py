@@ -27,13 +27,29 @@ class WeebCentralScraper(PlaywrightScraper):
         try:
             # Use advanced search page
             page.goto(f"{self.base_url}/search", wait_until='domcontentloaded', timeout=60000)
-            page.wait_for_timeout(2000)
+            # Wait for the search input to be ready rather than a fixed 2s.
+            try:
+                page.wait_for_selector(
+                    'input[type="text"], input[type="search"]', timeout=10000,
+                )
+            except Exception:
+                pass
 
             # Fill search input
             search_input = page.locator('input[type="text"], input[type="search"]').first
             search_input.fill(query)
             search_input.press('Enter')
-            page.wait_for_timeout(3000)
+            # Wait for the first /series/ link instead of a blind 3s
+            # sleep — empty queries return faster, popular queries
+            # render their first row in <500 ms. Old fixed-sleep meant
+            # every search paid 3 s minimum.
+            try:
+                page.wait_for_selector(
+                    'a[href*="/series/"]:not([href*="/series/random"])',
+                    timeout=10000,
+                )
+            except Exception:
+                pass
 
             # Get results
             content = page.content()
