@@ -93,6 +93,23 @@ class BackgroundWorker:
         self._max_concurrent_downloads = 2
         self._lock = threading.Lock()
         self._cancel_flags: Dict[str, threading.Event] = {}
+        # Each call to search_manga() bumps _search_seq. Every event the
+        # search task publishes carries that seq, and the UI drops
+        # events whose seq doesn't match its current search. Without
+        # this, results from "Oshi No Ko" would bleed into a
+        # subsequent "One Piece" search because the old worker's
+        # scrapers are still running.
+        self._search_seq: int = 0
+        self._search_cancel: Optional[threading.Event] = None
+        self._search_pool: Optional[ThreadPoolExecutor] = None
+        self._search_lock = threading.Lock()
+        # Dedicated pool for chapter-count probes — separate from
+        # the 3-slot shared pool so a busy download queue doesn't
+        # block chips from appearing, and they don't serialise
+        # excessively behind each other either.
+        self._count_pool = ThreadPoolExecutor(
+            max_workers=6, thread_name_prefix="chapter-count",
+        )
         # Optional NetworkMonitor — wired up by MeMangaApp after both
         # the worker and the monitor exist. When set, network-bound
         # entry points short-circuit (with a friendly event) instead
@@ -110,6 +127,24 @@ class BackgroundWorker:
         """Clean up the thread pool."""
         self._shutdown = True
         self._pool.shutdown(wait=False)
+        try:
+            self._count_pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        # Tear down any in-flight search so its threads don't outlive
+        # the app and try to publish into a destroyed event bus.
+        with self._search_lock:
+            cancel = self._search_cancel
+            pool = self._search_pool
+            self._search_cancel = None
+            self._search_pool = None
+        if cancel is not None:
+            cancel.set()
+        if pool is not None:
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
 
     def submit_task(self, fn):
         """Run a fire-and-forget callable on the shared worker pool.
@@ -441,34 +476,68 @@ class BackgroundWorker:
         # sources with 30 s timeouts would freeze the bar for minutes.
         if self._is_offline():
             self._events.publish("search_started", {
-                "query": query, "total_sources": 0,
+                "query": query, "total_sources": 0, "seq": -1,
             })
             self._events.publish("search_complete", {
-                "query": query, "offline": True,
+                "query": query, "offline": True, "seq": -1,
             })
             return
         from concurrent.futures import as_completed
 
+        # ── Generation tagging ──────────────────────────────────────
+        # Bump the seq, signal any previous search to abort, then drop
+        # the previous pool. cancel_futures=True (Py 3.9+) discards
+        # any queued tasks that haven't started; in-flight scraper
+        # calls have to finish on their own (we can't interrupt
+        # Playwright mid-navigation) but their post-publish work is
+        # short-circuited by the cancel event below.
+        with self._search_lock:
+            self._search_seq += 1
+            seq = self._search_seq
+            cancel = threading.Event()
+            prev_cancel = self._search_cancel
+            prev_pool = self._search_pool
+            self._search_cancel = cancel
+        if prev_cancel is not None:
+            prev_cancel.set()
+        if prev_pool is not None:
+            try:
+                prev_pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+
         def _search_source(source_domain: str):
+            # Pre-flight cancel check so user-issued new search can
+            # abandon stale work fast without spamming the bus.
+            if cancel.is_set():
+                return 0
             from ..scrapers import get_scraper
             try:
                 scraper = get_scraper(source_domain)
             except Exception as e:
+                if cancel.is_set():
+                    return 0
                 self._events.publish("search_source_failed", {
-                    "source": source_domain,
+                    "source": source_domain, "seq": seq,
                     "error": f"no scraper: {e}"[:160],
                 })
                 return 0
             try:
                 results = scraper.search(query) or []
             except Exception as e:
+                if cancel.is_set():
+                    return 0
                 self._events.publish("search_source_failed", {
-                    "source": source_domain,
+                    "source": source_domain, "seq": seq,
                     "error": f"{type(e).__name__}: {e}"[:160],
                 })
                 return 0
+            if cancel.is_set():
+                return 0
             count = 0
             for m in results:
+                if cancel.is_set():
+                    return count
                 # Tolerate both Manga dataclass (the contract) and plain
                 # dict (older scrapers / future variants).
                 if hasattr(m, "title") and hasattr(m, "url"):
@@ -478,10 +547,12 @@ class BackgroundWorker:
                         "cover_url": getattr(m, "cover_url", None),
                         "description": getattr(m, "description", None),
                         "source": source_domain,
+                        "seq": seq,
                     }
                 elif isinstance(m, dict):
                     payload = dict(m)
                     payload["source"] = source_domain
+                    payload["seq"] = seq
                 else:
                     continue
                 if not payload.get("title") or not payload.get("url"):
@@ -493,52 +564,95 @@ class BackgroundWorker:
                     continue
                 self._events.publish("search_result", payload)
                 count += 1
-            self._events.publish("search_source_done", {
-                "source": source_domain, "count": count,
-            })
+            if not cancel.is_set():
+                self._events.publish("search_source_done", {
+                    "source": source_domain, "count": count, "seq": seq,
+                })
             return count
 
         def _task():
             # Submit in popularity order so MangaDex / MangaPill /
             # MangaFire etc. always start before the long tail. The
-            # worker pool has 8 slots, so the 8 most popular sources
+            # search pool has 8 slots, so the 8 most popular sources
             # are running before any unranked one starts. UI sort
-            # below uses the same rank to keep results in popularity
-            # order regardless of which source's network was fastest.
+            # in SearchPage uses the same rank to keep results in
+            # popularity order regardless of which source's network
+            # was fastest.
             ordered = sort_sources_by_popularity(sources)
             self._events.publish("search_started", {
-                "query": query, "total_sources": len(ordered),
+                "query": query, "total_sources": len(ordered), "seq": seq,
             })
             # Cap concurrency — 290 supported sources × 1 thread each
             # would saturate the network stack and spin up a flood of
             # Playwright browsers. 8 keeps it responsive without
             # melting the laptop.
-            with ThreadPoolExecutor(max_workers=8,
-                                     thread_name_prefix="search") as pool:
+            pool = ThreadPoolExecutor(max_workers=8,
+                                       thread_name_prefix=f"search-{seq}")
+            with self._search_lock:
+                # Register so the next search_manga can shut us down.
+                # Skip if a newer search has already replaced us.
+                if self._search_cancel is cancel:
+                    self._search_pool = pool
+                else:
+                    # We were cancelled before even starting; bail.
+                    try:
+                        pool.shutdown(wait=False, cancel_futures=True)
+                    except Exception:
+                        pass
+                    return
+            try:
                 futures = {pool.submit(_search_source, src): src for src in ordered}
                 # as_completed gives each future the full timeout window
                 # instead of serializing — one slow source no longer
                 # eats every subsequent source's budget.
                 for f in as_completed(futures, timeout=None):
+                    if cancel.is_set():
+                        break
                     src = futures[f]
                     try:
                         f.result(timeout=20)
                     except Exception as e:
+                        if cancel.is_set():
+                            break
                         self._events.publish("search_source_failed", {
-                            "source": src,
+                            "source": src, "seq": seq,
                             "error": f"timeout/{type(e).__name__}",
                         })
-            self._events.publish("search_complete", {"query": query})
+            finally:
+                try:
+                    pool.shutdown(wait=False, cancel_futures=True)
+                except Exception:
+                    pass
+                if not cancel.is_set():
+                    self._events.publish("search_complete", {
+                        "query": query, "seq": seq,
+                    })
 
         self._safe_submit(_task)
+
+    # Retries used when a probe returns -1 (network blip / Cloudflare /
+    # transient site error). Three attempts spaced 4, 8, 16 seconds —
+    # within ~30 s a typical recoverable failure resolves; permanent
+    # failures (404, dead site) burn the budget and stay hidden.
+    _COUNT_RETRY_DELAYS = (4.0, 8.0, 16.0)
 
     def count_chapters(self, source_domain: str, manga_url: str):
         """Fetch the chapter count for a single search result in the
         background. Publishes ``search_chapter_count`` with
-        ``{source, url, count}`` once known (count = -1 on error so
-        the row can drop the chip).
+        ``{source, url, count}`` once known (count = -1 if every retry
+        attempt failed; the row drops the chip).
 
-        Skipped when offline; the row simply stays without a chip.
+        - Runs on a dedicated 6-slot pool (`_count_pool`) so it doesn't
+          compete with downloads for the shared 3-slot worker pool.
+        - **Not** tied to the search seq. The UI matches incoming
+          events to result rows by URL, so a late-arriving chip for
+          a now-removed search just no-ops. Tying it to the seq
+          meant a quick second search killed every in-flight probe
+          from the first one — which is what made MangaFire chips
+          appear to "never load" for users who searched twice.
+        - Retries on failure (see _COUNT_RETRY_DELAYS) — as long as
+          you stay on the same search, the chip will eventually fill
+          in once the source responds.
         """
         if self._is_offline() or not manga_url:
             return
@@ -546,19 +660,37 @@ class BackgroundWorker:
         def _task():
             from ..scrapers import get_scraper
             count = -1
-            try:
-                scraper = get_scraper(source_domain)
-                chapters = scraper.get_chapters(manga_url) or []
-                count = len(chapters)
-            except Exception:
-                count = -1
+            # Try once + retry deltas defined above. Each attempt does
+            # a full scraper.get_chapters() — for plain-requests
+            # sources that's ~1 s, for Playwright AJAX endpoints
+            # (MangaFire/Comick/...) usually <1 s, for Playwright
+            # browser-driven sources (WeebCentral/MangaKatana) 3-10 s.
+            for i, delay in enumerate((0.0,) + self._COUNT_RETRY_DELAYS):
+                if delay > 0:
+                    import time as _t
+                    _t.sleep(delay)
+                if self._is_offline() or getattr(self, "_shutdown", False):
+                    return
+                try:
+                    scraper = get_scraper(source_domain)
+                    chapters = scraper.get_chapters(manga_url) or []
+                    count = len(chapters)
+                    if count > 0:
+                        break  # success — publish below
+                except Exception:
+                    count = -1
             self._events.publish("search_chapter_count", {
                 "source": source_domain,
                 "url": manga_url,
                 "count": count,
             })
 
-        self._safe_submit(_task)
+        try:
+            if not getattr(self, "_shutdown", False):
+                self._count_pool.submit(_task)
+        except RuntimeError:
+            # Pool was shut down between the check and submit.
+            pass
 
     # ------------------------------------------------------------------
     # Storage

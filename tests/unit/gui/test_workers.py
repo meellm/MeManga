@@ -109,6 +109,11 @@ class TestCountChapters:
     def test_failure_publishes_minus_one(self, event_bus, monkeypatch):
         from memanga.gui.workers import BackgroundWorker
         w = BackgroundWorker(event_bus)
+        # Disable retry back-off so the test doesn't sit through the
+        # production 4 + 8 + 16 s wait waiting for each attempt to
+        # fail. The retry behaviour itself is exercised by
+        # test_retries_on_transient_failure below.
+        w._COUNT_RETRY_DELAYS = ()
 
         class _Boom:
             def get_chapters(self, _url): raise IOError("network")
@@ -125,6 +130,39 @@ class TestCountChapters:
             time.sleep(0.02)
         event_bus.poll()
         assert seen and seen[0]["count"] == -1
+
+    def test_retries_on_transient_failure(self, event_bus, monkeypatch):
+        """A transient failure should be retried — as long as the user
+        stays on the same search, the chip eventually fills in once
+        the source comes back. (Per-user request: don't give up
+        silently on the first failure.)
+        """
+        from memanga.gui.workers import BackgroundWorker
+        w = BackgroundWorker(event_bus)
+        # Compress the retry schedule to keep the test fast.
+        w._COUNT_RETRY_DELAYS = (0.05, 0.05)
+
+        calls = {"n": 0}
+        class _FlakyThenOk:
+            def get_chapters(self, _url):
+                calls["n"] += 1
+                if calls["n"] < 3:
+                    raise IOError("transient")
+                return [object() for _ in range(7)]
+        import memanga.scrapers as scr
+        monkeypatch.setattr(scr, "get_scraper", lambda _d: _FlakyThenOk())
+
+        seen = []
+        event_bus.subscribe("search_chapter_count", lambda d: seen.append(d))
+        w.count_chapters("mangadex.org", "https://x/m")
+        import time
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not seen:
+            event_bus.poll()
+            time.sleep(0.02)
+        event_bus.poll()
+        assert calls["n"] == 3, f"expected 3 attempts, got {calls['n']}"
+        assert seen and seen[0]["count"] == 7
 
     def test_offline_is_noop(self, event_bus):
         from memanga.gui.workers import BackgroundWorker

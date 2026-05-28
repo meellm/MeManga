@@ -15,8 +15,51 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QSizePolicy,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontMetrics, QPainter
 
 from .. import theme as T
+
+
+class _ElideLabel(QLabel):
+    """QLabel that paints its text with right-elision when there
+    isn't enough room.
+
+    Plain QLabel just clips long text or — with wordWrap — expands
+    vertically. Neither is right for the search result row: the
+    title needs to **shrink** so the chip and Add button on the
+    right keep their fixed widths. Custom paint with
+    `QFontMetrics.elidedText` is the canonical Qt fix.
+    """
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self._full_text = text
+        # We don't want the label asking the layout for room for its
+        # full text — set its preferred horizontal size to its minimum.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored,
+                            QSizePolicy.Policy.Preferred)
+        self.setMinimumWidth(20)
+        self.setToolTip(text)
+
+    def setText(self, text):
+        self._full_text = text
+        self.setToolTip(text)
+        super().setText(text)
+        self.update()
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        try:
+            fm = QFontMetrics(self.font())
+            elided = fm.elidedText(
+                self._full_text, Qt.TextElideMode.ElideRight,
+                self.width(),
+            )
+            # Honor stylesheet color via palette.
+            p.setPen(self.palette().color(self.foregroundRole()))
+            p.drawText(self.rect(), int(self.alignment()) | Qt.TextFlag.TextSingleLine, elided)
+        finally:
+            p.end()
 
 
 class SearchResultRow(QFrame):
@@ -42,28 +85,38 @@ class SearchResultRow(QFrame):
         layout.setContentsMargins(14, 10, 14, 10)
         layout.setSpacing(12)
 
-        # Left: title (bold) + source · url (mono small)
-        info = QVBoxLayout()
+        # Left: title (bold, elided) + source · url (mono small, elided).
+        # Wrap in a QWidget so the layout can size-constrain the whole
+        # info column without the chip/button having to compete.
+        info_wrap = QFrame()
+        info_wrap.setStyleSheet("background: transparent; border: none;")
+        info_wrap.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                  QSizePolicy.Policy.Preferred)
+        info = QVBoxLayout(info_wrap)
         info.setSpacing(2)
         info.setContentsMargins(0, 0, 0, 0)
-        title = QLabel(result.get("title", "Unknown"))
+        title = _ElideLabel(result.get("title", "Unknown"))
         title.setStyleSheet(
             f"color: {T.tokens()['text.t_1']}; font-size: 11pt;"
             f"font-weight: 600;"
         )
-        title.setWordWrap(False)
-        title.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         info.addWidget(title)
 
         source = result.get("source", "")
-        url = (result.get("url", "") or "")[:60]
-        sub = QLabel(f"{source}  ·  {url}")
+        url = result.get("url", "") or ""
+        sub = _ElideLabel(f"{source}  ·  {url}")
         sub.setStyleSheet(
             f"color: {T.tokens()['text.t_3']}; font-size: 9pt;"
             f"font-family: 'Geist Mono', monospace;"
         )
         info.addWidget(sub)
-        layout.addLayout(info, 1)
+        # `1` here means: this column gets all the leftover horizontal
+        # space after the chip + Add button claim their fixed widths.
+        # Combined with the elide-label inside, long titles truncate
+        # with "…" instead of pushing the chip off the row.
+        layout.addWidget(info_wrap, 1)
+        self._title_lbl = title
+        self._sub_lbl = sub
 
         # Chapter-count chip — same style language as the source-row
         # language chip in Sources tab (small mono, t_3, no border).
@@ -71,22 +124,14 @@ class SearchResultRow(QFrame):
         # 0 stays hidden so the user can immediately see which sources
         # don't actually have the manga / are out of date.
         self._count_chip = QLabel("")
-        self._count_chip.setStyleSheet(
-            f"QLabel {{"
-            f"  color: {T.tokens()['text.t_3']};"
-            f"  font-family: 'Geist Mono', monospace;"
-            f"  font-size: 8pt; font-weight: 600;"
-            f"  letter-spacing: 0.5px;"
-            f"  padding: 0px 6px;"
-            f"}}"
-        )
+        self._count_chip.setSizePolicy(QSizePolicy.Policy.Fixed,
+                                         QSizePolicy.Policy.Fixed)
         self._count_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._count_chip.hide()
         layout.addWidget(self._count_chip, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # Right: prominent Add button. setVisible(True) explicitly +
-        # min size so it can't be clipped to 0 px when the row width
-        # is tight.
+        # Right: prominent Add button. Fixed size policy + minimum so
+        # the layout can't shrink it to 0 px when titles are long.
         if on_add:
             btn = QPushButton("+ Add")
             btn.setProperty("variant", "primary")
@@ -123,6 +168,7 @@ class SearchResultRow(QFrame):
             return
         self._count_chip.setText(f"{count} ch")
         self._count_chip.show()
+        self._count_chip.adjustSize()
 
     def _handle_add(self):
         if callable(self._on_add):

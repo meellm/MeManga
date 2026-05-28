@@ -101,7 +101,11 @@ class TestWorkerOfflineGates:
         event_bus.subscribe("search_complete", lambda d: complete.append(d))
         w.search_manga("piece", ["mangadex.org", "mangapill.com"])
         event_bus.poll()
-        assert started == [{"query": "piece", "total_sources": 0}]
+        # Offline events carry seq=-1 so the UI knows they don't
+        # correspond to any real search generation.
+        assert len(started) == 1
+        assert started[0]["query"] == "piece"
+        assert started[0]["total_sources"] == 0
         assert complete and complete[0].get("offline") is True
 
     def test_download_chapter_offline_publishes_error(self, event_bus):

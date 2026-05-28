@@ -137,6 +137,12 @@ class SearchPage(BasePage):
         self._sources_total = 0
         self._sources_done = 0
         self._sources_failed: list[tuple[str, str]] = []
+        # The worker tags every event with the search generation seq
+        # it belongs to. We track the seq of the CURRENT search here
+        # and drop events whose seq doesn't match — that's how we
+        # stop "Oshi No Ko" results from showing up in a subsequent
+        # "One Piece" search while the old worker is still draining.
+        self._current_seq = -1
         self._build()
 
         self.app.events.subscribe("search_result", self._on_result)
@@ -266,7 +272,17 @@ class SearchPage(BasePage):
         if not query:
             return
 
-        # Clear old results
+        # Re-enable the Search button up front — a quick Enter-Enter
+        # from the user shouldn't leave the button disabled because
+        # the previous search's _on_complete never fired (cancelled).
+        if hasattr(self, "_search_btn"):
+            self._search_btn.setEnabled(True)
+
+        # Clear old results visually. The worker will also cancel the
+        # previous search's in-flight tasks (see search_manga's
+        # cancel-and-replace-pool block), but its events that are
+        # already mid-publish would otherwise still arrive — the
+        # seq filter in _on_result drops them.
         for w in self._result_widgets:
             try:
                 w.deleteLater()
@@ -300,7 +316,22 @@ class SearchPage(BasePage):
         )
         self.app.worker.search_manga(query, sources)
 
+    def _is_stale(self, data) -> bool:
+        """True if the event belongs to a previous search generation.
+
+        Offline-handler events carry seq=-1 and are always honoured.
+        """
+        seq = data.get("seq")
+        if seq is None or seq == -1:
+            return False
+        return seq != self._current_seq
+
     def _on_started(self, data):
+        # First event of the new search — lock in this seq so every
+        # event after the previous batch can be filtered out cleanly.
+        seq = data.get("seq")
+        if seq is not None and seq != -1:
+            self._current_seq = seq
         total = data.get("total_sources", self._sources_total)
         self._status_label.setText(
             f"Searching '{data['query']}' across {total} sources…  0 done"
@@ -308,6 +339,8 @@ class SearchPage(BasePage):
         self._search_btn.setEnabled(False)
 
     def _on_result(self, data):
+        if self._is_stale(data):
+            return
         self._results.append(data)
         row = SearchResultRow(self._scroll_content, result=data, on_add=self._add_result)
         # Insert at the correct popularity-sorted position so MangaDex
@@ -328,8 +361,8 @@ class SearchPage(BasePage):
 
         # Fire-and-forget chapter-count probe so the chip can replace
         # the "—" once the scraper finishes get_chapters(). The worker
-        # uses a 3-slot pool so these naturally serialise behind any
-        # active download.
+        # tags the probe's publish with the current seq so a slow
+        # MangaFire chip from the previous query can't land here.
         try:
             self.app.worker.count_chapters(data.get("source", ""),
                                              data.get("url", ""))
@@ -337,7 +370,13 @@ class SearchPage(BasePage):
             pass
 
     def _on_chapter_count(self, data):
-        """search_chapter_count → find the matching row + update its chip."""
+        """search_chapter_count → find the matching row + update its chip.
+
+        We DO NOT seq-filter chapter-count events. The worker decoupled
+        these from the search seq so a quick second search no longer
+        kills in-flight probes from the first; a late event whose URL
+        no longer matches any row naturally no-ops below.
+        """
         url = data.get("url", "")
         count = data.get("count", -1)
         if not url:
@@ -348,10 +387,14 @@ class SearchPage(BasePage):
                 break
 
     def _on_source_done(self, data):
+        if self._is_stale(data):
+            return
         self._sources_done += 1
         self._update_progress_label()
 
     def _on_source_failed(self, data):
+        if self._is_stale(data):
+            return
         self._sources_done += 1
         self._sources_failed.append(
             (data.get("source", "?"), data.get("error", "")[:80])
@@ -370,6 +413,10 @@ class SearchPage(BasePage):
         self._status_label.setText("  ·  ".join(parts))
 
     def _on_complete(self, data):
+        if self._is_stale(data):
+            # Don't re-enable the Search button or rewrite the status
+            # line from a previous search's late completion.
+            return
         self._search_btn.setEnabled(True)
         # Worker tagged the response as offline → tell the user that's
         # why nothing came back, not "no results".
