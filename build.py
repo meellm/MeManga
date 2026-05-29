@@ -31,6 +31,18 @@ import sys
 from pathlib import Path
 
 
+# Force UTF-8 on stdout/stderr so the unicode glyphs we print (✓ ✗ —)
+# don't crash on Windows CI runners, whose default stdout encoding is
+# cp1252 and explodes with UnicodeEncodeError on those characters.
+# Safe to call on any platform — reconfigure exists since Python 3.7
+# and a no-op when the stream is already UTF-8 (macOS, Linux).
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, ValueError):
+    pass
+
+
 ROOT = Path(__file__).resolve().parent
 PACKAGING = ROOT / "packaging"
 SPEC = PACKAGING / "memanga-dev.spec"
