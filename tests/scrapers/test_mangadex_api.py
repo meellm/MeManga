@@ -71,6 +71,7 @@ class TestGetChapters:
         assert len(chapters) == 2
         numbers = sorted(c.number for c in chapters)
         assert numbers == ["1", "2"]
+        assert next(c for c in chapters if c.number == "1").url.endswith("/ch-001")
 
     def test_invalid_manga_url_raises(self, scraper):
         with pytest.raises(ValueError):

@@ -15,6 +15,7 @@ Features:
 import re
 import json
 import threading
+import time
 from io import BytesIO
 from typing import List, Optional, Dict, Tuple
 from pathlib import Path
@@ -44,6 +45,10 @@ except ImportError:
     CLOUDSCRAPER_AVAILABLE = False
 
 import requests
+
+
+class MangaFireError(RuntimeError):
+    """Raised when MangaFire returns an error instead of scraper data."""
 
 
 # ==================== Image Descrambler ====================
@@ -304,8 +309,8 @@ class VRFGenerator:
                 timeout=60000,
             )
             # The search bar redirects to /filter?keyword=…&vrf=<token>.
-            # We can't construct the VRF token ourselves (server-signed),
-            # so we drive the bar instead of building the URL.
+            # The server-signed VRF token is not constructible locally, so
+            # the search bar is used instead of building the URL directly.
             si = page.locator(
                 'input[placeholder*="Search"], input[name="keyword"]'
             ).first
@@ -435,7 +440,7 @@ class MangaFireScraper(BaseScraper):
     LANGUAGES = ['en', 'es', 'es-la', 'fr', 'ja', 'pt', 'pt-br']
 
     # Search now goes through VRFGenerator's persistent browser
-    # (see search() below) so we no longer need a per-scraper executor.
+    # (see search() below), avoiding a per-scraper executor.
     # Chapter-pages route through VRFGenerator's own _run_serialized.
 
     def __init__(self):
@@ -509,47 +514,93 @@ class MangaFireScraper(BaseScraper):
         """
         return get_vrf_generator().search(query)
 
+    def _chapter_error_message(self, ajax_url: str, data: dict) -> str:
+        """Build a concise error from MangaFire/Cloudflare AJAX envelopes."""
+        status = data.get('status')
+        title = data.get('title') or data.get('error_name') or 'unknown error'
+        retry_after = data.get('retry_after')
+        retryable = data.get('retryable')
+
+        parts = [f"status={status}", f"reason={title}"]
+        if retryable is not None:
+            parts.append(f"retryable={retryable}")
+        if retry_after is not None:
+            parts.append(f"retry_after={retry_after}s")
+        return f"MangaFire chapter list unavailable for {ajax_url} ({', '.join(parts)})"
+
     def get_chapters(self, manga_url: str, language: str = 'en') -> List[Chapter]:
-        """Get all chapters for a manga."""
+        """Get all chapters for a manga.
+
+        Raises on a fetch failure (network error, Cloudflare 5xx, non-200
+        response) instead of returning ``[]``. A swallowed error here is
+        indistinguishable from a manga that genuinely has no chapters, which
+        made the checker report "No new chapters" during upstream outages and
+        silently skip the backup-source fallback. Letting the error propagate
+        lets ``check_for_updates`` record a real source error and try the
+        backup source instead.
+        """
         manga_id = self._extract_id_from_url(manga_url)
         if not manga_id:
-            print(f"[MangaFire] Could not extract manga ID from: {manga_url}")
-            return []
+            raise ValueError(f"Could not extract manga ID from URL: {manga_url}")
 
         # Use AJAX endpoint for chapter list (works without VRF!)
         ajax_url = f"{self.base_url}/ajax/manga/{manga_id}/chapter/{language}"
 
-        chapters = []
+        last_error = None
+        response = None
+        for attempt in range(1, 4):
+            try:
+                response = self.session.get(ajax_url, timeout=30)
+                break
+            except requests.RequestException as e:
+                last_error = e
+                if attempt < 3:
+                    time.sleep(attempt)
+                    continue
+                raise MangaFireError(f"MangaFire request failed for {ajax_url}: {e}") from e
+            except Exception as e:
+                raise MangaFireError(f"MangaFire request failed for {ajax_url}: {e}") from e
+
+        if response is None:
+            raise MangaFireError(f"MangaFire request failed for {ajax_url}: {last_error}")
+
+        # A non-200 transport status is an upstream failure (Cloudflare 5xx,
+        # gateway timeout, rate limit) — not an empty chapter list.
+        if response.status_code != 200:
+            raise MangaFireError(
+                f"MangaFire returned HTTP {response.status_code} for {ajax_url}"
+            )
 
         try:
-            response = self.session.get(ajax_url, timeout=30)
             data = response.json()
+        except ValueError as e:
+            raise MangaFireError(f"MangaFire returned a non-JSON response for {ajax_url}: {e}") from e
 
-            if data.get('status') != 200 or 'result' not in data:
-                print(f"[MangaFire] Failed to get chapters: {data}")
-                return []
+        # The AJAX envelope carries its own status code; anything other than
+        # 200 (often a wrapped Cloudflare error) means the request did not
+        # actually return a chapter list.
+        if data.get('status') != 200 or 'result' not in data:
+            raise MangaFireError(self._chapter_error_message(ajax_url, data))
 
-            soup = BeautifulSoup(data['result'], 'html.parser')
+        chapters = []
+        soup = BeautifulSoup(data['result'], 'html.parser')
 
-            for li in soup.select('li'):
-                a_tag = li.select_one('a')
-                if not a_tag:
-                    continue
+        for li in soup.select('li'):
+            a_tag = li.select_one('a')
+            if not a_tag:
+                continue
 
-                href = a_tag.get('href', '')
-                title = a_tag.get('title', '')
-                chap_num = li.get('data-number', '0')
+            href = a_tag.get('href', '')
+            title = a_tag.get('title', '')
+            chap_num = li.get('data-number', '0')
 
-                full_url = href if href.startswith('http') else f"{self.base_url}{href}"
+            full_url = href if href.startswith('http') else f"{self.base_url}{href}"
 
-                chapters.append(Chapter(
-                    number=chap_num,
-                    title=title,
-                    url=full_url,
-                ))
-
-        except Exception as e:
-            print(f"[MangaFire] Error getting chapters: {e}")
+            chapters.append(Chapter(
+                number=chap_num,
+                title=title,
+                url=full_url,
+            ))
 
         return sorted(chapters, key=lambda x: x.numeric)
 
