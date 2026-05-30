@@ -184,6 +184,38 @@ class TestFallbackDelayMechanic:
             "fallback_delay should defer it"
         )
 
+    def test_primary_source_failure_can_still_probe_backup(
+            self, fake_state, monkeypatch):
+        """A transient primary outage should not look like an empty library."""
+        from memanga.downloader import check_for_updates
+        from memanga.scrapers.base import Chapter
+        import memanga.downloader as dl
+
+        class _PrimaryScraper:
+            def get_chapters(self, url):
+                raise RuntimeError("Cloudflare 522")
+
+        class _BackupScraper:
+            def get_chapters(self, url):
+                return [Chapter("10", "", "https://backup.test/c/10")]
+
+        scrapers_by_domain = {
+            "primary.test": _PrimaryScraper(),
+            "backup.test": _BackupScraper(),
+        }
+        monkeypatch.setattr(dl, "get_scraper", lambda d: scrapers_by_domain[d])
+
+        manga = {"title": "X", "fallback_delay_days": 2, "sources": [
+            {"source": "primary.test", "url": "https://primary.test/x"},
+            {"source": "backup.test", "url": "https://backup.test/x"},
+        ]}
+
+        new, all_ = check_for_updates(manga, fake_state, return_all=True)
+
+        assert new == []
+        assert all_ == []
+        assert ("X", "10") in fake_state.pending
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Format conversion functions — each one is a pure file-output helper

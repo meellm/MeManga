@@ -115,10 +115,13 @@ class MangaDexScraper(BaseScraper):
             if len(items) < limit:
                 break
         
-        # Sort and deduplicate (keep first occurrence of each chapter)
+        # Sort and deduplicate. MangaDex can have multiple English uploads for
+        # the same chapter, and API tie ordering is not stable enough to trust.
+        # Prefer the earliest upload so repeated checks pick the same scanlation
+        # instead of flipping between duplicates.
         seen = set()
         unique_chapters = []
-        for ch in sorted(chapters):
+        for ch in sorted(chapters, key=lambda ch: (ch.numeric, ch.date or "")):
             if ch.number not in seen:
                 seen.add(ch.number)
                 unique_chapters.append(ch)
