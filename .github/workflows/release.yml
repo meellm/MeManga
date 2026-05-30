@@ -34,6 +34,24 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Linux system libraries for Qt/XCB + image plugins
+        # The Qt6 XCB platform plugin (libqxcb.so) and the imageformats
+        # plugins link against a set of XCB / xkbcommon / TIFF / JPEG
+        # system libs that the bare GitHub `ubuntu-latest` runner does
+        # not ship. Without them PyInstaller emits 20+ "Library not
+        # found" warnings and the frozen binary fails to launch on
+        # vanilla Ubuntu desktops with "qt.qpa.plugin: Could not load
+        # the Qt platform plugin 'xcb'".
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-util1 \
+            libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0 \
+            libegl1 libgl1 libfontconfig1 libdbus-1-3
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -41,14 +59,14 @@ jobs:
           pip install pyinstaller
 
       - name: Build release executable
-        # build_app.py produces a single-file binary at the repo root
-        # (MeManga.exe on Windows, MeManga elsewhere) and sweeps the
-        # build/ + dist/ scratch dirs afterwards.
+        # build_app.py produces a single-file binary under `release/`
+        # (release/MeManga.exe on Windows, release/MeManga elsewhere)
+        # and sweeps the build/ + dist/ scratch dirs afterwards.
         run: python build_app.py
 
       - name: Rename artifact for upload
         shell: bash
-        run: mv "${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"
+        run: mv "release/${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

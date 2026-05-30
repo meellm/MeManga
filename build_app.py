@@ -49,6 +49,13 @@ SPEC = PACKAGING / "memanga-release.spec"
 BUILD_TMP = ROOT / "build"
 DIST_TMP = ROOT / "dist"
 
+# Final binary lands here. A dedicated subdirectory avoids the
+# macOS / Windows case-insensitive filesystem trap where a
+# repo-root file called `MeManga` collides with the lowercase
+# `memanga/` source directory and Path.unlink() fails with EPERM
+# trying to remove what is actually a directory.
+RELEASE_DIR = ROOT / "release"
+
 
 def install_dependencies() -> bool:
     """Install deps for the release build.
@@ -152,7 +159,11 @@ def collect_artifact() -> Path | None:
     if not src.exists():
         print(f"\n! Expected output not found: {src}")
         return None
-    dest = ROOT / _exe_name()
+    RELEASE_DIR.mkdir(parents=True, exist_ok=True)
+    dest = RELEASE_DIR / _exe_name()
+    # `unlink(missing_ok=True)` is safe even on case-insensitive
+    # filesystems because `release/MeManga` cannot alias the
+    # `memanga/` package directory: they live at different paths.
     if dest.exists():
         dest.unlink()
     shutil.move(str(src), str(dest))
@@ -160,7 +171,7 @@ def collect_artifact() -> Path | None:
         dest.chmod(dest.stat().st_mode | 0o755)
     except Exception:
         pass
-    # Sweep — release builds leave nothing but the .exe.
+    # Sweep PyInstaller scratch dirs — only the release/ output remains.
     for d in (BUILD_TMP, DIST_TMP):
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)

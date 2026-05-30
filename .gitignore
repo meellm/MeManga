@@ -46,21 +46,16 @@ test-output/
 build/
 dist/
 
-# Final build artifacts — single-file PyInstaller output lands at
-# the repo root, not in dist/. Don't ever check the binaries into
-# git; they belong in GitHub Releases.
-# Windows release binaries (handled by *.exe below — kept here for
-# discoverability).
+# Final build artifacts — single-file PyInstaller output lands in
+# the `release/` subdir (chosen so a `MeManga` binary cannot collide
+# with the `memanga/` package on case-insensitive macOS/Windows
+# filesystems). Don't ever check binaries into git; they belong in
+# GitHub Releases.
+/release/
 /MeManga.exe
 /MeManga-Dev.exe
 *.exe
 *.app
-# NOTE: the bare-name macOS/Linux PyInstaller outputs (`MeManga`,
-# `MeManga-Dev` at the repo root) are *not* ignored by name. On
-# case-insensitive macOS filesystems a `/MeManga` ignore rule also
-# matches the lowercase `memanga/` source directory and blocks
-# tracking every file under it. After a local build on macOS or
-# Linux just `rm MeManga` (or move it to dist/, which IS ignored).
 
 # pytest cache
 .pytest_cache/

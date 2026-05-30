@@ -2,8 +2,11 @@
 """
 PyInstaller spec — MeManga RELEASE build (one-file, GUI-only).
 
-Used by `python build_app.py`. Produces MeManga[.exe] at the repo
-root for shipping to end users (e.g. via the GitHub release page).
+Used by `python build_app.py`. Produces MeManga[.exe] under the
+`release/` subdir for shipping to end users (e.g. via the GitHub
+release page). The dedicated subdir dodges the case-insensitive
+filesystem collision between a `MeManga` binary and the lowercase
+`memanga/` source package on macOS / Windows.
 
 Differences from the dev spec:
   - console=False → no terminal window pops behind the app
@@ -16,11 +19,14 @@ first launch (~80 MB, one-time, behind a progress toast).
 """
 
 import os
+import sys
 from pathlib import Path
 
 import certifi
 import playwright_stealth
 from PyInstaller.utils.hooks import collect_data_files
+
+_IS_WINDOWS = sys.platform == "win32"
 
 
 block_cipher = None
@@ -55,16 +61,6 @@ hidden_imports += [
     "cloudscraper",
     "keyring",
     "keyring.backends",
-    # Windows Credential Manager backend + its ctypes shim. PyInstaller
-    # would skip these because the imports are inside keyring's
-    # platform-detect branch (resolved at runtime, not import time).
-    # Without them, the frozen exe on Windows falls back to keyring's
-    # `Null` backend and `keyring.get_password` always returns None —
-    # no email password persists across launches.
-    "keyring.backends.Windows",
-    "pywin32_ctypes",
-    "pywin32_ctypes.pywintypes",
-    "pywin32_ctypes.win32cred",
     "yaml",
     "bs4",
     "playwright",
@@ -77,6 +73,22 @@ hidden_imports += [
     "PySide6.QtWidgets",
     "PySide6.QtSvg",
 ]
+
+# Windows Credential Manager backend + its ctypes shim. PyInstaller
+# would skip these because the imports are inside keyring's
+# platform-detect branch (resolved at runtime, not import time).
+# Without them, the frozen exe on Windows falls back to keyring's
+# `Null` backend and `keyring.get_password` always returns None —
+# no email password persists across launches. Declaring them outside
+# the win32 guard produced loud "Hidden import not found" errors in
+# the macOS / Linux build logs even though the bundle still worked.
+if _IS_WINDOWS:
+    hidden_imports += [
+        "keyring.backends.Windows",
+        "pywin32_ctypes",
+        "pywin32_ctypes.pywintypes",
+        "pywin32_ctypes.win32cred",
+    ]
 
 datas = [
     (certifi_dir, "certifi"),
