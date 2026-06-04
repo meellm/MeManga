@@ -18,6 +18,13 @@ class State:
     Call flush() explicitly when you need the file written immediately.
     """
 
+    # Latency above which a successful probe is flagged "warning" instead
+    # of "ok". Healthy sites on an ordinary connection routinely answer in
+    # 500-2000 ms, so a lower bound paints almost every source yellow. This
+    # threshold reserves the warning tier for responses that are genuinely
+    # sluggish.
+    SLOW_LATENCY_MS = 2500
+
     def __init__(self, config_dir: Optional[Path] = None):
         if config_dir:
             self.config_dir = Path(config_dir)
@@ -581,8 +588,8 @@ class State:
         if success:
             health["last_success"] = now
             health["error_count"] = 0
-            # "slow" badge if response was sluggish (>500ms is plenty).
-            if latency_ms is not None and latency_ms > 500:
+            # Flag only genuinely slow responses; see SLOW_LATENCY_MS.
+            if latency_ms is not None and latency_ms > self.SLOW_LATENCY_MS:
                 health["status"] = "warning"
             else:
                 health["status"] = "ok"
