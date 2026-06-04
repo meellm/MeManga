@@ -177,6 +177,52 @@ class TestCountChapters:
         assert seen == []
 
 
+class TestCheckUpdates:
+    """Issue #30: explicit per-manga checks must bypass the reading-only
+    filter that the library-wide sweep applies to non-reading manga."""
+
+    def _run_check(self, worker, event_bus, state, monkeypatch,
+                   manga_list, force):
+        import time
+        import memanga.downloader as downloader
+        checked = []
+
+        def _fake_check(manga, _state, return_all=False):
+            checked.append(manga.get("title"))
+            return ([], []) if return_all else []
+
+        monkeypatch.setattr(downloader, "check_for_updates", _fake_check)
+
+        done = []
+        event_bus.subscribe("check_complete", lambda d: done.append(d))
+        worker.check_updates(manga_list, state, config=None, force=force)
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not done:
+            event_bus.poll()
+            time.sleep(0.02)
+        event_bus.poll()
+        assert done, "check_complete never fired"
+        return checked
+
+    def test_sweep_skips_non_reading(self, worker, event_bus, state,
+                                     monkeypatch):
+        checked = self._run_check(worker, event_bus, state, monkeypatch, [
+            {"title": "Reading one", "status": "reading",
+             "source": "mock.test", "url": "u"},
+            {"title": "Plan one", "status": "plan",
+             "source": "mock.test", "url": "u"},
+        ], force=False)
+        assert checked == ["Reading one"]
+
+    def test_force_checks_non_reading(self, worker, event_bus, state,
+                                      monkeypatch):
+        checked = self._run_check(worker, event_bus, state, monkeypatch, [
+            {"title": "Plan one", "status": "plan",
+             "source": "mock.test", "url": "u"},
+        ], force=True)
+        assert checked == ["Plan one"]
+
+
 class TestSearchRelevanceFilter:
     """Regression for the 'searching Blue Lock returns Beastars, Tokyo
     Ghoul, …' bug. Single-manga aggregators (TGManga, BeastarsManga,

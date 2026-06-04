@@ -543,7 +543,9 @@ class LibraryPage(BasePage):
         ContextMenu(self, x, y, items)
 
     def _ctx_check(self, manga):
-        self.app.worker.check_updates([manga], self.app.app_state, self.app.config)
+        self.app.worker.check_updates(
+            [manga], self.app.app_state, self.app.config, force=True,
+        )
         self.app.show_page("downloads")
 
     def _ctx_download_all(self, manga):
@@ -554,7 +556,9 @@ class LibraryPage(BasePage):
         # skips anything `is_chapter_downloaded` already covers.
         title = manga.get("title", "")
         self.app.app_state.set_last_chapter(title, None)
-        self.app.worker.check_updates([manga], self.app.app_state, self.app.config)
+        self.app.worker.check_updates(
+            [manga], self.app.app_state, self.app.config, force=True,
+        )
         self.app.show_page("downloads")
 
     def _ctx_set_status(self, manga, status):
