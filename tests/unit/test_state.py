@@ -255,8 +255,18 @@ class TestSourceHealth:
         assert h["status"] == "ok"
         assert h["latency_ms"] == 120
 
+    def test_moderate_latency_stays_ok(self, state):
+        # Sub-threshold responses are normal network variance, not a
+        # problem — they must not be flagged. Regression test for the
+        # old 500 ms threshold that painted healthy sources "warning".
+        for latency in (589, 635, 711, state.SLOW_LATENCY_MS):
+            state.update_source_health("ok.test", True, latency_ms=latency)
+            assert state.get_source_health("ok.test")["status"] == "ok"
+
     def test_slow_latency_flagged_warning(self, state):
-        state.update_source_health("slow.test", True, latency_ms=900)
+        state.update_source_health(
+            "slow.test", True, latency_ms=state.SLOW_LATENCY_MS + 1,
+        )
         assert state.get_source_health("slow.test")["status"] == "warning"
 
     def test_repeated_failures_escalate_to_error(self, state):
