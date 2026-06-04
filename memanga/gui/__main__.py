@@ -8,7 +8,89 @@ import os
 import sys
 from pathlib import Path
 
+
+def _config_dir() -> Path:
+    """Directory the app uses for state, logs and crash reports."""
+    return Path.home() / ".config" / "memanga"
+
+
+def _ensure_valid_std_streams() -> None:
+    """Guarantee real, file-descriptor-backed standard streams.
+
+    A PyInstaller ``console=False`` (windowed) build starts with
+    ``sys.stdout`` / ``sys.stderr`` / ``sys.stdin`` set to ``None`` on
+    Windows, because there is no attached console. Two things break as a
+    direct result:
+
+      1. Any code that treats the stream as a file object — e.g.
+         ``sys.stdout.flush()`` in the update-check worker — raises
+         ``AttributeError: 'NoneType' object has no attribute 'flush'``.
+
+      2. Playwright launches its Node driver as a child process and
+         wires the child's stderr to ``sys.stderr.fileno()``. With
+         ``sys.stderr`` set to ``None`` it instead lets the child
+         inherit the parent's stderr handle, which does not exist in a
+         windowed process. The driver fails to start, so every
+         Playwright-backed scraper raises during ``search()`` and is
+         silently dropped from the results — while HTTP-only sources,
+         which never spawn the driver, keep working.
+
+    Pointing the missing streams at a real, writable log file restores a
+    valid file descriptor and leaves a diagnostic trail for bug reports.
+    Builds that already have working streams (the console dev build, or
+    running from source) are detected and left untouched.
+    """
+    def _is_usable(stream) -> bool:
+        if stream is None:
+            return False
+        try:
+            fd = stream.fileno()
+        except (AttributeError, OSError, ValueError):
+            return False
+        return isinstance(fd, int) and fd >= 0
+
+    need_out = not _is_usable(sys.stdout)
+    need_err = not _is_usable(sys.stderr)
+    need_in = not _is_usable(sys.stdin)
+    if not (need_out or need_err or need_in):
+        return
+
+    if need_out or need_err:
+        log = None
+        try:
+            config_dir = _config_dir()
+            config_dir.mkdir(parents=True, exist_ok=True)
+            # Truncate per launch — this is a "last session" diagnostic
+            # log, not an append-forever file that grows unbounded.
+            log = open(config_dir / "runtime.log", "w",
+                       encoding="utf-8", buffering=1)
+        except OSError:
+            # No writable config dir — fall back to the null device.
+            # It still provides a valid fd, which is all the Playwright
+            # driver needs; the output is simply discarded.
+            try:
+                log = open(os.devnull, "w", encoding="utf-8")
+            except OSError:
+                log = None
+        if log is not None:
+            if need_out:
+                sys.stdout = log
+            if need_err:
+                sys.stderr = log
+
+    if need_in:
+        try:
+            sys.stdin = open(os.devnull, "r", encoding="utf-8")
+        except OSError:
+            pass
+
+
 if getattr(sys, 'frozen', False):
+    # Must run before anything else in the frozen build: a windowed
+    # (console=False) exe has null std streams, and Playwright's driver
+    # reads sys.stderr.fileno() the moment a scraper starts.
+    _ensure_valid_std_streams()
+
     bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(sys.executable)))
 
     # --- SSL certificates ---
@@ -71,9 +153,8 @@ def _install_crash_logger():
     """
     import traceback
     from datetime import datetime
-    from pathlib import Path
 
-    config_dir = Path.home() / ".config" / "memanga"
+    config_dir = _config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
     log_path = config_dir / "crash.log"
 
