@@ -956,7 +956,9 @@ class DetailPage(BasePage):
     def _check_updates(self):
         if not self._manga:
             return
-        self.app.worker.check_updates([self._manga], self.app.app_state, self.app.config)
+        self.app.worker.check_updates(
+            [self._manga], self.app.app_state, self.app.config, force=True,
+        )
         # For auto-mode manga we follow the user to the Downloads page since
         # something will start queueing. For manual mode we stay put — the
         # Detail page will refresh its chapter list when check_complete fires.
@@ -1010,7 +1012,9 @@ class DetailPage(BasePage):
             # subtract 0.001 to make from_ch itself qualify.
             self.app.app_state.set_last_chapter(title, str(from_ch - 0.001))
 
-        self.app.worker.check_updates([self._manga], self.app.app_state, self.app.config)
+        self.app.worker.check_updates(
+            [self._manga], self.app.app_state, self.app.config, force=True,
+        )
         self.app.show_page("downloads")
         ch_display = int(from_ch) if from_ch == int(from_ch) else from_ch
         Toast(self, f"Downloading from chapter {ch_display}...", kind="info")

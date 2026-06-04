@@ -207,8 +207,16 @@ class BackgroundWorker:
     # Chapter checking
     # ------------------------------------------------------------------
 
-    def check_updates(self, manga_list: list, state, config):
-        """Check for new chapters across manga list."""
+    def check_updates(self, manga_list: list, state, config, force: bool = False):
+        """Check for new chapters across a list of manga.
+
+        The library-wide sweep only checks manga whose status is
+        ``reading`` — there's no point polling something that is on hold,
+        dropped or completed. Explicit per-manga actions (the Detail
+        page's "Check updates" button, a context-menu check, a download
+        request) pass ``force=True`` so the requested manga is always
+        checked regardless of its status.
+        """
         import sys as _sys
         # Short-circuit when we know we're offline. Every per-manga
         # check_for_updates() would otherwise burn 30 s × 3 retries
@@ -240,7 +248,7 @@ class BackgroundWorker:
             _sys.stdout.flush()
             for i, manga in enumerate(manga_list):
                 status = manga.get("status", "reading")
-                if status != "reading":
+                if not force and status != "reading":
                     print(f"[Check] Skipping '{manga.get('title')}' — status={status}", flush=True)
                     continue
                 title = manga.get("title", "")

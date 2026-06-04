@@ -291,8 +291,11 @@ class AddMangaDialog(ModalDialog):
 
             threading.Thread(target=_fetch_cover, daemon=True).start()
 
-            # Auto-check for chapters
-            self.app.worker.check_updates([entry], self.app.app_state, self.app.config)
+            # Auto-check for chapters. A freshly added manga is an explicit
+            # per-manga action, so check it regardless of its starting status.
+            self.app.worker.check_updates(
+                [entry], self.app.app_state, self.app.config, force=True,
+            )
         # When offline, the worker's check_updates() would already
         # short-circuit; skip both calls here to keep the add flow snappy.
 
