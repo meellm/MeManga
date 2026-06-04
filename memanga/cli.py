@@ -354,6 +354,13 @@ def cmd_update(args):
         if old_title in manga_state:
             manga_state[args.title] = manga_state.pop(old_title)
             state.set("manga", manga_state)
+        # Move already-downloaded files so they stay reachable under the
+        # new title (folder + filenames are keyed by title).
+        from .downloader import rename_manga_downloads
+        try:
+            rename_manga_downloads(config.download_dir, old_title, args.title)
+        except Exception:
+            pass
         changes.append(f"Title → {args.title}")
 
     if not changes:

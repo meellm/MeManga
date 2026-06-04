@@ -395,3 +395,79 @@ class TestRestartBrowsers:
         live Playwright browsers."""
         from memanga.downloader import restart_browsers
         restart_browsers()  # must not raise
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Rename migration — keep downloaded files reachable after a manga rename
+# (issue #41). The reader derives the folder and file names from the
+# manga's current title, so a rename must move both.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestRenameMangaDownloads:
+    def test_moves_folder_and_rewrites_title_prefix(self, tmp_path):
+        from memanga.downloader import rename_manga_downloads
+        old_dir = tmp_path / "Old Title"
+        old_dir.mkdir()
+        (old_dir / "Old Title - Chapter 1.cbz").write_text("a")
+        (old_dir / "Old Title - Chapter 2.cbz").write_text("b")
+
+        assert rename_manga_downloads(tmp_path, "Old Title", "New Title") is True
+
+        new_dir = tmp_path / "New Title"
+        assert not old_dir.exists()
+        assert (new_dir / "New Title - Chapter 1.cbz").read_text() == "a"
+        assert (new_dir / "New Title - Chapter 2.cbz").read_text() == "b"
+
+    def test_moves_non_title_prefixed_entries_as_is(self, tmp_path):
+        # Image-format downloads use "Chapter N" folders with no title.
+        from memanga.downloader import rename_manga_downloads
+        old_dir = tmp_path / "Old"
+        (old_dir / "Chapter 1").mkdir(parents=True)
+        (old_dir / "Chapter 1" / "001.jpg").write_text("img")
+
+        assert rename_manga_downloads(tmp_path, "Old", "New") is True
+        assert (tmp_path / "New" / "Chapter 1" / "001.jpg").read_text() == "img"
+
+    def test_no_downloads_returns_false(self, tmp_path):
+        from memanga.downloader import rename_manga_downloads
+        assert rename_manga_downloads(tmp_path, "Missing", "New") is False
+
+    def test_unchanged_sanitized_title_is_noop(self, tmp_path):
+        # The sanitizer strips characters like ':' — titles that collapse
+        # to the same safe name must not move anything.
+        from memanga.downloader import rename_manga_downloads
+        d = tmp_path / "Title"
+        d.mkdir()
+        assert rename_manga_downloads(tmp_path, "Title", "Title:") is False
+        assert d.exists()
+
+    def test_does_not_clobber_existing_destination(self, tmp_path):
+        from memanga.downloader import rename_manga_downloads
+        old_dir = tmp_path / "Old"
+        old_dir.mkdir()
+        (old_dir / "Old - Chapter 1.cbz").write_text("new-source")
+        new_dir = tmp_path / "New"
+        new_dir.mkdir()
+        (new_dir / "New - Chapter 1.cbz").write_text("keep-me")
+
+        rename_manga_downloads(tmp_path, "Old", "New")
+
+        # Existing destination file is preserved; the colliding source is
+        # left behind in the old folder rather than overwritten.
+        assert (new_dir / "New - Chapter 1.cbz").read_text() == "keep-me"
+        assert (old_dir / "Old - Chapter 1.cbz").read_text() == "new-source"
+
+    def test_merges_into_existing_new_folder(self, tmp_path):
+        from memanga.downloader import rename_manga_downloads
+        old_dir = tmp_path / "Old"
+        old_dir.mkdir()
+        (old_dir / "Old - Chapter 2.cbz").write_text("two")
+        new_dir = tmp_path / "New"
+        new_dir.mkdir()
+        (new_dir / "New - Chapter 1.cbz").write_text("one")
+
+        assert rename_manga_downloads(tmp_path, "Old", "New") is True
+        assert (new_dir / "New - Chapter 1.cbz").read_text() == "one"
+        assert (new_dir / "New - Chapter 2.cbz").read_text() == "two"
+        assert not old_dir.exists()

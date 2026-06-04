@@ -914,6 +914,16 @@ class DetailPage(BasePage):
                     if old_state:
                         self.app.app_state._data.setdefault("manga", {})[new_title] = old_state
                         self.app.app_state.remove_manga(old_title)
+                    # Move already-downloaded files to the new title so the
+                    # reader can still find them (state migrates above, but
+                    # the on-disk folder/filenames are keyed by title too).
+                    from ...downloader import rename_manga_downloads
+                    try:
+                        rename_manga_downloads(
+                            self.app.config.download_dir, old_title, new_title,
+                        )
+                    except Exception:
+                        pass
 
                 self._manga = m
                 break
