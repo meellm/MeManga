@@ -6,6 +6,31 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-06-04
+
+### Fixed
+- #28 Playwright-based sources (MangaFire, WeebCentral, Comick,
+  MangaKatana, …) silently returned no search results in the no-console
+  release exe. A `console=False` Windows build has null standard
+  streams, so Playwright's driver subprocess inherited an invalid
+  stderr handle and failed to start. The frozen entry point now
+  restores real, file-descriptor-backed streams before any scraper
+  runs.
+- #29 Source-health checks flagged almost every source as "warning":
+  the slow threshold was 500 ms, but healthy sites routinely answer in
+  500–2000 ms. Raised to a tunable `State.SLOW_LATENCY_MS` (2500 ms) so
+  the warning tier is reserved for genuinely slow responses.
+- #30 The Detail-page "Check updates" button silently did nothing for
+  manga whose status wasn't "reading". Explicit per-manga actions now
+  check regardless of status; only the library-wide sweep keeps the
+  reading-only filter.
+- MangaFire `get_chapters` now raises on network error, non-200,
+  non-JSON, and wrapped Cloudflare 5xx envelopes (with 3× backoff
+  retries) instead of returning an empty list, so `check_for_updates`
+  logs a real error and falls back to the backup source instead of
+  reporting "No new chapters". MangaDex chapter dedup is now stable
+  across repeated checks.
+
 ## [0.2.0] - 2026-05-28
 
 ### Added
