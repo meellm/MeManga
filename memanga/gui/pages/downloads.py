@@ -2,8 +2,6 @@
 Downloads page - Active/Completed/History with tab navigation.
 """
 
-import subprocess
-import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
@@ -420,22 +418,9 @@ class DownloadsPage(BasePage):
 
     def _open_download_folder(self):
         """Open the download directory in the OS file manager."""
-        import platform, subprocess
-        from pathlib import Path
-        from .._subprocess import no_window_kwargs
-        path = Path(self.app.config.download_dir)
-        path.mkdir(parents=True, exist_ok=True)
-        try:
-            # no_window_kwargs() prevents a cmd window from flashing
-            # on Windows when launching explorer from the release exe.
-            if platform.system() == "Darwin":
-                subprocess.run(["open", str(path)])
-            elif platform.system() == "Windows":
-                subprocess.run(["explorer", str(path)], **no_window_kwargs())
-            else:
-                subprocess.run(["xdg-open", str(path)])
-        except Exception:
-            pass
+        from .._subprocess import open_in_file_manager
+        if not open_in_file_manager(self.app.config.download_dir):
+            Toast(self, "Couldn't open the download folder", kind="error")
 
     def _cancel_all(self):
         # Order matters: set cancel flags on every queued item AND clear
@@ -504,17 +489,10 @@ class DownloadsPage(BasePage):
         self._update_empty_state()
 
     def _open_folder(self, path):
-        from .._subprocess import no_window_kwargs
-        try:
-            folder = str(Path(path).parent)
-            if sys.platform == "darwin":
-                subprocess.Popen(["open", folder])
-            elif sys.platform == "win32":
-                subprocess.Popen(["explorer", folder], **no_window_kwargs())
-            else:
-                subprocess.Popen(["xdg-open", folder])
-        except Exception:
-            pass
+        # `path` is a chapter file; reveal its containing manga folder.
+        from .._subprocess import open_in_file_manager
+        if not open_in_file_manager(Path(path).parent):
+            Toast(self, "Couldn't open the folder", kind="error")
 
     # ── Check event handlers ──
 
