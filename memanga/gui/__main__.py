@@ -14,7 +14,7 @@ def _config_dir() -> Path:
     return Path.home() / ".config" / "memanga"
 
 
-def _ensure_valid_std_streams() -> None:
+def _ensure_valid_std_streams() -> bool:
     """Guarantee real, file-descriptor-backed standard streams.
 
     A PyInstaller ``console=False`` (windowed) build starts with
@@ -30,15 +30,18 @@ def _ensure_valid_std_streams() -> None:
          wires the child's stderr to ``sys.stderr.fileno()``. With
          ``sys.stderr`` set to ``None`` it instead lets the child
          inherit the parent's stderr handle, which does not exist in a
-         windowed process. The driver fails to start, so every
-         Playwright-backed scraper raises during ``search()`` and is
-         silently dropped from the results — while HTTP-only sources,
-         which never spawn the driver, keep working.
+         windowed process.
 
     Pointing the missing streams at a real, writable log file restores a
-    valid file descriptor and leaves a diagnostic trail for bug reports.
-    Builds that already have working streams (the console dev build, or
-    running from source) are detected and left untouched.
+    valid file descriptor and leaves a diagnostic trail for bug reports —
+    the scraper layer's ``print``/traceback output then lands in
+    ``runtime.log`` instead of vanishing, which is what makes a frozen
+    Playwright failure diagnosable at all.
+
+    Returns ``True`` when streams had to be repaired (i.e. this is the
+    windowed build), ``False`` when they were already usable (the console
+    dev build, or running from source), so the caller can apply the other
+    windowed-only workarounds.
     """
     def _is_usable(stream) -> bool:
         if stream is None:
@@ -53,7 +56,7 @@ def _ensure_valid_std_streams() -> None:
     need_err = not _is_usable(sys.stderr)
     need_in = not _is_usable(sys.stdin)
     if not (need_out or need_err or need_in):
-        return
+        return False
 
     if need_out or need_err:
         log = None
@@ -77,19 +80,78 @@ def _ensure_valid_std_streams() -> None:
                 sys.stdout = log
             if need_err:
                 sys.stderr = log
+            # Also point the process's OS-level standard handles at the
+            # log. Playwright's Node driver is a child process: on
+            # Windows a windowed build leaves the real stdout/stderr
+            # handles invalid, and a child that inherits those handles
+            # — rather than reading ``sys.stderr.fileno()`` — gets broken
+            # ones and the driver fails to start. ``dup2`` makes the
+            # inherited descriptors valid too.
+            try:
+                _fd = log.fileno()
+                if need_out:
+                    os.dup2(_fd, 1)
+                if need_err:
+                    os.dup2(_fd, 2)
+            except (OSError, ValueError, AttributeError):
+                pass
 
     if need_in:
         try:
-            sys.stdin = open(os.devnull, "r", encoding="utf-8")
+            _devnull_in = open(os.devnull, "r", encoding="utf-8")
+            sys.stdin = _devnull_in
+            try:
+                os.dup2(_devnull_in.fileno(), 0)
+            except (OSError, ValueError, AttributeError):
+                pass
         except OSError:
             pass
+
+    return True
+
+
+def _install_windowed_subprocess_defaults() -> None:
+    """Spawn child processes without a console in the windowed build.
+
+    A ``console=False`` (GUI-subsystem) process has no console to share
+    with its children. When it spawns a console program such as
+    Playwright's Node driver, Windows allocates a fresh console for the
+    child; combined with the ``SW_HIDE`` startup flag Playwright already
+    sets, that allocation is what stops the driver from coming up in the
+    release exe — so every Playwright source fails (no search results,
+    zero chapters, page-fetch errors) while the console dev build, whose
+    children inherit its console, works from the identical bundle.
+
+    ``CREATE_NO_WINDOW`` tells Windows not to allocate a console for the
+    child, which is exactly what a background driver wants — its stdio
+    already travel over the pipes Playwright sets up. Default it on every
+    ``subprocess.Popen`` (the API asyncio uses under the hood to spawn the
+    driver) that doesn't already request creation flags, so the existing
+    ``no_window_kwargs()`` callers are left as-is.
+    """
+    if os.name != "nt":
+        return
+    import subprocess
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+    _orig_popen_init = subprocess.Popen.__init__
+
+    def _popen_init(self, *args, **kwargs):
+        if not kwargs.get("creationflags"):
+            kwargs["creationflags"] = flags
+        _orig_popen_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = _popen_init
 
 
 if getattr(sys, 'frozen', False):
     # Must run before anything else in the frozen build: a windowed
     # (console=False) exe has null std streams, and Playwright's driver
     # reads sys.stderr.fileno() the moment a scraper starts.
-    _ensure_valid_std_streams()
+    _windowed = _ensure_valid_std_streams()
+    if _windowed:
+        # Windowed build only: keep Windows from allocating a console for
+        # the Playwright Node driver, which otherwise fails to start.
+        _install_windowed_subprocess_defaults()
 
     bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(sys.executable)))
 

@@ -95,3 +95,71 @@ class TestMangaFireGetChapters:
 
         assert scraper.session.calls == 2
         assert [ch.number for ch in chapters] == ["1"]
+
+
+class TestVRFBrowserInitAtomicity:
+    """Issue #28: a failed firefox.launch() must surface the real error,
+    not a masking AttributeError on a half-initialised thread-local.
+
+    The frozen release exe could not launch Firefox; the original
+    non-atomic init left `_vrf_thread_local.playwright` set, so the retry
+    skipped init and raised `'thread_local' object has no attribute
+    'page'` — hiding the actual launch failure and making the bug
+    undiagnosable.
+    """
+
+    class _FakeFirefox:
+        def launch(self, **kwargs):
+            raise RuntimeError("Executable doesn't exist: firefox")
+
+    class _FakePlaywright:
+        def __init__(self):
+            self.firefox = TestVRFBrowserInitAtomicity._FakeFirefox()
+            self.stopped = False
+
+        def stop(self):
+            self.stopped = True
+
+    class _FakeContextManager:
+        def __init__(self, started):
+            self._started = started
+
+        def start(self):
+            return self._started
+
+    def _patch(self, monkeypatch):
+        from memanga.scrapers import mangafire as mf
+        # Clear any thread-local state from earlier tests in this thread.
+        mf.VRFGenerator().close()
+        for attr in ("playwright", "browser", "context", "page"):
+            if hasattr(mf._vrf_thread_local, attr):
+                delattr(mf._vrf_thread_local, attr)
+        started = self._FakePlaywright()
+        monkeypatch.setattr(mf, "PLAYWRIGHT_AVAILABLE", True)
+        monkeypatch.setattr(
+            mf, "sync_playwright",
+            lambda: self._FakeContextManager(started),
+        )
+        return mf, started
+
+    def test_launch_failure_surfaces_real_error(self, monkeypatch):
+        mf, started = self._patch(monkeypatch)
+        gen = mf.VRFGenerator()
+        with pytest.raises(RuntimeError, match="Executable doesn't exist"):
+            gen._ensure_browser_in_thread()
+        # Playwright start was rolled back; no half-initialised state left.
+        assert started.stopped is True
+        assert not hasattr(mf._vrf_thread_local, "playwright")
+        assert not hasattr(mf._vrf_thread_local, "page")
+
+    def test_retry_still_surfaces_real_error_not_attribute_error(self,
+                                                                 monkeypatch):
+        mf, _ = self._patch(monkeypatch)
+        gen = mf.VRFGenerator()
+        # First attempt fails…
+        with pytest.raises(RuntimeError, match="Executable doesn't exist"):
+            gen._ensure_browser_in_thread()
+        # …and so does the retry, with the SAME real error — never an
+        # AttributeError about a missing 'page' on the thread-local.
+        with pytest.raises(RuntimeError, match="Executable doesn't exist"):
+            gen._ensure_browser_in_thread()
