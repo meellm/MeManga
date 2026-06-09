@@ -181,20 +181,53 @@ class VRFGenerator:
         self._initialized = True
 
     def _ensure_browser_in_thread(self):
-        """Ensure browser is running in the current thread. Must be called from executor thread."""
+        """Ensure the thread-local Firefox is running. Executor-thread only.
+
+        Atomic, mirroring ``PlaywrightScraper._get_browser_in_thread``: a
+        failed ``firefox.launch()`` must not leave ``_vrf_thread_local``
+        with ``playwright`` set but no ``page``. The old code set
+        ``_vrf_thread_local.playwright`` first, so a launch failure left a
+        half-initialised thread-local — and the next call skipped the init
+        block and raised ``AttributeError`` on ``_vrf_thread_local.page``,
+        masking the real launch error (this is the "'thread_local'"
+        download failure in the frozen build). Build everything in locals,
+        roll the Playwright start back on failure, and commit at once.
+        """
         if not PLAYWRIGHT_AVAILABLE:
             raise RuntimeError("Playwright not available")
 
-        if not hasattr(_vrf_thread_local, 'playwright'):
-            print("[MangaFire] Starting Firefox browser (bypasses bot detection)...")
-            _vrf_thread_local.playwright = sync_playwright().start()
-            _vrf_thread_local.browser = _vrf_thread_local.playwright.firefox.launch(headless=True)
-            _vrf_thread_local.context = _vrf_thread_local.browser.new_context(
+        if (hasattr(_vrf_thread_local, 'playwright')
+                and hasattr(_vrf_thread_local, 'browser')
+                and hasattr(_vrf_thread_local, 'context')
+                and hasattr(_vrf_thread_local, 'page')):
+            return _vrf_thread_local.page
+
+        # Drop any half-initialised state from a previous failed attempt
+        # so sync_playwright().start() doesn't raise "already started".
+        self._close_in_thread()
+
+        print("[MangaFire] Starting Firefox browser (bypasses bot detection)...")
+        pw = sync_playwright().start()
+        try:
+            browser = pw.firefox.launch(headless=True)
+            context = browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
                 viewport={'width': 1920, 'height': 1080}
             )
-            _vrf_thread_local.page = _vrf_thread_local.context.new_page()
+            page = context.new_page()
+        except Exception:
+            # Roll back so the next call retries cleanly and surfaces the
+            # real error instead of a masking AttributeError.
+            try:
+                pw.stop()
+            except Exception:
+                pass
+            raise
 
+        _vrf_thread_local.playwright = pw
+        _vrf_thread_local.browser = browser
+        _vrf_thread_local.context = context
+        _vrf_thread_local.page = page
         return _vrf_thread_local.page
 
     def _get_chapter_pages_in_thread(self, chapter_url: str) -> Tuple[List[str], List[int]]:
