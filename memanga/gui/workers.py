@@ -207,7 +207,8 @@ class BackgroundWorker:
     # Chapter checking
     # ------------------------------------------------------------------
 
-    def check_updates(self, manga_list: list, state, config, force: bool = False):
+    def check_updates(self, manga_list: list, state, config,
+                      force: bool = False, queue_all: bool = False):
         """Check for new chapters across a list of manga.
 
         The library-wide sweep only checks manga whose status is
@@ -216,6 +217,12 @@ class BackgroundWorker:
         page's "Check updates" button, a context-menu check, a download
         request) pass ``force=True`` so the requested manga is always
         checked regardless of its status.
+
+        ``queue_all`` marks the check as an explicit download request
+        ("Download All" / "Download from chapter"). It is echoed on the
+        ``check_complete`` event so the Downloads page queues the resolved
+        chapters for every manga regardless of mode — manual-mode manga
+        are otherwise only surfaced, never auto-queued.
         """
         import sys as _sys
         # Short-circuit when we know we're offline. Every per-manga
@@ -295,7 +302,9 @@ class BackgroundWorker:
                         "title": title, "error": str(e),
                     })
             print(f"[Check] Done. Total results: {len(results)} manga with new chapters", flush=True)
-            self._events.publish("check_complete", {"results": results})
+            self._events.publish("check_complete", {
+                "results": results, "queue_all": queue_all,
+            })
 
         self._safe_submit(_task)
 

@@ -503,18 +503,30 @@ class DownloadsPage(BasePage):
 
     def _on_check_complete(self, data):
         results = data.get("results", [])
+        # Set by an explicit "Download All" / "Download from chapter" action.
+        # Such a request must queue the resolved chapters regardless of mode;
+        # the background sweep only auto-queues auto-mode manga.
+        queue_all = data.get("queue_all", False)
 
-        # Filter to auto-mode manga that actually have new chapters to queue.
         # Manual-mode manga surface their badge + per-chapter Download buttons
-        # on the Detail page; we never auto-queue for them.
-        auto_results = [
-            r for r in results
-            if r["manga"].get("mode", "auto") == "auto" and r.get("chapters")
-        ]
+        # on the Detail page and are not auto-queued by the background sweep —
+        # but an explicit download request (queue_all) does queue them.
+        if queue_all:
+            to_queue = [r for r in results if r.get("chapters")]
+        else:
+            to_queue = [
+                r for r in results
+                if r["manga"].get("mode", "auto") == "auto" and r.get("chapters")
+            ]
 
-        if not auto_results:
-            # Nothing to queue. Show an informational toast distinguishing
-            # "nothing found" from "found, but waiting for user action".
+        if not to_queue:
+            if queue_all:
+                # Explicit request resolved nothing to download (e.g. every
+                # chapter is already on disk).
+                Toast(self, "No chapters to download", kind="info")
+                return
+            # Background sweep: distinguish "nothing found" from "found, but
+            # waiting for the user to download from the Detail page".
             manual_with_new = sum(
                 len(r["chapters"]) for r in results
                 if r["manga"].get("mode", "auto") == "manual" and r.get("chapters")
@@ -529,14 +541,14 @@ class DownloadsPage(BasePage):
                 Toast(self, "No new chapters found", kind="info")
             return
 
-        total = sum(len(r["chapters"]) for r in auto_results)
+        total = sum(len(r["chapters"]) for r in to_queue)
         Toast(self, f"Found {total} new chapter(s), downloading...", kind="success")
 
         global_kindle = self.app.config.delivery_mode == "email" and self.app.config.email_enabled
         naming_template = self.app.config.get("delivery.naming_template")
 
         skipped = 0
-        for r in auto_results:
+        for r in to_queue:
             manga = r["manga"]
             m_title = manga.get("title", "")
             for ch in r["chapters"]:
