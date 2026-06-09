@@ -645,23 +645,12 @@ class SettingsPage(BasePage):
         """Open the user config dir (where state.json + logs live) in the
         OS file manager.
         """
-        import platform, subprocess
-        from pathlib import Path
-        from .._subprocess import no_window_kwargs
-        path = Path(self.app.config.config_dir)
-        path.mkdir(parents=True, exist_ok=True)
-        try:
-            # no_window_kwargs() prevents a cmd window from flashing
-            # when launching explorer from the windowed release exe.
-            if platform.system() == "Darwin":
-                subprocess.run(["open", str(path)])
-            elif platform.system() == "Windows":
-                subprocess.run(["explorer", str(path)], **no_window_kwargs())
-            else:
-                subprocess.run(["xdg-open", str(path)])
+        from .._subprocess import open_in_file_manager
+        path = self.app.config.config_dir
+        if open_in_file_manager(path):
             Toast(self, f"Opened {path}", kind="info")
-        except Exception as e:
-            Toast(self, f"Couldn't open folder: {e}", kind="error")
+        else:
+            Toast(self, "Couldn't open the logs folder", kind="error")
 
     # ── Actions ──
 
