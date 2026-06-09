@@ -64,6 +64,45 @@ jobs:
         # and sweeps the build/ + dist/ scratch dirs afterwards.
         run: python build_app.py
 
+      - name: Verify Playwright works inside the built executable (Windows)
+        # Release gate for issue #28: run the actual artifact on the
+        # pristine runner — the same "fresh machine, first session"
+        # conditions the bug reproduced under. The flag installs Firefox
+        # through the bundled driver and launches it through the normal
+        # Playwright transport; a non-zero exit fails the release.
+        #
+        # Start-Process WITHOUT stream redirection is deliberate: it
+        # detaches the windowed exe from the runner's console so it gets
+        # null standard handles, exactly like a user double-click. A
+        # plain shell invocation would pipe valid handles in and mask
+        # the very environment this gate exists to prove.
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath ".\release\${{ matrix.artifact_name }}" `
+                 -ArgumentList "--verify-playwright" -PassThru -Wait
+          Write-Host "----- runtime.log -----"
+          Get-Content "$env:USERPROFILE\.config\memanga\runtime.log" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) {
+            Write-Error "Playwright self-test failed in the built executable (exit $($p.ExitCode))"
+            exit 1
+          }
+
+      - name: Verify Playwright works inside the built executable (macOS)
+        # Same gate for the macOS artifact (it had its own variant of the
+        # browsers-path bug). Skipped on Linux: the bare runner lacks
+        # Firefox's system libraries and the issue is specific to the
+        # windowed Windows/macOS artifacts.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          "./release/${{ matrix.artifact_name }}" --verify-playwright || {
+            echo "::error::Playwright self-test failed in the built executable"
+            echo "----- runtime.log -----"
+            cat "$HOME/.config/memanga/runtime.log" 2>/dev/null || true
+            exit 1
+          }
+
       - name: Rename artifact for upload
         shell: bash
         run: mv "release/${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"

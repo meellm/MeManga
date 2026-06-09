@@ -14,6 +14,55 @@ def _config_dir() -> Path:
     return Path.home() / ".config" / "memanga"
 
 
+def _playwright_browsers_dir() -> Path:
+    """Per-user browser cache dir, matching Playwright's own defaults.
+
+    Mirrors the driver registry's platform defaults so the path computed
+    here is the same one ``playwright install`` writes to when the env
+    var is absent: ``%LOCALAPPDATA%\\ms-playwright`` on Windows,
+    ``~/Library/Caches/ms-playwright`` on macOS, ``$XDG_CACHE_HOME`` or
+    ``~/.cache`` elsewhere.
+    """
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA")
+        root = Path(base) if base else Path.home() / "AppData" / "Local"
+    elif sys.platform == "darwin":
+        root = Path.home() / "Library" / "Caches"
+    else:
+        base = os.environ.get("XDG_CACHE_HOME")
+        root = Path(base) if base else Path.home() / ".cache"
+    return root / "ms-playwright"
+
+
+def _configure_playwright_browsers() -> Path:
+    """Pin ``PLAYWRIGHT_BROWSERS_PATH`` to the per-user cache dir.
+
+    Playwright's driver transport forces ``PLAYWRIGHT_BROWSERS_PATH=0``
+    ("browsers live inside the application bundle") for frozen builds
+    whenever the variable is unset. No browsers ship inside the bundle,
+    so every ``firefox.launch()`` then fails with "Executable doesn't
+    exist".
+
+    Setting the variable only when the directory already exists — the
+    old behaviour — broke the entire first session on a fresh machine:
+    the first-launch installer downloads Firefox into the per-user
+    cache, but the running process still has no variable set, so the
+    driver resolves to the empty bundle for the rest of the session.
+    Search, get_chapters and get_pages fail for every Playwright source
+    until the app is restarted. Set it unconditionally; the installer
+    creates the directory on first run.
+
+    An explicit pre-set value other than the bundle sentinel ``"0"`` is
+    honoured so a user-managed browser cache keeps working.
+    """
+    existing = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if existing and existing != "0":
+        return Path(existing)
+    pw_browsers = _playwright_browsers_dir()
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(pw_browsers)
+    return pw_browsers
+
+
 def _ensure_valid_std_streams() -> bool:
     """Guarantee real, file-descriptor-backed standard streams.
 
@@ -143,6 +192,68 @@ def _install_windowed_subprocess_defaults() -> None:
     subprocess.Popen.__init__ = _popen_init
 
 
+def _verify_playwright() -> int:
+    """End-to-end Playwright self-test. Returns a process exit code.
+
+    Invoked via ``--verify-playwright``, primarily by the release
+    pipeline: after building the windowed executable, CI runs it with
+    this flag on a pristine runner — the same "fresh machine, first
+    session" conditions issue #28 kept reproducing under. The test
+    installs Firefox through the bundled driver (exactly like the
+    first-launch dialog), launches it through the regular Playwright
+    transport, and loads a page. A release cannot ship unless this
+    passes, which turns "the windowed exe can drive Playwright" from a
+    claim into a release invariant.
+
+    All progress goes through ``print`` so a windowed build writes it
+    to ``runtime.log`` via the repaired streams; the exit code is the
+    machine-readable verdict either way.
+    """
+    import subprocess
+    import traceback
+
+    print(f"[Verify] platform={sys.platform} frozen={getattr(sys, 'frozen', False)}",
+          flush=True)
+    print(f"[Verify] PLAYWRIGHT_BROWSERS_PATH="
+          f"{os.environ.get('PLAYWRIGHT_BROWSERS_PATH')!r}", flush=True)
+    try:
+        from playwright._impl._driver import (
+            compute_driver_executable, get_driver_env,
+        )
+        node, cli = compute_driver_executable()
+        print(f"[Verify] installing firefox via bundled driver…", flush=True)
+        result = subprocess.run(
+            [str(node), str(cli), "install", "firefox"],
+            env=get_driver_env(), capture_output=True, text=True,
+            timeout=900,
+        )
+        if result.returncode != 0:
+            print(f"[Verify] FAIL: install exited {result.returncode}:\n"
+                  f"{(result.stderr or result.stdout or '')[-2000:]}",
+                  flush=True)
+            return 1
+
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            print(f"[Verify] firefox expected at: {pw.firefox.executable_path}",
+                  flush=True)
+            browser = pw.firefox.launch(headless=True)
+            page = browser.new_page()
+            page.goto("data:text/html,<title>memanga-verify</title>",
+                      wait_until="domcontentloaded")
+            title = page.title()
+            browser.close()
+        if title != "memanga-verify":
+            print(f"[Verify] FAIL: unexpected page title {title!r}", flush=True)
+            return 1
+        print("[Verify] PASS: driver started, firefox launched, page loaded",
+              flush=True)
+        return 0
+    except Exception:
+        print(f"[Verify] FAIL:\n{traceback.format_exc()}", flush=True)
+        return 1
+
+
 if getattr(sys, 'frozen', False):
     # Must run before anything else in the frozen build: a windowed
     # (console=False) exe has null std streams, and Playwright's driver
@@ -175,20 +286,15 @@ if getattr(sys, 'frozen', False):
                 print("[SSL] WARNING: No CA bundle found!", flush=True)
 
     # --- Playwright browsers ---
-    # Playwright installs browsers to ~\AppData\Local\ms-playwright (Windows)
-    # or ~/.cache/ms-playwright (Linux/Mac). Inside a PyInstaller bundle,
-    # Playwright's bundled driver looks for browsers relative to itself
-    # (.local-browsers/) which is wrong. Point it to the real install location.
-    if os.name == 'nt':
-        pw_browsers = Path.home() / "AppData" / "Local" / "ms-playwright"
-    else:
-        pw_browsers = Path.home() / ".cache" / "ms-playwright"
-
+    # Pin the browser cache location unconditionally; see
+    # _configure_playwright_browsers for why "only if it exists" broke
+    # every Playwright source on a fresh machine's first session.
+    pw_browsers = _configure_playwright_browsers()
     if pw_browsers.exists():
-        os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(pw_browsers)
         print(f"[Playwright] Browsers: {pw_browsers}", flush=True)
     else:
-        print(f"[Playwright] WARNING: Browser dir not found at {pw_browsers}", flush=True)
+        print(f"[Playwright] Browser dir not present yet "
+              f"(first-launch install creates it): {pw_browsers}", flush=True)
 
     # Quick SSL test
     try:
@@ -199,6 +305,11 @@ if getattr(sys, 'frozen', False):
         print(f"[SSL] HTTPS test FAILED: {e}", flush=True)
 else:
     print("[Init] Running from source", flush=True)
+
+# Release-pipeline self-test — must run before the GUI import so the
+# verdict is pure Playwright, with no Qt/display dependency.
+if "--verify-playwright" in sys.argv:
+    sys.exit(_verify_playwright())
 
 from memanga.gui import launch_gui
 

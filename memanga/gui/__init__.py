@@ -102,11 +102,14 @@ def _install_playwright_browsers():
 
     def _run(cmd, label):
         try:
+            # Pass the environment through unchanged. The frozen entry
+            # point pins PLAYWRIGHT_BROWSERS_PATH to the per-user cache
+            # dir, and the install target must match the path the driver
+            # resolves at launch time. Popping the variable here made the
+            # installer write to the platform default while the running
+            # process kept resolving to the empty bundle ("0"), so every
+            # Playwright launch failed until the app was restarted.
             env = dict(os.environ)
-            # Force the standard per-account cache dir so
-            # `_check_playwright_browsers` on next launch finds the
-            # freshly-installed browser.
-            env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
             # no_window_kwargs() prevents Windows from flashing a cmd
             # window for the install subprocess — release builds use
             # console=False so any naked subprocess would otherwise pop
@@ -155,8 +158,10 @@ def _install_playwright_browsers_stream(on_line, cancelled):
 
     def _stream(cmd, label):
         try:
+            # Environment passed through unchanged — install target must
+            # match the driver's launch-time lookup (see the blocking
+            # variant above for the full rationale).
             env = dict(os.environ)
-            env.pop("PLAYWRIGHT_BROWSERS_PATH", None)
             from ._subprocess import no_window_kwargs
             proc = subprocess.Popen(
                 cmd,
