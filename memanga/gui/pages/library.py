@@ -557,7 +557,8 @@ class LibraryPage(BasePage):
         title = manga.get("title", "")
         self.app.app_state.set_last_chapter(title, None)
         self.app.worker.check_updates(
-            [manga], self.app.app_state, self.app.config, force=True,
+            [manga], self.app.app_state, self.app.config,
+            force=True, queue_all=True,
         )
         self.app.show_page("downloads")
 

@@ -1023,7 +1023,8 @@ class DetailPage(BasePage):
             self.app.app_state.set_last_chapter(title, str(from_ch - 0.001))
 
         self.app.worker.check_updates(
-            [self._manga], self.app.app_state, self.app.config, force=True,
+            [self._manga], self.app.app_state, self.app.config,
+            force=True, queue_all=True,
         )
         self.app.show_page("downloads")
         ch_display = int(from_ch) if from_ch == int(from_ch) else from_ch

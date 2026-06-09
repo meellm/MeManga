@@ -283,6 +283,72 @@ class TestDetailPage:
             sample_manga["title"]) == "4.999"
 
 
+class TestDownloadsQueueing:
+    """Issue #50: an explicit "Download All" / "Download from chapter"
+    must queue the resolved chapters even for manual-mode manga, which
+    the background sweep deliberately does not auto-queue."""
+
+    def _result(self, manga, *numbers):
+        import types
+        chapters = [
+            types.SimpleNamespace(
+                number=n, title="", url=f"https://x/c/{n}",
+                source=manga.get("source", "x"), is_backup=False,
+            )
+            for n in numbers
+        ]
+        return {"manga": manga, "chapters": chapters, "all_chapters": chapters}
+
+    def test_explicit_download_queues_manual_manga(self, app_window, qapp,
+                                                   sample_manga):
+        assert sample_manga.get("mode") == "manual"
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+
+        queued = []
+        app_window.worker.download_chapter = (
+            lambda **kw: queued.append(str(kw["chapter"].number))
+        )
+        page._on_check_complete({
+            "results": [self._result(sample_manga, "1", "2")],
+            "queue_all": True,
+        })
+        assert queued == ["1", "2"]
+
+    def test_background_sweep_does_not_queue_manual_manga(self, app_window,
+                                                          qapp, sample_manga):
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+
+        queued = []
+        app_window.worker.download_chapter = (
+            lambda **kw: queued.append(str(kw["chapter"].number))
+        )
+        # No queue_all flag → background-sweep semantics; manual manga is
+        # surfaced, not queued.
+        page._on_check_complete({
+            "results": [self._result(sample_manga, "1", "2")],
+        })
+        assert queued == []
+
+    def test_explicit_download_skips_already_downloaded(self, app_window, qapp,
+                                                        sample_manga):
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+        app_window.app_state.add_downloaded_chapter(sample_manga["title"], "1")
+
+        queued = []
+        app_window.worker.download_chapter = (
+            lambda **kw: queued.append(str(kw["chapter"].number))
+        )
+        page._on_check_complete({
+            "results": [self._result(sample_manga, "1", "2")],
+            "queue_all": True,
+        })
+        # Chapter 1 is already on disk; only 2 is queued.
+        assert queued == ["2"]
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Reader
 # ─────────────────────────────────────────────────────────────────────────
