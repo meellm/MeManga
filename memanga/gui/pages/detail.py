@@ -260,7 +260,7 @@ class DetailPage(BasePage):
         manga_kindle = manga.get("send_to_kindle", True)
         kindle_row = QHBoxLayout()
         self._kindle_check = QCheckBox("Send to Kindle after download")
-        self._kindle_check.setChecked(manga_kindle and global_email_on)
+        self._kindle_check.setChecked(bool(manga_kindle and global_email_on))
         self._kindle_check.stateChanged.connect(self._on_kindle_toggle)
         kindle_row.addWidget(self._kindle_check)
         if not global_email_on:

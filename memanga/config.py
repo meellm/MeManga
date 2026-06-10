@@ -171,7 +171,9 @@ class Config:
     
     @property
     def email_enabled(self):
-        return self.delivery_mode == "email" and self.get("email.kindle_email")
+        # bool() matters: `and` would otherwise leak the kindle_email
+        # string, which Qt setters like setChecked() reject (issue #55).
+        return self.delivery_mode == "email" and bool(self.get("email.kindle_email"))
     
     @property
     def output_format(self):

@@ -13,6 +13,7 @@ If any of these go red, a previously-fixed bug has come back.
 | #21 | No pan/drag when zoomed in reader |
 | #23 | Non-image format downloads written to root, not <dir>/<title>/ |
 | #40 | Pause All / Resume All dropped queued downloads |
+| #55 | Detail page blank when Email to Kindle delivery selected |
 """
 
 from __future__ import annotations
@@ -318,3 +319,44 @@ def test_issue_40_pause_resume_keeps_queue(app_window, qapp, monkeypatch):
     gates["M:3"].set()
     gates["M:4"].set()
     assert pump(lambda: worker._active_downloads == 0)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# #55 — Detail page blank when Email to Kindle delivery is selected
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_issue_55_detail_renders_with_email_delivery(app_window, qapp,
+                                                     sample_manga):
+    """Config.email_enabled returned the kindle_email *string*, which the
+    detail page passed straight into QCheckBox.setChecked(). PySide6
+    rejects non-bool arguments with a TypeError, aborting _rebuild()
+    mid-way and leaving the page blank except for the back button.
+    """
+    app_window.config.set("delivery.mode", "email")
+    app_window.config.set("email.kindle_email", "reader@kindle.com")
+    app_window.config.set("manga", [sample_manga])
+
+    app_window.show_page("detail", manga=sample_manga)
+    qapp.processEvents()
+
+    page = app_window._pages["detail"]
+    assert app_window._current_page == "detail"
+    assert page._kindle_check.isChecked() is True
+    # The page actually rendered past the back button.
+    assert page._layout.count() > 1
+
+
+def test_issue_55_email_enabled_is_bool(config):
+    """email_enabled must be a real bool in every config state, never the
+    kindle_email string leaking through `and` short-circuiting."""
+    assert config.email_enabled is False  # default: local mode
+
+    config.set("delivery.mode", "email")
+    assert config.email_enabled is False  # email mode, no address yet
+
+    config.set("email.kindle_email", "reader@kindle.com")
+    assert config.email_enabled is True
+
+    config.set("delivery.mode", "local")
+    assert config.email_enabled is False
