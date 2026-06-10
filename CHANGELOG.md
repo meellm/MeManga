@@ -6,6 +6,46 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-10
+
+### Added
+- Release builds now run an actual frozen-executable Playwright
+  self-test before publishing artifacts. Windows runs the no-console
+  app with null standard handles to match a user double-click; macOS
+  runs the same `--verify-playwright` gate against the built binary.
+- Tagged releases now build and upload Windows, macOS, and Linux
+  single-file binaries through GitHub Actions.
+
+### Fixed
+- #28 Playwright-based sources could still fail inside frozen desktop
+  builds when the bundled driver looked in the wrong browser cache path
+  or inherited invalid standard handles from a windowed executable.
+  MeManga now pins the browser install path for packaged builds,
+  creates valid hidden subprocess handles where needed, and verifies the
+  real release artifact before publishing.
+- #39 Open-folder buttons in the Windows release exe did nothing because
+  Explorer was launched through a hidden subprocess path. Folder opening
+  now uses the platform shell directly so the action works from the
+  packaged GUI.
+- #40 Pause All / Resume All could make queued downloads disappear from
+  the active downloads tab, and in some flows lose the queued work
+  entirely. Paused items now stay represented in the queue model and are
+  restored correctly when downloads resume.
+- #41 Renaming a manga could orphan already-downloaded chapter files, so
+  the Detail page later failed with "couldn't find the chapter". Rename
+  operations now move the downloaded files along with the library entry.
+- #50 "Download All" and explicit "Download from" actions could do
+  nothing for manual-mode manga: no chapters were queued and the UI gave
+  no useful feedback. Explicit download actions now bypass the
+  reading-only update filter and queue the requested chapters.
+- #55 Selecting Email to Kindle delivery could prevent manga detail
+  pages from opening because the delivery setting was normalized through
+  a stale config shape. The Detail page now accepts the modern email
+  delivery mode and renders normally.
+- MangaFire chapter checks now raise and retry on network errors,
+  non-JSON responses, HTTP failures, and Cloudflare-wrapped 5xx payloads
+  instead of silently reporting an empty chapter list.
+
 ## [0.2.1] - 2026-06-04
 
 ### Fixed
