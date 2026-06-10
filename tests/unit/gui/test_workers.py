@@ -39,6 +39,138 @@ class TestPauseResume:
         assert worker.is_paused() is False
 
 
+class TestPauseResumeQueue:
+    """Issue #40 — Pause All / Resume All must hold the queue and then
+    refill every free slot, without dropping queued items or breaching
+    `_max_concurrent_downloads`.
+    """
+
+    @pytest.fixture
+    def gated_downloads(self, monkeypatch):
+        """Patch the downloader with a fake that blocks until released,
+        so tests can hold jobs "in flight" and observe real concurrency.
+        """
+        import time
+        import memanga.downloader as dl
+
+        class Harness:
+            def __init__(self):
+                self.gates: dict[str, threading.Event] = {}
+                self.running: set[str] = set()
+                self.max_running = 0
+                self._lock = threading.Lock()
+
+            def release(self, *task_ids):
+                for tid in task_ids:
+                    self.gates[tid].set()
+
+            def release_all(self):
+                for gate in self.gates.values():
+                    gate.set()
+
+            def wait_for(self, predicate, timeout=5.0):
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    if predicate():
+                        return True
+                    time.sleep(0.02)
+                return predicate()
+
+        h = Harness()
+
+        def fake_download_chapter(manga, chapter, output_dir, output_format,
+                                   state, progress_callback=None,
+                                   naming_template=None, cancel_event=None):
+            tid = f"{manga['title']}:{chapter.number}"
+            with h._lock:
+                h.running.add(tid)
+                h.max_running = max(h.max_running, len(h.running))
+            h.gates[tid].wait(timeout=10)
+            with h._lock:
+                h.running.discard(tid)
+            return None
+
+        monkeypatch.setattr(dl, "download_chapter", fake_download_chapter)
+        return h
+
+    def _queue(self, worker, harness, n):
+        """Queue chapters M:1..M:n through the public API."""
+        import types
+        for i in range(1, n + 1):
+            tid = f"M:{i}"
+            harness.gates[tid] = threading.Event()
+            worker.download_chapter(
+                {"title": "M"}, types.SimpleNamespace(number=str(i)),
+                "/tmp/out", "pdf", None,
+            )
+
+    def test_resume_refills_all_free_slots(self, worker, gated_downloads):
+        # Everything queued while paused; resume must start a full
+        # `_max_concurrent_downloads` batch, not just one job.
+        worker.pause_all()
+        self._queue(worker, gated_downloads, 4)
+        assert len(worker._download_queue) == 4
+
+        worker.resume_all()
+        assert gated_downloads.wait_for(
+            lambda: len(gated_downloads.running) == 2)
+        assert len(worker._download_queue) == 2
+        assert worker._active_downloads == 2
+        gated_downloads.release_all()
+
+    def test_toggle_while_in_flight_keeps_queue_and_cap(
+            self, worker, gated_downloads):
+        # Pause/resume while jobs are running used to release a slot no
+        # job ever held — each toggle dequeued one extra item past the
+        # concurrency cap, where a later Pause All could no longer hold
+        # it ("the queue drops").
+        self._queue(worker, gated_downloads, 6)
+        assert gated_downloads.wait_for(
+            lambda: len(gated_downloads.running) == 2)
+
+        for _ in range(3):
+            worker.pause_all()
+            worker.resume_all()
+
+        # Nothing new may start while both slots are taken.
+        assert not gated_downloads.wait_for(
+            lambda: len(gated_downloads.running) > 2, timeout=0.3)
+        assert len(worker._download_queue) == 4
+        assert worker._active_downloads == 2
+
+        gated_downloads.release_all()
+        assert gated_downloads.wait_for(
+            lambda: len(worker._download_queue) == 0
+            and worker._active_downloads == 0)
+        assert gated_downloads.max_running == 2
+
+    def test_pause_resume_drains_everything(self, worker, event_bus,
+                                             gated_downloads):
+        # Full reported flow: queue, pause, let in-flight finish,
+        # resume — every chapter must still complete exactly once.
+        completed = []
+        event_bus.subscribe("download_complete",
+                            lambda d: completed.append(d["task_id"]))
+        self._queue(worker, gated_downloads, 5)
+        assert gated_downloads.wait_for(
+            lambda: len(gated_downloads.running) == 2)
+
+        worker.pause_all()
+        gated_downloads.release("M:1", "M:2")
+        assert gated_downloads.wait_for(
+            lambda: worker._active_downloads == 0)
+        assert len(worker._download_queue) == 3  # queue held, not dropped
+
+        worker.resume_all()
+        gated_downloads.release_all()
+        assert gated_downloads.wait_for(
+            lambda: len(worker._download_queue) == 0
+            and worker._active_downloads == 0)
+        event_bus.poll()
+        assert sorted(completed) == [f"M:{i}" for i in range(1, 6)]
+        assert gated_downloads.max_running == 2
+
+
 class TestCancelFlags:
     def test_active_tasks_starts_empty(self, worker):
         assert worker.active_tasks == {}
