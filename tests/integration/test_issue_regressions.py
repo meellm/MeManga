@@ -13,6 +13,7 @@ If any of these go red, a previously-fixed bug has come back.
 | #21 | No pan/drag when zoomed in reader |
 | #23 | Non-image format downloads written to root, not <dir>/<title>/ |
 | #40 | Pause All / Resume All dropped queued downloads |
+| #43 | Arrow keys dead in the reader |
 | #55 | Detail page blank when Email to Kindle delivery selected |
 """
 
@@ -319,6 +320,78 @@ def test_issue_40_pause_resume_keeps_queue(app_window, qapp, monkeypatch):
     gates["M:3"].set()
     gates["M:4"].set()
     assert pump(lambda: worker._active_downloads == 0)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# #43 — Arrow keys navigate the reader
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _open_reader(app_window, qapp, sample_manga, make_cbz, chapters=("1",),
+                 pages=1):
+    """Download fake chapters and open the reader on the first one."""
+    from pathlib import Path
+    app_window.config.set("manga", [sample_manga])
+    dl = Path(app_window.config.download_dir) / sample_manga["title"]
+    dl.mkdir(parents=True, exist_ok=True)
+    for ch in chapters:
+        (dl / f"{sample_manga['title']} - Chapter {ch}.cbz").write_bytes(
+            make_cbz(pages=pages, name=f"ch{ch}.cbz").read_bytes())
+        app_window.app_state.add_downloaded_chapter(sample_manga["title"], ch)
+    app_window.show_page("reader", manga=sample_manga, chapter=chapters[0])
+    qapp.processEvents()
+    return app_window._pages["reader"]
+
+
+def _press(reader, key):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+    reader.keyPressEvent(
+        QKeyEvent(QEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier))
+
+
+def test_issue_43_down_up_arrows_scroll(app_window, qapp, sample_manga,
+                                          make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=3)
+    bar = reader._scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "test needs content taller than the viewport"
+    assert bar.value() == 0
+
+    _press(reader, Qt.Key.Key_Down)
+    assert bar.value() > 0
+    _press(reader, Qt.Key.Key_Up)
+    assert bar.value() == 0
+
+
+def test_issue_43_left_right_arrows_change_chapter(app_window, qapp,
+                                                     sample_manga, make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz,
+                          chapters=("1", "2"))
+    assert reader._scroll.horizontalScrollBar().maximum() == 0
+
+    _press(reader, Qt.Key.Key_Right)
+    qapp.processEvents()
+    assert str(reader._chapter) == "2"
+    _press(reader, Qt.Key.Key_Left)
+    qapp.processEvents()
+    assert str(reader._chapter) == "1"
+
+
+def test_issue_43_right_arrow_pans_when_zoomed(app_window, qapp,
+                                                 sample_manga, make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz,
+                          chapters=("1", "2"))
+    # The offscreen platform never lays out wide-enough content, so give
+    # the scrollbar the range a zoomed-in page would have.
+    hbar = reader._scroll.horizontalScrollBar()
+    hbar.setRange(0, 500)
+
+    _press(reader, Qt.Key.Key_Right)
+    assert hbar.value() > 0          # panned…
+    assert str(reader._chapter) == "1"  # …without switching chapters
 
 
 # ─────────────────────────────────────────────────────────────────────────
