@@ -91,6 +91,7 @@ class BackgroundWorker:
         self._download_queue: list = []
         self._active_downloads: int = 0
         self._max_concurrent_downloads = 2
+        self._paused: bool = False
         self._lock = threading.Lock()
         self._cancel_flags: Dict[str, threading.Event] = {}
         # Each call to search_manga() bumps _search_seq. Every event the
@@ -345,7 +346,7 @@ class BackgroundWorker:
         }
 
         with self._lock:
-            paused = getattr(self, "_paused", False)
+            paused = self._paused
             if (not paused) and self._active_downloads < self._max_concurrent_downloads:
                 self._active_downloads += 1
                 self._safe_submit(self._run_download, item)
@@ -375,6 +376,10 @@ class BackgroundWorker:
                 "task_id": item["task_id"], "error": f"Import error: {e}",
                 "title": item["manga"]["title"], "chapter": "?",
             })
+            # Release the slot this job held — bailing without it would
+            # leak a concurrency slot and eventually stall the queue.
+            self._cancel_flags.pop(item["task_id"], None)
+            self._start_next_download()
             return
         task_id = item["task_id"]
         manga = item["manga"]
@@ -449,24 +454,40 @@ class BackgroundWorker:
             self._start_next_download()
 
     def _start_next_download(self):
-        """Finish current download and start next queued one if capacity allows.
+        """Release the finished download's slot, then refill from the queue.
 
-        While paused (``pause_all()``) the queue holds — no new jobs are
-        dequeued. In-flight jobs continue until completion. ``resume_all()``
-        kicks this method again to drain the queue.
+        Called exactly once per finished job (from ``_run_download``'s
+        finally block) — the decrement here is the job giving its slot
+        back. While paused (``pause_all()``) the queue holds — no new
+        jobs are dequeued. In-flight jobs continue until completion.
+        ``resume_all()`` refills the freed slots via
+        ``_fill_download_slots``.
         """
-        next_item = None
         with self._lock:
             self._active_downloads = max(0, self._active_downloads - 1)
-            if getattr(self, "_paused", False):
+        self._fill_download_slots()
+
+    def _fill_download_slots(self):
+        """Dequeue queued jobs until the concurrency cap is reached.
+
+        No-op while paused. Never touches the slot counter for jobs it
+        didn't start, so it's safe to call from anywhere — job
+        completion, ``resume_all``, repeated pause/resume toggles —
+        without dropping queued items or breaching
+        ``_max_concurrent_downloads``.
+        """
+        to_start = []
+        with self._lock:
+            if self._paused:
                 # Don't dequeue anything while paused.
                 return
-            if self._download_queue and self._active_downloads < self._max_concurrent_downloads:
-                next_item = self._download_queue.pop(0)
+            while (self._download_queue
+                   and self._active_downloads < self._max_concurrent_downloads):
                 self._active_downloads += 1
+                to_start.append(self._download_queue.pop(0))
         # Submit outside lock to avoid deadlock
-        if next_item:
-            self._safe_submit(self._run_download, next_item)
+        for item in to_start:
+            self._safe_submit(self._run_download, item)
 
     # ------------------------------------------------------------------
     # Search
@@ -794,7 +815,7 @@ class BackgroundWorker:
         return dict(self._cancel_flags)
 
     def is_paused(self) -> bool:
-        return getattr(self, "_paused", False)
+        return self._paused
 
     def pause_all(self):
         """Stop dequeuing new downloads. In-flight jobs continue (Playwright
@@ -808,5 +829,7 @@ class BackgroundWorker:
         with self._lock:
             self._paused = False
         self._events.publish("downloads_resumed", {})
-        # Kick the queue.
-        self._start_next_download()
+        # Refill every free download slot from the held queue. (Not
+        # _start_next_download — that would release a slot no job ever
+        # held, breaching the concurrency cap on each pause/resume.)
+        self._fill_download_slots()
