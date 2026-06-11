@@ -661,9 +661,11 @@ class ReaderPage(BasePage):
         # Issue #21: allow horizontal scrollbar when zoomed images
         # overflow the viewport. AsNeeded keeps it hidden at fit-width.
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self._scroll.setStyleSheet(
-            f"background-color: {T.tokens()['surfaces.bg_0']};"
-        )
+        # Issue #49: no setStyleSheet here. A selector-less widget
+        # stylesheet cascades into every descendant and overrode the
+        # accent background of the "Next chapter" button, leaving its
+        # dark on_primary label invisible on bg_0. The app QSS already
+        # paints ReaderPage bg_0 and keeps scroll areas transparent.
         # Issue #16 + #21: intercept Ctrl/Cmd+wheel for zoom AND track
         # mouse press/move for click-and-drag pan. Plain wheel events
         # fall through to default scrolling.
