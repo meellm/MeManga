@@ -309,6 +309,118 @@ class TestCountChapters:
         assert seen == []
 
 
+class _RecordingCache:
+    """Stand-in for CoverCache that records calls instead of touching
+    disk or QPixmap."""
+
+    def __init__(self):
+        self.saved = {}
+        self.failed = []
+
+    def save_to_disk(self, url, content):
+        self.saved[url] = content
+
+    def mark_failed(self, url):
+        self.failed.append(url)
+
+
+class TestCoverFetch:
+    """Issue #48 — MangaPill covers live on a hotlink-protected CDN
+    that answers 403 (or an HTML block page) unless the request carries
+    the site's Referer. The generic cover fetch must send the right
+    Referer and must refuse to cache non-image bodies.
+    """
+
+    _CDN_URL = "https://cdn.readdetectiveconan.com/file/mangapill/i/580.webp"
+    _WEBP_BYTES = b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 16
+
+    def test_mangapill_cdn_url_gets_referer(self):
+        from memanga.gui.workers import cover_request_headers
+        headers = cover_request_headers(self._CDN_URL)
+        assert headers["Referer"] == "https://mangapill.com/"
+
+    def test_unknown_host_gets_no_referer(self):
+        from memanga.gui.workers import cover_request_headers
+        headers = cover_request_headers(
+            "https://uploads.mangadex.org/covers/abc/def.512.jpg")
+        assert "Referer" not in headers
+        assert "User-Agent" in headers
+
+    def test_looks_like_image_accepts_magic_bytes(self):
+        from memanga.gui.workers import looks_like_image
+        assert looks_like_image(b"\xff\xd8\xff" + b"\x00" * 16)          # JPEG
+        assert looks_like_image(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)     # PNG
+        assert looks_like_image(self._WEBP_BYTES)                        # WEBP
+
+    def test_looks_like_image_content_type_fallback(self):
+        from memanga.gui.workers import looks_like_image
+        # Format we don't sniff — trust the Content-Type header.
+        assert looks_like_image(b"\x00\x00\x00 ftypavif", "image/avif")
+
+    def test_looks_like_image_rejects_html_and_empty(self):
+        from memanga.gui.workers import looks_like_image
+        assert not looks_like_image(b"<!DOCTYPE html><html>blocked",
+                                    "text/html; charset=UTF-8")
+        assert not looks_like_image(b"")
+
+    def _run_fetch(self, worker, event_bus, monkeypatch, body, ctype):
+        """Drive fetch_cover against a faked requests.get; return the
+        (recording cache, captured request headers, error events)."""
+        import time
+        import requests
+
+        captured = {}
+
+        class _Resp:
+            content = body
+            headers = {"Content-Type": ctype}
+
+            def raise_for_status(self):
+                pass
+
+        def _fake_get(url, timeout=None, headers=None):
+            captured.update(headers or {})
+            return _Resp()
+
+        monkeypatch.setattr(requests, "get", _fake_get)
+
+        errors = []
+        event_bus.subscribe(
+            "cover_loaded",
+            lambda d: errors.append(d) if d.get("error") else None)
+
+        cache = _RecordingCache()
+        worker.fetch_cover(self._CDN_URL, cache=cache)
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not (cache.saved or cache.failed):
+            event_bus.poll()
+            time.sleep(0.02)
+        event_bus.poll()
+        return cache, captured, errors
+
+    def test_image_response_saved_with_referer(self, worker, event_bus,
+                                               monkeypatch):
+        cache, captured, errors = self._run_fetch(
+            worker, event_bus, monkeypatch,
+            self._WEBP_BYTES, "image/webp")
+        assert captured.get("Referer") == "https://mangapill.com/"
+        assert cache.saved == {self._CDN_URL: self._WEBP_BYTES}
+        assert cache.failed == []
+        assert errors == []
+
+    def test_html_block_page_marks_failed(self, worker, event_bus,
+                                          monkeypatch):
+        # 200 + HTML must not reach the disk cache — a cached non-image
+        # is never refetched and leaves the cover permanently blank.
+        cache, _captured, errors = self._run_fetch(
+            worker, event_bus, monkeypatch,
+            b"<!DOCTYPE html><html>blocked</html>",
+            "text/html; charset=UTF-8")
+        assert cache.saved == {}
+        assert cache.failed == [self._CDN_URL]
+        assert errors and errors[0]["url"] == self._CDN_URL
+
+
 class TestCheckUpdates:
     """Issue #30: explicit per-manga checks must bypass the reading-only
     filter that the library-wide sweep applies to non-reading manga."""

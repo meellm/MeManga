@@ -72,6 +72,66 @@ from ..scrapers import POPULAR_SOURCES as SOURCE_POPULARITY  # noqa: E402
 _POPULARITY_RANK = {d: i for i, d in enumerate(SOURCE_POPULARITY)}
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Cover fetch helpers — some cover CDNs hotlink-protect their images:
+# they refuse the request (or answer 200 with an HTML block page)
+# unless it carries the source site's Referer. Scrapers send these
+# headers in their own download_image(), but the GUI fetches covers
+# straight from the stored URL, outside any scraper — so the worker
+# needs its own marker → referer table. Keyed on a stable URL
+# fragment: MangaPill's CDN hostname rotates
+# (cdn.readdetectiveconan.com at the time of writing) but the
+# /file/mangapill/ path prefix does not.
+# ─────────────────────────────────────────────────────────────────────
+
+
+_COVER_REFERERS = (
+    ("/file/mangapill/", "https://mangapill.com/"),
+    ("mangapill.com", "https://mangapill.com/"),
+)
+
+_COVER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+
+def cover_request_headers(url: str) -> Dict[str, str]:
+    """Headers for a cover fetch, with a Referer for CDNs known to
+    require one."""
+    headers = {"User-Agent": _COVER_USER_AGENT}
+    for marker, referer in _COVER_REFERERS:
+        if marker in url:
+            headers["Referer"] = referer
+            break
+    return headers
+
+
+_IMAGE_MAGIC_PREFIXES = (
+    b"\xff\xd8\xff",        # JPEG
+    b"\x89PNG\r\n\x1a\n",   # PNG
+    b"GIF87a",              # GIF
+    b"GIF89a",
+    b"BM",                  # BMP
+)
+
+
+def looks_like_image(content: bytes, content_type: str = "") -> bool:
+    """True when a response body is plausibly an image.
+
+    Caching a non-image body (an HTML block page served with 200)
+    would leave the cover permanently blank — the disk cache file
+    exists, so the URL is never refetched. Magic bytes first; the
+    Content-Type header is only a fallback for formats we don't
+    sniff (AVIF, SVG, …).
+    """
+    if not content:
+        return False
+    if content.startswith(_IMAGE_MAGIC_PREFIXES):
+        return True
+    if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return True
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    return ctype.startswith("image/")
+
+
 def source_rank(domain: str) -> int:
     """Lower = more popular. Unranked sources sort after named ones."""
     return _POPULARITY_RANK.get(domain, 999)
@@ -191,10 +251,12 @@ class BackgroundWorker:
 
         def _task():
             try:
-                resp = requests.get(url, timeout=15, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                })
+                resp = requests.get(url, timeout=15,
+                                    headers=cover_request_headers(url))
                 resp.raise_for_status()
+                if not looks_like_image(
+                        resp.content, resp.headers.get("Content-Type", "")):
+                    raise ValueError("response body is not an image")
                 if cache:
                     cache.save_to_disk(url, resp.content)
             except Exception:
