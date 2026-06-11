@@ -42,6 +42,9 @@ class MeMangaApp(QMainWindow):
         except Exception:
             pass
         self.cover_cache = CoverCache(self.config.config_dir, self.events)
+        # Cover URLs we already tried to replace after a failed fetch —
+        # once per URL per session, see _on_cover_load_failed.
+        self._cover_fallback_attempted: set = set()
 
         # Centralised network status — probes connectivity in a daemon
         # thread, publishes `network_online` / `network_offline` events.
@@ -56,6 +59,7 @@ class MeMangaApp(QMainWindow):
 
         # Wire up event handlers
         self.events.subscribe("cover_fetch_request", self._on_cover_fetch_request)
+        self.events.subscribe("cover_loaded", self._on_cover_load_failed)
         self.events.subscribe("download_complete", self._on_download_complete)
         self.events.subscribe("download_error", self._on_download_error)
         self.events.subscribe("check_complete", self._on_check_complete)
@@ -209,6 +213,51 @@ class MeMangaApp(QMainWindow):
 
     def _on_cover_fetch_request(self, data):
         self.worker.fetch_cover(data["url"], data.get("size", (170, 210)), self.cover_cache)
+
+    def _on_cover_load_failed(self, data):
+        """A stored cover URL no longer downloads (dead CDN link,
+        hotlink block we can't satisfy, non-image response). Try to
+        replace it via the MangaDex fallback so the card doesn't keep
+        a permanent placeholder — `_backfill_missing_covers` only
+        handles entries with no URL at all. Tried at most once per
+        URL per session; repeated paints of the same broken cover
+        shouldn't re-query MangaDex.
+        """
+        if not data.get("error") or data.get("offline"):
+            return
+        url = data.get("url") or ""
+        if not url or url in self._cover_fallback_attempted:
+            return
+        self._cover_fallback_attempted.add(url)
+        titles = [
+            m.get("title") for m in self.config.get("manga", [])
+            if m.get("title") and m.get("cover_url") == url
+        ]
+        if not titles:
+            return  # transient cover (search result) — nothing to repair
+
+        def _task():
+            from .cover_fallback import fetch_mangadex_cover
+            for t in titles:
+                try:
+                    cover = fetch_mangadex_cover(t)
+                except Exception:
+                    cover = None
+                if not cover or cover == url:
+                    continue
+
+                def _mutate(entry, _cover=cover):
+                    if entry.get("cover_url") != url:
+                        return False  # someone else already replaced it
+                    entry["cover_url"] = _cover
+                    return True
+
+                if self.config.update_manga(t, _mutate):
+                    self.events.publish(
+                        "library_updated", {"title": t, "action": "cover"}
+                    )
+
+        self.worker.submit_task(_task)
 
     def _on_download_complete(self, data):
         title = data.get("title", "")

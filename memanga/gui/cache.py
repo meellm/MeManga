@@ -51,7 +51,14 @@ class CoverCache:
         disk_path = self._disk_path(url)
         if disk_path.exists():
             try:
-                return self._load_and_cache(url, disk_path, size)
+                pm = self._load_and_cache(url, disk_path, size)
+                if pm is not None:
+                    return pm
+                # Cached bytes don't decode as an image (e.g. an HTML
+                # block page saved before fetch responses were
+                # validated) — drop them and fall through to a fresh
+                # fetch request.
+                disk_path.unlink()
             except Exception:
                 pass
 
@@ -77,10 +84,13 @@ class CoverCache:
             self._loading.discard(url)
             self._failed.add(url)
 
-    def _load_and_cache(self, url: str, disk_path: Path, size: Tuple[int, int]) -> QPixmap:
+    def _load_and_cache(self, url: str, disk_path: Path,
+                        size: Tuple[int, int]) -> Optional[QPixmap]:
+        """Decode the cached file into a scaled QPixmap, or ``None``
+        when the bytes aren't a decodable image."""
         img = QImage(str(disk_path))
         if img.isNull():
-            return self.get_placeholder(size)
+            return None
         pm = QPixmap.fromImage(img).scaled(
             size[0], size[1], Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,
