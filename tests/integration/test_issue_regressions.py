@@ -14,6 +14,7 @@ If any of these go red, a previously-fixed bug has come back.
 | #23 | Non-image format downloads written to root, not <dir>/<title>/ |
 | #40 | Pause All / Resume All dropped queued downloads |
 | #43 | Arrow keys dead in the reader |
+| #45 | Chapter marked read before reaching the end |
 | #49 | "Next chapter" button label invisible |
 | #55 | Detail page blank when Email to Kindle delivery selected |
 """
@@ -393,6 +394,37 @@ def test_issue_43_right_arrow_pans_when_zoomed(app_window, qapp,
     _press(reader, Qt.Key.Key_Right)
     assert hbar.value() > 0          # panned…
     assert str(reader._chapter) == "1"  # …without switching chapters
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# #45 — Reader only marks read near the end
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_issue_45_reader_does_not_mark_middle_as_read(app_window, qapp,
+                                                       sample_manga, make_cbz):
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
+    title = sample_manga["title"]
+    bar = reader._scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "test needs scrollable reader content"
+
+    bar.setValue(bar.maximum() // 2)
+    qapp.processEvents()
+
+    assert not app_window.app_state.is_chapter_read(title, "1")
+
+
+def test_issue_45_reader_marks_read_at_end(app_window, qapp, sample_manga,
+                                            make_cbz):
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
+    title = sample_manga["title"]
+    bar = reader._scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "test needs scrollable reader content"
+
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+
+    assert app_window.app_state.is_chapter_read(title, "1")
 
 
 # ─────────────────────────────────────────────────────────────────────────
