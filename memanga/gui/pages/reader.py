@@ -183,8 +183,41 @@ class ReaderPage(BasePage):
             self._go_next_chapter()
         elif key == Qt.Key.Key_P:
             self._go_prev_chapter()
+        elif key == Qt.Key.Key_Down:
+            self._scroll_vertical(+1)
+        elif key == Qt.Key.Key_Up:
+            self._scroll_vertical(-1)
+        elif key == Qt.Key.Key_Right:
+            self._arrow_horizontal(+1)
+        elif key == Qt.Key.Key_Left:
+            self._arrow_horizontal(-1)
         else:
             super().keyPressEvent(event)
+
+    # ── Arrow-key navigation (issue #43) ──────────────────────────────
+    # The page itself holds keyboard focus (StrongFocus + setFocus in
+    # on_show), so the QScrollArea never sees arrow keys natively —
+    # they must be handled here alongside the other shortcuts.
+
+    def _scroll_vertical(self, direction: int):
+        """Up/Down: scroll half a viewport per press."""
+        if self._scroll is None:
+            return
+        bar = self._scroll.verticalScrollBar()
+        bar.setValue(bar.value() + direction * max(40, bar.pageStep() // 2))
+
+    def _arrow_horizontal(self, direction: int):
+        """Left/Right: pan when zoomed content overflows horizontally,
+        otherwise jump to the prev/next chapter (mirrors P/N)."""
+        if self._scroll is not None:
+            bar = self._scroll.horizontalScrollBar()
+            if bar.maximum() > 0:
+                bar.setValue(bar.value() + direction * max(40, bar.pageStep() // 2))
+                return
+        if direction > 0:
+            self._go_next_chapter()
+        else:
+            self._go_prev_chapter()
 
     def _zoom_in(self):
         if self._zoom_level < self.ZOOM_MAX:
