@@ -14,6 +14,7 @@ If any of these go red, a previously-fixed bug has come back.
 | #23 | Non-image format downloads written to root, not <dir>/<title>/ |
 | #40 | Pause All / Resume All dropped queued downloads |
 | #43 | Arrow keys dead in the reader |
+| #49 | "Next chapter" button label invisible |
 | #55 | Detail page blank when Email to Kindle delivery selected |
 """
 
@@ -392,6 +393,55 @@ def test_issue_43_right_arrow_pans_when_zoomed(app_window, qapp,
     _press(reader, Qt.Key.Key_Right)
     assert hbar.value() > 0          # panned…
     assert str(reader._chapter) == "1"  # …without switching chapters
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# #49 — "Next chapter" button label invisible
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _luminance_spread(widget) -> float:
+    """Render the widget and return the gap between its darkest and
+    lightest interior pixel (border and corner radius excluded). A
+    legible label separates text from fill; an invisible one renders
+    near-uniform."""
+    img = widget.grab().toImage()
+    inset = 6
+    lo, hi = 1.0, 0.0
+    for y in range(inset, img.height() - inset):
+        for x in range(inset, img.width() - inset):
+            c = img.pixelColor(x, y)
+            lum = (0.2126 * c.redF() + 0.7152 * c.greenF()
+                   + 0.0722 * c.blueF())
+            lo = min(lo, lum)
+            hi = max(hi, lum)
+    return hi - lo
+
+
+def test_issue_49_next_chapter_label_legible(app_window, qapp, theme,
+                                             sample_manga, make_cbz):
+    """A selector-less stylesheet on the reader's scroll area cascaded
+    into every descendant, repainting the next-chapter button's accent
+    background with bg_0 while the label kept its dark on_primary color
+    — invisible text in dark mode, near-invisible in light.
+    """
+    from PySide6.QtWidgets import QPushButton
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz,
+                          chapters=("1", "2"))
+    btns = [b for b in reader._scroll.findChildren(QPushButton)
+            if b.text().startswith("Next: Chapter")]
+    assert len(btns) == 1, "next-chapter button missing at end of chapter 1"
+    btn = btns[0]
+    assert "2" in btn.text()
+
+    for theme_name in ("dark", "light"):
+        theme.set_theme(theme_name, qapp)
+        qapp.processEvents()
+        spread = _luminance_spread(btn)
+        assert spread > 0.25, (
+            f"#49 regression: next-chapter label illegible in {theme_name} "
+            f"theme (luminance spread {spread:.3f})"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────
