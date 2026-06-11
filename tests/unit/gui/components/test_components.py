@@ -339,3 +339,76 @@ class TestIcons:
         from memanga.gui.assets.icons import icon
         i = icon(name, "#666666", size=24)
         assert not i.isNull(), f"{name} failed to render"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# JumpSlider
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestJumpSlider:
+    """Regression for #46: clicking the groove of a short-range slider
+    page-stepped (default pageStep=10) straight to the minimum or
+    maximum instead of the clicked position."""
+
+    def _make(self, theme, qtbot):
+        from memanga.gui.components.slider import JumpSlider
+        s = JumpSlider()
+        s.setMinimum(1)
+        s.setMaximum(8)
+        s.resize(280, 24)
+        qtbot.addWidget(s)
+        s.show()
+        return s
+
+    def _click_at(self, slider, x):
+        from PySide6.QtCore import Qt, QPointF
+        from PySide6.QtGui import QMouseEvent
+        pos = QPointF(x, slider.height() / 2)
+        for etype in (QMouseEvent.Type.MouseButtonPress,
+                      QMouseEvent.Type.MouseButtonRelease):
+            ev = QMouseEvent(etype, pos, pos,
+                             Qt.MouseButton.LeftButton,
+                             Qt.MouseButton.LeftButton,
+                             Qt.KeyboardModifier.NoModifier)
+            if etype == QMouseEvent.Type.MouseButtonPress:
+                slider.mousePressEvent(ev)
+            else:
+                slider.mouseReleaseEvent(ev)
+
+    def test_page_step_is_one(self, theme, qtbot):
+        s = self._make(theme, qtbot)
+        assert s.pageStep() == 1
+
+    def test_click_center_sets_middle_value(self, theme, qtbot):
+        s = self._make(theme, qtbot)
+        s.setValue(1)
+        self._click_at(s, s.width() / 2)
+        assert s.value() in (4, 5), (
+            f"center click gave {s.value()}, expected mid-range"
+        )
+
+    def test_click_does_not_saturate_to_extremes(self, theme, qtbot):
+        s = self._make(theme, qtbot)
+        s.setValue(4)
+        # Click ~3/4 of the way along the groove: a stock QSlider would
+        # page-step (by 10) and slam to the maximum.
+        self._click_at(s, s.width() * 0.75)
+        assert s.value() not in (1, 8), (
+            f"groove click saturated to {s.value()}"
+        )
+        assert s.value() > 4
+
+    def test_click_left_quarter_lowers_value(self, theme, qtbot):
+        s = self._make(theme, qtbot)
+        s.setValue(8)
+        self._click_at(s, s.width() * 0.25)
+        assert 1 < s.value() < 4
+
+    def test_click_at_ends_reaches_extremes(self, theme, qtbot):
+        s = self._make(theme, qtbot)
+        s.setValue(4)
+        self._click_at(s, 1)
+        assert s.value() == 1
+        self._click_at(s, s.width() - 1)
+        assert s.value() == 8

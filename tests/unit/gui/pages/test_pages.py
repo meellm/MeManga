@@ -234,6 +234,14 @@ class TestSettingsPage:
         page._refresh_filename_preview()
         assert "1" in page._filename_preview.text()
 
+    def test_concurrent_slider_jumps_to_click(self, app_window, qapp):
+        # Regression for #46: a stock QSlider's groove click page-steps
+        # (default pageStep=10), saturating the 1..8 range to an extreme.
+        from memanga.gui.components.slider import JumpSlider
+        page = app_window._pages["settings"]
+        assert isinstance(page._concurrent_slider, JumpSlider)
+        assert page._concurrent_slider.pageStep() == 1
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Detail (requires a manga in config)

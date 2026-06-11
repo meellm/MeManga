@@ -325,8 +325,10 @@ class SettingsPage(BasePage):
         format_row.addWidget(hint, 1)
         f.addLayout(format_row)
 
-        # Concurrent downloads slider (1..8).
-        from PySide6.QtWidgets import QSlider
+        # Concurrent downloads slider (1..8). JumpSlider so a groove
+        # click sets the clicked value instead of page-stepping to an
+        # extreme (#46).
+        from ..components.slider import JumpSlider
         self._section(f, "Concurrent Downloads")
         slider_row = QHBoxLayout()
         slider_row.setSpacing(14)
@@ -334,7 +336,7 @@ class SettingsPage(BasePage):
         slider_hint.setProperty("role", "hint")
         slider_row.addWidget(slider_hint)
 
-        self._concurrent_slider = QSlider(Qt.Orientation.Horizontal)
+        self._concurrent_slider = JumpSlider(Qt.Orientation.Horizontal)
         self._concurrent_slider.setMinimum(1)
         self._concurrent_slider.setMaximum(8)
         self._concurrent_slider.setSingleStep(1)
