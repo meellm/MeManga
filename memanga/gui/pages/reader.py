@@ -1,5 +1,6 @@
 """
-Reader page - Built-in vertical scroll manga reader with keyboard shortcuts and zoom.
+Reader page - Built-in manga reader with keyboard shortcuts and zoom.
+Three layouts: continuous vertical scroll, single page, two-up spreads.
 """
 
 import io
@@ -97,7 +98,8 @@ def _extract_images_from_folder(folder: Path) -> List[QImage]:
 
 
 class ReaderPage(BasePage):
-    """Vertical scroll manga reader with keyboard shortcuts and zoom."""
+    """Manga reader with continuous / single-page / two-up layouts,
+    keyboard shortcuts and zoom."""
 
     ZOOM_MIN = 0.5
     ZOOM_MAX = 2.5
@@ -108,6 +110,10 @@ class ReaderPage(BasePage):
     # appended after the last page, so finishing the final page is
     # enough without having to pixel-perfectly hit the bottom.
     READ_THRESHOLD = 0.98
+    # Issue #32: the three reader layouts the toolbar toggle cycles
+    # between. "double" is the issue-#24 two-up view, now paged.
+    VIEW_MODES = ("continuous", "single", "double")
+    PAGED_MODES = ("single", "double")
 
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -117,13 +123,19 @@ class ReaderPage(BasePage):
         self._page_labels: list = []
         self._zoom_level = 1.0
         self._fit_width = True
-        # Issue #24: dual-page (two-up) view mode, persisted across launches.
-        self._dual_page = bool(self.app.config.get("gui.reader_dual_page", False))
+        # Issue #32: reader layout — "continuous" (vertical scroll, all
+        # pages stacked), "single" (one page at a time) or "double"
+        # (two-up spreads, one spread at a time). Resolved per manga in
+        # _load_chapter; this is just the cold default.
+        self._view_mode = "continuous"
+        # First visible page index in the paged modes (always even in
+        # "double" so spreads stay aligned to the same page pairs).
+        self._current_page = 0
         self._content: Optional[QWidget] = None
         self._scroll = None
         self._image_layout = None
         self._page_indicator = None
-        self._dual_btn = None
+        self._mode_btns = {}
         # Issue #45: set once the current chapter has been marked read,
         # so the scroll handler only fires the state write + event once.
         self._read_marked = False
@@ -186,6 +198,16 @@ class ReaderPage(BasePage):
             self._go_next_chapter()
         elif key == Qt.Key.Key_P:
             self._go_prev_chapter()
+        elif self._view_mode in self.PAGED_MODES and key in (
+                Qt.Key.Key_Right, Qt.Key.Key_PageDown, Qt.Key.Key_Space):
+            self._page_step(+1)
+        elif self._view_mode in self.PAGED_MODES and key in (
+                Qt.Key.Key_Left, Qt.Key.Key_PageUp):
+            self._page_step(-1)
+        elif self._view_mode in self.PAGED_MODES and key == Qt.Key.Key_Home:
+            self._go_to_page(0)
+        elif self._view_mode in self.PAGED_MODES and key == Qt.Key.Key_End:
+            self._go_to_page(len(self._images) - 1)
         elif key == Qt.Key.Key_Down:
             self._scroll_vertical(+1)
         elif key == Qt.Key.Key_Up:
@@ -210,8 +232,10 @@ class ReaderPage(BasePage):
         bar.setValue(bar.value() + direction * max(40, bar.pageStep() // 2))
 
     def _arrow_horizontal(self, direction: int):
-        """Left/Right: pan when zoomed content overflows horizontally,
-        otherwise jump to the prev/next chapter (mirrors P/N)."""
+        """Left/Right in continuous mode: pan when zoomed content
+        overflows horizontally, otherwise jump to the prev/next chapter
+        (mirrors P/N). Paged modes never reach here — their Left/Right
+        turn pages in keyPressEvent (issue #32)."""
         if self._scroll is not None:
             bar = self._scroll.horizontalScrollBar()
             if bar.maximum() > 0:
@@ -221,6 +245,34 @@ class ReaderPage(BasePage):
             self._go_next_chapter()
         else:
             self._go_prev_chapter()
+
+    # ── Page-by-page navigation (issue #32) ───────────────────────────
+    # Only active in the "single" and "double" layouts. Up/Down keep
+    # their scroll meaning so a zoomed-in page can still be read top to
+    # bottom; Left/Right/PageUp/PageDown/Space/Home/End move between
+    # pages (or spreads in two-up).
+
+    def _page_step(self, direction: int):
+        """Advance one page (single) or one spread (double)."""
+        step = 2 if self._view_mode == "double" else 1
+        self._go_to_page(self._current_page + direction * step)
+
+    def _go_to_page(self, index: int):
+        if not self._images:
+            return
+        index = max(0, min(len(self._images) - 1, index))
+        if self._view_mode == "double":
+            index -= index % 2  # spreads stay aligned to fixed pairs
+        if index == self._current_page:
+            return
+        self._current_page = index
+        self._rebuild_images()
+        # Each new page starts at its top-left corner, like turning a
+        # physical page — leftover scroll from a zoomed previous page
+        # would otherwise open the new one mid-panel.
+        if self._scroll is not None:
+            self._scroll.verticalScrollBar().setValue(0)
+            self._scroll.horizontalScrollBar().setValue(0)
 
     def _zoom_in(self):
         if self._zoom_level < self.ZOOM_MAX:
@@ -232,29 +284,67 @@ class ReaderPage(BasePage):
             self._zoom_level -= self.ZOOM_STEP
             self._rebuild_images()
 
-    # ── Dual-page view (issue #24) ────────────────────────────────────
-    def _toggle_dual_page(self):
-        """Flip between single + dual page view. Re-renders + persists."""
-        self._dual_page = not self._dual_page
-        self.app.config.set("gui.reader_dual_page", self._dual_page)
-        self.app.config.save()
-        self._refresh_dual_btn()
-        self._rebuild_images()
+    # ── Reader layout (issues #24, #32) ───────────────────────────────
+    # Three layouts: continuous scroll, single page, two-up spreads.
+    # The choice persists per manga so a webtoon can stay continuous
+    # while a print manga stays single-page.
 
-    def _refresh_dual_btn(self):
-        """Sync the toggle button's icon + tooltip to the current mode."""
-        if not self._dual_btn:
+    def _resolve_view_mode(self) -> str:
+        """Layout for the current manga: its config entry's
+        ``reader_mode``, else the global ``gui.reader_view_mode``, else
+        the legacy ``gui.reader_dual_page`` boolean (issue #24)."""
+        title = (self._manga or {}).get("title", "")
+        for entry in self.app.config.get("manga", []) or []:
+            if entry.get("title") == title:
+                mode = entry.get("reader_mode")
+                if mode in self.VIEW_MODES:
+                    return mode
+                break
+        mode = self.app.config.get("gui.reader_view_mode")
+        if mode in self.VIEW_MODES:
+            return mode
+        if self.app.config.get("gui.reader_dual_page", False):
+            return "double"
+        return "continuous"
+
+    def _set_view_mode(self, mode: str):
+        """Switch layout, persist it for this manga, and re-render."""
+        if mode not in self.VIEW_MODES or mode == self._view_mode:
             return
+        if self._view_mode == "continuous" and self._scroll is not None \
+                and self._images:
+            # Carry the reading position over: estimate the current page
+            # from the scroll ratio, same as the progress bar does.
+            sb = self._scroll.verticalScrollBar()
+            ratio = sb.value() / max(1, sb.maximum())
+            self._current_page = min(len(self._images) - 1,
+                                     int(ratio * len(self._images)))
+        self._view_mode = mode
+
+        def _store(entry):
+            entry["reader_mode"] = mode
+        title = (self._manga or {}).get("title", "")
+        if not (title and self.app.config.update_manga(title, _store)):
+            # Manga not in config (e.g. removed mid-read): fall back to
+            # the global default so the choice still sticks.
+            self.app.config.set("gui.reader_view_mode", mode)
+            self.app.config.save()
+
+        self._refresh_mode_btns()
+        self._rebuild_images()
+        if self._scroll is not None:
+            self._scroll.verticalScrollBar().setValue(0)
+            self._scroll.horizontalScrollBar().setValue(0)
+
+    def _refresh_mode_btns(self):
+        """Accent-tint the active layout's toolbar button."""
         from ..assets.icons import icon as _ic
         from PySide6.QtCore import QSize
-        # Icon shows the CURRENT mode; tooltip explains the click action.
-        if self._dual_page:
-            self._dual_btn.setIcon(_ic("view_dual", T.tokens()["accent.primary"], 16))
-            self._dual_btn.setToolTip("Switch to single-page view")
-        else:
-            self._dual_btn.setIcon(_ic("view_single", T.tokens()["text.t_2"], 16))
-            self._dual_btn.setToolTip("Switch to dual-page view")
-        self._dual_btn.setIconSize(QSize(16, 16))
+        for mode, (btn, icon_name) in self._mode_btns.items():
+            color = (T.tokens()["accent.primary"] if mode == self._view_mode
+                     else T.tokens()["text.t_2"])
+            btn.setIcon(_ic(icon_name, color, 16))
+            btn.setIconSize(QSize(16, 16))
 
     # ── Ctrl+wheel zoom (issue #16) ──────────────────────────────────────
     # The scroll area's viewport eats wheel events for native scrolling.
@@ -433,8 +523,7 @@ class ReaderPage(BasePage):
 
         if hasattr(self, "_zoom_label") and self._zoom_label:
             self._zoom_label.setText(f"{int(self._zoom_level * 100)}%")
-        if self._page_indicator:
-            self._page_indicator.setText(f"1 / {len(self._images)}")
+        self._update_progress_display()
 
     def _clear_sub_layout(self, layout):
         """Recursively drain a layout's children + delete widgets."""
@@ -448,6 +537,11 @@ class ReaderPage(BasePage):
 
     def _on_scroll(self, _value):
         """Update the sticky bottom progress bar from scroll position."""
+        # Issue #32: in the paged layouts scrolling only moves within
+        # the current page — progress is tracked per page in
+        # _update_progress_display instead.
+        if self._view_mode in self.PAGED_MODES:
+            return
         try:
             sb = self._scroll.verticalScrollBar()
             mx = max(1, sb.maximum())
@@ -464,6 +558,31 @@ class ReaderPage(BasePage):
                 self._mark_current_read()
         except Exception:
             pass
+
+    def _update_progress_display(self):
+        """Sync the page indicator + bottom progress bar to the reading
+        position. Continuous mode derives it from the scroll offset; the
+        paged modes (issue #32) from the visible page index — which also
+        marks the chapter read once the final page is on screen."""
+        if self._view_mode not in self.PAGED_MODES:
+            self._on_scroll(0)  # ratio is re-read from the scrollbar
+            return
+        total = len(self._images)
+        if not total:
+            return
+        first = self._current_page
+        last = min(total - 1, first + 1) if self._view_mode == "double" else first
+        try:
+            if self._page_indicator:
+                self._page_indicator.setText(f"{first + 1} / {total}")
+            ratio = (last + 1) / total
+            self._progress_left.setText(f"Page {first + 1} of {total}")
+            self._progress_track.setValue(int(ratio * 1000))
+            self._progress_pct.setText(f"{int(ratio * 100)}%")
+        except (AttributeError, RuntimeError):
+            pass
+        if last >= total - 1:
+            self._mark_current_read()
 
     def _mark_current_read(self):
         """Mark the current chapter read (issue #45: only called when the
@@ -487,6 +606,11 @@ class ReaderPage(BasePage):
         """A chapter that fits entirely in the viewport never scrolls, so
         the end-of-scroll threshold can't fire — but the user is already
         seeing all of it, which is as "finished" as it gets."""
+        # Paged layouts (issue #32) mark read from the page index in
+        # _update_progress_display — a single fitting page there just
+        # means the user is on ONE page, not done with the chapter.
+        if self._view_mode in self.PAGED_MODES:
+            return
         if self._read_marked or self._scroll is None or not self._images:
             return
         viewport_h = self._scroll.viewport().height()
@@ -525,8 +649,17 @@ class ReaderPage(BasePage):
                 Qt.TransformationMode.SmoothTransformation,
             )
 
-        if not self._dual_page:
-            # ── Single-page (default) ──
+        # Paged layouts center the (short) content in the viewport;
+        # continuous keeps everything pinned to the top of the scroll.
+        if self._image_layout is not None:
+            if self._view_mode in self.PAGED_MODES:
+                self._image_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            else:
+                self._image_layout.setAlignment(
+                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+
+        if self._view_mode == "continuous":
+            # ── Continuous (default): all pages stacked vertically ──
             for qimg in self._images:
                 lbl = QLabel()
                 lbl.setPixmap(_scaled_pixmap(qimg, max_w))
@@ -535,31 +668,43 @@ class ReaderPage(BasePage):
                 self._page_labels.append(lbl)
             return
 
-        # ── Dual-page (issue #24): pairs of pages side-by-side ──
-        # Each spread = a horizontal row holding two QLabels (or one if
-        # the chapter has an odd page count). Allocate half max_w per
-        # side so the spread as a whole stays inside the viewport.
+        # ── Paged layouts (issue #32): only the current page/spread ──
+        self._current_page = max(0, min(len(self._images) - 1,
+                                        self._current_page))
+        if self._view_mode == "double":
+            self._current_page -= self._current_page % 2
+
+        if self._view_mode == "single":
+            lbl = QLabel()
+            lbl.setPixmap(_scaled_pixmap(self._images[self._current_page], max_w))
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._image_layout.addWidget(lbl)
+            self._page_labels.append(lbl)
+            return
+
+        # ── Two-up (issues #24, #32): one spread, two pages side-by-side
+        # (or one if the chapter ends on an odd page). Allocate half
+        # max_w per side so the spread as a whole stays inside the
+        # viewport.
         per_side = max(120, (max_w - 8) // 2)
-        i = 0
-        while i < len(self._images):
-            spread = QHBoxLayout()
-            spread.setSpacing(4)
-            spread.setContentsMargins(0, 0, 0, 0)
-            spread.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        i = self._current_page
+        spread = QHBoxLayout()
+        spread.setSpacing(4)
+        spread.setContentsMargins(0, 0, 0, 0)
+        spread.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-            for j in (0, 1):
-                if i + j >= len(self._images):
-                    break
-                lbl = QLabel()
-                lbl.setPixmap(_scaled_pixmap(self._images[i + j], per_side))
-                lbl.setAlignment(Qt.AlignmentFlag.AlignTop | (
-                    Qt.AlignmentFlag.AlignRight if j == 0 else Qt.AlignmentFlag.AlignLeft
-                ))
-                spread.addWidget(lbl)
-                self._page_labels.append(lbl)
+        for j in (0, 1):
+            if i + j >= len(self._images):
+                break
+            lbl = QLabel()
+            lbl.setPixmap(_scaled_pixmap(self._images[i + j], per_side))
+            lbl.setAlignment(Qt.AlignmentFlag.AlignTop | (
+                Qt.AlignmentFlag.AlignRight if j == 0 else Qt.AlignmentFlag.AlignLeft
+            ))
+            spread.addWidget(lbl)
+            self._page_labels.append(lbl)
 
-            self._image_layout.addLayout(spread)
-            i += 2
+        self._image_layout.addLayout(spread)
 
     def _load_chapter(self):
         # Tear down previous content
@@ -570,6 +715,10 @@ class ReaderPage(BasePage):
         # Issue #45: each chapter load starts with an unread gate, even
         # when navigating Prev/Next within the reader.
         self._read_marked = False
+        # Issue #32: every chapter opens on its first page, in whatever
+        # layout this manga last used (or the global/legacy fallback).
+        self._current_page = 0
+        self._view_mode = self._resolve_view_mode()
 
         self._content = QWidget()
         content_layout = QVBoxLayout(self._content)
@@ -633,17 +782,24 @@ class ReaderPage(BasePage):
             next_btn.clicked.connect(lambda checked=False, c=next_ch: self._navigate_chapter(c))
             top_layout.addWidget(next_btn)
 
-        # ── Dual-page toggle (issue #24) ────────────────────────────────
-        # Same iconified style as the zoom +/- buttons. Tooltip names
-        # the mode the click WILL switch to (matches OS conventions).
-        from ..assets.icons import icon as _ic
-        from PySide6.QtCore import QSize
-        self._dual_btn = QPushButton()
-        self._dual_btn.setFixedSize(36, 28)
-        self._dual_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._dual_btn.clicked.connect(self._toggle_dual_page)
-        self._refresh_dual_btn()
-        top_layout.addWidget(self._dual_btn)
+        # ── Layout toggle (issues #24, #32) ─────────────────────────────
+        # Three iconified buttons (same style as the zoom +/- chip):
+        # continuous scroll, single page, two-up. The active layout's
+        # icon is accent-tinted in _refresh_mode_btns.
+        self._mode_btns = {}
+        for mode, icon_name, tip in (
+            ("continuous", "view_continuous", "Continuous vertical scroll"),
+            ("single", "view_single", "Single page at a time"),
+            ("double", "view_dual", "Two-page spreads"),
+        ):
+            btn = QPushButton()
+            btn.setFixedSize(36, 28)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(tip)
+            btn.clicked.connect(lambda checked=False, m=mode: self._set_view_mode(m))
+            self._mode_btns[mode] = (btn, icon_name)
+            top_layout.addWidget(btn)
+        self._refresh_mode_btns()
 
         # Zoom chip
         zoom_minus = QPushButton("−")
@@ -733,8 +889,10 @@ class ReaderPage(BasePage):
 
         self._render_images()
 
-        # "Next Chapter" button at bottom
-        if idx >= 0 and idx < len(downloaded) - 1:
+        # "Next Chapter" button at bottom — continuous mode only: the
+        # paged layouts re-render per page, so an in-flow footer would
+        # show under every single page rather than after the last one.
+        if self._view_mode == "continuous" and 0 <= idx < len(downloaded) - 1:
             next_ch = downloaded[idx + 1]
             next_frame = QWidget()
             next_frame_layout = QHBoxLayout(next_frame)
@@ -790,7 +948,7 @@ class ReaderPage(BasePage):
         sb = self._scroll.verticalScrollBar()
         sb.valueChanged.connect(self._on_scroll)
         # Initial paint.
-        self._on_scroll(0)
+        self._update_progress_display()
         # Issue #45: after the layout settles, a chapter short enough to
         # fit the viewport whole is immediately fully visible — the
         # scroll threshold can never fire for it.

@@ -12,6 +12,7 @@ If any of these go red, a previously-fixed bug has come back.
 | #20 | "Download from chapter X" downloaded all chapters |
 | #21 | No pan/drag when zoomed in reader |
 | #23 | Non-image format downloads written to root, not <dir>/<title>/ |
+| #32 | Reader page-by-page mode with left/right arrow navigation |
 | #40 | Pause All / Resume All dropped queued downloads |
 | #43 | Arrow keys dead in the reader |
 | #45 | Chapter marked read before reaching the end |
@@ -425,6 +426,150 @@ def test_issue_45_reader_marks_read_at_end(app_window, qapp, sample_manga,
     qapp.processEvents()
 
     assert app_window.app_state.is_chapter_read(title, "1")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# #32 — Page-by-page reading modes (single / two-up) with arrow keys
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_issue_32_single_mode_arrows_turn_pages(app_window, qapp,
+                                                  sample_manga, make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz,
+                          chapters=("1", "2"), pages=4)
+    reader._set_view_mode("single")
+    qapp.processEvents()
+    assert reader._current_page == 0
+    assert len(reader._page_labels) == 1  # only the current page rendered
+
+    _press(reader, Qt.Key.Key_Right)
+    assert reader._current_page == 1
+    _press(reader, Qt.Key.Key_Left)
+    assert reader._current_page == 0
+    # Clamped at the first page — and crucially Left/Right never fall
+    # through to the continuous-mode chapter jump.
+    _press(reader, Qt.Key.Key_Left)
+    assert reader._current_page == 0
+    assert str(reader._chapter) == "1"
+
+
+def test_issue_32_single_mode_space_pgdn_home_end(app_window, qapp,
+                                                    sample_manga, make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=5)
+    reader._set_view_mode("single")
+
+    _press(reader, Qt.Key.Key_Space)
+    assert reader._current_page == 1
+    _press(reader, Qt.Key.Key_PageDown)
+    assert reader._current_page == 2
+    _press(reader, Qt.Key.Key_PageUp)
+    assert reader._current_page == 1
+    _press(reader, Qt.Key.Key_End)
+    assert reader._current_page == 4
+    _press(reader, Qt.Key.Key_Home)
+    assert reader._current_page == 0
+
+
+def test_issue_32_double_mode_steps_by_spread(app_window, qapp,
+                                                sample_manga, make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=5)
+    reader._set_view_mode("double")
+    qapp.processEvents()
+    assert reader._current_page == 0
+    assert len(reader._page_labels) == 2  # one spread = two pages
+
+    _press(reader, Qt.Key.Key_Right)
+    assert reader._current_page == 2
+    _press(reader, Qt.Key.Key_End)
+    # Last spread of a 5-page chapter holds only the odd final page.
+    assert reader._current_page == 4
+    assert len(reader._page_labels) == 1
+    _press(reader, Qt.Key.Key_Left)
+    assert reader._current_page == 2
+
+
+def test_issue_32_right_at_last_page_stays_in_chapter(app_window, qapp,
+                                                        sample_manga,
+                                                        make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz,
+                          chapters=("1", "2"), pages=2)
+    reader._set_view_mode("single")
+    _press(reader, Qt.Key.Key_End)
+    assert reader._current_page == 1
+    _press(reader, Qt.Key.Key_Right)
+    assert reader._current_page == 1
+    assert str(reader._chapter) == "1"
+
+
+def test_issue_32_up_down_scroll_within_page_when_zoomed(app_window, qapp,
+                                                           sample_manga,
+                                                           make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=3)
+    reader._set_view_mode("single")
+    reader._zoom_in(); reader._zoom_in()
+    qapp.processEvents()
+    bar = reader._scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "test needs the page to overflow the viewport"
+
+    _press(reader, Qt.Key.Key_Down)
+    assert bar.value() > 0           # scrolled within the page…
+    assert reader._current_page == 0  # …without turning it
+    _press(reader, Qt.Key.Key_Up)
+    assert bar.value() == 0
+
+
+def test_issue_32_last_page_marks_chapter_read(app_window, qapp,
+                                                 sample_manga, make_cbz):
+    from PySide6.QtCore import Qt
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=4)
+    reader._set_view_mode("single")
+    title = sample_manga["title"]
+    assert not app_window.app_state.is_chapter_read(title, "1")
+
+    _press(reader, Qt.Key.Key_End)
+    qapp.processEvents()
+    assert app_window.app_state.is_chapter_read(title, "1")
+
+
+def test_issue_32_mode_persists_per_manga(app_window, qapp, sample_manga,
+                                            make_cbz):
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz)
+    reader._set_view_mode("single")
+
+    entry = next(m for m in app_window.config.get("manga", [])
+                 if m.get("title") == sample_manga["title"])
+    assert entry.get("reader_mode") == "single"
+
+    # Leave the reader and come back — the manga reopens single-page.
+    app_window.show_page("library"); qapp.processEvents()
+    app_window.show_page("reader", manga=sample_manga, chapter="1")
+    qapp.processEvents()
+    assert reader._view_mode == "single"
+
+
+def test_issue_32_legacy_dual_page_config_maps_to_double(app_window, qapp,
+                                                           sample_manga,
+                                                           make_cbz):
+    app_window.config.set("gui.reader_dual_page", True)
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=4)
+    assert reader._view_mode == "double"
+
+
+def test_issue_32_detail_layout_dropdown_persists(app_window, qapp,
+                                                    sample_manga):
+    app_window.config.set("manga", [sample_manga])
+    app_window.show_page("detail", manga=sample_manga); qapp.processEvents()
+    page = app_window._pages["detail"]
+    page._on_layout_change("single")
+
+    entry = next(m for m in app_window.config.get("manga", [])
+                 if m.get("title") == sample_manga["title"])
+    assert entry.get("reader_mode") == "single"
 
 
 # ─────────────────────────────────────────────────────────────────────────

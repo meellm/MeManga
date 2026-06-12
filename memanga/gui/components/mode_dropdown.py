@@ -67,8 +67,11 @@ class ModeDropdown(QToolButton):
 
     value_changed = Signal(str)
 
-    def __init__(self, parent=None, initial: str = "auto"):
+    def __init__(self, parent=None, initial: str = "auto", options=None):
         super().__init__(parent)
+        # `options` lets subclasses (e.g. LayoutDropdown) reuse the same
+        # trigger + two-line menu with a different option set.
+        self._options = list(options) if options is not None else MODE_OPTIONS
         self._value = initial
         self.setArrowType(Qt.ArrowType.NoArrow)
         self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -107,7 +110,7 @@ class ModeDropdown(QToolButton):
         )
         self.setMenu(self._menu)
 
-        for key, label, desc in MODE_OPTIONS:
+        for key, label, desc in self._options:
             wa = QWidgetAction(self)
             item = _ModeItemWidget(label, desc, lambda k=key: self._on_pick(k))
             item.setMinimumWidth(260)
@@ -121,7 +124,7 @@ class ModeDropdown(QToolButton):
         return self._value
 
     def set_value(self, key: str):
-        if key not in {k for k, _, _ in MODE_OPTIONS}:
+        if key not in {k for k, _, _ in self._options}:
             return
         self._value = key
         self._refresh_text()
@@ -136,7 +139,7 @@ class ModeDropdown(QToolButton):
         self.value_changed.emit(key)
 
     def _refresh_text(self):
-        label = next((lbl for k, lbl, _ in MODE_OPTIONS if k == self._value),
+        label = next((lbl for k, lbl, _ in self._options if k == self._value),
                      self._value.title())
         self.setText(label)
         self.update()
