@@ -429,10 +429,34 @@ def cmd_check(args):
         console.print(f"[dim]Checking:[/dim] [cyan]{title}[/cyan]...")
         
         try:
-            new_chapters = check_for_updates(manga, state, from_chapter=from_chapter)
-            
+            force_suspicious = getattr(args, 'force_suspicious', False)
+            new_chapters = check_for_updates(
+                manga, state,
+                from_chapter=from_chapter,
+                force_suspicious=force_suspicious,
+            )
+
+            # A batch that doesn't fit this manga's history was withheld
+            # because it couldn't be confirmed by a backup source.
+            suspicious = state.get_suspicious_batch(title) if from_chapter is None else None
+            if suspicious:
+                console.print(
+                    f"  [yellow]└─ Warning: Suspicious chapter batch detected: "
+                    f"{suspicious.get('count')} chapter(s) up to "
+                    f"{suspicious.get('highest')} "
+                    f"(last tracked: {suspicious.get('last_chapter')})[/yellow]"
+                )
+                for reason in suspicious.get("reasons", []):
+                    console.print(f"     [dim]- {reason}[/dim]")
+                console.print(f"     [dim]- {suspicious.get('backup_status')}[/dim]")
+                console.print(
+                    "     [yellow]Skipped auto-delivery. Run "
+                    "'memanga check --force-suspicious' to accept anyway.[/yellow]"
+                )
+
             if not new_chapters:
-                console.print("  [dim]└─ No new chapters[/dim]")
+                if not suspicious:
+                    console.print("  [dim]└─ No new chapters[/dim]")
                 continue
             
             console.print(f"  [green]└─ {len(new_chapters)} new chapter(s)![/green]")
@@ -1340,6 +1364,7 @@ Examples:
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")
     p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
     p_check.add_argument("-n", "--dry-run", action="store_true", help="List new chapters without downloading")
+    p_check.add_argument("--force-suspicious", action="store_true", help="Accept a chapter batch even if it was flagged as suspicious")
     p_check.add_argument("--format", choices=["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"], help="Output format (overrides config)")
     p_check.add_argument("--retries", type=int, default=3, metavar="N", help="Retry failed page downloads N times (default: 3, 0 to disable)")
     p_check.set_defaults(func=cmd_check)
