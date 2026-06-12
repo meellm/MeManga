@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget,
 )
 from PySide6.QtGui import QPixmap, QImage, QKeyEvent, QShortcut
-from PySide6.QtCore import Qt, QByteArray, QBuffer, QEvent, QObject
+from PySide6.QtCore import Qt, QByteArray, QBuffer, QEvent, QObject, QTimer
 
 from .base import BasePage
 from .. import theme as T
@@ -103,6 +103,11 @@ class ReaderPage(BasePage):
     ZOOM_MAX = 2.5
     ZOOM_STEP = 0.25
     DEFAULT_MAX_WIDTH = 800
+    # Issue #45: scroll ratio at which a chapter counts as read. The
+    # slack below 1.0 covers the spacing + "Next chapter" button row
+    # appended after the last page, so finishing the final page is
+    # enough without having to pixel-perfectly hit the bottom.
+    READ_THRESHOLD = 0.98
 
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -119,6 +124,9 @@ class ReaderPage(BasePage):
         self._image_layout = None
         self._page_indicator = None
         self._dual_btn = None
+        # Issue #45: set once the current chapter has been marked read,
+        # so the scroll handler only fires the state write + event once.
+        self._read_marked = False
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -151,16 +159,11 @@ class ReaderPage(BasePage):
             self._load_chapter()
             title = self._manga.get("title", "")
             if title:
-                # Cursor (most-recent) tracking + per-chapter read set
-                # (issue #18). The per-chapter set powers the Library's
-                # "X/N read" sub-line and the Detail chapter row badge.
+                # Cursor (most-recent) tracking (issue #18). The
+                # per-chapter read set is only updated once the user
+                # scrolls to the end of the chapter (issue #45) — see
+                # _mark_current_read.
                 self.app.app_state.set_reading_progress(title, str(self._chapter))
-                self.app.app_state.mark_chapter_read(title, str(self._chapter))
-                # Tell other pages (Library, Detail) to repaint without
-                # waiting for the next navigation.
-                self.app.events.publish("chapter_read", {
-                    "title": title, "chapter": str(self._chapter),
-                })
         self.setFocus()
 
     def on_hide(self):
@@ -455,8 +458,43 @@ class ReaderPage(BasePage):
             self._progress_pct.setText(f"{int(ratio * 100)}%")
             if self._page_indicator:
                 self._page_indicator.setText(f"{page_n} / {len(self._images)}")
+            # Issue #45: only flip the chapter to read once the user has
+            # actually scrolled (or jumped) to the end of it.
+            if sb.maximum() > 0 and ratio >= self.READ_THRESHOLD:
+                self._mark_current_read()
         except Exception:
             pass
+
+    def _mark_current_read(self):
+        """Mark the current chapter read (issue #45: only called when the
+        user reaches the end). The per-chapter set powers the Library's
+        "X/N read" sub-line and the Detail chapter row badge (issue #18).
+        """
+        if self._read_marked or not self._manga or not self._chapter:
+            return
+        title = self._manga.get("title", "")
+        if not title:
+            return
+        self._read_marked = True
+        self.app.app_state.mark_chapter_read(title, str(self._chapter))
+        # Tell other pages (Library, Detail) to repaint without
+        # waiting for the next navigation.
+        self.app.events.publish("chapter_read", {
+            "title": title, "chapter": str(self._chapter),
+        })
+
+    def _mark_read_if_unscrollable(self):
+        """A chapter that fits entirely in the viewport never scrolls, so
+        the end-of-scroll threshold can't fire — but the user is already
+        seeing all of it, which is as "finished" as it gets."""
+        if self._read_marked or self._scroll is None or not self._images:
+            return
+        viewport_h = self._scroll.viewport().height()
+        content = self._scroll.widget()
+        if viewport_h <= 0 or content is None:
+            return
+        if content.sizeHint().height() <= viewport_h:
+            self._mark_current_read()
 
     def _render_images(self):
         # Total width the spread is allowed to occupy.
@@ -528,6 +566,10 @@ class ReaderPage(BasePage):
         if self._content:
             self._content.deleteLater()
             self._content = None
+
+        # Issue #45: each chapter load starts with an unread gate, even
+        # when navigating Prev/Next within the reader.
+        self._read_marked = False
 
         self._content = QWidget()
         content_layout = QVBoxLayout(self._content)
@@ -749,6 +791,10 @@ class ReaderPage(BasePage):
         sb.valueChanged.connect(self._on_scroll)
         # Initial paint.
         self._on_scroll(0)
+        # Issue #45: after the layout settles, a chapter short enough to
+        # fit the viewport whole is immediately fully visible — the
+        # scroll threshold can never fire for it.
+        QTimer.singleShot(0, self._mark_read_if_unscrollable)
 
     def _find_and_load_chapter(self) -> List[QImage]:
         title = self._manga.get("title", "")
