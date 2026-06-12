@@ -3,7 +3,6 @@ Background worker for long-running operations.
 Wraps ThreadPoolExecutor; publishes events to the EventBus.
 """
 
-import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
@@ -13,63 +12,16 @@ import requests
 from .events import EventBus
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Search relevance filter — many "single-manga" scrapers in the
-# registry (BeastarsManga, TGManga, AjimeNoIppo, …) hard-code
-# `search()` to return their one manga regardless of the query
-# string. Without this filter, searching "Blue Lock" returns Beastars,
-# Tokyo Ghoul, Hajime no Ippo, etc. We compare the returned title
-# against the query tokens and drop everything that's obviously
-# unrelated. Cheap and idempotent — scrapers that already do
-# server-side search (MangaDex API, etc.) pass through unchanged.
-# ─────────────────────────────────────────────────────────────────────
-
-
-_WORD_RE = re.compile(r"[a-z0-9]+")
-
-
-def _result_matches_query(title: str, query: str) -> bool:
-    """Decide whether `title` is a plausible match for `query`.
-
-    Rules:
-      - Empty query → everything passes.
-      - Whole query substring in title → pass.
-      - Tokenise both, drop common stopwords. Short queries (1-2
-        tokens) require ALL tokens to be present in the title. Longer
-        queries require ≥ 60% of tokens.
-    """
-    if not query:
-        return True
-    title_l = (title or "").lower()
-    query_l = query.lower().strip()
-    if not title_l:
-        return False
-    if query_l in title_l:
-        return True
-    q_tokens = [t for t in _WORD_RE.findall(query_l) if len(t) >= 2]
-    if not q_tokens:
-        return True
-    t_tokens = set(_WORD_RE.findall(title_l))
-    matched = sum(1 for t in q_tokens if t in t_tokens or t in title_l)
-    if len(q_tokens) <= 2:
-        return matched == len(q_tokens)
-    return matched / len(q_tokens) >= 0.6
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Popularity ranking — sources we hit first (and present first in the
-# results list). Earlier in the list = more popular / more trusted.
-# Anything not listed gets rank=999 (shown after the named ones,
-# stable alphabetical order between them).
-#
-# Single source of truth lives in memanga.scrapers.POPULAR_SOURCES so
-# the same order drives both the search-time submission queue and
-# the first-launch "which sources are pre-checked" seeding.
-# ─────────────────────────────────────────────────────────────────────
-
-
-from ..scrapers import POPULAR_SOURCES as SOURCE_POPULARITY  # noqa: E402
-_POPULARITY_RANK = {d: i for i, d in enumerate(SOURCE_POPULARITY)}
+# Relevance filter and popularity ranking are shared with the CLI's
+# `memanga search` — single source of truth lives in memanga.search.
+# Re-imported under the historical names so existing callers (and
+# tests) keep working.
+from ..search import (  # noqa: E402
+    result_matches_query as _result_matches_query,
+    source_rank,
+    sort_sources_by_popularity,
+)
+from ..scrapers import POPULAR_SOURCES as SOURCE_POPULARITY  # noqa: E402,F401
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -130,16 +82,6 @@ def looks_like_image(content: bytes, content_type: str = "") -> bool:
         return True
     ctype = (content_type or "").split(";")[0].strip().lower()
     return ctype.startswith("image/")
-
-
-def source_rank(domain: str) -> int:
-    """Lower = more popular. Unranked sources sort after named ones."""
-    return _POPULARITY_RANK.get(domain, 999)
-
-
-def sort_sources_by_popularity(sources: List[str]) -> List[str]:
-    """Return `sources` ordered most-popular-first, then alphabetical."""
-    return sorted(sources, key=lambda d: (source_rank(d), d))
 
 
 class BackgroundWorker:
