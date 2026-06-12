@@ -19,6 +19,7 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich import box
 
+from .backup import EXPORT_VERSION, BackupVersionError, validate_backup
 from .config import Config, get_app_password, set_app_password
 from .state import State
 from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga
@@ -1119,7 +1120,7 @@ def cmd_export(args):
     manga_state = state.get("manga", {})
 
     export_data = {
-        "version": 1,
+        "version": EXPORT_VERSION,
         "exported_at": datetime.now().isoformat(),
         "manga": manga_list,
         "state": manga_state,
@@ -1144,6 +1145,12 @@ def cmd_import(args):
 
     with open(import_path, "r") as f:
         import_data = json.load(f)
+
+    try:
+        import_data = validate_backup(import_data)
+    except BackupVersionError as exc:
+        console.print(f"[red]Cannot import:[/red] {exc}")
+        return 1
 
     if "manga" not in import_data:
         console.print("[red]Invalid export file (missing 'manga' key)[/red]")

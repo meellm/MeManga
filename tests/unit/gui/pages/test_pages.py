@@ -242,6 +242,58 @@ class TestSettingsPage:
         assert isinstance(page._concurrent_slider, JumpSlider)
         assert page._concurrent_slider.pageStep() == 1
 
+    def test_import_accepts_versioned_backup(self, app_window, qapp,
+                                             monkeypatch, tmp_path):
+        import json
+        from PySide6.QtWidgets import QFileDialog
+        good = tmp_path / "good.json"
+        good.write_text(json.dumps({
+            "version": 1,
+            "manga": [{"title": "FromBackup", "url": "u",
+                       "source": "mangadex.org", "status": "reading"}],
+            "state": {},
+        }))
+        monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                            staticmethod(lambda *a, **k: (str(good), "")))
+        app_window.config.set("manga", [])
+        app_window._pages["settings"]._import()
+        titles = [m.get("title")
+                  for m in app_window.config.get("manga", []) or []]
+        assert "FromBackup" in titles
+
+    def test_import_rejects_versionless_backup(self, app_window, qapp,
+                                               monkeypatch, tmp_path):
+        # Regression for #42: import never read the export's `version`
+        # stamp, so any file with a `manga` array was imported blindly.
+        import json
+        from PySide6.QtWidgets import QFileDialog
+        bad = tmp_path / "noversion.json"
+        bad.write_text(json.dumps({
+            "manga": [{"title": "Sneaky", "url": "u",
+                       "source": "mangadex.org", "status": "reading"}],
+        }))
+        monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                            staticmethod(lambda *a, **k: (str(bad), "")))
+        app_window.config.set("manga", [])
+        app_window._pages["settings"]._import()
+        titles = [m.get("title")
+                  for m in app_window.config.get("manga", []) or []]
+        assert "Sneaky" not in titles
+
+    def test_import_rejects_newer_backup_version(self, app_window, qapp,
+                                                 monkeypatch, tmp_path):
+        import json
+        from PySide6.QtWidgets import QFileDialog
+        future = tmp_path / "future.json"
+        future.write_text(json.dumps({"version": 99, "manga": [
+            {"title": "FromTheFuture", "url": "u",
+             "source": "mangadex.org", "status": "reading"}]}))
+        monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                            staticmethod(lambda *a, **k: (str(future), "")))
+        app_window.config.set("manga", [])
+        app_window._pages["settings"]._import(replace=True)
+        assert app_window.config.get("manga", []) == []
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Detail (requires a manga in config)

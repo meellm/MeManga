@@ -275,17 +275,72 @@ class TestExportImport:
             # Export schema should include manga list somewhere.
             assert "manga" in str(data) or "Exp" in str(data)
 
+    def test_export_stamps_schema_version(self, run_cli, config, tmp_path):
+        from memanga.backup import EXPORT_VERSION
+        out = tmp_path / "backup.json"
+        rc = run_cli("export", str(out))
+        assert rc == 0
+        assert json.loads(out.read_text())["version"] == EXPORT_VERSION
+
     def test_import_merge(self, run_cli, config, tmp_path):
         # First export
         backup = tmp_path / "x.json"
         backup.write_text(json.dumps({
+            "version": 1,
             "manga": [{"title": "FromImport", "url": "u",
                        "source": "mangadex.org", "status": "reading"}]
         }))
-        rc = run_cli("import", str(backup), "--merge")
+        rc = run_cli("import", str(backup))
         if rc == 0:
             titles = [m["title"] for m in config.get("manga", []) or []]
             assert "FromImport" in titles
+
+    def test_import_roundtrip(self, run_cli, config, tmp_path):
+        """An export produced by the CLI must import cleanly (issue #42)."""
+        config.set("manga", [{"title": "RoundTrip", "url": "u",
+                              "source": "mangadex.org", "status": "reading"}])
+        config.save()
+        backup = tmp_path / "rt.json"
+        assert run_cli("export", str(backup)) == 0
+        config.set("manga", [])
+        config.save()
+        assert run_cli("import", str(backup)) == 0
+        titles = [m["title"] for m in config.get("manga", []) or []]
+        assert "RoundTrip" in titles
+
+    def test_import_missing_version_rejected(self, run_cli, config, tmp_path,
+                                             capsys):
+        """Issue #42: a file without the export's `version` stamp is not
+        a MeManga backup and must not be imported blindly."""
+        backup = tmp_path / "noversion.json"
+        backup.write_text(json.dumps({
+            "manga": [{"title": "Sneaky", "url": "u",
+                       "source": "mangadex.org", "status": "reading"}]
+        }))
+        capsys.readouterr()
+        rc = run_cli("import", str(backup))
+        assert rc == 1
+        assert "version" in capsys.readouterr().out.lower()
+        titles = [m["title"] for m in config.get("manga", []) or []]
+        assert "Sneaky" not in titles
+
+    def test_import_newer_version_rejected(self, run_cli, config, tmp_path,
+                                           capsys):
+        backup = tmp_path / "future.json"
+        backup.write_text(json.dumps({"version": 99, "manga": []}))
+        capsys.readouterr()
+        rc = run_cli("import", str(backup))
+        assert rc == 1
+        assert "newer" in capsys.readouterr().out.lower()
+
+    def test_import_malformed_version_rejected(self, run_cli, config,
+                                               tmp_path, capsys):
+        backup = tmp_path / "bad.json"
+        backup.write_text(json.dumps({"version": "one", "manga": []}))
+        capsys.readouterr()
+        rc = run_cli("import", str(backup))
+        assert rc == 1
+        assert "version" in capsys.readouterr().out.lower()
 
 
 # ─────────────────────────────────────────────────────────────────────────
