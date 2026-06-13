@@ -12,7 +12,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QWidget, QComboBox, QCheckBox, QRadioButton,
-    QLineEdit, QFileDialog, QButtonGroup,
+    QLineEdit, QFileDialog, QButtonGroup, QSizePolicy,
 )
 from PySide6.QtCore import Qt
 from .base import BasePage
@@ -400,8 +400,12 @@ class SettingsPage(BasePage):
         pf_label.setProperty("role", "hint")
         pf_l.addWidget(pf_label)
         self._filename_preview = QLabel("")
-        pf_l.addWidget(self._filename_preview)
-        pf_l.addStretch(1)
+        self._filename_preview.setWordWrap(True)
+        self._filename_preview.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        pf_l.addWidget(self._filename_preview, 1)
         f.addWidget(self._preview_frame)
         # Style + restyle on theme change so it isn't stuck on the
         # snapshot taken at construct time.
