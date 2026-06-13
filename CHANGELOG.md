@@ -6,6 +6,58 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-13
+
+### Added
+- #31 CLI-only users had no way to discover manga by title without
+  leaving the terminal, finding a source URL manually, then pasting it
+  back into `memanga add`. The new `memanga search` command reuses the
+  same multi-source search engine as the GUI, with relevance filtering,
+  source ordering, chapter-count probes, JSON output, and direct add
+  support.
+- #32 The Reader only supported continuous vertical scrolling, which is
+  awkward for print-style manga where pages are meant to advance one at
+  a time. Reader layout mode now supports continuous, single-page, and
+  two-page reading with keyboard navigation and per-manga persistence.
+- #35 A source could report a huge bogus chapter jump and MeManga would
+  trust it, potentially downloading or emailing dozens of incorrect
+  chapters. Suspicious update batches are now scored before delivery,
+  checked against backup sources when available, and held back unless
+  they are confirmed or explicitly forced.
+
+### Changed
+- #45 Reader progress previously marked a chapter as read before the
+  user actually reached the end. The read threshold now waits until the
+  final portion of the chapter, so library progress reflects real
+  reading progress instead of early scroll position.
+- #46 Clicking the concurrent-downloads slider could snap straight to
+  the minimum or maximum instead of the clicked value. Slider clicks now
+  map to the actual clicked position, making the setting predictable.
+- Release workflow actions now use Node 24-compatible major versions,
+  avoiding the GitHub Actions Node 20 deprecation warning before the
+  v0.3.0 tag build runs.
+
+### Fixed
+- #42 Backup import ignored the export schema version, so unsupported
+  backup data could be accepted silently. Import now validates the
+  version field before restoring data, giving future migrations a safe
+  rejection path instead of corrupt or surprising state.
+- #43 Reader arrow keys did not navigate, even though page-based
+  reading expects keyboard controls. Arrow/Page/Home/End handling now
+  works with the active reader layout mode.
+- #44 Very long filename-template previews in Settings could overflow
+  and break the theme options layout. The preview now stays constrained
+  inside the settings panel.
+- #47 The Downloads page left "Cancel All" enabled when there was no
+  active or queued work, then reported a misleading cancellation. The
+  action is now disabled for an empty queue.
+- #48 MangaPill cover images could fail to load in the GUI because the
+  source rejected image requests without its expected referer. Cover
+  fetching now sends the required source referer.
+- #49 The Reader's "Next chapter" button could hide its label, making
+  the navigation control unclear. The button layout now keeps the label
+  visible.
+
 ## [0.2.2] - 2026-06-10
 
 ### Added
