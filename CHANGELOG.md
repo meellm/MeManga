@@ -6,6 +6,33 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-13
+
+### Added
+- #31 `memanga search` command for live multi-source CLI search.
+- #32 Reader page-by-page mode with left/right navigation and layout
+  controls.
+- #35 Suspicious chapter-jump detection that checks backup sources
+  before accepting unusually large update batches.
+
+### Changed
+- Reader progress now marks chapters as read only near the end of the
+  chapter instead of too early.
+- Concurrent-download slider clicks now jump to the clicked value
+  rather than snapping to the minimum or maximum.
+
+### Fixed
+- #42 Backup import now validates the exported schema version instead
+  of silently accepting unsupported backup data.
+- #43 Reader arrow keys navigate chapters/pages as expected.
+- #44 Long settings filename-template previews no longer break the
+  theme options layout.
+- #47 "Cancel All" is disabled when there is no active or queued
+  download work.
+- #48 MangaPill covers load in the GUI by sending the required source
+  referer.
+- #49 The Reader "Next chapter" button label remains visible.
+
 ## [0.2.2] - 2026-06-10
 
 ### Added
