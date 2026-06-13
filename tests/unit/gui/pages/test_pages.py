@@ -234,6 +234,25 @@ class TestSettingsPage:
         page._refresh_filename_preview()
         assert "1" in page._filename_preview.text()
 
+    def test_long_template_stays_in_column(self, app_window, qapp):
+        from PySide6.QtWidgets import QSizePolicy
+
+        app_window.show_page("settings"); qapp.processEvents()
+        page = app_window._pages["settings"]
+
+        long_tpl = "{title}-" + ("VeryLongUnbrokenTemplatePart" * 20)
+        page._naming_entry.setText(long_tpl)
+        page._refresh_filename_preview()
+        qapp.processEvents()
+
+        assert page._filename_preview.wordWrap()
+        assert (
+            page._filename_preview.sizePolicy().horizontalPolicy()
+            == QSizePolicy.Policy.Ignored
+        )
+        assert page._preview_frame.width() < 800
+        assert page._filename_preview.width() < 800
+
     def test_concurrent_slider_jumps_to_click(self, app_window, qapp):
         # Regression for #46: a stock QSlider's groove click page-steps
         # (default pageStep=10), saturating the 1..8 range to an extreme.
