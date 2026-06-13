@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt
 from .base import BasePage
 from .. import theme as T
 from ..components.toast import Toast
+from ...backup import EXPORT_VERSION, BackupVersionError, validate_backup
 
 
 class SettingsPage(BasePage):
@@ -948,7 +949,7 @@ class SettingsPage(BasePage):
             return
         try:
             data = {
-                "version": 1,
+                "version": EXPORT_VERSION,
                 "exported_at": datetime.now().isoformat(),
                 "manga": self.app.config.get("manga", []),
                 "state": self.app.app_state._data.get("manga", {}),
@@ -966,6 +967,11 @@ class SettingsPage(BasePage):
         try:
             with open(path, "r") as f:
                 data = json.load(f)
+            try:
+                data = validate_backup(data)
+            except BackupVersionError as exc:
+                Toast(self, str(exc), kind="error")
+                return
             manga_list = data.get("manga", [])
             if not isinstance(manga_list, list):
                 Toast(self, "Invalid file", kind="error")
