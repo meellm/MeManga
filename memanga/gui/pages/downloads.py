@@ -66,12 +66,14 @@ class DownloadsPage(BasePage):
         self._pause_all_btn.clicked.connect(self._toggle_pause_all)
         top_row.addWidget(self._pause_all_btn)
 
-        cancel_all_btn = QPushButton("  Cancel all")
-        cancel_all_btn.setProperty("variant", "danger")
-        cancel_all_btn.setIcon(_ic("x_close", T.tokens()["status.danger"], 14))
-        cancel_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        cancel_all_btn.clicked.connect(self._cancel_all)
-        top_row.addWidget(cancel_all_btn)
+        self._cancel_all_btn = QPushButton("  Cancel all")
+        self._cancel_all_btn.setProperty("variant", "danger")
+        self._cancel_all_btn.setIcon(_ic("x_close", T.tokens()["status.danger"], 14))
+        self._cancel_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cancel_all_btn.clicked.connect(self._cancel_all)
+        # Issue #47: nothing to cancel until a download starts or queues.
+        self._cancel_all_btn.setEnabled(False)
+        top_row.addWidget(self._cancel_all_btn)
         h_layout.addLayout(top_row)
 
         # Meta line — live counts are populated by the download / queue
@@ -261,6 +263,7 @@ class DownloadsPage(BasePage):
             self._render_history()
         self._refresh_stats()
         self._refresh_tab_counts()
+        self._update_empty_state()
 
     def _refresh_tab_counts(self):
         """Re-render each tab button label with a trailing count like 'Active 3'."""
@@ -344,8 +347,12 @@ class DownloadsPage(BasePage):
     # ── Download event handlers ──
 
     def _update_empty_state(self):
+        # _active_items mirrors both running and queued downloads, so it is
+        # the single source of truth for "is there anything to cancel".
+        has_items = len(self._active_items) > 0
         try:
-            self._empty_label.setVisible(len(self._active_items) == 0)
+            self._empty_label.setVisible(not has_items)
+            self._cancel_all_btn.setEnabled(has_items)
         except Exception:
             pass
 
@@ -446,6 +453,14 @@ class DownloadsPage(BasePage):
             tid for tid in self._active_items.keys()
             if tid not in queued_task_ids
         ]
+
+        # Issue #47: with nothing running and nothing queued there is
+        # nothing to cancel — no events, no "Cancelled" confirmation.
+        # The button is disabled in that state, but guard the handler too
+        # so a stale click can never report a cancel that didn't happen.
+        if not running_task_ids and not queued_task_ids:
+            return
+
         for task_id in running_task_ids:
             self.app.worker.cancel_download(task_id)
 
