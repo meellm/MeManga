@@ -218,6 +218,7 @@ class DetailPage(BasePage):
 
         from ..components.status_dropdown import StatusDropdown
         from ..components.mode_dropdown import ModeDropdown
+        from ..components.layout_dropdown import LayoutDropdown
 
         def _control_column(label_text: str, widget: QWidget) -> QVBoxLayout:
             col = QVBoxLayout()
@@ -240,6 +241,19 @@ class DetailPage(BasePage):
         self._mode_combo = ModeDropdown(initial=current_mode)
         self._mode_combo.value_changed.connect(self._on_mode_change)
         cc_l.addLayout(_control_column("MODE", self._mode_combo))
+
+        # Reader layout (issue #32) — same fallback chain the reader
+        # uses: per-manga value, then the global default, then the
+        # legacy dual-page boolean (issue #24).
+        current_layout = (
+            manga.get("reader_mode")
+            or self.app.config.get("gui.reader_view_mode")
+            or ("double" if self.app.config.get("gui.reader_dual_page", False)
+                else "continuous")
+        )
+        self._layout_combo = LayoutDropdown(initial=current_layout)
+        self._layout_combo.value_changed.connect(self._on_layout_change)
+        cc_l.addLayout(_control_column("READER LAYOUT", self._layout_combo))
 
         cc_l.addStretch(1)  # push columns left, no centering void
 
@@ -778,6 +792,26 @@ class DetailPage(BasePage):
             else "Mode: Auto — new chapters will download on next check",
             kind="info",
         )
+
+    # ── Reader layout (Continuous / Single page / Two-up) ──
+
+    def _on_layout_change(self, new_layout: str):
+        """Persist this manga's reader layout (issue #32)."""
+        if not self._manga:
+            return
+        from ..components.layout_dropdown import LAYOUT_OPTIONS
+        if new_layout not in {k for k, _, _ in LAYOUT_OPTIONS}:
+            return
+        manga_list = self.app.config.get("manga", [])
+        for m in manga_list:
+            if m.get("title") == self._manga.get("title"):
+                m["reader_mode"] = new_layout
+                self._manga = m
+                break
+        self.app.config.save()
+        label = next((lbl for k, lbl, _ in LAYOUT_OPTIONS if k == new_layout),
+                     new_layout)
+        Toast(self, f"Reader layout: {label}", kind="info")
 
     # ── Edit ──
 
