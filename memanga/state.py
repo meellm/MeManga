@@ -190,6 +190,29 @@ class State:
         return manga_state.get("pending_backup", {})
     
     # ========================================================================
+    # Suspicious Batch Tracking
+    # ========================================================================
+
+    def set_suspicious_batch(self, manga_title: str, info: Dict[str, Any]):
+        """Record a suspicious chapter batch that was held back from
+        download/delivery. ``info`` should describe the batch (chapters,
+        score, reasons, backup verification status, detected_at)."""
+        self._ensure_manga_entry(manga_title)
+        self._data["manga"][manga_title]["suspicious_batch"] = info
+        self.save()
+
+    def get_suspicious_batch(self, manga_title: str) -> Optional[Dict[str, Any]]:
+        """Get the held-back suspicious batch for a manga, if any."""
+        return self.get_manga_state(manga_title).get("suspicious_batch")
+
+    def clear_suspicious_batch(self, manga_title: str):
+        """Clear the suspicious batch record (accepted, confirmed, or stale)."""
+        manga_state = self._data.get("manga", {}).get(manga_title, {})
+        if "suspicious_batch" in manga_state:
+            del manga_state["suspicious_batch"]
+            self.save()
+
+    # ========================================================================
     # Failed Chapter Tracking
     # ========================================================================
 

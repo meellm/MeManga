@@ -11,6 +11,26 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-13
+
+### Added
+- #31 CLI-only users had no way to discover manga by title without
+  leaving the terminal, finding a source URL manually, then pasting it
+  back into `memanga add`. The new `memanga search` command reuses the
+  shared multi-source search engine, with relevance filtering, source
+  ordering, chapter-count probes, JSON output, and direct add support.
+- #35 A source could report a huge bogus chapter jump and MeManga would
+  trust it, potentially downloading or emailing dozens of incorrect
+  chapters. Suspicious update batches are now scored before delivery,
+  checked against backup sources when available, and held back unless
+  they are confirmed or explicitly forced.
+
+### Fixed
+- #42 Backup import ignored the export schema version, so unsupported
+  backup data could be accepted silently. Import now validates the
+  version field before restoring data, giving future migrations a safe
+  rejection path instead of corrupt or surprising state.
+
 ## [0.2.0] - 2026-05-28
 
 ### Added

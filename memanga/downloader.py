@@ -125,6 +125,7 @@ def check_for_updates(
     state: State,
     from_chapter: Optional[float] = None,
     return_all: bool = False,
+    force_suspicious: bool = False,
 ):
     """
     Check if a manga has new chapters, with backup source support.
@@ -140,6 +141,14 @@ def check_for_updates(
        - Not in pending_backup? Add it, skip (start waiting)
     5. If primary gets the chapter later, we prefer primary
 
+    Suspicious batches: when the primary source suddenly exposes a batch
+    of "new" chapters that doesn't fit the manga's history (huge count,
+    big numeric jump, gappy numbering), the batch is verified against
+    backup sources. If no backup confirms it, the chapters are withheld,
+    recorded via ``state.set_suspicious_batch``, and a warning notification
+    is added. Nothing is downloaded or delivered until the user re-runs
+    with ``force_suspicious=True``.
+
     Args:
         manga: Manga entry from config with title, sources (or url/source)
         state: State manager to check last downloaded chapter
@@ -148,8 +157,10 @@ def check_for_updates(
             where ``all_chapters`` is the full chapter list from the primary
             source wrapped as :class:`ChapterWithSource` (used by the GUI
             Detail page to show every chapter as Read/Download). When False
-            (default), returns just the filtered new-chapter list — preserves
+            (default), returns just the filtered new-chapter list, preserving
             the original CLI signature.
+        force_suspicious: Accept a batch even if it looks suspicious
+            (``memanga check --force-suspicious``).
 
     Returns:
         ``List[ChapterWithSource]`` (default) or
@@ -177,6 +188,12 @@ def check_for_updates(
     # Track what we found on each source
     primary_chapters: Dict[str, Chapter] = {}  # chapter_num -> Chapter
     backup_chapters: Dict[str, Tuple[Chapter, str, str]] = {}  # chapter_num -> (Chapter, source, url)
+
+    # Every chapter number seen on any backup source (full list, not just
+    # new ones). Used to verify suspicious primary batches.
+    backup_all_numbers: set = set()
+    backup_sources_checked = 0
+    primary_checked = False
 
     # Full chapter list from the primary source (every chapter, downloaded or not).
     # Used by the GUI Detail page when return_all=True so it can render every
@@ -210,10 +227,14 @@ def check_for_updates(
         # Detail-page cache. Backup sources are intentionally skipped here —
         # we don't want backup-only chapters polluting the canonical list.
         if is_primary:
+            primary_checked = True
             primary_all = [
                 ChapterWithSource(ch, source, url, is_backup=False)
                 for ch in all_chapters
             ]
+        else:
+            backup_sources_checked += 1
+            backup_all_numbers.update(round(ch.numeric, 3) for ch in all_chapters)
 
         # Filter to new chapters
         new_chapters = [
@@ -236,6 +257,56 @@ def check_for_updates(
         raise DownloaderError(
             f"All sources failed for '{title}': " + "; ".join(source_errors)
         )
+
+    # Suspicious-batch guard. Only meaningful when we have a baseline (a
+    # previously tracked chapter) and the user isn't explicitly
+    # bulk-downloading with from_chapter.
+    if from_chapter is None and last_num > 0 and primary_checked:
+        from .suspicion import evaluate_new_chapters
+
+        suspicion = evaluate_new_chapters(
+            state, title,
+            [ch.numeric for ch in primary_chapters.values()],
+            last_num,
+        )
+        if suspicion.suspicious and not force_suspicious:
+            suspect = sorted(primary_chapters.values())
+            suspect_numbers = [round(ch.numeric, 3) for ch in suspect]
+
+            # Verify against backup sources before withholding anything.
+            confirmed = sum(1 for n in suspect_numbers if n in backup_all_numbers)
+            if backup_sources_checked and confirmed / len(suspect_numbers) >= 0.5:
+                # Backup largely agrees with the primary, so accept the batch.
+                state.clear_suspicious_batch(title)
+            else:
+                if backup_sources_checked:
+                    backup_status = (
+                        f"backup confirmed only {confirmed}/{len(suspect_numbers)} chapters"
+                    )
+                else:
+                    backup_status = "no backup source available to verify"
+                state.set_suspicious_batch(title, {
+                    "detected_at": datetime.now().isoformat(),
+                    "chapters": [ch.number for ch in suspect],
+                    "count": len(suspect),
+                    "last_chapter": last_num,
+                    "highest": max(suspect_numbers),
+                    "score": suspicion.score,
+                    "reasons": suspicion.reasons,
+                    "backup_status": backup_status,
+                })
+                state.add_notification(
+                    "warn",
+                    f"Suspicious chapter batch for '{title}': "
+                    f"{len(suspect)} chapter(s) up to {max(suspect_numbers):g} "
+                    f"({backup_status}). Skipped auto-delivery.",
+                )
+                # Withhold the whole primary batch from download/delivery.
+                primary_chapters = {}
+        else:
+            # Batch is normal, forced, or backup-confirmed. Drop any
+            # stale suspicious record so warnings don't linger.
+            state.clear_suspicious_batch(title)
 
     # Process primary chapters first (always download these)
     for ch_num, ch in primary_chapters.items():

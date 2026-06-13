@@ -19,10 +19,12 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich import box
 
+from .backup import EXPORT_VERSION, BackupVersionError, validate_backup
 from .config import Config, get_app_password, set_app_password
 from .state import State
 from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga
 from .scrapers import get_scraper
+from .search import compute_search_sources, probe_chapter_counts, sweep
 from .emailer import send_to_kindle, EmailError
 
 console = Console()
@@ -422,10 +424,34 @@ def cmd_check(args):
         console.print(f"[dim]Checking:[/dim] [cyan]{title}[/cyan]...")
         
         try:
-            new_chapters = check_for_updates(manga, state, from_chapter=from_chapter)
-            
+            force_suspicious = getattr(args, 'force_suspicious', False)
+            new_chapters = check_for_updates(
+                manga, state,
+                from_chapter=from_chapter,
+                force_suspicious=force_suspicious,
+            )
+
+            # A batch that doesn't fit this manga's history was withheld
+            # because it couldn't be confirmed by a backup source.
+            suspicious = state.get_suspicious_batch(title) if from_chapter is None else None
+            if suspicious:
+                console.print(
+                    f"  [yellow]└─ Warning: Suspicious chapter batch detected: "
+                    f"{suspicious.get('count')} chapter(s) up to "
+                    f"{suspicious.get('highest')} "
+                    f"(last tracked: {suspicious.get('last_chapter')})[/yellow]"
+                )
+                for reason in suspicious.get("reasons", []):
+                    console.print(f"     [dim]- {reason}[/dim]")
+                console.print(f"     [dim]- {suspicious.get('backup_status')}[/dim]")
+                console.print(
+                    "     [yellow]Skipped auto-delivery. Run "
+                    "'memanga check --force-suspicious' to accept anyway.[/yellow]"
+                )
+
             if not new_chapters:
-                console.print("  [dim]└─ No new chapters[/dim]")
+                if not suspicious:
+                    console.print("  [dim]└─ No new chapters[/dim]")
                 continue
             
             console.print(f"  [green]└─ {len(new_chapters)} new chapter(s)![/green]")
@@ -896,13 +922,198 @@ def cmd_sources(args):
     console.print(f"[dim]Total: {len(sources)} sources • All tested and working![/dim]")
 
 
+def _add_search_result(result, status=None):
+    """Add one search result to the tracked manga list.
+
+    Returns (ok, message). Printing is left to the caller so the JSON
+    output path can stay machine-readable.
+    """
+    manga_list = config.get("manga", [])
+    for m in manga_list:
+        if m["title"].lower() == result.title.lower():
+            return False, f"'{result.title}' already exists"
+
+    entry = {
+        "title": result.title,
+        "source": result.source,
+        "url": result.url,
+    }
+    if result.cover_url:
+        entry["cover_url"] = result.cover_url
+    if status:
+        entry["status"] = status
+
+    manga_list.append(entry)
+    config.set("manga", manga_list)
+    config.save()
+    return True, f"Added: {result.title} ({result.source})"
+
+
+def cmd_search(args):
+    """Search enabled sources for a manga by title."""
+    query = args.query.strip()
+    if not query:
+        console.print("[red]Error:[/red] empty search query")
+        return 1
+    if args.limit is not None and args.limit < 1:
+        console.print("[red]Error:[/red] --limit must be at least 1")
+        return 1
+
+    # Resolve the source list: one source with --source, otherwise the
+    # same enabled-aggregators + library sweep the GUI Search page runs.
+    if args.source:
+        source = args.source.lower()
+        if source.startswith("www."):
+            source = source[4:]
+        try:
+            get_scraper(source)
+        except ValueError:
+            console.print(f"[red]Unknown source:[/red] {source}")
+            console.print("[dim]Use 'memanga sources' to see supported sources.[/dim]")
+            return 1
+        sources = [source]
+    else:
+        sources = compute_search_sources(config)
+
+    if not sources:
+        console.print("[yellow]No searchable sources enabled.[/yellow]")
+        return 1
+
+    quiet = args.json  # keep stdout machine-readable for --json
+
+    if not quiet:
+        console.print(f'Searching {len(sources)} sources for [cyan]"{query}"[/cyan]...')
+
+    if quiet:
+        results, failures = sweep(query, sources, limit=args.limit)
+        if results and not args.no_chips:
+            probe_chapter_counts(results)
+    else:
+        progress = {"done": 0, "found": 0}
+
+        with console.status(f"[dim]0/{len(sources)} sources[/dim]") as status:
+            def _tick(extra_found=0):
+                progress["done"] += 1
+                progress["found"] += extra_found
+                status.update(
+                    f"[dim]{progress['done']}/{len(sources)} sources · "
+                    f"{progress['found']} results[/dim]"
+                )
+
+            results, failures = sweep(
+                query, sources, limit=args.limit,
+                on_source_done=lambda src, count: _tick(count),
+                on_source_failed=lambda src, err: _tick(),
+            )
+            if results and not args.no_chips:
+                status.update(f"[dim]Fetching chapter counts for {len(results)} results...[/dim]")
+                probe_chapter_counts(results)
+
+    # ── Output ──
+    if args.json:
+        add_ok = None
+        payload = {
+            "query": query,
+            "sources_searched": len(sources),
+            "results": [
+                {
+                    "n": i,
+                    "title": r.title,
+                    "source": r.source,
+                    "url": r.url,
+                    "cover_url": r.cover_url,
+                    "chapters": r.chapter_count,
+                }
+                for i, r in enumerate(results, 1)
+            ],
+            "failed": [{"source": f.source, "error": f.error} for f in failures],
+        }
+        if args.add is not None:
+            if 1 <= args.add <= len(results):
+                add_ok, message = _add_search_result(
+                    results[args.add - 1], args.status
+                )
+            else:
+                add_ok, message = False, f"invalid result number: {args.add}"
+            payload["added"] = {"ok": add_ok, "message": message}
+        print(json.dumps(payload, indent=2))
+        if args.add is not None:
+            return 0 if add_ok else 1
+        return 0 if results else 1
+
+    summary = f"{len(sources) - len(failures)} / {len(sources)} sources done"
+    if failures:
+        first = failures[0]
+        summary += f" · {len(failures)} failed ({first.source}: {first.error})"
+
+    if not results:
+        console.print(f"[yellow]No results for \"{query}\".[/yellow]")
+        console.print(f"[dim]{summary}[/dim]")
+        return 1
+
+    table = Table(box=box.SIMPLE)
+    table.add_column("#", style="dim", justify="right")
+    table.add_column("Source", style="green")
+    table.add_column("Title", style="cyan bold")
+    table.add_column("Chapters", style="yellow", justify="right")
+    for i, r in enumerate(results, 1):
+        table.add_row(
+            str(i),
+            r.source,
+            r.title,
+            str(r.chapter_count) if r.chapter_count is not None else "—",
+        )
+    console.print(table)
+    console.print(f"[dim]{summary}[/dim]")
+
+    # ── Selection ──
+    if args.add is not None:
+        if not (1 <= args.add <= len(results)):
+            console.print(f"[red]Invalid result number:[/red] {args.add} (valid: 1-{len(results)})")
+            return 1
+        ok, message = _add_search_result(results[args.add - 1], args.status)
+        if ok:
+            console.print(f"[green]✅ {message}[/green]")
+            return 0
+        console.print(f"[yellow]⚠️  {message}[/yellow]")
+        return 1
+
+    # Interactive prompt — only when someone is actually at the
+    # terminal. Piped/cron invocations just get the table.
+    if not sys.stdin.isatty():
+        return 0
+
+    console.print()
+    choice = Prompt.ask("Add which? ([cyan]number[/cyan] to add, [cyan]q[/cyan] to quit)", default="q")
+    choice = choice.strip().lower()
+    if choice in ("q", ""):
+        return 0
+    # Accept both "3" and "a 3".
+    if choice.startswith("a ") or choice.startswith("a\t"):
+        choice = choice[1:].strip()
+    try:
+        n = int(choice)
+    except ValueError:
+        console.print(f"[red]Not a result number:[/red] {choice}")
+        return 1
+    if not (1 <= n <= len(results)):
+        console.print(f"[red]Invalid result number:[/red] {n} (valid: 1-{len(results)})")
+        return 1
+    ok, message = _add_search_result(results[n - 1], args.status)
+    if ok:
+        console.print(f"[green]✅ {message}[/green]")
+        return 0
+    console.print(f"[yellow]⚠️  {message}[/yellow]")
+    return 1
+
+
 def cmd_export(args):
     """Export manga list and download state to JSON."""
     manga_list = config.get("manga", [])
     manga_state = state.get("manga", {})
 
     export_data = {
-        "version": 1,
+        "version": EXPORT_VERSION,
         "exported_at": datetime.now().isoformat(),
         "manga": manga_list,
         "state": manga_state,
@@ -927,6 +1138,12 @@ def cmd_import(args):
 
     with open(import_path, "r") as f:
         import_data = json.load(f)
+
+    try:
+        import_data = validate_backup(import_data)
+    except BackupVersionError as exc:
+        console.print(f"[red]Cannot import:[/red] {exc}")
+        return 1
 
     if "manga" not in import_data:
         console.print("[red]Invalid export file (missing 'manga' key)[/red]")
@@ -1279,6 +1496,7 @@ Examples:
   memanga list                          # Show tracked manga
   memanga add -i                        # Add manga interactively
   memanga add -t "Solo Leveling" -u URL # Add manga directly
+  memanga search "Blue Lock"            # Find a manga across sources
   memanga check                         # Check for new chapters
   memanga check --auto                  # Auto-download new chapters
   memanga cron install                  # Set up daily checks
@@ -1331,6 +1549,7 @@ Examples:
     p_check.add_argument("-q", "--quiet", action="store_true", help="Minimal output (for cron)")
     p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
     p_check.add_argument("-n", "--dry-run", action="store_true", help="List new chapters without downloading")
+    p_check.add_argument("--force-suspicious", action="store_true", help="Accept a chapter batch even if it was flagged as suspicious")
     p_check.add_argument("--format", choices=["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"], help="Output format (overrides config)")
     p_check.add_argument("--retries", type=int, default=3, metavar="N", help="Retry failed page downloads N times (default: 3, 0 to disable)")
     p_check.set_defaults(func=cmd_check)
@@ -1353,6 +1572,17 @@ Examples:
     # sources
     p_sources = subparsers.add_parser("sources", help="List supported sources")
     p_sources.set_defaults(func=cmd_sources)
+
+    # search
+    p_search = subparsers.add_parser("search", help="Search sources for a manga by title")
+    p_search.add_argument("query", help="Manga title to search for")
+    p_search.add_argument("--json", action="store_true", help="Machine-readable JSON output")
+    p_search.add_argument("--source", help="Search a single source only (e.g. mangadex.org)")
+    p_search.add_argument("--limit", type=int, metavar="N", help="Cap results per source")
+    p_search.add_argument("--add", type=int, metavar="N", help="Add result #N without prompting")
+    p_search.add_argument("--status", choices=VALID_STATUSES, help="Status for the added manga (with --add or the prompt)")
+    p_search.add_argument("--no-chips", action="store_true", help="Skip chapter-count probes (faster)")
+    p_search.set_defaults(func=cmd_search)
 
     # export
     p_export = subparsers.add_parser("export", help="Export manga list and state to JSON")

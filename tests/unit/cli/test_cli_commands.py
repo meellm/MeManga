@@ -275,17 +275,244 @@ class TestExportImport:
             # Export schema should include manga list somewhere.
             assert "manga" in str(data) or "Exp" in str(data)
 
+    def test_export_stamps_schema_version(self, run_cli, config, tmp_path):
+        from memanga.backup import EXPORT_VERSION
+        out = tmp_path / "backup.json"
+        rc = run_cli("export", str(out))
+        assert rc == 0
+        assert json.loads(out.read_text())["version"] == EXPORT_VERSION
+
     def test_import_merge(self, run_cli, config, tmp_path):
         # First export
         backup = tmp_path / "x.json"
         backup.write_text(json.dumps({
+            "version": 1,
             "manga": [{"title": "FromImport", "url": "u",
                        "source": "mangadex.org", "status": "reading"}]
         }))
-        rc = run_cli("import", str(backup), "--merge")
+        rc = run_cli("import", str(backup))
         if rc == 0:
             titles = [m["title"] for m in config.get("manga", []) or []]
             assert "FromImport" in titles
+
+    def test_import_roundtrip(self, run_cli, config, tmp_path):
+        """An export produced by the CLI must import cleanly (issue #42)."""
+        config.set("manga", [{"title": "RoundTrip", "url": "u",
+                              "source": "mangadex.org", "status": "reading"}])
+        config.save()
+        backup = tmp_path / "rt.json"
+        assert run_cli("export", str(backup)) == 0
+        config.set("manga", [])
+        config.save()
+        assert run_cli("import", str(backup)) == 0
+        titles = [m["title"] for m in config.get("manga", []) or []]
+        assert "RoundTrip" in titles
+
+    def test_import_missing_version_rejected(self, run_cli, config, tmp_path,
+                                             capsys):
+        """Issue #42: a file without the export's `version` stamp is not
+        a MeManga backup and must not be imported blindly."""
+        backup = tmp_path / "noversion.json"
+        backup.write_text(json.dumps({
+            "manga": [{"title": "Sneaky", "url": "u",
+                       "source": "mangadex.org", "status": "reading"}]
+        }))
+        capsys.readouterr()
+        rc = run_cli("import", str(backup))
+        assert rc == 1
+        assert "version" in capsys.readouterr().out.lower()
+        titles = [m["title"] for m in config.get("manga", []) or []]
+        assert "Sneaky" not in titles
+
+    def test_import_newer_version_rejected(self, run_cli, config, tmp_path,
+                                           capsys):
+        backup = tmp_path / "future.json"
+        backup.write_text(json.dumps({"version": 99, "manga": []}))
+        capsys.readouterr()
+        rc = run_cli("import", str(backup))
+        assert rc == 1
+        assert "newer" in capsys.readouterr().out.lower()
+
+    def test_import_malformed_version_rejected(self, run_cli, config,
+                                               tmp_path, capsys):
+        backup = tmp_path / "bad.json"
+        backup.write_text(json.dumps({"version": "one", "manga": []}))
+        capsys.readouterr()
+        rc = run_cli("import", str(backup))
+        assert rc == 1
+        assert "version" in capsys.readouterr().out.lower()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# `search` — live multi-source search (scrapers mocked, no network)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _FakeSearchScraper:
+    def __init__(self, results=None, chapters=3, search_error=None):
+        self._results = results
+        self._chapters = chapters
+        self._search_error = search_error
+        self.get_chapters_calls = []
+
+    def search(self, query):
+        if self._search_error:
+            raise self._search_error
+        if self._results is not None:
+            return self._results
+        from memanga.scrapers import Manga
+        return [Manga(title="Blue Lock", url="https://fake.test/blue-lock",
+                      cover_url="https://fake.test/cover.jpg")]
+
+    def get_chapters(self, url):
+        self.get_chapters_calls.append(url)
+        return [object()] * self._chapters
+
+
+@pytest.fixture
+def fake_search_scraper(monkeypatch):
+    """Route every scraper lookup (CLI validation + engine sweep) to one
+    fake. Tests pass `--source fake.test` so the sweep stays single-source
+    and never consults the real registry."""
+    scraper = _FakeSearchScraper()
+
+    def _install(s):
+        monkeypatch.setattr("memanga.cli.get_scraper", lambda d: s)
+        monkeypatch.setattr("memanga.search.get_scraper", lambda d: s)
+        return s
+
+    _install(scraper)
+    scraper.reinstall = _install
+    return scraper
+
+
+class TestSearchCommand:
+    def test_table_output(self, run_cli, fake_search_scraper, capsys):
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test")
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Blue Lock" in out
+        assert "fake.test" in out
+        assert "3" in out            # chapter-count chip
+        assert "1 / 1 sources done" in out
+
+    def test_json_output(self, run_cli, fake_search_scraper, capsys):
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test", "--json")
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["query"] == "Blue Lock"
+        assert payload["sources_searched"] == 1
+        assert payload["failed"] == []
+        (result,) = payload["results"]
+        assert result["title"] == "Blue Lock"
+        assert result["source"] == "fake.test"
+        assert result["url"] == "https://fake.test/blue-lock"
+        assert result["chapters"] == 3
+
+    def test_no_chips_skips_chapter_probe(self, run_cli, fake_search_scraper,
+                                          capsys):
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--no-chips", "--json")
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["results"][0]["chapters"] is None
+        assert fake_search_scraper.get_chapters_calls == []
+
+    def test_limit_caps_per_source_results(self, run_cli, fake_search_scraper,
+                                           capsys):
+        from memanga.scrapers import Manga
+        many = [Manga(title=f"Blue Lock {i}", url=f"https://fake.test/{i}")
+                for i in range(8)]
+        fake_search_scraper.reinstall(_FakeSearchScraper(results=many))
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--limit", "2", "--no-chips", "--json")
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload["results"]) == 2
+
+    def test_add_directly_with_status(self, run_cli, fake_search_scraper,
+                                      config):
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--add", "1", "--status", "on-hold", "--no-chips")
+        assert rc == 0
+        (manga,) = config.get("manga", [])
+        assert manga["title"] == "Blue Lock"
+        assert manga["source"] == "fake.test"
+        assert manga["url"] == "https://fake.test/blue-lock"
+        assert manga["cover_url"] == "https://fake.test/cover.jpg"
+        assert manga["status"] == "on-hold"
+
+    def test_add_duplicate_rejected(self, run_cli, fake_search_scraper,
+                                    config):
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--add", "1", "--no-chips")
+        assert rc == 0
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--add", "1", "--no-chips")
+        assert rc == 1
+        assert len(config.get("manga", [])) == 1
+
+    def test_add_out_of_range(self, run_cli, fake_search_scraper, config):
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--add", "99", "--no-chips")
+        assert rc == 1
+        assert config.get("manga", []) == []
+
+    def test_json_add_out_of_range_exits_nonzero(self, run_cli,
+                                                 fake_search_scraper,
+                                                 capsys):
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--add", "99", "--no-chips", "--json")
+        assert rc == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["added"]["ok"] is False
+
+    def test_no_results(self, run_cli, fake_search_scraper, capsys):
+        fake_search_scraper.reinstall(_FakeSearchScraper(results=[]))
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--no-chips")
+        assert rc == 1
+        assert "No results" in capsys.readouterr().out
+
+    def test_source_failure_reported(self, run_cli, fake_search_scraper,
+                                     capsys):
+        fake_search_scraper.reinstall(
+            _FakeSearchScraper(search_error=RuntimeError("HTTP 502")))
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--no-chips")
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "1 failed" in out
+        assert "HTTP 502" in out
+
+    def test_unknown_source_errors(self, run_cli, isolated_home, capsys):
+        rc = run_cli("search", "Blue Lock",
+                     "--source", "not-a-real-source.example")
+        assert rc == 1
+        assert "Unknown source" in capsys.readouterr().out
+
+    def test_irrelevant_results_filtered(self, run_cli, fake_search_scraper,
+                                         capsys):
+        from memanga.scrapers import Manga
+        fake_search_scraper.reinstall(_FakeSearchScraper(results=[
+            Manga(title="Blue Lock", url="https://fake.test/bl"),
+            Manga(title="Beastars", url="https://fake.test/beastars"),
+        ]))
+        rc = run_cli("search", "Blue Lock", "--source", "fake.test",
+                     "--no-chips", "--json")
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert [r["title"] for r in payload["results"]] == ["Blue Lock"]
+
+    def test_default_source_selection_used(self, run_cli, monkeypatch,
+                                           fake_search_scraper, capsys):
+        """Without --source the command sweeps compute_search_sources()."""
+        monkeypatch.setattr("memanga.cli.compute_search_sources",
+                            lambda cfg: ["fake.test", "other.test"])
+        rc = run_cli("search", "Blue Lock", "--no-chips", "--json")
+        assert rc == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["sources_searched"] == 2
 
 
 # ─────────────────────────────────────────────────────────────────────────
