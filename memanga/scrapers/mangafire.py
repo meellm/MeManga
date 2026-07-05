@@ -1,15 +1,17 @@
 """
-MangaFire.to scraper with VRF bypass and image descrambling.
+MangaFire.to scraper using the site's JSON API.
 
-Based on:
-- https://github.com/f4rh4d-4hmed/MangaFire-API (image descrambler)
-- https://github.com/zzyil/AIO-Webtoon-Downloader (VRF capture approach)
+MangaFire moved from server-rendered /manga/slug.hid pages with /ajax
+endpoints to an SPA under /title/hid-slug backed by a JSON API:
 
-Features:
-- Direct AJAX API access (tries without VRF first)
-- Playwright-based VRF token capture (fallback for protected endpoints)
-- Image descrambling for protected/scrambled images
-- Chapter list and page extraction
+- GET /api/titles/{hid}/chapters?language=en&limit=100&page=N  (chapter list)
+- GET /api/chapters/{chapter_id}                               (page image URLs)
+
+Both work with plain HTTP (no VRF token needed). Search still goes through
+a persistent Playwright Firefox (see VRFGenerator.search).
+
+Image descrambling based on:
+- https://github.com/f4rh4d-4hmed/MangaFire-API
 """
 
 import re
@@ -19,7 +21,7 @@ import time
 from io import BytesIO
 from typing import List, Optional, Dict, Tuple
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 
 from bs4 import BeautifulSoup
@@ -181,20 +183,38 @@ class VRFGenerator:
         self._initialized = True
 
     def _ensure_browser_in_thread(self):
-        """Ensure browser is running in the current thread. Must be called from executor thread."""
+        """Ensure the thread-local Firefox is running. Executor-thread only."""
         if not PLAYWRIGHT_AVAILABLE:
             raise RuntimeError("Playwright not available")
 
-        if not hasattr(_vrf_thread_local, 'playwright'):
-            print("[MangaFire] Starting Firefox browser (bypasses bot detection)...")
-            _vrf_thread_local.playwright = sync_playwright().start()
-            _vrf_thread_local.browser = _vrf_thread_local.playwright.firefox.launch(headless=True)
-            _vrf_thread_local.context = _vrf_thread_local.browser.new_context(
+        if (hasattr(_vrf_thread_local, 'playwright')
+                and hasattr(_vrf_thread_local, 'browser')
+                and hasattr(_vrf_thread_local, 'context')
+                and hasattr(_vrf_thread_local, 'page')):
+            return _vrf_thread_local.page
+
+        self._close_in_thread()
+
+        print("[MangaFire] Starting Firefox browser (bypasses bot detection)...")
+        pw = sync_playwright().start()
+        try:
+            browser = pw.firefox.launch(headless=True)
+            context = browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
                 viewport={'width': 1920, 'height': 1080}
             )
-            _vrf_thread_local.page = _vrf_thread_local.context.new_page()
+            page = context.new_page()
+        except Exception:
+            try:
+                pw.stop()
+            except Exception:
+                pass
+            raise
 
+        _vrf_thread_local.playwright = pw
+        _vrf_thread_local.browser = browser
+        _vrf_thread_local.context = context
+        _vrf_thread_local.page = page
         return _vrf_thread_local.page
 
     def _get_chapter_pages_in_thread(self, chapter_url: str) -> Tuple[List[str], List[int]]:
@@ -465,11 +485,48 @@ class MangaFireScraper(BaseScraper):
         self._current_offsets: Dict[str, int] = {}
 
     def _extract_id_from_url(self, url: str) -> str:
-        """Extract manga ID from URL (e.g., 'dkw' from '/manga/one-piece.dkw')."""
+        """Extract MangaFire title hid from old and current URL formats."""
         path = urlparse(url).path
-        if '.' in path:
-            return path.split('.')[-1]
+        if match := re.search(r'/title/([^/-]+)(?:-|$)', path):
+            return match.group(1)
+        if match := re.search(r'/manga/[^/]+\.([^/.]+)$', path):
+            return match.group(1)
+        if match := re.search(r'/read/[^/]+\.([^/.]+)/', path):
+            return match.group(1)
+        if match := re.search(r'/api/titles/([^/]+)', path):
+            return match.group(1)
         return ''
+
+    def _format_chapter_number(self, value) -> str:
+        """Format API chapter numbers without adding trailing .0."""
+        if value is None:
+            return ''
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value).strip()
+
+    def _api_get_json(self, url: str) -> dict:
+        """Fetch a MangaFire API endpoint and raise useful scraper errors."""
+        try:
+            response = self.session.get(url, timeout=30)
+        except requests.RequestException as e:
+            raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
+        except Exception as e:
+            raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
+
+        if response.status_code != 200:
+            raise MangaFireError(
+                f"MangaFire returned HTTP {response.status_code} for {url}"
+            )
+
+        try:
+            return response.json()
+        except ValueError as e:
+            raise MangaFireError(
+                f"MangaFire returned a non-JSON response for {url}: {e}"
+            ) from e
 
     def _parse_chapter_url(self, chapter_url: str) -> Tuple[str, str, str]:
         """
@@ -485,7 +542,18 @@ class MangaFireScraper(BaseScraper):
         lang = 'en'
         chap_num = '1'
 
-        # Find manga ID (the part after the dot)
+        if parts[:2] == ['api', 'chapters'] and len(parts) >= 3:
+            return parts[2], lang, chap_num
+
+        # New reader/title URLs carry the title hid before the first dash.
+        if len(parts) >= 2 and parts[0] == 'title':
+            manga_id = parts[1].split('-', 1)[0]
+            for i, part in enumerate(parts):
+                if part == 'read' and i + 1 < len(parts):
+                    lang = parts[i + 1]
+                    break
+
+        # Old reader URLs carry the manga hid after the dot.
         for i, part in enumerate(parts):
             if '.' in part:
                 manga_id = part.split('.')[-1]
@@ -543,66 +611,63 @@ class MangaFireScraper(BaseScraper):
         if not manga_id:
             raise ValueError(f"Could not extract manga ID from URL: {manga_url}")
 
-        # Use AJAX endpoint for chapter list (works without VRF!)
-        ajax_url = f"{self.base_url}/ajax/manga/{manga_id}/chapter/{language}"
+        chapters: List[Chapter] = []
+        seen_numbers = set()
+        page = 1
 
-        last_error = None
-        response = None
-        for attempt in range(1, 4):
-            try:
-                response = self.session.get(ajax_url, timeout=30)
-                break
-            except requests.RequestException as e:
-                last_error = e
-                if attempt < 3:
-                    time.sleep(attempt)
-                    continue
-                raise MangaFireError(f"MangaFire request failed for {ajax_url}: {e}") from e
-            except Exception as e:
-                raise MangaFireError(f"MangaFire request failed for {ajax_url}: {e}") from e
-
-        if response is None:
-            raise MangaFireError(f"MangaFire request failed for {ajax_url}: {last_error}")
-
-        # A non-200 transport status is an upstream failure (Cloudflare 5xx,
-        # gateway timeout, rate limit) — not an empty chapter list.
-        if response.status_code != 200:
-            raise MangaFireError(
-                f"MangaFire returned HTTP {response.status_code} for {ajax_url}"
+        while True:
+            api_url = (
+                f"{self.base_url}/api/titles/{manga_id}/chapters"
+                f"?language={language}&limit=100&page={page}"
             )
+            data = self._api_get_json(api_url)
+            items = data.get('items')
+            if not isinstance(items, list):
+                raise MangaFireError(
+                    f"MangaFire returned an invalid chapter list for {api_url}"
+                )
 
-        try:
-            data = response.json()
-        except ValueError as e:
-            raise MangaFireError(f"MangaFire returned a non-JSON response for {ajax_url}: {e}") from e
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                chapter_id = item.get('id')
+                number = self._format_chapter_number(item.get('number', ''))
+                if not chapter_id or not number or number in seen_numbers:
+                    continue
 
-        # The AJAX envelope carries its own status code; anything other than
-        # 200 (often a wrapped Cloudflare error) means the request did not
-        # actually return a chapter list.
-        if data.get('status') != 200 or 'result' not in data:
-            raise MangaFireError(self._chapter_error_message(ajax_url, data))
+                seen_numbers.add(number)
+                name = str(item.get('name') or '').strip()
+                chapters.append(Chapter(
+                    number=number,
+                    title=name or f"Chapter {number}",
+                    url=f"{self.base_url}/api/chapters/{chapter_id}",
+                ))
 
-        chapters = []
-        soup = BeautifulSoup(data['result'], 'html.parser')
-
-        for li in soup.select('li'):
-            a_tag = li.select_one('a')
-            if not a_tag:
-                continue
-
-            href = a_tag.get('href', '')
-            title = a_tag.get('title', '')
-            chap_num = li.get('data-number', '0')
-
-            full_url = href if href.startswith('http') else f"{self.base_url}{href}"
-
-            chapters.append(Chapter(
-                number=chap_num,
-                title=title,
-                url=full_url,
-            ))
+            meta = data.get('meta') if isinstance(data.get('meta'), dict) else {}
+            if not meta.get('hasNext'):
+                break
+            page += 1
 
         return sorted(chapters, key=lambda x: x.numeric)
+
+    def _resolve_chapter_api_url(self, chapter_url: str) -> str:
+        """Resolve a saved MangaFire chapter URL to the current chapter API URL."""
+        parsed = urlparse(chapter_url)
+        if re.search(r'/api/chapters/\d+', parsed.path):
+            if chapter_url.startswith('http'):
+                return chapter_url
+            return f"{self.base_url}{parsed.path}"
+
+        manga_id, lang, chap_num = self._parse_chapter_url(chapter_url)
+        if not manga_id:
+            raise MangaFireError(f"Could not parse MangaFire chapter URL: {chapter_url}")
+
+        wanted = self._format_chapter_number(chap_num)
+        for chapter in self.get_chapters(f"{self.base_url}/title/{manga_id}", language=lang):
+            if chapter.number == wanted:
+                return chapter.url
+
+        raise MangaFireError(f"MangaFire chapter {wanted} not found for {manga_id}")
 
     def _try_direct_ajax(self, manga_id: str, lang: str, chap_num: str) -> Tuple[List[str], List[int]]:
         """
@@ -657,46 +722,36 @@ class MangaFireScraper(BaseScraper):
         """
         Get all page image URLs for a chapter.
 
-        First tries direct AJAX (fast, no browser).
-        Falls back to Playwright browser for VRF bypass if needed.
-
-        The offsets are stored internally for use during download.
+        Uses MangaFire's current JSON API. The old AJAX endpoints now return
+        the SPA shell instead of chapter/page JSON.
         """
-        # Parse the chapter URL
-        manga_id, lang, chap_num = self._parse_chapter_url(chapter_url)
+        api_url = self._resolve_chapter_api_url(chapter_url)
+        data = self._api_get_json(api_url)
+        chapter_data = (
+            data.get('data') if isinstance(data.get('data'), dict) else data
+        )
+        pages = chapter_data.get('pages') if isinstance(chapter_data, dict) else None
+        if not isinstance(pages, list):
+            raise MangaFireError(
+                f"MangaFire returned an invalid page list for {api_url}"
+            )
 
-        if not manga_id:
-            print(f"[MangaFire] Could not parse chapter URL: {chapter_url}")
-            return []
-
-        print(f"[MangaFire] Chapter: manga_id={manga_id}, lang={lang}, chap={chap_num}")
-
-        # First, try direct AJAX (works for many chapters without VRF)
-        urls, offsets = self._try_direct_ajax(manga_id, lang, chap_num)
-
-        if urls:
-            # Store offsets for descrambling
-            self._current_offsets.clear()
-            for url, offset in zip(urls, offsets):
+        self._current_offsets.clear()
+        image_urls = []
+        for page in pages:
+            if isinstance(page, dict):
+                url = page.get('url')
+                offset = page.get('offset') or page.get('scrambleOffset') or 0
+            else:
+                url = page
+                offset = 0
+            if not url:
+                continue
+            image_urls.append(url)
+            if isinstance(offset, int) and offset > 0:
                 self._current_offsets[url] = offset
-            return urls
 
-        # Fallback: Use Playwright browser for VRF bypass
-        if PLAYWRIGHT_AVAILABLE:
-            print("[MangaFire] Direct AJAX failed, trying browser bypass...")
-            vrf_gen = get_vrf_generator()
-            urls, offsets = vrf_gen.get_chapter_pages(chapter_url)
-
-            if urls:
-                self._current_offsets.clear()
-                for url, offset in zip(urls, offsets):
-                    self._current_offsets[url] = offset
-                return urls
-        else:
-            print("[MangaFire] Playwright not available for VRF bypass")
-
-        print(f"[MangaFire] Could not get pages for: {chapter_url}")
-        return []
+        return image_urls
 
     def download_image(self, url: str, path) -> bool:
         """
