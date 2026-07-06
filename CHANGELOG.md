@@ -6,6 +6,16 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-07-06
+
+### Fixed
+- #71 MangaFire changed its chapter and page endpoints, so saved
+  MangaFire library entries could no longer fetch real chapter lists.
+  MangaFire now reads the current `/api` chapter and page payloads,
+  keeps old saved MangaFire URLs compatible, follows paginated chapter
+  lists, and deduplicates repeated chapter numbers before update checks
+  or downloads run.
+
 ## [0.3.0] - 2026-06-13
 
 ### Added

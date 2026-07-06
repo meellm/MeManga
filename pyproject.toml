@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memanga"
-version = "0.3.0"
+version = "0.3.1"
 description = "Automatic manga downloader with Kindle support"
 readme = "README.md"
 license = {text = "MIT"}
