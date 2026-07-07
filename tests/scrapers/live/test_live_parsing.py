@@ -72,6 +72,7 @@ PARSING_PROBES = {
     "mangakakalot.com": ProbeSpec("Mangakakalot", query="naruto"),
     "manganato.com": ProbeSpec("Manganato", query="naruto"),
     "mangahub.io": ProbeSpec("MangaHub", query="one piece"),
+    "comix.to": ProbeSpec("Comix.to", query="kubera"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),

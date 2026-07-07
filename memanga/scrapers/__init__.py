@@ -65,6 +65,7 @@ from .mangahubus import MangaHubUsScraper
 from .onemanga import OneMangaScraper
 from .mangafreak import MangaFreakScraper
 from .comick import ComickScraper
+from .comix import ComixScraper
 from .fanfox import FanFoxScraper
 from .toonily import ToonilyScraper
 from .omegascans import OmegaScansScraper
@@ -339,6 +340,9 @@ SCRAPERS = {
     # ComicK - Popular manga aggregator (Playwright + Cloudflare bypass)
     "comick.io": ComickScraper,
     "comick.dev": ComickScraper,
+
+    # Comix - Popular manga/manhwa aggregator (Playwright)
+    "comix.to": ComixScraper,
 
     # FanFox (MangaFox) - Large manga library (Playwright)
     "fanfox.net": FanFoxScraper,
@@ -669,6 +673,7 @@ POPULAR_SOURCES = [
     "mangabuddy.com",
     "weebcentral.com",
     "mangakatana.com",
+    "comix.to",
     "comick.io",
     "mangahub.io",
     "mangahere.cc",
