@@ -67,6 +67,7 @@ PARSING_PROBES = {
     # ── Aggregators (full pipeline) ──
     "mangadex.org": ProbeSpec("API client", query="one piece"),
     "mangapill.com": ProbeSpec("Simple HTTP aggregator", query="one piece"),
+    "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),
     "tcbonepiecechapters.com": ProbeSpec("TCB Scans (project list)",
                                            query="one piece"),
     "mangakakalot.com": ProbeSpec("Mangakakalot", query="naruto"),
