@@ -73,6 +73,13 @@ pytest tests/unit/gui
 
 # Live scraper health checks (hits real sites — slow, opt-in)
 pytest -m live tests/scrapers/live/
+
+# Curated end-to-end probes only — each walks search → chapters →
+# pages → image and a failure names the first broken stage
+pytest -m live tests/scrapers/live/test_live_parsing.py -v
+
+# Machine-readable report (per-stage details + failures_by_stage)
+pytest -m live tests/scrapers/live/ --health-report=health.json
 ```
 
 All checked-in tests should pass before you push. CI runs `pytest` on
