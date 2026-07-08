@@ -6,6 +6,26 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-07-08
+
+### Added
+- #77 Comix.to is now available as a supported source. Search runs
+  through the rendered search flow, chapter discovery reads paginated
+  chapter rows, and reader image extraction/downloads use the headers
+  required by the site.
+- #78 MangaPark is now available as a supported source through
+  `mangapark1.com`, including search, chapter-list parsing, reader page
+  extraction, CDN image downloads, and live scraper diagnostics.
+- Live scraper diagnostics now include staged parsing probes that make
+  source-specific breakage easier to confirm without running the full
+  application workflow.
+
+### Fixed
+- #74 MangaFire search now reads the current `/api/titles` JSON payload
+  instead of scraping the old browser search page, restoring title
+  discovery for queries such as `one piece`, `ao no hako`, and
+  `super no ura`.
+
 ## [0.3.1] - 2026-07-06
 
 ### Fixed
