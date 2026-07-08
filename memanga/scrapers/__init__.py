@@ -8,6 +8,7 @@ Working sources:
 - Mangakatana (mangakatana.com) - General library
 - MangaDex (mangadex.org) - Community uploads (skip Shueisha)
 - Mangapill (mangapill.com) - Large library, no Cloudflare
+- MangaPark (mangapark1.com) - Large library, simple requests
 - MangaReader (mangareader.to) - Large library, clean UI
 - MangaSee (mangasee123.com) - High quality scans
 - MangaBuddy (mangabuddy.com) - Popular aggregator
@@ -30,6 +31,7 @@ from .asurascans import AsuraScansScraper
 from .mangakatana import MangakatanataScraper
 from .mangadex import MangaDexScraper
 from .mangapill import MangapillScraper
+from .mangapark import MangaParkScraper
 from .mangareader import MangaReaderScraper
 from .mangafire import MangaFireScraper
 from .mangasee import MangaSeeScraper
@@ -184,6 +186,9 @@ SCRAPERS = {
 
     # Mangapill - Large library (no Cloudflare, simple requests)
     "mangapill.com": MangapillScraper,
+
+    # MangaPark - current working domain
+    "mangapark1.com": MangaParkScraper,
 
     # MangaReader.to
     "mangareader.to": MangaReaderScraper,
@@ -665,6 +670,7 @@ def list_supported_sources():
 POPULAR_SOURCES = [
     "mangadex.org",
     "mangapill.com",
+    "mangapark1.com",
     "mangafire.to",
     "mangabuddy.com",
     "weebcentral.com",
