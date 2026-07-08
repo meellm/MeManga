@@ -158,6 +158,89 @@ class TestMangaFireGetPages:
         assert pages == ["https://cdn.example/002.jpg"]
 
 
+class TestMangaFireSearch:
+    """Issue #74: search must use GET /api/titles?keyword=... - the old
+    browser-driven homepage search scraped `/manga/` result links that
+    the browse page no longer renders, so it always found 0 results.
+    """
+
+    def test_parses_api_items_into_manga(self):
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session([
+            _Response(payload={
+                "items": [
+                    {
+                        "title": "One Piece",
+                        "url": "/title/dkw-one-piece",
+                        "poster": {
+                            "small": "https://cdn.example/op@100.jpg",
+                            "medium": "https://cdn.example/op@280.jpg",
+                        },
+                    },
+                    {
+                        # No medium poster - falls back to large.
+                        "title": "One Piece Academy",
+                        "url": "https://mangafire.to/title/1qz0v-one-piece-academy",
+                        "poster": {"large": "https://cdn.example/opa.jpg"},
+                    },
+                    {"title": "", "url": "/title/x-skipped-no-title"},
+                    {"title": "Skipped, no URL"},
+                    "not-a-dict",
+                ],
+                "meta": {"total": 4},
+            }),
+        ])
+
+        results = scraper.search("one piece")
+
+        assert [(m.title, m.url, m.cover_url) for m in results] == [
+            ("One Piece", "https://mangafire.to/title/dkw-one-piece",
+             "https://cdn.example/op@280.jpg"),
+            ("One Piece Academy",
+             "https://mangafire.to/title/1qz0v-one-piece-academy",
+             "https://cdn.example/opa.jpg"),
+        ]
+
+    def test_caps_results_at_ten(self):
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session([
+            _Response(payload={
+                "items": [
+                    {"title": f"Manga {i}", "url": f"/title/h{i}-manga-{i}"}
+                    for i in range(20)
+                ],
+            }),
+        ])
+
+        assert len(scraper.search("manga")) == 10
+
+    def test_invalid_search_payload_raises(self):
+        from memanga.scrapers.mangafire import MangaFireError, MangaFireScraper
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session([
+            _Response(payload={"message": "shape changed"}),
+        ])
+
+        with pytest.raises(MangaFireError, match="invalid search response"):
+            scraper.search("one piece")
+
+    def test_http_error_raises_instead_of_empty_list(self):
+        from memanga.scrapers.mangafire import MangaFireError, MangaFireScraper
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session([
+            _Response(status_code=503, payload={}),
+        ])
+
+        with pytest.raises(MangaFireError, match="HTTP 503"):
+            scraper.search("one piece")
+
+
 class TestVRFBrowserInitAtomicity:
     """Issue #28: a failed firefox.launch() must surface the real error,
     not a masking AttributeError on a half-initialised thread-local.

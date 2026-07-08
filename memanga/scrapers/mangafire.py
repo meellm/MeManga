@@ -4,11 +4,11 @@ MangaFire.to scraper using the site's JSON API.
 MangaFire moved from server-rendered /manga/slug.hid pages with /ajax
 endpoints to an SPA under /title/hid-slug backed by a JSON API:
 
+- GET /api/titles?keyword={query}                              (search)
 - GET /api/titles/{hid}/chapters?language=en&limit=100&page=N  (chapter list)
 - GET /api/chapters/{chapter_id}                               (page image URLs)
 
-Both work with plain HTTP (no VRF token needed). Search still goes through
-a persistent Playwright Firefox (see VRFGenerator.search).
+All work with plain HTTP (no VRF token or browser needed).
 
 Image descrambling based on:
 - https://github.com/f4rh4d-4hmed/MangaFire-API
@@ -21,10 +21,9 @@ import time
 from io import BytesIO
 from typing import List, Optional, Dict, Tuple
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from concurrent.futures import ThreadPoolExecutor
 
-from bs4 import BeautifulSoup
 from PIL import Image
 
 from .base import BaseScraper, Chapter, Manga
@@ -315,90 +314,6 @@ class VRFGenerator:
             self._get_chapter_pages_in_thread, chapter_url, timeout=120,
         )
 
-    # ------------------------------------------------------------------
-    # Search via persistent browser
-    # ------------------------------------------------------------------
-    # MangaFire returns 403 to plain HTTP (Cloudflare), so search must
-    # go through a real browser. Launching a fresh Firefox per call
-    # adds ~5-10 s of cold-start latency on top of the actual search
-    # work, which on slower networks pushes MangaFire past the point
-    # the GUI considers it usable. Reusing the persistent VRFGenerator
-    # browser drops per-search cost to ~0.5 s after warm-up.
-    def _search_in_thread(self, query: str) -> List[Manga]:
-        """Run a search using the persistent Firefox in this thread.
-
-        Must be called via `_run_serialized` (same lock as chapter-page
-        extraction) — otherwise concurrent calls would race on the same
-        thread-local `_vrf_thread_local.page`.
-        """
-        page = self._ensure_browser_in_thread()
-
-        results: List[Manga] = []
-        try:
-            # Hit the homepage so the search bar is available + Cloudflare
-            # cookies seed on first call. After the first warm-up this is
-            # cached and returns in <500 ms.
-            page.goto(
-                'https://mangafire.to/',
-                wait_until='domcontentloaded',
-                timeout=60000,
-            )
-            # The search bar redirects to /filter?keyword=…&vrf=<token>.
-            # The server-signed VRF token is not constructible locally, so
-            # the search bar is used instead of building the URL directly.
-            si = page.locator(
-                'input[placeholder*="Search"], input[name="keyword"]'
-            ).first
-            si.fill(query)
-            si.press('Enter')
-            page.wait_for_load_state('domcontentloaded', timeout=30000)
-            # Wait for the first result row OR give up after 10 s. Using
-            # wait_for_selector instead of a fixed sleep means fast
-            # responses come back fast and empty/blocked responses don't
-            # hold the lock longer than necessary.
-            try:
-                page.wait_for_selector(
-                    '.info a[href*="/manga/"]', timeout=10000,
-                )
-            except Exception:
-                pass
-
-            soup = BeautifulSoup(page.content(), 'html.parser')
-            seen_urls = set()
-            for link in soup.select('.info a[href*="/manga/"]'):
-                href = link.get('href', '')
-                title = link.get_text(strip=True)
-                if not title or len(title) < 2:
-                    continue
-                full_url = href if href.startswith('http') \
-                    else f"https://mangafire.to{href}"
-                if full_url in seen_urls:
-                    continue
-                seen_urls.add(full_url)
-                cover_url = None
-                parent = link.find_parent(class_='unit')
-                if parent:
-                    img = parent.select_one('.inner img')
-                    if img:
-                        cover_url = img.get('src')
-                results.append(Manga(
-                    title=title, url=full_url, cover_url=cover_url,
-                ))
-        except Exception as e:
-            print(f"[MangaFire] Search error (persistent browser): {e}")
-        return results[:10]
-
-    def search(self, query: str) -> List[Manga]:
-        """Search via the persistent VRFGenerator browser.
-
-        Public entry point — runs `_search_in_thread` under the same
-        executor lock as chapter-page extraction so they share the
-        thread-local browser without racing.
-        """
-        return self._run_serialized(
-            self._search_in_thread, query, timeout=60,
-        )
-
     def _close_in_thread(self):
         """Clean up browser resources - runs in executor thread."""
         try:
@@ -474,8 +389,7 @@ class MangaFireScraper(BaseScraper):
     # Supported languages
     LANGUAGES = ['en', 'es', 'es-la', 'fr', 'ja', 'pt', 'pt-br']
 
-    # Search now goes through VRFGenerator's persistent browser
-    # (see search() below), avoiding a per-scraper executor.
+    # Search uses the JSON API directly (see search() below).
     # Chapter-pages route through VRFGenerator's own _run_serialized.
 
     def __init__(self):
@@ -588,14 +502,37 @@ class MangaFireScraper(BaseScraper):
         return manga_id, lang, chap_num
 
     def search(self, query: str) -> List[Manga]:
-        """Search for manga via the persistent VRFGenerator browser.
+        """Search for manga via MangaFire's JSON API.
 
-        Routes through `get_vrf_generator()` (a process-wide singleton
-        that keeps Firefox open across calls) instead of launching a
-        fresh browser per query, so per-search latency stays under a
-        second once the browser is warm.
+        The browse page renders results client-side, but the SPA's own
+        /api/titles endpoint returns the search payload directly.
         """
-        return get_vrf_generator().search(query)
+        api_url = f"{self.base_url}/api/titles?keyword={quote(query, safe='')}"
+        data = self._api_get_json(api_url)
+        items = data.get('items')
+        if not isinstance(items, list):
+            raise MangaFireError(
+                f"MangaFire returned an invalid search response for {api_url}"
+            )
+
+        results: List[Manga] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get('title') or '').strip()
+            path = item.get('url') or ''
+            if not title or not path:
+                continue
+            full_url = path if path.startswith('http') \
+                else f"{self.base_url}/{path.lstrip('/')}"
+            poster = item.get('poster') \
+                if isinstance(item.get('poster'), dict) else {}
+            cover_url = (poster.get('medium') or poster.get('large')
+                         or poster.get('small'))
+            results.append(Manga(
+                title=title, url=full_url, cover_url=cover_url,
+            ))
+        return results[:10]
 
     def _chapter_error_message(self, ajax_url: str, data: dict) -> str:
         """Build a concise error from MangaFire/Cloudflare AJAX envelopes."""
