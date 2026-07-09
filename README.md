@@ -2,7 +2,7 @@
 
 **Automatic manga downloader with a desktop app and a power-user CLI.**
 
-Track manga across 224 scrapers / 319 domains, read downloaded chapters
+Track manga across 227 scrapers / 322 domains, read downloaded chapters
 in the built-in reader, and optionally email them to your Kindle.
 Works offline once chapters are downloaded.
 
@@ -222,7 +222,7 @@ On macOS / Linux:
 | `config` | Interactive settings editor |
 | `cron install [--time 06:00]` | Schedule a daily `check --auto` job |
 | `cron status` / `cron remove` | Inspect / uninstall the cron job |
-| `sources` | List all 319 supported domains, marking which ones are healthy |
+| `sources` | List all 322 supported domains, marking which ones are healthy |
 | `export FILE` / `import FILE` | Back up or restore your library + state as JSON |
 | `tui` | Launch the in-terminal interactive view |
 

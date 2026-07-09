@@ -15,6 +15,8 @@ import pytest
 
 from memanga.scrapers.mangabuddy import MangaBuddyScraper
 from memanga.scrapers.comix import ComixScraper
+from memanga.scrapers.batoto import BatoToScraper
+from memanga.scrapers.wto import WTOScraper, _is_cf_challenge
 from memanga.scrapers import get_scraper
 
 
@@ -121,6 +123,120 @@ class TestComixChapters:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# WTO (wto.to) - Bato mirror. Parsing is inherited from BatoToScraper;
+# only the transport differs (Playwright, for the Cloudflare managed
+# challenge). Tests inject fixture HTML through _get_html, so they
+# exercise the exact parser wto.to relies on.
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def wto():
+    return WTOScraper()
+
+
+class TestWTORegistry:
+    def test_wto_domain_resolves_to_wto_scraper(self):
+        s = get_scraper("wto.to")
+        assert isinstance(s, WTOScraper)
+        assert s.base_url == "https://wto.to"
+
+    def test_wto_reuses_bato_parser(self):
+        assert issubclass(WTOScraper, BatoToScraper)
+
+    def test_bato_domains_unaffected(self):
+        # Mirror registration must not reroute or re-base the originals.
+        for domain in ("bato.to", "batoto.to"):
+            s = get_scraper(domain)
+            assert type(s) is BatoToScraper
+            assert s.base_url == "https://bato.to"
+
+
+class TestWTOSearch:
+    def test_parses_bato_series_cards(self, wto, patch_html, load_fixture):
+        patch_html(wto, load_fixture("playwright_html", "wto_search.html"))
+        results = wto.search("one piece")
+        titles = [r.title for r in results]
+        assert "One Piece" in titles
+        assert "Naruto" in titles
+        # Relative /series/ hrefs absolutized against the MIRROR domain
+        assert all(r.url.startswith("https://wto.to/series/") for r in results)
+        # Non-series links filtered out
+        assert not any("/browse" in r.url for r in results)
+
+    def test_dedupes_cover_and_text_links(self, wto, patch_html, load_fixture):
+        patch_html(wto, load_fixture("playwright_html", "wto_search.html"))
+        results = wto.search("one piece")
+        urls = [r.url for r in results]
+        assert len(urls) == len(set(urls))
+        assert len(results) == 3
+
+
+class TestWTOChapters:
+    def test_dedupes_and_sorts(self, wto, patch_html, load_fixture):
+        patch_html(wto, load_fixture("playwright_html", "wto_manga.html"))
+        chapters = wto.get_chapters("https://wto.to/series/72315/one-piece")
+        urls = [c.url for c in chapters]
+        assert len(urls) == len(set(urls))
+        assert len(chapters) == 3
+        # Ascending numeric order, decimal preserved
+        assert [c.number for c in chapters] == ["1099", "1099.5", "1100"]
+        # Relative /chapter/ hrefs absolutized against the mirror
+        assert all(u.startswith("https://wto.to/chapter/") for u in urls)
+
+
+class TestWTOPages:
+    def test_extracts_image_urls_from_script(self, wto, patch_html):
+        html = """
+        <html><body>
+        <script>
+        const imgList = ["https://xfs-n01.xfsbb.com/comic/7002/chapter-1100/001.webp",
+                         "https://xfs-n01.xfsbb.com/comic/7002/chapter-1100/002.png"];
+        </script>
+        </body></html>
+        """
+        patch_html(wto, html)
+        pages = wto.get_pages("https://wto.to/chapter/2600003")
+        assert len(pages) == 2
+        assert all(p.startswith("https://") for p in pages)
+
+
+class TestWTOCloudflareFallback:
+    CHALLENGE = "<html><head><title>Just a moment...</title></head></html>"
+    MANAGED = """
+    <html><body>
+    <h1>Performing security verification</h1>
+    <div class="cf-turnstile"></div>
+    <p>Ray ID: abc123</p>
+    </body></html>
+    """
+    REAL = "<html><body><div class='item-text'></div></body></html>"
+
+    def test_detects_challenge_markup(self):
+        assert _is_cf_challenge(self.CHALLENGE) is True
+        assert _is_cf_challenge(self.MANAGED) is True
+        assert _is_cf_challenge(self.REAL) is False
+
+    def test_retries_once_with_longer_wait(self, monkeypatch, wto):
+        calls = []
+        def fake_fetch(url, wait_time=0, **kwargs):
+            calls.append(wait_time)
+            return self.CHALLENGE if len(calls) == 1 else self.REAL
+        monkeypatch.setattr(wto, "_get_page_content", fake_fetch)
+        html = wto._get_html("https://wto.to/search?word=x")
+        assert html == self.REAL
+        assert len(calls) == 2
+        assert calls[1] > calls[0]
+
+    def test_persistent_challenge_degrades_to_empty_results(
+            self, monkeypatch, wto):
+        monkeypatch.setattr(wto, "_get_page_content",
+                             lambda *a, **k: self.CHALLENGE)
+        # No crash; parsers just find nothing in the interstitial.
+        assert wto.search("one piece") == []
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Smoke tests: every Playwright-based scraper imports + instantiates +
 # exposes the required methods. This catches typos and missing-import
 # bugs without paying the cost of spinning up a browser.
@@ -163,6 +279,7 @@ PLAYWRIGHT_DOMAINS = [
     "hentairead.com",
     "manganato.gg",
     "mangahere.onl",
+    "wto.to",
 ]
 
 

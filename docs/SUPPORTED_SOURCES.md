@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga supports **224 scrapers** covering **319 domains**. This document lists all supported sources.
+MeManga supports **227 scrapers** covering **322 domains**. This document lists all supported sources.
 
 > Some sites listed below are unreachable as of the last audit
 > (mangakakalot.com / mangasee123.com / mangareader.to /
@@ -23,6 +23,7 @@ Large sites with extensive manga libraries.
 | mangafire.to | Playwright | VRF bypass + image descrambling |
 | mangapill.com | Requests | Fast, no Cloudflare |
 | bato.to, batoto.to | Requests | Community-driven |
+| wto.to | Playwright | Bato mirror, Cloudflare challenge (add by URL; search sweep skips it) |
 | comick.io, comick.dev | Requests | Clean API |
 | mangabuddy.com | Requests | Popular aggregator |
 | mangakatana.com | Playwright | General library |

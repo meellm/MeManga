@@ -12,7 +12,7 @@ Working sources:
 - MangaReader (mangareader.to) - Large library, clean UI
 - MangaSee (mangasee123.com) - High quality scans
 - MangaBuddy (mangabuddy.com) - Popular aggregator
-- Bato.to (bato.to) - Community-driven
+- Bato.to (bato.to) - Community-driven; wto.to mirror via Playwright
 - Mangakakalot (mangakakalot.com) - Huge library
 - Manganato (manganato.com) - Same network as Kakalot
 - Mangago (mangago.me) - Large yaoi/shoujo collection
@@ -37,6 +37,7 @@ from .mangafire import MangaFireScraper
 from .mangasee import MangaSeeScraper
 from .mangabuddy import MangaBuddyScraper
 from .batoto import BatoToScraper
+from .wto import WTOScraper
 from .mangakakalot import MangakakalotScraper
 from .manganato import ManganatoScraper
 from .mangago import MangagoScraper
@@ -206,6 +207,9 @@ SCRAPERS = {
     # Bato.to
     "bato.to": BatoToScraper,
     "batoto.to": BatoToScraper,
+
+    # WTO - Bato mirror (same HTML, Cloudflare challenge via Playwright)
+    "wto.to": WTOScraper,
 
     # Mangakakalot
     "mangakakalot.com": MangakakalotScraper,

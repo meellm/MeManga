@@ -1,7 +1,7 @@
 # MeManga Setup & Usage Guide
 
 Automatic manga downloader with desktop GUI + Kindle support. Track
-manga from 224 scrapers / 319 domains, download chapters as
+manga from 227 scrapers / 322 domains, download chapters as
 PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP, and optionally email
 them to your Kindle.
 

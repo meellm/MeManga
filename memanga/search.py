@@ -127,6 +127,11 @@ BROKEN_SEARCH_SOURCES = {
     # user can still add manga from these by URL.
     "manhuafast.com",
     "manhuaus.org",
+    # WTO (Bato mirror) - Cloudflare managed challenge that stays stuck
+    # on "Just a moment..." even for headless Firefox + stealth in
+    # probes. Its Playwright scraper is registered for add-by-URL, but
+    # a sweep slot would just burn its 60s budget on the challenge.
+    "wto.to",
     # Manganato.gg also serves the Cloudflare "Just a moment..." page
     # to plain requests + Playwright without a deep wait. Its existing
     # Playwright scraper times out at the 60s mark in practice.

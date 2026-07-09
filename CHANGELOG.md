@@ -6,6 +6,15 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- #79 wto.to (active Bato mirror) is now a supported source. It reuses
+  the Bato.to parsers and fetches HTML through Playwright because the
+  site sits behind a Cloudflare managed challenge; when the challenge
+  does not clear, the scraper degrades to empty results instead of
+  crashing. The multi-source search sweep skips it (challenge burns the
+  sweep budget), but add-by-URL routes it correctly. bato.to/batoto.to
+  registrations are unchanged.
+
 ## [0.3.2] - 2026-07-08
 
 ### Added
