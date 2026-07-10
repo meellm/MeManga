@@ -80,6 +80,12 @@ LIVE_HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
+    # A real browser always sends Sec-Fetch-* metadata. Some APIs (e.g.
+    # api.mangadex.org) reject a Chrome User-Agent that omits them with
+    # HTTP 400, so send the values a top-level navigation would use.
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
 }
 
 # Enough to hold any of the magic byte signatures below.
