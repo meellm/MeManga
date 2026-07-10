@@ -12,9 +12,9 @@ Works offline once chapters are downloaded.
 
 <p align="center">
   <a href="https://github.com/meellm/MeManga/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/meellm/MeManga"></a>
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="https://github.com/meellm/MeManga/releases"><img alt="release downloads" src="https://img.shields.io/github/downloads/meellm/MeManga/total?label=downloads"></a>
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-supported-success">
-  <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
 ---
