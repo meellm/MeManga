@@ -5,16 +5,25 @@ Why we don't trust ``requests.exceptions.ConnectionError`` alone:
     A scraper that hits the network will retry 3 times with exponential
     back-off before giving up. With 100+ scrapers fanned out in parallel,
     that's a 90-second freeze on the search bar (and the same on
-    "Check all") any time the user's WiFi blinks. We instead probe a
-    cheap anycast endpoint every few seconds and *publish* the result
+    "Check all") any time the user's WiFi blinks. We instead probe
+    cheap TCP endpoints every few seconds and *publish* the result
     so every page can short-circuit network work the moment we go
     offline — and re-enable it the moment we recover.
 
 Probe:
-    Open a TCP connection to Cloudflare's 1.1.1.1:53 with a 3-second
-    timeout. We don't speak DNS — we only care that the socket opens.
-    This avoids HTTP/DNS overhead and works even when the user has
-    a captive portal that intercepts HTTP.
+    Try a short list of TCP endpoints in order and treat the machine as
+    online as soon as one is reachable. The first candidate is
+    Cloudflare's 1.1.1.1:53 (cheap, no name lookup); if that fails we
+    fall back to HTTPS ports on well-known hostnames, because some
+    networks block outbound TCP/53 to public resolvers while normal
+    HTTPS traffic works fine (see issue #84). We never speak the
+    protocol — we only care that a socket opens.
+
+    A connection that is actively refused or blocked by local policy
+    still counts as online: getting a refusal back proves the network
+    path works, it just means that particular endpoint won't take the
+    connection. Only timeouts, unreachable-network errors and
+    name-resolution failures count as offline evidence.
 
 Events published:
     "network_online"  → emitted on the first probe AND on every offline
@@ -34,17 +43,26 @@ from typing import Optional
 
 # Probe parameters. Keep the offline interval short so the user gets
 # their UI back fast when the WiFi recovers; keep the online interval
-# loose so we don't spam DNS while everything is fine.
-PROBE_HOST = "1.1.1.1"
-PROBE_PORT = 53
+# loose so we don't spam probes while everything is fine.
+#
+# Endpoints are tried in order until one succeeds. 1.1.1.1:53 stays
+# first because it needs no DNS lookup; the :443 fallbacks cover
+# networks that block TCP/53 to public resolvers. Use content
+# hostnames (not resolver IPs) on :443 — Windows 11 reserves DoH
+# resolver IPs like 1.1.1.1:443 and refuses direct connections.
+PROBE_ENDPOINTS = (
+    ("1.1.1.1", 53),
+    ("cloudflare.com", 443),
+    ("github.com", 443),
+)
 PROBE_TIMEOUT = 3.0
 ONLINE_INTERVAL = 30.0      # re-check every 30 s while online
 OFFLINE_INTERVAL = 5.0      # re-check every 5 s while offline
 
 
 class NetworkMonitor:
-    """Background thread that pings a cheap anycast endpoint at a
-    cadence depending on the current online/offline state and
+    """Background thread that probes a small set of cheap endpoints at
+    a cadence depending on the current online/offline state and
     publishes transitions on the GUI EventBus.
     """
 
@@ -100,7 +118,7 @@ class NetworkMonitor:
                 slept += 0.5
 
     def _probe_and_publish(self):
-        online = _tcp_probe(PROBE_HOST, PROBE_PORT, PROBE_TIMEOUT)
+        online = _check_connectivity()
         with self._lock:
             changed = (self._online is None) or (self._online != online)
             prev = self._online
@@ -120,10 +138,29 @@ class NetworkMonitor:
             pass
 
 
+def _check_connectivity() -> bool:
+    """Probe endpoints in order; online as soon as one is reachable."""
+    for host, port in PROBE_ENDPOINTS:
+        if _tcp_probe(host, port, PROBE_TIMEOUT):
+            return True
+    return False
+
+
 def _tcp_probe(host: str, port: int, timeout: float) -> bool:
-    """Try to open a TCP socket. Returns True iff it connects."""
+    """Try to open a TCP socket to (host, port).
+
+    Returns True if the connection succeeds — or if it is actively
+    refused / blocked by policy (ConnectionRefusedError,
+    PermissionError). A refusal is a response: it proves the network
+    path works and only this endpoint won't accept the connection.
+
+    Returns False on name-resolution failure, unreachable network or
+    timeout — the errors a genuinely dead link produces.
+    """
     try:
         sock = socket.create_connection((host, port), timeout=timeout)
+    except (ConnectionRefusedError, PermissionError):
+        return True
     except (socket.gaierror, OSError):
         return False
     try:

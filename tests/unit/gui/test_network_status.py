@@ -61,6 +61,84 @@ class TestNetworkMonitor:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Probe semantics (issue #84 — false offline on networks that block
+# TCP/53 to public resolvers while normal HTTPS works)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestTcpProbe:
+    def _patch_connect(self, monkeypatch, exc):
+        import memanga.gui.network_status as ns
+
+        def _raise(*a, **k):
+            raise exc
+
+        monkeypatch.setattr(ns.socket, "create_connection", _raise)
+        return ns
+
+    def test_refused_connection_counts_as_online(self, monkeypatch):
+        # A refusal (e.g. RST for TCP/53 on filtered networks) proves
+        # the network path works — must not flip the app offline.
+        ns = self._patch_connect(monkeypatch, ConnectionRefusedError())
+        assert ns._tcp_probe("1.1.1.1", 53, 0.1) is True
+
+    def test_policy_blocked_connection_counts_as_online(self, monkeypatch):
+        # Windows 11 reserves DoH resolver IPs and returns WSAEACCES;
+        # local policy blocks are not offline evidence either.
+        ns = self._patch_connect(monkeypatch, PermissionError())
+        assert ns._tcp_probe("1.1.1.1", 443, 0.1) is True
+
+    def test_timeout_counts_as_offline(self, monkeypatch):
+        import socket
+        ns = self._patch_connect(monkeypatch, socket.timeout())
+        assert ns._tcp_probe("1.1.1.1", 53, 0.1) is False
+
+    def test_name_resolution_failure_counts_as_offline(self, monkeypatch):
+        import socket
+        ns = self._patch_connect(monkeypatch, socket.gaierror())
+        assert ns._tcp_probe("cloudflare.com", 443, 0.1) is False
+
+    def test_unreachable_network_counts_as_offline(self, monkeypatch):
+        import errno
+        ns = self._patch_connect(
+            monkeypatch, OSError(errno.ENETUNREACH, "unreachable"))
+        assert ns._tcp_probe("1.1.1.1", 53, 0.1) is False
+
+
+class TestCheckConnectivity:
+    def test_falls_back_to_https_when_tcp53_fails(self, monkeypatch):
+        from memanga.gui import network_status as ns
+        calls = []
+
+        def fake_probe(host, port, timeout):
+            calls.append((host, port))
+            return port == 443
+
+        monkeypatch.setattr(ns, "_tcp_probe", fake_probe)
+        assert ns._check_connectivity() is True
+        assert calls[0][1] == 53          # cheap endpoint tried first
+        assert calls[1][1] == 443         # then the HTTPS fallback
+
+    def test_stops_at_first_reachable_endpoint(self, monkeypatch):
+        from memanga.gui import network_status as ns
+        calls = []
+        monkeypatch.setattr(
+            ns, "_tcp_probe",
+            lambda h, p, t: calls.append((h, p)) or True)
+        assert ns._check_connectivity() is True
+        assert len(calls) == 1
+
+    def test_offline_only_when_every_endpoint_fails(self, monkeypatch):
+        from memanga.gui import network_status as ns
+        calls = []
+        monkeypatch.setattr(
+            ns, "_tcp_probe",
+            lambda h, p, t: bool(calls.append((h, p))))
+        assert ns._check_connectivity() is False
+        assert len(calls) == len(ns.PROBE_ENDPOINTS)
+
+
+# ─────────────────────────────────────────────────────────────────────
 # BackgroundWorker offline gates
 # ─────────────────────────────────────────────────────────────────────
 
