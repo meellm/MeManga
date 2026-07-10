@@ -65,7 +65,9 @@ class ProbeSpec:
 
 PARSING_PROBES = {
     # ── Aggregators (full pipeline) ──
-    "mangadex.org": ProbeSpec("API client", query="one piece"),
+    # "one piece" is fully external on MangaDex (MangaPlus) → 0 readable
+    # chapters, so probe a title that is actually hosted there.
+    "mangadex.org": ProbeSpec("API client", query="chainsaw man"),
     "mangapill.com": ProbeSpec("Simple HTTP aggregator", query="one piece"),
     "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),
     "tcbonepiecechapters.com": ProbeSpec("TCB Scans (project list)",
