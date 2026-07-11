@@ -244,6 +244,114 @@ class TestImagesToCbz:
         except Exception:
             pass
 
+    def test_embeds_comicinfo_at_root_without_disturbing_pages(
+            self, jpg_paths, tmp_path):
+        # ComicInfo.xml must sit at the archive root and must NOT be counted
+        # among the page entries or change their names/order.
+        from memanga.downloader import _images_to_cbz
+        out = tmp_path / "ch.cbz"
+        _images_to_cbz(jpg_paths, out, comicinfo_xml=b"<ComicInfo/>")
+        with zipfile.ZipFile(out) as zf:
+            names = zf.namelist()
+            assert "ComicInfo.xml" in names
+            pages = [n for n in names if n != "ComicInfo.xml"]
+            assert len(pages) == 3
+            assert all(n.startswith("page_") for n in pages)
+            assert pages == sorted(pages)
+            assert zf.read("ComicInfo.xml") == b"<ComicInfo/>"
+
+    def test_no_metadata_keeps_plain_archive(self, jpg_paths, tmp_path):
+        # Omitting metadata must leave the archive exactly as before.
+        from memanga.downloader import _images_to_cbz
+        out = tmp_path / "plain.cbz"
+        _images_to_cbz(jpg_paths, out)
+        with zipfile.ZipFile(out) as zf:
+            assert "ComicInfo.xml" not in zf.namelist()
+
+
+class TestComicInfoXml:
+    """ComicInfo.xml generation from metadata already on hand,
+    with no extra network requests."""
+
+    @staticmethod
+    def _parse(xml_bytes):
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_bytes)
+        assert root.tag == "ComicInfo"
+        return {child.tag: child.text for child in root}
+
+    def test_basic_fields_always_present(self):
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        manga = {"title": "Berserk"}
+        ch = Chapter(number="5", title=None, url="https://x.test/c/5")
+        fields = self._parse(_build_comicinfo_xml(manga, ch, page_count=12))
+        assert fields["Series"] == "Berserk"
+        # No chapter title: falls back to "Chapter <number>".
+        assert fields["Title"] == "Chapter 5"
+        assert fields["Number"] == "5"
+        assert fields["PageCount"] == "12"
+        assert fields["Web"] == "https://x.test/c/5"
+
+    def test_optional_fields_written_when_available(self):
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        import xml.etree.ElementTree as ET
+        manga = {
+            "title": "Berserk",
+            "description": "A wandering swordsman.",
+            "author": "Kentaro Miura",
+            "url": "https://x.test/manga",
+        }
+        ch = Chapter(number="5", title="The Golden Age",
+                     url="https://x.test/c/5", date="2016-05-06")
+        fields = self._parse(_build_comicinfo_xml(manga, ch, page_count=20))
+        assert fields["Title"] == "The Golden Age"
+        assert fields["Summary"] == "A wandering swordsman."
+        assert fields["Writer"] == "Kentaro Miura"
+        assert fields["Year"] == "2016"
+        assert fields["Month"] == "5"
+        assert fields["Day"] == "6"
+        root = ET.fromstring(_build_comicinfo_xml(manga, ch, page_count=20))
+        assert [child.tag for child in root] == [
+            "Title", "Series", "Number", "Summary", "Year", "Month",
+            "Day", "Writer", "Web", "PageCount",
+        ]
+
+    def test_missing_optional_fields_are_omitted(self):
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        manga = {"title": "Berserk"}
+        ch = Chapter(number="5", url="")
+        fields = self._parse(_build_comicinfo_xml(manga, ch, page_count=1))
+        # No description/author/date/url: those tags simply don't appear.
+        for absent in ("Summary", "Writer", "Year", "Month", "Day", "Web"):
+            assert absent not in fields
+
+    def test_special_characters_are_escaped(self):
+        # Raw XML metacharacters must be escaped by the serializer and
+        # survive a round-trip parse without corrupting the document.
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        manga = {"title": 'Fist of the <North> & "Star"',
+                 "author": "A & B"}
+        ch = Chapter(number="1", title="Ch <1> & more", url="https://x.test/?a=1&b=2")
+        xml_bytes = _build_comicinfo_xml(manga, ch, page_count=3)
+        assert b"&amp;" in xml_bytes  # escaped, not raw
+        fields = self._parse(xml_bytes)  # must still parse cleanly
+        assert fields["Series"] == 'Fist of the <North> & "Star"'
+        assert fields["Title"] == "Ch <1> & more"
+        assert fields["Writer"] == "A & B"
+        assert fields["Web"] == "https://x.test/?a=1&b=2"
+
+    def test_year_omitted_for_unparseable_date(self):
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        manga = {"title": "X"}
+        ch = Chapter(number="1", date="an hour ago")
+        fields = self._parse(_build_comicinfo_xml(manga, ch, page_count=1))
+        assert "Year" not in fields
+
 
 class TestImagesToPdf:
     def test_creates_valid_pdf(self, jpg_paths, tmp_path):
