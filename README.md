@@ -61,6 +61,47 @@ On macOS / Linux:
 > the JS-heavy sources (MangaFire, WeebCentral, …). After that, startup
 > is instant.
 
+### Docker
+
+The Docker image packages the CLI and Playwright Firefox runtime for
+headless servers, NAS boxes, Raspberry Pi systems, and cron-style
+automation.
+
+```bash
+docker build -t memanga:cli .
+docker run --rm memanga:cli --help
+```
+
+Persist MeManga's config/state and downloads with two mounts:
+
+```bash
+mkdir -p memanga-data/config memanga-data/downloads
+
+docker run --rm \
+  -v "$PWD/memanga-data/config:/home/memanga/.config/memanga" \
+  -v "$PWD/memanga-data/downloads:/home/memanga/Downloads/MeManga" \
+  memanga:cli status
+```
+
+Use the included Compose file for repeated commands:
+
+```bash
+docker compose build
+docker compose run --rm memanga list
+docker compose run --rm memanga check --auto
+```
+
+For a host cron job, run Compose from the repository directory:
+
+```cron
+0 6 * * * cd /path/to/MeManga && docker compose run --rm memanga check --auto --quiet >> memanga-docker.log 2>&1
+```
+
+Kindle delivery works the same way as local installs: run
+`docker compose run --rm memanga config` and keep the config volume
+private because email settings are stored there when a system keyring is
+not available inside the container.
+
 ---
 
 ## 🧭 First five minutes
@@ -235,7 +276,8 @@ JS-heavy sites. One-time. After that, startup is instant.
 **Can I use this on a Raspberry Pi?**
 Yes — the CLI runs anywhere Python 3.10+ runs. On a headless Pi a
 typical setup is cron + `--auto` flag + `xvfb-run` for Playwright
-sources.
+sources. You can also use the Docker setup above if Docker is available
+on the Pi.
 
 **Why is there a separate `cli` branch?**
 `main` ships a full PySide6 desktop app — useful, but heavy. Some

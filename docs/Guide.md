@@ -16,6 +16,7 @@ JPG / PNG / WEBP, and optionally email them to your Kindle.
 - [Setup — Windows](#setup--windows)
 - [Setup — macOS](#setup--macos)
 - [Setup — Linux](#setup--linux)
+- [Setup — Docker](#setup--docker)
 - [Your First Manga](#your-first-manga)
 - [Checking for New Chapters](#checking-for-new-chapters)
 - [Downloading From the Start](#downloading-from-the-start)
@@ -247,6 +248,68 @@ Or run directly through the virtual environment:
 /home/YourName/.config/memanga/state.json        # Download history
 /home/YourName/.config/memanga/downloads/        # Downloaded chapters
 ```
+
+---
+
+## Setup — Docker
+
+Docker is the easiest option for headless servers, NAS boxes, Raspberry
+Pi systems, and cron-style automation because the image includes the CLI
+and Playwright Firefox runtime.
+
+### Requirements
+
+- Docker
+- Docker Compose v2 if you want to use `compose.yaml`
+
+### Build and run
+
+```bash
+git clone -b cli <repo-url>
+cd MeManga
+docker build -t memanga:cli .
+docker run --rm memanga:cli --help
+```
+
+### Persist config, state, and downloads
+
+MeManga stores config and state under
+`/home/memanga/.config/memanga` in the container. Downloads use the
+default path `/home/memanga/Downloads/MeManga`.
+
+```bash
+mkdir -p memanga-data/config memanga-data/downloads
+
+docker run --rm \
+  -v "$PWD/memanga-data/config:/home/memanga/.config/memanga" \
+  -v "$PWD/memanga-data/downloads:/home/memanga/Downloads/MeManga" \
+  memanga:cli status
+```
+
+### Compose
+
+The included `compose.yaml` keeps config/state and downloads in named
+volumes:
+
+```bash
+docker compose build
+docker compose run --rm memanga list
+docker compose run --rm memanga check --auto
+docker compose run --rm memanga config
+```
+
+For daily checks, add a host cron entry from the repository directory:
+
+```cron
+0 6 * * * cd /path/to/MeManga && docker compose run --rm memanga check --auto --quiet >> memanga-docker.log 2>&1
+```
+
+### Kindle delivery
+
+Run `docker compose run --rm memanga config`, choose email delivery, and
+enter the Kindle/Gmail settings. Keep the Docker config volume private:
+containers usually do not have a desktop keyring, so MeManga may store
+the Gmail app credential in the config volume as a fallback.
 
 ---
 
