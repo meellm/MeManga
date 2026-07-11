@@ -271,6 +271,22 @@ docker build -t memanga:cli .
 docker run --rm memanga:cli --help
 ```
 
+Official release images are published to Docker Hub and GitHub Container
+Registry when a release tag is pushed:
+
+```bash
+docker pull meellm/memanga:latest
+docker run --rm meellm/memanga:latest --help
+
+docker pull ghcr.io/meellm/memanga:latest
+docker run --rm ghcr.io/meellm/memanga:latest --help
+```
+
+Stable releases are published to both registries with `X.Y.Z`, `X.Y`,
+and `latest` tags; pin to a specific `X.Y.Z` tag for reproducible runs.
+Use a local `docker build` when testing unreleased code from the
+repository.
+
 ### Persist config, state, and downloads
 
 MeManga stores config and state under
@@ -285,6 +301,14 @@ docker run --rm \
   -v "$PWD/memanga-data/downloads:/home/memanga/Downloads/MeManga" \
   memanga:cli status
 ```
+
+> The container runs as a non-root user with UID 1000. With host bind
+> mounts like the ones above, the mounted directories must be writable by
+> UID 1000 or downloads and config saves will fail with permission
+> errors. This works automatically when your host user is UID 1000 (the
+> default first user on most Linux and Raspberry Pi systems); otherwise
+> run `sudo chown -R 1000:1000 memanga-data`. The Compose setup below
+> uses named volumes and avoids the issue entirely.
 
 ### Compose
 
