@@ -81,14 +81,37 @@ jobs:
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
             type=sha,prefix=sha-
 
-      # PR runs validate the build on a single native arch (no push); tag
-      # pushes and manual dispatch build the full multi-arch image set.
-      - name: Build image
+      - name: Build image for PR
+        if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ inputs.platforms || (github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64') }}
-          push: ${{ github.event_name == 'push' || inputs.push }}
+          platforms: linux/amd64
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build image without publishing
+        if: github.event_name == 'workflow_dispatch' && !inputs.push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ inputs.platforms }}
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and publish image
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
