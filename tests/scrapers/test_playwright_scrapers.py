@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from memanga.scrapers.mangabuddy import MangaBuddyScraper
+from memanga.scrapers.comix import ComixScraper
 from memanga.scrapers import get_scraper
 
 
@@ -78,6 +79,48 @@ class TestMangaBuddyDownload:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Comix.to
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def comix():
+    return ComixScraper()
+
+
+class TestComixSearch:
+    def test_extracts_rendered_title_links(self, comix):
+        html = """
+        <a href="/title/45nl-kubera"><img src="https://static.comix.to/k.jpg"></a>
+        <a href="/title/45nl-kubera">Kubera</a>
+        <a href="/title/793e-arelyn-is-sick-and-tired">Arelyn Is Sick and Tired</a>
+        """
+        results = comix._parse_search_html(html)
+        assert [r.title for r in results] == [
+            "Kubera",
+            "Arelyn Is Sick and Tired",
+        ]
+        assert results[0].url == "https://comix.to/title/45nl-kubera"
+        assert results[0].cover_url == "https://static.comix.to/k.jpg"
+
+
+class TestComixChapters:
+    def test_extracts_chapter_rows(self, comix):
+        html = """
+        <a class="mchap-row__primary"
+           href="/title/45nl-kubera/10512172-chapter-705">Ch.705 S3-423</a>
+        <a class="mchap-row__primary"
+           href="/title/45nl-kubera/10308843-chapter-704">Ch.704 S3-422</a>
+        """
+        chapters = comix._parse_chapters_html(html)
+        assert [c.number for c in chapters] == ["705", "704"]
+        assert chapters[0].title == "S3-423"
+        assert chapters[0].url == (
+            "https://comix.to/title/45nl-kubera/10512172-chapter-705"
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Smoke tests: every Playwright-based scraper imports + instantiates +
 # exposes the required methods. This catches typos and missing-import
 # bugs without paying the cost of spinning up a browser.
@@ -102,6 +145,7 @@ PLAYWRIGHT_DOMAINS = [
     "mangatown.com",
     "manhuaus.org",
     "comick.io",
+    "comix.to",
     "fanfox.net",
     "toonily.me",
     "omegascans.org",

@@ -12,6 +12,34 @@ def scraper():
     return MangaDexScraper()
 
 
+class TestSessionHeaders:
+    """MangaDex's API returns HTTP 400 for a browser-style User-Agent that
+    omits Sec-Fetch-* metadata. The scraper must send those headers (and ask
+    for JSON) on every request via the shared session."""
+
+    def test_sends_sec_fetch_and_json_accept(self, scraper):
+        headers = scraper.session.headers
+        assert headers["Accept"] == "application/json"
+        assert headers["Sec-Fetch-Dest"] == "empty"
+        assert headers["Sec-Fetch-Mode"] == "cors"
+        assert headers["Sec-Fetch-Site"] == "same-origin"
+
+    def test_headers_reach_the_request(self, monkeypatch, scraper, fake_response):
+        seen = {}
+
+        def fake_get(url, **kwargs):
+            # session.headers are merged into the request by requests itself,
+            # so assert against the session that will be used for the call.
+            seen["headers"] = dict(scraper.session.headers)
+            return fake_response(json_data={"data": []})
+
+        monkeypatch.setattr(scraper.session, "get", fake_get)
+        scraper.search("one piece")
+
+        assert seen["headers"]["Accept"] == "application/json"
+        assert seen["headers"]["Sec-Fetch-Mode"] == "cors"
+
+
 class TestExtractIDs:
     def test_manga_id(self, scraper):
         assert scraper._extract_manga_id(

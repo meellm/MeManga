@@ -1,4 +1,4 @@
-# 📖 MeManga (CLI)
+# MeManga (CLI)
 
 **Automatic manga downloader — command-line edition.**
 
@@ -9,6 +9,7 @@ engine and a cron-friendly CLI.
 
 <p align="center">
   <a href="https://github.com/meellm/MeManga/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/meellm/MeManga"></a>
+  <a href="https://github.com/meellm/MeManga/releases"><img alt="release downloads" src="https://img.shields.io/github/downloads/meellm/MeManga/total?label=downloads"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-supported-success">
   <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue">
@@ -22,20 +23,20 @@ engine and a cron-friendly CLI.
 
 ---
 
-## ✨ Highlights
+## Highlights
 
-- 🤝 **Power-user CLI** — scriptable, cron-friendly, works on headless servers
-- 📚 **Library tracking** — read/unread state survives reboots
-- 🔍 **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
-- 📥 **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output
-- 📧 **Kindle delivery** — auto-send chapters by email after download
-- 🔄 **Backup sources** — fall back to a second source if the primary stops updating
-- 🌐 **Offline-aware** — gracefully fails on network actions when offline
-- 🔒 **No telemetry, no accounts, no cloud** — everything stays on your machine
+- **Power-user CLI** — scriptable, cron-friendly, works on headless servers
+- **Library tracking** — read/unread state survives reboots
+- **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
+- **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output
+- **Kindle delivery** — auto-send chapters by email after download
+- **Backup sources** — fall back to a second source if the primary stops updating
+- **Offline-aware** — gracefully fails on network actions when offline
+- **No telemetry, no accounts, no cloud** — everything stays on your machine
 
 ---
 
-## 🚀 Install
+## Install
 
 ```bash
 git clone -b cli https://github.com/meellm/MeManga.git
@@ -63,7 +64,7 @@ On macOS / Linux:
 
 ---
 
-## 🧭 First five minutes
+## First five minutes
 
 ```bash
 # 1. Track a manga (either interactive or one-shot)
@@ -83,7 +84,7 @@ library from both interchangeably.
 
 ---
 
-## 📜 Commands
+## Commands
 
 | Command | Purpose |
 |---|---|
@@ -166,7 +167,7 @@ split so they fail-loud with a size warning.
 
 ---
 
-## 🌐 Sources
+## Sources
 
 The default search sweep covers these 15 verified working aggregators
 (popularity order):
@@ -175,10 +176,12 @@ The default search sweep covers these 15 verified working aggregators
 |---|---|---|
 | mangadex.org | API | Largest fan-translation library |
 | mangapill.com | Requests | Fast, no Cloudflare |
-| mangafire.to | Playwright | VRF bypass + image descrambling |
+| mangapark1.com | Requests | Large mirror with live diagnostics |
+| mangafire.to | Requests | Current JSON APIs + image descrambling |
 | mangabuddy.com | Playwright | Popular aggregator |
 | weebcentral.com | Playwright | 1000+ series |
 | mangakatana.com | Playwright | General library |
+| comix.to | Playwright | Rendered search + reader extraction |
 | comick.io | Playwright | Clean API |
 | mangahub.io | Requests | Huge library |
 | mangahere.cc | Requests | Reliable mirror |
@@ -186,8 +189,6 @@ The default search sweep covers these 15 verified working aggregators
 | mangaclash.com | Playwright | Manhwa-heavy |
 | mangahere.onl | Playwright | Alternate mirror |
 | mangataro.org | Requests | ComicK replacement |
-| luminousscans.com | Requests | Scanlation focus |
-| tcbonepiecechapters.com | Requests | Jump titles (One Piece, JJK, MHA) |
 
 200+ more aggregators are in the registry — toggle them on via
 `python -m memanga sources`. See the
@@ -246,7 +247,7 @@ config + state files, so you can switch between them freely.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 PRs welcome — bug fixes, new scrapers, CLI polish, all of it.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, test

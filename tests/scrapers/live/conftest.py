@@ -14,13 +14,18 @@ Capture a JSON report:
 
     pytest -m live tests/scrapers/live/ --health-report=health.json
 
-Failures are classified in the test name so you can scan the output:
+Failures are classified so you can scan the output:
   - DEAD        : DNS lookup failed, connection refused, timeout
   - PROTECTED   : Cloudflare/anti-bot 403/503 (site exists, blocked us)
   - HTTP_ERROR  : 4xx/5xx response
   - STALE       : site responded but the scraper extracted nothing
                   (likely the HTML structure changed)
   - OK          : reachable + scraper extracted real data
+
+Curated pipeline probes (test_live_parsing.py) additionally name the
+first broken stage — reachability, search, chapters, pages or image —
+both in the pytest failure message ("[STALE:pages] domain: ...") and
+in the JSON report's `stage` field / per-stage `extra.stages` rows.
 """
 
 from __future__ import annotations
@@ -74,6 +79,17 @@ def health_recorder():
     return _record
 
 
+def _count_failures_by_stage() -> dict:
+    from _helpers import STATUS_OK, STATUS_SKIP, STATUS_PROTECTED
+    counts: dict = {}
+    for r in _RESULTS:
+        # PROTECTED is informational, not a failure (see assert_alive).
+        if r.status not in (STATUS_OK, STATUS_SKIP, STATUS_PROTECTED) \
+                and r.stage:
+            counts[r.stage] = counts.get(r.stage, 0) + 1
+    return counts
+
+
 def pytest_sessionfinish(session, exitstatus):
     path = session.config.getoption("--health-report")
     if not path or not _RESULTS:
@@ -92,6 +108,9 @@ def pytest_sessionfinish(session, exitstatus):
             "stale": sum(1 for r in _RESULTS if r.status == STATUS_STALE),
             "skip": sum(1 for r in _RESULTS if r.status == STATUS_SKIP),
         },
+        # Which pipeline stage failures happened at (curated probes
+        # only — broad reachability rows always say "reachability").
+        "failures_by_stage": _count_failures_by_stage(),
         "results": [asdict(r) for r in _RESULTS],
     }
     Path(path).write_text(json.dumps(out, indent=2), encoding="utf-8")
