@@ -318,7 +318,7 @@ class BackgroundWorker:
     # ------------------------------------------------------------------
 
     def download_chapter(self, manga, chapter, output_dir, output_format, state,
-                         kindle_cfg=None, naming_template=None):
+                         kindle_cfg=None, naming_template=None, post_processing=None):
         """Queue a chapter download."""
         task_id = f"{manga['title']}:{chapter.number}"
         # Refuse to enqueue while offline — the request would just
@@ -346,6 +346,7 @@ class BackgroundWorker:
             "state": state,
             "kindle_cfg": kindle_cfg,
             "naming_template": naming_template,
+            "post_processing": post_processing,
             "cancel": cancel,
         }
 
@@ -419,6 +420,7 @@ class BackgroundWorker:
                 progress_callback=progress_cb,
                 naming_template=item.get("naming_template"),
                 cancel_event=item["cancel"],
+                post_processing=item.get("post_processing"),
             )
 
             # Kindle delivery
@@ -449,6 +451,18 @@ class BackgroundWorker:
         except Exception as e:
             print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}", flush=True)
             traceback.print_exc()
+            state = item.get("state")
+            if state is not None and hasattr(state, "add_failed_chapter"):
+                source = getattr(chapter, "source", None) or manga.get("source", "?")
+                try:
+                    state.add_failed_chapter(
+                        manga["title"],
+                        chapter.number,
+                        source,
+                        str(e),
+                    )
+                except Exception:
+                    traceback.print_exc()
             self._events.publish("download_error", {
                 "task_id": task_id, "error": str(e),
                 "title": manga["title"], "chapter": chapter.number,

@@ -533,6 +533,49 @@ class SettingsPage(BasePage):
 
         f.addSpacing(T.PAD_XL)
 
+        # Post-processing
+        self._section(f, "Post-Processing")
+
+        self._post_processing_check = QCheckBox("Run a command after each chapter download")
+        self._post_processing_check.setChecked(
+            self.app.config.get("delivery.post_processing.enabled", False)
+        )
+        self._post_processing_check.toggled.connect(
+            self._refresh_post_processing_enabled
+        )
+        f.addWidget(self._post_processing_check)
+
+        self._post_processing_command = self._labeled_entry(
+            f,
+            "Command:",
+            self.app.config.get("delivery.post_processing.command", ""),
+            "python scripts/after_download.py {output_path}",
+        )
+        self._post_processing_command.setToolTip(
+            "Runs after the final chapter file or folder is created"
+        )
+
+        self._post_processing_fail_check = QCheckBox(
+            "Mark download failed if the command exits with an error"
+        )
+        self._post_processing_fail_check.setChecked(
+            self.app.config.get("delivery.post_processing.fail_on_error", False)
+        )
+        f.addWidget(self._post_processing_fail_check)
+
+        pp_hint = QLabel(
+            "Available placeholders: {output_path}, {title}, {chapter}, "
+            "{source}, {format}, {is_dir}. The same values are also exposed "
+            "as MEMANGA_* environment variables. Commands run directly; invoke "
+            "a shell explicitly if you need shell features."
+        )
+        pp_hint.setWordWrap(True)
+        pp_hint.setProperty("role", "hint")
+        f.addWidget(pp_hint)
+        self._refresh_post_processing_enabled()
+
+        f.addSpacing(T.PAD_XL)
+
         # Import/Export
         self._section(f, "Import / Export")
         ie_row = QHBoxLayout()
@@ -589,6 +632,11 @@ class SettingsPage(BasePage):
         # Refresh cache size on display.
         from PySide6.QtCore import QTimer
         QTimer.singleShot(100, self._refresh_cache_size)
+
+    def _refresh_post_processing_enabled(self):
+        enabled = self._post_processing_check.isChecked()
+        self._post_processing_command.setEnabled(enabled)
+        self._post_processing_fail_check.setEnabled(enabled)
 
     def _refresh_cache_size(self):
         """Compute the on-disk size of the cover cache and update the label."""
@@ -774,6 +822,18 @@ class SettingsPage(BasePage):
             cron_time = "06:00"
         cfg.set("cron.enabled", self._cron_check.isChecked())
         cfg.set("cron.time", cron_time)
+        cfg.set(
+            "delivery.post_processing.enabled",
+            self._post_processing_check.isChecked(),
+        )
+        cfg.set(
+            "delivery.post_processing.command",
+            self._post_processing_command.text().strip(),
+        )
+        cfg.set(
+            "delivery.post_processing.fail_on_error",
+            self._post_processing_fail_check.isChecked(),
+        )
 
         cfg.save()
         Toast(self, "Settings saved", kind="success")

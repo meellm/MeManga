@@ -23,6 +23,7 @@ them to your Kindle.
 - [Downloading From a Specific Chapter](#downloading-from-a-specific-chapter)
 - [Managing Status](#managing-status)
 - [Changing Output Format](#changing-output-format)
+- [Post-Processing After Download](#post-processing-after-download)
 - [Setting Up Kindle Email](#setting-up-kindle-email)
 - [Backup Sources](#backup-sources)
 - [Updating Manga Details](#updating-manga-details)
@@ -531,6 +532,96 @@ Download one manga in CBZ:
 
 ```bash
 run check -t "One Piece" --format cbz --auto
+```
+
+---
+
+## Post-Processing After Download
+
+MeManga can run a command of your choice after each chapter's output
+file (or image folder) is created - for converting, compressing, copying to an
+archive, or triggering another tool.
+
+Post-processing is **disabled by default**.
+
+> ⚠️ The command runs on your machine. Only enable commands you trust and
+> understand.
+
+### Enable it
+
+In the desktop app, open **Settings -> Advanced -> Post-Processing**, enable
+the command, then save settings.
+
+In the CLI, run the config wizard and answer the post-processing prompts:
+
+```bash
+run config
+```
+
+Or edit `~/.config/memanga/config.yaml` directly:
+
+```yaml
+delivery:
+  post_processing:
+    enabled: true
+    command: 'cp -R {output_path} /mnt/archive/'
+    fail_on_error: false
+```
+
+### Available values
+
+Each value is available both as a `{placeholder}` in the command string and as
+an environment variable:
+
+| Placeholder | Environment variable | Meaning |
+|-------------|----------------------|---------|
+| `{output_path}` | `MEMANGA_OUTPUT_PATH` | Final file or folder path |
+| `{title}` | `MEMANGA_MANGA_TITLE` | Manga title |
+| `{chapter}` | `MEMANGA_CHAPTER` | Chapter number |
+| `{source}` | `MEMANGA_SOURCE` | Source the chapter came from |
+| `{format}` | `MEMANGA_OUTPUT_FORMAT` | Output format (`pdf`, `cbz`, `jpg`, …) |
+| `{is_dir}` | `MEMANGA_IS_DIR` | `1` if the output is a folder (image formats), else `0` |
+
+The hook receives the final output path whether it is an archive/document file
+(`pdf`, `epub`, `cbz`, `zip`) or an image folder (`jpg`, `png`, `webp`).
+The command is split into arguments and run directly, without a shell.
+Placeholder values are substituted after splitting, so manga metadata cannot
+become shell syntax. For shell features like pipes, redirects, or globbing,
+invoke a shell explicitly and prefer the `MEMANGA_*` environment variables.
+
+### Failure behavior
+
+- `fail_on_error: false` (default) - a failed command prints a warning but the
+  chapter is still recorded as downloaded.
+- `fail_on_error: true` - a failed command marks the chapter as failed, so it
+  shows up under `run failed` for retry. During CLI checks, backup-source
+  handling applies the same way it does for other download failures.
+
+A command is considered failed if it exits non-zero, times out (10 minute
+limit), or can't be launched.
+
+### Examples
+
+Copy every download into an archive directory:
+
+```yaml
+command: 'cp -R {output_path} /mnt/archive/'
+```
+
+Optimize a CBZ/ZIP or run a script with the passed environment variables:
+
+```yaml
+command: '/home/me/scripts/process-chapter.sh'
+```
+
+```bash
+#!/usr/bin/env bash
+# process-chapter.sh
+echo "Finished $MEMANGA_MANGA_TITLE chapter $MEMANGA_CHAPTER ($MEMANGA_OUTPUT_FORMAT)"
+if [ "$MEMANGA_IS_DIR" = "1" ]; then
+  # image-folder output, e.g. compress each image
+  find "$MEMANGA_OUTPUT_PATH" -name '*.png' -print
+fi
 ```
 
 ---

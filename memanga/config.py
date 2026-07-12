@@ -59,6 +59,14 @@ class Config:
                 "delete_after_send": False,  # Delete file after sending to Kindle
                 "output_format": "pdf",  # "pdf", "epub", "cbz", "zip", "jpg", "png", or "webp"
                 "naming_template": "{title} - Chapter {chapter}",  # File naming pattern
+                "post_processing": {
+                    # Optional command run after each chapter's output
+                    # file/folder is created. Disabled by default. See docs
+                    # for available placeholders/env vars.
+                    "enabled": False,
+                    "command": "",
+                    "fail_on_error": False,  # True marks the chapter failed
+                },
             },
             "email": {
                 "kindle_email": "",

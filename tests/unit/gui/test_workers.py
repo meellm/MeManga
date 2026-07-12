@@ -80,7 +80,8 @@ class TestPauseResumeQueue:
 
         def fake_download_chapter(manga, chapter, output_dir, output_format,
                                    state, progress_callback=None,
-                                   naming_template=None, cancel_event=None):
+                                   naming_template=None, cancel_event=None,
+                                   **kwargs):
             tid = f"{manga['title']}:{chapter.number}"
             with h._lock:
                 h.running.add(tid)
@@ -177,6 +178,89 @@ class TestCancelFlags:
 
     def test_cancel_download_unknown_is_noop(self, worker):
         worker.cancel_download("never-existed")
+
+
+class TestDownloadChapter:
+    def test_forwards_post_processing_config(self, worker, monkeypatch):
+        import time
+        import types
+        from pathlib import Path
+        import memanga.downloader as dl
+
+        seen = {}
+
+        def fake_download_chapter(**kwargs):
+            seen.update(kwargs)
+            return Path("/tmp/out/M/Chapter 1.cbz")
+
+        monkeypatch.setattr(dl, "download_chapter", fake_download_chapter)
+
+        post_processing = {
+            "enabled": True,
+            "command": "echo ok",
+            "fail_on_error": True,
+        }
+        worker.download_chapter(
+            {"title": "M"},
+            types.SimpleNamespace(number="1"),
+            "/tmp/out",
+            "cbz",
+            None,
+            post_processing=post_processing,
+        )
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not seen:
+            time.sleep(0.02)
+
+        assert seen["post_processing"] is post_processing
+
+    def test_download_error_records_failed_chapter(self, worker, monkeypatch,
+                                                   event_bus):
+        import time
+        import types
+        import memanga.downloader as dl
+
+        class FakeState:
+            def __init__(self):
+                self.failed = []
+
+            def add_failed_chapter(self, *args):
+                self.failed.append(args)
+
+        def fake_download_chapter(**kwargs):
+            raise dl.DownloaderError("post-processing command exited with code 3")
+
+        monkeypatch.setattr(dl, "download_chapter", fake_download_chapter)
+
+        errors = []
+        event_bus.subscribe("download_error", errors.append)
+        state = FakeState()
+        chapter = types.SimpleNamespace(number="1", source="mock.test")
+
+        worker.download_chapter(
+            {"title": "M", "source": "mock.test"},
+            chapter,
+            "/tmp/out",
+            "cbz",
+            state,
+            post_processing={
+                "enabled": True,
+                "command": "exit 3",
+                "fail_on_error": True,
+            },
+        )
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not state.failed:
+            time.sleep(0.02)
+        event_bus.poll()
+
+        assert state.failed == [
+            ("M", "1", "mock.test",
+             "post-processing command exited with code 3")
+        ]
+        assert errors
 
 
 class TestPingSources:

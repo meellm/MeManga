@@ -279,6 +279,7 @@ class MeMangaApp(QMainWindow):
             fmt=self.config.output_format, path=path, size_mb=size_mb,
         )
         self.app_state.add_downloaded_chapter(title, str(chapter))
+        self.app_state.clear_failed_chapter(title, str(chapter))
 
         # Badge update depends on mode:
         #   auto   → batch download flushes the whole badge at once
