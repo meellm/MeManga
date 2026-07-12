@@ -1,0 +1,11 @@
+{
+  "success": true,
+  "data": [
+    {"comic_id": 4280, "chapter_id": 1241, "chapter_name": "Chapter 1187", "chapter_slug": "chapter-1187", "updated_at": "2026-07-03 03:21:33", "chapter_num": 1187},
+    {"comic_id": 4280, "chapter_id": 1139, "chapter_name": "Chapter 1186", "chapter_slug": "chapter-1186", "updated_at": "2026-06-28 03:40:34", "chapter_num": 1186},
+    {"comic_id": 4280, "chapter_id": 901, "chapter_name": "Chapter 10.5", "chapter_slug": "chapter-10-5", "updated_at": "2026-06-01 00:00:00", "chapter_num": 10.5},
+    {"comic_id": 4280, "chapter_id": 12, "chapter_name": "Chapter 1", "chapter_slug": "chapter-1", "updated_at": "2026-05-01 00:00:00", "chapter_num": 1.0},
+    {"comic_id": 4280, "chapter_id": 12, "chapter_name": "Chapter 1", "chapter_slug": "chapter-1", "updated_at": "2026-05-01 00:00:00", "chapter_num": 1.0}
+  ],
+  "total": 5
+}
