@@ -29,7 +29,7 @@ engine and a cron-friendly CLI.
 - **Library tracking** — read/unread state survives reboots
 - **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
 - **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output
-- **Kindle delivery** — auto-send chapters by email after download
+- **E-Reader delivery** — auto-send chapters by email after download
 - **Backup sources** — fall back to a second source if the primary stops updating
 - **Offline-aware** — gracefully fails on network actions when offline
 - **No telemetry, no accounts, no cloud** — everything stays on your machine
@@ -58,7 +58,7 @@ On macOS / Linux:
 ./scripts/run.sh <command>
 ```
 
-> **First run downloads Firefox** (~90 MB, one-time) via Playwright for
+> **First run downloads Firefox** (~80 MB download, one-time) via Playwright for
 > the JS-heavy sources (MangaFire, WeebCentral, …). After that, startup
 > is instant.
 
@@ -107,7 +107,7 @@ Run any subcommand with `--help` for full flags.
 
 ---
 
-## 🍳 Common recipes
+## Common recipes
 
 ### Add a manga with a backup source
 
@@ -137,7 +137,7 @@ flat across long bulk runs.
 # Linux/macOS — installs a crontab entry
 python -m memanga cron install --time 06:00
 
-# Windows — registers a Task Scheduler entry (run as the current user)
+# Windows — register a Task Scheduler entry (run as your user)
 python -m memanga cron install --time 06:00
 ```
 
@@ -147,14 +147,14 @@ python -m memanga cron install --time 06:00
 python -m memanga failed --retry
 ```
 
-`failed` is the safety net for the "downloaded but incomplete" class
-of errors — the downloader refuses to mark a chapter complete if any
-page failed, and tracks the failure so the next run can batch-retry it.
+`failed` is the safety net for the "downloaded but incomplete" class of
+errors - the modern downloader refuses to mark a chapter complete if
+any page failed, and tracks the failure so you can batch-retry later.
 
 ### Send a manga to your Kindle after every download
 
 1. [Generate a Gmail App Password](https://support.google.com/accounts/answer/185833)
-   (regular passwords won't work; Google blocks them for SMTP).
+   (regular passwords won't work).
 2. Add your Gmail address to your
    [Amazon "Approved Personal Document E-mail List"](https://www.amazon.com/hz/mycd/myx#/home/settings/payment).
 3. Run `python -m memanga config` and fill in Kindle email, sender
@@ -196,7 +196,7 @@ The default search sweep covers these 15 verified working aggregators
 
 ---
 
-## 📂 Where your data lives
+## Where your data lives
 
 | Path | What |
 |---|---|
@@ -207,14 +207,14 @@ The default search sweep covers these 15 verified working aggregators
 
 Sensitive credentials (SMTP App Password) are stored in the OS keyring
 (Keychain on macOS, Credential Manager on Windows, Secret Service on
-Linux) — never in plain text on disk.
+Linux).
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 **Will my downloads work without internet?**
-Yes — once a chapter is on disk it's just files in your download
+Yes. Once a chapter is on disk it's just files in your download
 folder. The CLI gracefully fails on network actions (Search, Check,
 Download) when no connection is available.
 
@@ -229,14 +229,14 @@ JS-heavy sites. One-time. After that, startup is instant.
 **A source I use stopped working — what now?**
 - Run `python -m memanga sources` to see health status. If it's
   marked unhealthy, the site is genuinely down or changed its HTML.
-  File an issue with the **Scraper broken** template.
+  File an issue with the **Scraper broken** template so we can
+  investigate together.
 - Use `python -m memanga update <title>` to switch the manga to a
   backup source until the scraper is fixed.
 
-**Can I use this on a Raspberry Pi?**
-Yes — the CLI runs anywhere Python 3.10+ runs. On a headless Pi a
-typical setup is cron + `--auto` flag + `xvfb-run` for Playwright
-sources.
+**Can I use this on headless devices?**
+The CLI runs anywhere Python 3.10+ runs. You'd typically use cron,
+the CLI's `--auto` flag, and `xvfb-run` for Playwright sources.
 
 **Why is there a separate `cli` branch?**
 `main` ships a full PySide6 desktop app — useful, but heavy. Some
@@ -262,6 +262,6 @@ branches don't drift further than necessary.
 
 For security-sensitive reports, see [SECURITY.md](SECURITY.md).
 
-## 📄 License
+## License
 
 MIT — see [LICENSE](LICENSE).
