@@ -6,6 +6,24 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-12
+
+### Fixed
+- #83 MangaDex API requests could fail with HTTP 400 because the shared
+  scraper session claimed a browser user agent without the `Sec-Fetch-*`
+  headers MangaDex expects. Default scraper headers now include those
+  browser fetch metadata headers, restoring MangaDex search and chapter
+  requests.
+- #84 The GUI could falsely report offline on connected networks because
+  the network probe used TCP port 53, which some Windows networks reject
+  even while normal HTTPS access works. The probe now checks an HTTPS
+  host on port 443 so connected users are not blocked by DNS-over-TCP
+  policy.
+
+### Acknowledgements
+- Special thanks to @Camponotus-vagus for the detailed issue diagnostics
+  and follow-up testing that helped shape the fixes.
+
 ## [0.3.2] - 2026-07-08
 
 ### Added
