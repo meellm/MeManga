@@ -59,8 +59,18 @@ DEFAULT_FALLBACK_DELAY_DAYS = 2
 
 
 class DownloaderError(Exception):
-    """Base exception for downloader errors."""
-    pass
+    """Base exception for downloader errors.
+
+    Incomplete-download failures carry structured detail so callers can
+    record/act on them without parsing the message string:
+    ``failed_pages`` (1-indexed page numbers) and ``total_pages``.
+    Both are ``None`` for errors unrelated to per-page failures.
+    """
+
+    def __init__(self, message, failed_pages=None, total_pages=None):
+        super().__init__(message)
+        self.failed_pages = failed_pages
+        self.total_pages = total_pages
 
 
 class ChapterWithSource(Chapter):
@@ -387,6 +397,9 @@ def download_chapter(
     naming_template: Optional[str] = None,
     cancel_event=None,
     max_retries: int = 3,
+    allow_partial: bool = False,
+    partial_threshold: float = 0.0,
+    on_partial=None,
 ) -> Optional[Path]:
     """
     Download a chapter and convert to PDF or EPUB.
@@ -402,11 +415,33 @@ def download_chapter(
             InterruptedError before/during page fetching to abort the download.
         max_retries: Number of times to retry failed page downloads
             (with exponential back-off). 0 to disable.
+        allow_partial: When True, a chapter that still has missing pages
+            after retries is kept as a *partial* download (only the pages
+            that succeeded, in order) instead of raising — provided the
+            failure rate is within ``partial_threshold``. Off by default,
+            so the historical "any failure aborts the chapter" behavior is
+            unchanged unless a caller opts in (issue #86).
+        partial_threshold: Maximum share of pages allowed to fail, as a
+            percentage (0-100). A partial is kept only when
+            ``failed_pages / total_pages * 100 <= partial_threshold`` and
+            at least one page downloaded. With the default 0, any failure
+            still aborts.
+        on_partial: Optional callable(failed_page_nums, total_pages) invoked
+            when a partial download is accepted, so callers can log/surface
+            it and record which pages are missing.
 
     Returns:
         Path to downloaded file, or None if failed
     """
     title = manga["title"]
+
+    # Defensive: keep the tolerance within [0, 100] even if a caller passes
+    # something out of range directly (issue #86). The CLI/config already
+    # clamp, but download_chapter is a public entry point.
+    try:
+        partial_threshold = max(0.0, min(100.0, float(partial_threshold)))
+    except (TypeError, ValueError):
+        partial_threshold = 0.0
 
     def _check_cancel():
         if cancel_event is not None and cancel_event.is_set():
@@ -517,10 +552,36 @@ def download_chapter(
         still_failed = [idx for idx, _, _ in download_tasks if idx not in results]
         if still_failed:
             failed_page_nums = [i + 1 for i in still_failed]
-            raise DownloaderError(
-                f"Incomplete download: {len(still_failed)}/{len(page_urls)} "
-                f"pages failed (pages {failed_page_nums})"
+            failed_pct = len(still_failed) / total_pages * 100
+
+            # Partial-chapter tolerance (issue #86): when enabled and the
+            # failure rate is within the configured threshold, keep the
+            # pages we did get instead of discarding the whole chapter.
+            # At least one page must have downloaded — a chapter with zero
+            # usable pages is a hard failure regardless of the threshold.
+            partial_ok = (
+                allow_partial
+                and results
+                and failed_pct <= partial_threshold
             )
+            if not partial_ok:
+                raise DownloaderError(
+                    f"Incomplete download: {len(still_failed)}/{len(page_urls)} "
+                    f"pages failed (pages {failed_page_nums})",
+                    failed_pages=failed_page_nums,
+                    total_pages=total_pages,
+                )
+
+            print(
+                f"  Partial chapter kept: {len(still_failed)}/{total_pages} "
+                f"page(s) missing ({failed_pct:.0f}% <= "
+                f"{partial_threshold:g}% tolerance), pages {failed_page_nums}"
+            )
+            if on_partial is not None:
+                try:
+                    on_partial(failed_page_nums, total_pages)
+                except Exception:
+                    pass
 
         # Preserve page order
         image_paths = [results[i] for i in sorted(results)]

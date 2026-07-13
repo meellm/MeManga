@@ -228,6 +228,22 @@ class TestSettingsPage:
         # No exception = passes. Config got at least one write.
         assert app_window.config.get("delivery.output_format") is not None
 
+    def test_partial_toggle_saves_to_config(self, app_window, qapp):
+        # Partial-chapter tolerance (issue #86): the Advanced-tab toggle +
+        # threshold spin should persist to config on save.
+        page = app_window._pages["settings"]
+        page._partial_check.setChecked(True)
+        page._partial_threshold.setValue(12)
+        page._save()
+        assert app_window.config.partial_enabled is True
+        assert app_window.config.partial_threshold == 12.0
+
+    def test_partial_threshold_disabled_when_toggle_off(self, app_window, qapp):
+        page = app_window._pages["settings"]
+        page._partial_check.setChecked(False)
+        qapp.processEvents()
+        assert not page._partial_threshold.isEnabled()
+
     def test_template_preview_substitutes(self, app_window, qapp):
         page = app_window._pages["settings"]
         page._naming_entry.setText("X-{chapter}")

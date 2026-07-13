@@ -12,7 +12,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QWidget, QComboBox, QCheckBox, QRadioButton,
-    QLineEdit, QFileDialog, QButtonGroup, QSizePolicy,
+    QLineEdit, QFileDialog, QButtonGroup, QSizePolicy, QSpinBox,
 )
 from PySide6.QtCore import Qt
 from .base import BasePage
@@ -484,6 +484,40 @@ class SettingsPage(BasePage):
     def _build_advanced(self):
         f = self._advanced_layout
 
+        # Partial-chapter tolerance (issue #86)
+        self._section(f, "Partial Chapters")
+        partial_hint = QLabel(
+            "Keep a chapter that is missing a few pages instead of discarding it."
+        )
+        partial_hint.setProperty("role", "hint")
+        partial_hint.setWordWrap(True)
+        f.addWidget(partial_hint)
+
+        self._partial_check = QCheckBox("Allow partial chapters")
+        self._partial_check.setChecked(self.app.config.partial_enabled)
+        f.addWidget(self._partial_check)
+
+        thresh_row = QHBoxLayout()
+        thresh_lbl = QLabel("Max pages allowed to fail:")
+        thresh_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+        thresh_row.addWidget(thresh_lbl)
+
+        self._partial_threshold = QSpinBox()
+        self._partial_threshold.setMinimum(0)
+        self._partial_threshold.setMaximum(100)
+        self._partial_threshold.setSuffix(" %")
+        self._partial_threshold.setValue(int(round(self.app.config.partial_threshold)))
+        self._partial_threshold.setMinimumWidth(90)
+        thresh_row.addWidget(self._partial_threshold)
+        thresh_row.addStretch(1)
+        f.addLayout(thresh_row)
+
+        # Grey out the threshold when tolerance is off.
+        self._partial_threshold.setEnabled(self._partial_check.isChecked())
+        self._partial_check.toggled.connect(self._partial_threshold.setEnabled)
+
+        f.addSpacing(T.PAD_XL)
+
         # Scheduled checks
         self._section(f, "Scheduled Checks")
         cron_row = QHBoxLayout()
@@ -774,6 +808,11 @@ class SettingsPage(BasePage):
             cron_time = "06:00"
         cfg.set("cron.enabled", self._cron_check.isChecked())
         cfg.set("cron.time", cron_time)
+
+        # Partial-chapter tolerance (issue #86)
+        if hasattr(self, "_partial_check"):
+            cfg.set("partial_chapters.enabled", self._partial_check.isChecked())
+            cfg.set("partial_chapters.threshold_percent", int(self._partial_threshold.value()))
 
         cfg.save()
         Toast(self, "Settings saved", kind="success")

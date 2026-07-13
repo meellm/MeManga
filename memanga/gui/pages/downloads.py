@@ -592,6 +592,8 @@ class DownloadsPage(BasePage):
                     output_format=self.app.config.output_format,
                     state=self.app.app_state, kindle_cfg=kindle_cfg,
                     naming_template=naming_template,
+                    allow_partial=self.app.config.partial_enabled,
+                    partial_threshold=self.app.config.partial_threshold,
                 )
         if skipped:
             Toast(self, f"Skipped {skipped} chapter(s) already on disk", kind="info")
