@@ -22,6 +22,33 @@ class TestConfigBasics:
         assert a == {"b": {"c": 42}}
 
 
+class TestPartialChapterConfig:
+    """Partial-chapter tolerance settings (issue #86)."""
+
+    def test_disabled_by_default(self, config):
+        assert config.partial_enabled is False
+        # Default threshold is exposed as a float for the downloader.
+        assert config.partial_threshold == 5.0
+
+    def test_enable_and_set_threshold(self, config):
+        config.set("partial_chapters.enabled", True)
+        config.set("partial_chapters.threshold_percent", 10)
+        assert config.partial_enabled is True
+        assert config.partial_threshold == 10.0
+
+    def test_threshold_falls_back_on_garbage(self, config):
+        config.set("partial_chapters.threshold_percent", "not-a-number")
+        assert config.partial_threshold == 5.0
+
+    def test_threshold_clamps_above_100(self, config):
+        config.set("partial_chapters.threshold_percent", 150)
+        assert config.partial_threshold == 100.0
+
+    def test_threshold_clamps_below_0(self, config):
+        config.set("partial_chapters.threshold_percent", -20)
+        assert config.partial_threshold == 0.0
+
+
 class TestConfigPersistence:
     def test_save_then_reload(self, isolated_home):
         from memanga.config import Config

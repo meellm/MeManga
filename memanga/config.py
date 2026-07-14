@@ -84,6 +84,14 @@ class Config:
                 "auto_check": True,
                 "auto_check_interval": 3600,
             },
+            # Partial-chapter tolerance (issue #86). Off by default: any
+            # missing page still aborts the chapter and discards output.
+            # When enabled, a chapter whose failure rate is within
+            # threshold_percent is kept with only the pages that succeeded.
+            "partial_chapters": {
+                "enabled": False,
+                "threshold_percent": 5,  # max % of pages allowed to fail
+            },
         }
     
     def reload(self):
@@ -186,6 +194,22 @@ class Config:
     @property
     def output_format(self):
         return self.get("delivery.output_format", "pdf")
+
+    @property
+    def partial_enabled(self):
+        """Whether partial-chapter tolerance is turned on (issue #86)."""
+        return bool(self.get("partial_chapters.enabled", False))
+
+    @property
+    def partial_threshold(self):
+        """Max share of pages allowed to fail before a partial is refused,
+        as a percentage clamped to [0, 100]. Falls back to 5 for garbage or
+        out-of-range values persisted by an older/hand-edited config."""
+        try:
+            value = float(self.get("partial_chapters.threshold_percent", 5))
+        except (TypeError, ValueError):
+            return 5.0
+        return max(0.0, min(100.0, value))
 
 
 _KEYRING_SERVICE = "memanga"

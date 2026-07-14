@@ -12,7 +12,8 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QWidget, QComboBox, QCheckBox, QRadioButton,
-    QLineEdit, QFileDialog, QButtonGroup, QSizePolicy,
+    QLineEdit, QFileDialog, QButtonGroup, QSizePolicy, QSpinBox,
+    QAbstractSpinBox,
 )
 from PySide6.QtCore import Qt
 from .base import BasePage
@@ -54,7 +55,8 @@ class SettingsPage(BasePage):
         reset_btn.setProperty("variant", "ghost")
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         reset_btn.setIcon(icon("refresh", T.tokens()["text.t_2"], 14))
-        reset_btn.setToolTip("Reset all settings to defaults (coming soon)")
+        reset_btn.setToolTip("Reset all settings to defaults")
+        reset_btn.clicked.connect(self._reset_to_defaults)
         top_row.addWidget(reset_btn)
         h_layout.addLayout(top_row)
 
@@ -533,6 +535,43 @@ class SettingsPage(BasePage):
 
         f.addSpacing(T.PAD_XL)
 
+        # Partial-chapter tolerance (issue #86)
+        self._section(f, "Partial Chapters")
+        partial_hint = QLabel(
+            "Keep a chapter that is missing a few pages instead of discarding it."
+        )
+        partial_hint.setProperty("role", "hint")
+        partial_hint.setWordWrap(True)
+        f.addWidget(partial_hint)
+
+        self._partial_check = QCheckBox("Allow partial chapters")
+        self._partial_check.setChecked(self.app.config.partial_enabled)
+        f.addWidget(self._partial_check)
+
+        thresh_row = QHBoxLayout()
+        thresh_lbl = QLabel("Max pages allowed to fail:")
+        thresh_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+        thresh_row.addWidget(thresh_lbl)
+
+        self._partial_threshold = QSpinBox()
+        self._partial_threshold.setMinimum(0)
+        self._partial_threshold.setMaximum(100)
+        self._partial_threshold.setSuffix(" %")
+        self._partial_threshold.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self._partial_threshold.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._partial_threshold.setValue(int(round(self.app.config.partial_threshold)))
+        self._partial_threshold.setMinimumWidth(56)
+        self._partial_threshold.setMaximumWidth(72)
+        thresh_row.addWidget(self._partial_threshold)
+        thresh_row.addStretch(1)
+        f.addLayout(thresh_row)
+
+        # Grey out the threshold when tolerance is off.
+        self._partial_threshold.setEnabled(self._partial_check.isChecked())
+        self._partial_check.toggled.connect(self._partial_threshold.setEnabled)
+
+        f.addSpacing(T.PAD_XL)
+
         # Post-processing
         self._section(f, "Post-Processing")
 
@@ -835,8 +874,67 @@ class SettingsPage(BasePage):
             self._post_processing_fail_check.isChecked(),
         )
 
+        # Partial-chapter tolerance (issue #86)
+        if hasattr(self, "_partial_check"):
+            cfg.set("partial_chapters.enabled", self._partial_check.isChecked())
+            cfg.set("partial_chapters.threshold_percent", int(self._partial_threshold.value()))
+
         cfg.save()
         Toast(self, "Settings saved", kind="success")
+
+    def _reset_to_defaults(self):
+        cfg = self.app.config
+        defaults = cfg._default_config()
+        for section in ("delivery", "email", "cron", "gui", "partial_chapters"):
+            cfg.set(section, defaults[section])
+        cfg.save()
+        self._load_config_into_widgets()
+        Toast(self, "Settings reset to defaults", kind="success")
+
+    def _load_config_into_widgets(self):
+        cfg = self.app.config
+
+        if cfg.delivery_mode == "email":
+            self._radio_email.setChecked(True)
+        else:
+            self._radio_local.setChecked(True)
+
+        self._dir_entry.setText(str(cfg.download_dir))
+        self._format_combo.setCurrentText(cfg.output_format)
+        self._concurrent_slider.setValue(
+            max(1, min(8, int(cfg.get("gui.max_concurrent_downloads", 2))))
+        )
+        self._naming_entry.setText(
+            cfg.get("delivery.naming_template", "{title} - Chapter {chapter}")
+        )
+
+        self._entry_kindle_email.setText(cfg.get("email.kindle_email", ""))
+        self._entry_sender_email.setText(cfg.get("email.sender_email", ""))
+        self._entry_smtp_server.setText(cfg.get("email.smtp_server", "smtp.gmail.com"))
+        self._entry_smtp_port.setText(str(cfg.get("email.smtp_port", 587)))
+        self._password_entry.clear()
+        self._delete_after_check.setChecked(cfg.get("delivery.delete_after_send", False))
+
+        self._cron_check.setChecked(cfg.get("cron.enabled", False))
+        self._cron_time.setText(cfg.get("cron.time", "06:00"))
+
+        self._post_processing_check.setChecked(
+            cfg.get("delivery.post_processing.enabled", False)
+        )
+        self._post_processing_command.setText(
+            cfg.get("delivery.post_processing.command", "")
+        )
+        self._post_processing_fail_check.setChecked(
+            cfg.get("delivery.post_processing.fail_on_error", False)
+        )
+        self._refresh_post_processing_enabled()
+
+        if hasattr(self, "_partial_check"):
+            self._partial_check.setChecked(cfg.partial_enabled)
+            self._partial_threshold.setValue(int(round(cfg.partial_threshold)))
+            self._partial_threshold.setEnabled(self._partial_check.isChecked())
+
+        self._refresh_filename_preview()
 
     def _test_email(self):
         self._test_label.setText("Testing...")

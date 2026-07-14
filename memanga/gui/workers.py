@@ -318,8 +318,16 @@ class BackgroundWorker:
     # ------------------------------------------------------------------
 
     def download_chapter(self, manga, chapter, output_dir, output_format, state,
-                         kindle_cfg=None, naming_template=None, post_processing=None):
-        """Queue a chapter download."""
+                         kindle_cfg=None, naming_template=None,
+                         post_processing=None, allow_partial=False,
+                         partial_threshold=0.0):
+        """Queue a chapter download.
+
+        ``allow_partial``/``partial_threshold`` carry the partial-chapter
+        tolerance settings (issue #86) from config through to the
+        downloader. Off by default so behavior is unchanged unless the
+        caller opts in.
+        """
         task_id = f"{manga['title']}:{chapter.number}"
         # Refuse to enqueue while offline — the request would just
         # block a worker slot until per-source retries time out.
@@ -348,6 +356,8 @@ class BackgroundWorker:
             "naming_template": naming_template,
             "post_processing": post_processing,
             "cancel": cancel,
+            "allow_partial": allow_partial,
+            "partial_threshold": partial_threshold,
         }
 
         with self._lock:
@@ -373,7 +383,12 @@ class BackgroundWorker:
         """Execute a single download task."""
         import traceback
         try:
-            from ..downloader import download_chapter
+            from ..downloader import (
+                download_chapter,
+                DownloaderError,
+                ChapterWithSource,
+                _get_sources_from_manga,
+            )
         except Exception as e:
             print(f"[Download] FATAL: Failed to import downloader: {e}", flush=True)
             traceback.print_exc()
@@ -410,19 +425,17 @@ class BackgroundWorker:
             except Exception:
                 pass
 
-        try:
-            path = download_chapter(
-                manga=manga,
-                chapter=chapter,
-                output_dir=item["output_dir"],
-                output_format=item["output_format"],
-                state=item["state"],
-                progress_callback=progress_cb,
-                naming_template=item.get("naming_template"),
-                cancel_event=item["cancel"],
-                post_processing=item.get("post_processing"),
-            )
+        # Captures partial-download detail (issue #86) so the completion
+        # event can surface which pages are missing without parsing logs.
+        partial_info = {}
 
+        def on_partial(failed_pages, total):
+            partial_info["failed_pages"] = failed_pages
+            partial_info["total"] = total
+
+        def _finish(path, from_backup):
+            """Deliver to Kindle (if configured) and publish
+            download_complete, carrying any accepted partial detail."""
             # Kindle delivery
             if item["kindle_cfg"] and path:
                 try:
@@ -440,14 +453,74 @@ class BackgroundWorker:
                 except Exception as e:
                     self._events.publish("kindle_error", {"task_id": task_id, "error": str(e)})
 
-            self._events.publish("download_complete", {
+            complete_payload = {
                 "task_id": task_id,
                 "path": str(path) if path else None,
                 "title": manga["title"],
                 "chapter": chapter.number,
-            })
+                "from_backup": from_backup,
+            }
+            if partial_info:
+                complete_payload["partial"] = dict(partial_info)
+                print(
+                    f"[Download] Partial kept{' from backup' if from_backup else ''}: "
+                    f"{manga['title']} Ch.{chapter.number} "
+                    f"— {len(partial_info['failed_pages'])}/{partial_info['total']} "
+                    f"page(s) missing {partial_info['failed_pages']}",
+                    flush=True,
+                )
+            elif from_backup:
+                print(
+                    f"[Download] Completed from backup: "
+                    f"{manga['title']} Ch.{chapter.number}",
+                    flush=True,
+                )
+            self._events.publish("download_complete", complete_payload)
+
+        allow_partial = item.get("allow_partial", False)
+        partial_threshold = item.get("partial_threshold", 0.0)
+
+        # Backup-first parity with the CLI (issue #86): when the chapter is
+        # from the primary source and the manga has a backup configured,
+        # prefer a *complete* backup download over keeping a primary
+        # partial. Only accept a primary partial straight away when there
+        # is no backup to try first.
+        is_from_backup = isinstance(chapter, ChapterWithSource) and chapter.is_backup
+        has_backup = (not is_from_backup) and len(_get_sources_from_manga(manga)) > 1
+        primary_allow_partial = allow_partial and not has_backup
+
+        try:
+            partial_info.clear()
+            path = download_chapter(
+                manga=manga,
+                chapter=chapter,
+                output_dir=item["output_dir"],
+                output_format=item["output_format"],
+                state=item["state"],
+                progress_callback=progress_cb,
+                naming_template=item.get("naming_template"),
+                cancel_event=item["cancel"],
+                post_processing=item.get("post_processing"),
+                allow_partial=primary_allow_partial,
+                partial_threshold=partial_threshold,
+                on_partial=on_partial,
+            )
+            _finish(path, from_backup=False)
         except InterruptedError:
             self._events.publish("download_cancelled", {"task_id": task_id})
+        except DownloaderError as e:
+            # Primary source couldn't deliver a complete chapter. Try the
+            # backup first (complete), then salvage the best partial within
+            # threshold (backup, then primary) if tolerance is enabled.
+            try:
+                self._recover_via_backup(
+                    item, chapter, manga, e, on_partial, partial_info,
+                    _finish, allow_partial, partial_threshold,
+                    primary_allow_partial, is_from_backup,
+                    progress_callback=progress_cb,
+                )
+            except InterruptedError:
+                self._events.publish("download_cancelled", {"task_id": task_id})
         except Exception as e:
             print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}", flush=True)
             traceback.print_exc()
@@ -470,6 +543,122 @@ class BackgroundWorker:
         finally:
             self._cancel_flags.pop(task_id, None)
             self._start_next_download()
+
+    def _recover_via_backup(self, item, chapter, manga, primary_err,
+                            on_partial, partial_info, finish,
+                            allow_partial, partial_threshold,
+                            primary_allow_partial, is_from_backup,
+                            progress_callback=None):
+        """Backup-first recovery after a primary DownloaderError.
+
+        Mirrors the CLI (issue #86): 1) try a *complete* download from the
+        backup source; 2) if that also fails and partial tolerance is on,
+        keep the best partial within threshold, preferring the backup
+        partial over the primary partial; 3) otherwise publish
+        download_error. ``InterruptedError`` (cancellation) is allowed to
+        propagate so the caller can report a cancelled download.
+
+        ``progress_callback`` mirrors the primary attempt so backup and
+        salvage downloads still emit ``download_progress`` events (and,
+        because the same callback raises ``InterruptedError`` on a set
+        cancel flag, keep honouring cancellation).
+        """
+        from ..downloader import (
+            download_chapter,
+            DownloaderError,
+            _find_chapter_on_backup,
+        )
+
+        task_id = item["task_id"]
+
+        backup_ch = None
+        if not is_from_backup:
+            backup_ch = _find_chapter_on_backup(manga, chapter.number)
+
+        def _dl(cand, allow_partial_flag):
+            return download_chapter(
+                manga=manga,
+                chapter=cand,
+                output_dir=item["output_dir"],
+                output_format=item["output_format"],
+                state=item["state"],
+                progress_callback=progress_callback,
+                naming_template=item.get("naming_template"),
+                cancel_event=item["cancel"],
+                post_processing=item.get("post_processing"),
+                allow_partial=allow_partial_flag,
+                partial_threshold=partial_threshold,
+                on_partial=on_partial,
+            )
+
+        backup_err = None
+
+        # 1) Complete download from the backup source.
+        if backup_ch:
+            print(
+                f"[Download] Primary failed ({primary_err}), trying backup "
+                f"({backup_ch.source}) for {manga['title']} Ch.{chapter.number}",
+                flush=True,
+            )
+            partial_info.clear()
+            try:
+                path = _dl(backup_ch, False)
+                finish(path, from_backup=True)
+                return
+            except DownloaderError as be:
+                backup_err = be
+                print(f"[Download] Backup also failed: {be}", flush=True)
+
+        # 2) Salvage the best partial within threshold (backup first, then
+        #    primary), only if partial tolerance is enabled.
+        if allow_partial:
+            salvage = []
+            if backup_ch:
+                salvage.append((backup_ch, True))
+            # Skip the primary here if it was already attempted with partial
+            # enabled above (the no-backup case).
+            if not primary_allow_partial:
+                salvage.append((chapter, False))
+            for cand, from_backup in salvage:
+                partial_info.clear()
+                try:
+                    path = _dl(cand, True)
+                except DownloaderError:
+                    continue
+                finish(path, from_backup=from_backup)
+                return
+
+        # 3) Nothing worked — surface the failure.
+        if backup_ch and backup_err is not None:
+            error_msg = f"Primary: {primary_err}; Backup: {backup_err}"
+            source = f"{getattr(chapter, 'source', None) or manga.get('source', '?')}+{backup_ch.source}"
+        else:
+            error_msg = str(primary_err)
+            source = getattr(chapter, "source", None) or manga.get("source", "?")
+        print(
+            f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {error_msg}",
+            flush=True,
+        )
+        state = item.get("state")
+        if state is not None and hasattr(state, "add_failed_chapter"):
+            try:
+                failed_pages = getattr(primary_err, "failed_pages", None)
+                if failed_pages is not None:
+                    state.add_failed_chapter(
+                        manga["title"], chapter.number, source, error_msg,
+                        failed_pages=failed_pages,
+                    )
+                else:
+                    state.add_failed_chapter(
+                        manga["title"], chapter.number, source, error_msg,
+                    )
+            except Exception:
+                import traceback
+                traceback.print_exc()
+        self._events.publish("download_error", {
+            "task_id": task_id, "error": error_msg,
+            "title": manga["title"], "chapter": chapter.number,
+        })
 
     def _start_next_download(self):
         """Release the finished download's slot, then refill from the queue.

@@ -67,8 +67,18 @@ POST_PROCESSING_TIMEOUT = 600
 
 
 class DownloaderError(Exception):
-    """Base exception for downloader errors."""
-    pass
+    """Base exception for downloader errors.
+
+    Incomplete-download failures carry structured detail so callers can
+    record/act on them without parsing the message string:
+    ``failed_pages`` (1-indexed page numbers) and ``total_pages``.
+    Both are ``None`` for errors unrelated to per-page failures.
+    """
+
+    def __init__(self, message, failed_pages=None, total_pages=None):
+        super().__init__(message)
+        self.failed_pages = failed_pages
+        self.total_pages = total_pages
 
 
 class ChapterWithSource(Chapter):
@@ -396,6 +406,9 @@ def download_chapter(
     cancel_event=None,
     max_retries: int = 3,
     post_processing: Optional[Dict[str, Any]] = None,
+    allow_partial: bool = False,
+    partial_threshold: float = 0.0,
+    on_partial=None,
 ) -> Optional[Path]:
     """
     Download a chapter and convert to PDF or EPUB.
@@ -417,11 +430,33 @@ def download_chapter(
             ``fail_on_error`` is set, a command failure raises
             :class:`DownloaderError` so normal failed-chapter handling applies;
             otherwise it only prints a warning.
+        allow_partial: When True, a chapter that still has missing pages
+            after retries is kept as a *partial* download (only the pages
+            that succeeded, in order) instead of raising — provided the
+            failure rate is within ``partial_threshold``. Off by default,
+            so the historical "any failure aborts the chapter" behavior is
+            unchanged unless a caller opts in (issue #86).
+        partial_threshold: Maximum share of pages allowed to fail, as a
+            percentage (0-100). A partial is kept only when
+            ``failed_pages / total_pages * 100 <= partial_threshold`` and
+            at least one page downloaded. With the default 0, any failure
+            still aborts.
+        on_partial: Optional callable(failed_page_nums, total_pages) invoked
+            when a partial download is accepted, so callers can log/surface
+            it and record which pages are missing.
 
     Returns:
         Path to downloaded file, or None if failed
     """
     title = manga["title"]
+
+    # Defensive: keep the tolerance within [0, 100] even if a caller passes
+    # something out of range directly (issue #86). The CLI/config already
+    # clamp, but download_chapter is a public entry point.
+    try:
+        partial_threshold = max(0.0, min(100.0, float(partial_threshold)))
+    except (TypeError, ValueError):
+        partial_threshold = 0.0
 
     def _check_cancel():
         if cancel_event is not None and cancel_event.is_set():
@@ -532,10 +567,36 @@ def download_chapter(
         still_failed = [idx for idx, _, _ in download_tasks if idx not in results]
         if still_failed:
             failed_page_nums = [i + 1 for i in still_failed]
-            raise DownloaderError(
-                f"Incomplete download: {len(still_failed)}/{len(page_urls)} "
-                f"pages failed (pages {failed_page_nums})"
+            failed_pct = len(still_failed) / total_pages * 100
+
+            # Partial-chapter tolerance (issue #86): when enabled and the
+            # failure rate is within the configured threshold, keep the
+            # pages we did get instead of discarding the whole chapter.
+            # At least one page must have downloaded — a chapter with zero
+            # usable pages is a hard failure regardless of the threshold.
+            partial_ok = (
+                allow_partial
+                and results
+                and failed_pct <= partial_threshold
             )
+            if not partial_ok:
+                raise DownloaderError(
+                    f"Incomplete download: {len(still_failed)}/{len(page_urls)} "
+                    f"pages failed (pages {failed_page_nums})",
+                    failed_pages=failed_page_nums,
+                    total_pages=total_pages,
+                )
+
+            print(
+                f"  Partial chapter kept: {len(still_failed)}/{total_pages} "
+                f"page(s) missing ({failed_pct:.0f}% <= "
+                f"{partial_threshold:g}% tolerance), pages {failed_page_nums}"
+            )
+            if on_partial is not None:
+                try:
+                    on_partial(failed_page_nums, total_pages)
+                except Exception:
+                    pass
 
         # Preserve page order
         image_paths = [results[i] for i in sorted(results)]
@@ -592,7 +653,8 @@ def download_chapter(
         elif output_format == "cbz":
             output_path = manga_dir / f"{base_name}.cbz"
             try:
-                _images_to_cbz(image_paths, output_path)
+                comicinfo_xml = _build_comicinfo_xml(manga, chapter, len(image_paths))
+                _images_to_cbz(image_paths, output_path, comicinfo_xml)
             except Exception as e:
                 raise DownloaderError(f"Failed to create CBZ: {e}")
         elif output_format == "zip":
@@ -1043,11 +1105,103 @@ def _images_to_pdf(image_paths: List[Path], output_path: Path):
     output_path.write_bytes(pdf_bytes)
 
 
-def _images_to_cbz(image_paths: List[Path], output_path: Path):
+def _parse_comicinfo_date(date_str: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    """Best-effort parse of a chapter/source date into (year, month, day).
+
+    Chapter dates arrive in many shapes across scrapers (ISO 8601 from API
+    sources like ``publishAt``, free-form text elsewhere). Returns ``None``
+    when nothing usable can be extracted so the caller simply omits the
+    Year/Month/Day fields.
+    """
+    if not date_str:
+        return None
+    text = str(date_str).strip()
+    if not text:
+        return None
+
+    # ISO 8601 first (covers the trailing "...Z" suffix common to API sources).
+    try:
+        iso_text = text[:-1] + "+00:00" if text.endswith("Z") else text
+        dt = datetime.fromisoformat(iso_text)
+        return dt.year, dt.month, dt.day
+    except ValueError:
+        pass
+
+    for fmt in (
+        "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%m/%d/%Y",
+        "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y",
+    ):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.year, dt.month, dt.day
+        except ValueError:
+            continue
+    return None
+
+
+def _build_comicinfo_xml(
+    manga: Dict[str, Any],
+    chapter: Chapter,
+    page_count: int,
+) -> bytes:
+    """Build a ComicInfo.xml document from already-known metadata.
+
+    Only fields MeManga already has on hand (the tracked manga config and
+    the ``Chapter`` object) are written; no extra network requests are
+    made. Optional fields with no data are omitted entirely. Serialization
+    and XML escaping are handled by ElementTree.
+    """
+    from xml.etree.ElementTree import Element, SubElement, tostring
+
+    root = Element("ComicInfo", {
+        "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        "xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+    })
+
+    def add(tag: str, value: Any):
+        if value is None:
+            return
+        text = str(value).strip()
+        if not text:
+            return
+        SubElement(root, tag).text = text
+
+    chapter_title = getattr(chapter, "title", None)
+    add("Title", chapter_title or f"Chapter {chapter.number}")
+    add("Series", manga.get("title"))
+    add("Number", chapter.number)
+
+    add("Summary", manga.get("description"))
+
+    parsed = _parse_comicinfo_date(getattr(chapter, "date", None))
+    if parsed:
+        year, month, day = parsed
+        add("Year", year)
+        add("Month", month)
+        add("Day", day)
+
+    add("Writer", manga.get("author"))
+
+    # Web: prefer the specific chapter URL, fall back to the manga URL.
+    add("Web", getattr(chapter, "url", "") or manga.get("url", ""))
+    add("PageCount", page_count)
+
+    return tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _images_to_cbz(
+    image_paths: List[Path],
+    output_path: Path,
+    comicinfo_xml: Optional[bytes] = None,
+):
     """Convert a list of images to a CBZ (Comic Book ZIP) archive.
 
     Images are stored as-is (no re-encoding) with sequential names
     for correct reading order.
+
+    When ``comicinfo_xml`` is provided it is written to the archive root as
+    ``ComicInfo.xml`` so offline libraries and e-readers can read chapter
+    metadata. Page names and order are unaffected.
     """
     import zipfile
 
@@ -1058,6 +1212,8 @@ def _images_to_cbz(image_paths: List[Path], output_path: Path):
         for i, img_path in enumerate(image_paths):
             ext = img_path.suffix.lower() or '.jpg'
             cbz.write(img_path, f"page_{i:03d}{ext}")
+        if comicinfo_xml is not None:
+            cbz.writestr("ComicInfo.xml", comicinfo_xml)
 
 
 def _images_to_folder(image_paths: List[Path], output_dir: Path, img_format: str):

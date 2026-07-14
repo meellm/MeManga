@@ -172,6 +172,220 @@ class TestPauseResumeQueue:
         assert gated_downloads.max_running == 2
 
 
+class TestPartialDownload:
+    """Partial-chapter tolerance (issue #86): the worker forwards the
+    config-derived settings to the downloader and surfaces the accepted
+    partial in the download_complete event."""
+
+    def test_partial_info_forwarded_and_surfaced(
+            self, worker, event_bus, monkeypatch, tmp_path):
+        import types
+        import time
+        import memanga.downloader as dl
+
+        seen_kwargs = {}
+
+        def fake_download_chapter(manga, chapter, output_dir, output_format,
+                                   state, progress_callback=None,
+                                   naming_template=None, cancel_event=None,
+                                   allow_partial=False, partial_threshold=0.0,
+                                   on_partial=None, **kwargs):
+            seen_kwargs["allow_partial"] = allow_partial
+            seen_kwargs["partial_threshold"] = partial_threshold
+            # Simulate an accepted partial download.
+            if on_partial is not None:
+                on_partial([6], 40)
+            return tmp_path / "out.pdf"
+
+        monkeypatch.setattr(dl, "download_chapter", fake_download_chapter)
+
+        completed = []
+        event_bus.subscribe("download_complete", lambda d: completed.append(d))
+
+        worker.download_chapter(
+            {"title": "Vinland Saga"}, types.SimpleNamespace(number="71"),
+            str(tmp_path), "pdf", None,
+            allow_partial=True, partial_threshold=5,
+        )
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not completed:
+            event_bus.poll()
+            time.sleep(0.02)
+
+        assert seen_kwargs == {"allow_partial": True, "partial_threshold": 5}
+        assert completed and completed[0].get("partial") == {
+            "failed_pages": [6], "total": 40}
+
+
+class TestBackupFirst:
+    """Backup-first parity with the CLI (issue #86): when a primary
+    download fails and the manga has a backup source, the worker prefers
+    a *complete* backup download over keeping a primary partial. Only if
+    the backup also fails does partial tolerance salvage the best partial
+    (backup first, then primary) within threshold."""
+
+    # Manga with a real backup source configured (sources array, len 2).
+    _MANGA = {
+        "title": "Vinland Saga",
+        "sources": [
+            {"url": "https://primary.test/vs", "source": "primary.test"},
+            {"url": "https://backup.test/vs", "source": "backup.test"},
+        ],
+    }
+
+    def _run(self, worker, event_bus, monkeypatch, fake_dl,
+             allow_partial, partial_threshold, tmp_path):
+        """Drive a single download through the worker with a faked
+        downloader + backup lookup; return (completes, errors, cancels)."""
+        import types
+        import time
+        import memanga.downloader as dl
+
+        # Backup lookup returns a chapter tagged as backup so the fake
+        # downloader can tell primary and backup attempts apart.
+        backup_ch = types.SimpleNamespace(
+            number="71", url="https://backup.test/vs/71",
+            source="backup.test", is_backup=True)
+        monkeypatch.setattr(
+            dl, "_find_chapter_on_backup", lambda manga, num: backup_ch)
+        monkeypatch.setattr(dl, "download_chapter", fake_dl)
+
+        completes, errors, cancels = [], [], []
+        event_bus.subscribe("download_complete", lambda d: completes.append(d))
+        event_bus.subscribe("download_error", lambda d: errors.append(d))
+        event_bus.subscribe("download_cancelled", lambda d: cancels.append(d))
+
+        chapter = types.SimpleNamespace(number="71", url="https://primary.test/vs/71")
+        worker.download_chapter(
+            self._MANGA, chapter, str(tmp_path), "pdf", None,
+            allow_partial=allow_partial, partial_threshold=partial_threshold)
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not (completes or errors or cancels):
+            event_bus.poll()
+            time.sleep(0.02)
+        event_bus.poll()
+        return completes, errors, cancels
+
+    def test_primary_error_backup_complete_no_partial(
+            self, worker, event_bus, monkeypatch, tmp_path):
+        # Primary raises; backup delivers a complete chapter → completes
+        # from backup with no partial warning.
+        from memanga.downloader import DownloaderError
+
+        def fake_dl(manga, chapter, output_dir, output_format, state=None,
+                    on_partial=None, **kw):
+            if not getattr(chapter, "is_backup", False):
+                raise DownloaderError("primary boom",
+                                      failed_pages=[3], total_pages=10)
+            return tmp_path / "backup.pdf"  # complete, no on_partial
+
+        completes, errors, cancels = self._run(
+            worker, event_bus, monkeypatch, fake_dl,
+            allow_partial=True, partial_threshold=5, tmp_path=tmp_path)
+
+        assert not errors and not cancels
+        assert len(completes) == 1
+        assert completes[0].get("from_backup") is True
+        assert "partial" not in completes[0]
+
+    def test_primary_partial_still_prefers_complete_backup(
+            self, worker, event_bus, monkeypatch, tmp_path):
+        # Even when the primary *could* have been kept as a partial within
+        # threshold, the presence of a backup means the primary is tried
+        # with partial disabled first, so it errors and the complete
+        # backup wins.
+        from memanga.downloader import DownloaderError
+
+        seen = {"primary_allow_partial": None}
+
+        def fake_dl(manga, chapter, output_dir, output_format, state=None,
+                    allow_partial=False, on_partial=None, **kw):
+            if not getattr(chapter, "is_backup", False):
+                seen["primary_allow_partial"] = allow_partial
+                raise DownloaderError("primary incomplete")
+            return tmp_path / "backup.pdf"
+
+        completes, errors, cancels = self._run(
+            worker, event_bus, monkeypatch, fake_dl,
+            allow_partial=True, partial_threshold=90, tmp_path=tmp_path)
+
+        # Primary was attempted with partial disabled (backup exists).
+        assert seen["primary_allow_partial"] is False
+        assert not errors and len(completes) == 1
+        assert completes[0].get("from_backup") is True
+        assert "partial" not in completes[0]
+
+    def test_backup_partial_under_threshold_kept_from_backup(
+            self, worker, event_bus, monkeypatch, tmp_path):
+        # Primary fails, backup can't complete either, but the backup
+        # partial is within threshold → keep the backup partial.
+        from memanga.downloader import DownloaderError
+
+        def fake_dl(manga, chapter, output_dir, output_format, state=None,
+                    allow_partial=False, on_partial=None, **kw):
+            if not getattr(chapter, "is_backup", False):
+                raise DownloaderError("primary boom")
+            if not allow_partial:
+                raise DownloaderError("backup incomplete")  # complete attempt
+            if on_partial is not None:
+                on_partial([4], 20)  # 5% missing, within threshold
+            return tmp_path / "backup_partial.pdf"
+
+        completes, errors, cancels = self._run(
+            worker, event_bus, monkeypatch, fake_dl,
+            allow_partial=True, partial_threshold=10, tmp_path=tmp_path)
+
+        assert not errors and len(completes) == 1
+        assert completes[0].get("from_backup") is True
+        assert completes[0].get("partial") == {"failed_pages": [4], "total": 20}
+
+    def test_all_fail_over_threshold_errors(
+            self, worker, event_bus, monkeypatch, tmp_path):
+        # Primary fails, backup complete fails, and neither backup nor
+        # primary partial is within threshold → download_error, and the
+        # message names both sources.
+        from memanga.downloader import DownloaderError
+
+        def fake_dl(manga, chapter, output_dir, output_format, state=None,
+                    allow_partial=False, on_partial=None, **kw):
+            # Over-threshold partials raise from the real downloader; the
+            # fake mimics that by always raising.
+            raise DownloaderError("incomplete")
+
+        completes, errors, cancels = self._run(
+            worker, event_bus, monkeypatch, fake_dl,
+            allow_partial=True, partial_threshold=1, tmp_path=tmp_path)
+
+        assert not completes and not cancels
+        assert len(errors) == 1
+        assert "Primary" in errors[0]["error"] and "Backup" in errors[0]["error"]
+
+    def test_partial_disabled_backup_complete_still_used(
+            self, worker, event_bus, monkeypatch, tmp_path):
+        # With partial tolerance off, a failing primary still falls back to
+        # a *complete* backup (parity with the CLI multi-source backup),
+        # but no partial is ever kept.
+        from memanga.downloader import DownloaderError
+
+        def fake_dl(manga, chapter, output_dir, output_format, state=None,
+                    allow_partial=False, on_partial=None, **kw):
+            if not getattr(chapter, "is_backup", False):
+                raise DownloaderError("primary boom")
+            if not allow_partial:
+                return tmp_path / "backup.pdf"
+            raise AssertionError("partial salvage must not run when disabled")
+
+        completes, errors, cancels = self._run(
+            worker, event_bus, monkeypatch, fake_dl,
+            allow_partial=False, partial_threshold=0, tmp_path=tmp_path)
+
+        assert not errors and len(completes) == 1
+        assert completes[0].get("from_backup") is True
+        assert "partial" not in completes[0]
+
+
 class TestCancelFlags:
     def test_active_tasks_starts_empty(self, worker):
         assert worker.active_tasks == {}
