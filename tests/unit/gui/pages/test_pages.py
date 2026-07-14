@@ -244,6 +244,34 @@ class TestSettingsPage:
         qapp.processEvents()
         assert not page._partial_threshold.isEnabled()
 
+    def test_partial_threshold_uses_keyboard_only_input(self, app_window, qapp):
+        from PySide6.QtWidgets import QAbstractSpinBox
+
+        page = app_window._pages["settings"]
+        assert (
+            page._partial_threshold.buttonSymbols()
+            == QAbstractSpinBox.ButtonSymbols.NoButtons
+        )
+        assert page._partial_threshold.maximumWidth() == 72
+
+    def test_reset_defaults_updates_partial_controls(self, app_window, qapp):
+        page = app_window._pages["settings"]
+        app_window.config.set("manga", [{"title": "KeepMe"}])
+        app_window.config.set("partial_chapters.enabled", True)
+        app_window.config.set("partial_chapters.threshold_percent", 12)
+        page._partial_check.setChecked(True)
+        page._partial_threshold.setValue(12)
+
+        page._reset_to_defaults()
+        qapp.processEvents()
+
+        assert app_window.config.partial_enabled is False
+        assert app_window.config.partial_threshold == 5.0
+        assert not page._partial_check.isChecked()
+        assert page._partial_threshold.value() == 5
+        assert not page._partial_threshold.isEnabled()
+        assert app_window.config.get("manga") == [{"title": "KeepMe"}]
+
     def test_template_preview_substitutes(self, app_window, qapp):
         page = app_window._pages["settings"]
         page._naming_entry.setText("X-{chapter}")
