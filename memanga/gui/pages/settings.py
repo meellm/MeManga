@@ -584,12 +584,21 @@ class SettingsPage(BasePage):
         )
         f.addWidget(self._post_processing_check)
 
-        self._post_processing_command = self._labeled_entry(
-            f,
-            "Command:",
-            self.app.config.get("delivery.post_processing.command", ""),
-            "python scripts/after_download.py {output_path}",
+        command_row = QHBoxLayout()
+        command_lbl = QLabel("Command:")
+        command_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+        command_row.addWidget(command_lbl)
+
+        self._post_processing_command = QLineEdit(
+            self.app.config.get("delivery.post_processing.command", "")
         )
+        self._post_processing_command.setMinimumHeight(36)
+        self._post_processing_command.setMinimumWidth(280)
+        self._post_processing_command.setPlaceholderText(
+            "python scripts/after_download.py {output_path}"
+        )
+        command_row.addWidget(self._post_processing_command, 1)
+        f.addLayout(command_row)
         self._post_processing_command.setToolTip(
             "Runs after the final chapter file or folder is created"
         )
@@ -605,7 +614,7 @@ class SettingsPage(BasePage):
         pp_hint = QLabel(
             "Available placeholders: {output_path}, {title}, {chapter}, "
             "{source}, {format}, {is_dir}. The same values are also exposed "
-            "as MEMANGA_* environment variables. Commands run directly; invoke "
+            "as MEMANGA_* environment variables.\nCommands run directly; invoke "
             "a shell explicitly if you need shell features."
         )
         pp_hint.setWordWrap(True)
