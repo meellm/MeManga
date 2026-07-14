@@ -275,7 +275,8 @@ def test_issue_40_pause_resume_keeps_queue(app_window, qapp, monkeypatch):
 
     def fake_download_chapter(manga, chapter, output_dir, output_format,
                                state, progress_callback=None,
-                               naming_template=None, cancel_event=None):
+                               naming_template=None, cancel_event=None,
+                               **kwargs):
         gates[f"{manga['title']}:{chapter.number}"].wait(timeout=10)
         return None
 

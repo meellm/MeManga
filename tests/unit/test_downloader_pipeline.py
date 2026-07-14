@@ -493,6 +493,111 @@ class TestDownloadChapterErrors:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Partial-chapter tolerance (issue #86) — opt-in; a few missing pages are
+# kept instead of discarding the whole chapter when within threshold.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _PartialScraper:
+    """Fake scraper whose download_image fails a chosen set of page
+    indexes (0-based) and writes a valid JPEG for the rest."""
+
+    def __init__(self, num_pages, fail_indexes):
+        self._num_pages = num_pages
+        self._fail = set(fail_indexes)
+
+    def get_pages(self, url):
+        return [f"https://cdn.test/p{i}.jpg" for i in range(self._num_pages)]
+
+    def download_image(self, url, path):
+        # Index encoded in the filename we asked for: page_%03d.ext
+        idx = int(Path(url).stem[1:])
+        if idx in self._fail:
+            return False
+        Image.new("RGB", (200, 300), (10, 20, 30)).save(path, "JPEG")
+        return True
+
+    def get_cover_url(self, url):
+        return None
+
+
+def _partial_chapter():
+    return types.SimpleNamespace(
+        number="71", title="", url="https://cdn.test/c/71",
+        source="cdn.test", source_url="https://cdn.test/c/71",
+        is_backup=False)
+
+
+class TestPartialChapterTolerance:
+    def _patch(self, monkeypatch, num_pages, fail_indexes):
+        import memanga.downloader as dl
+        monkeypatch.setattr(
+            dl, "get_scraper",
+            lambda d: _PartialScraper(num_pages, fail_indexes))
+
+    def test_disabled_by_default_raises_with_structured_detail(
+            self, tmp_path, fake_state, monkeypatch):
+        """Default behavior unchanged: one missing page discards the
+        chapter, and the error carries structured failure detail."""
+        from memanga.downloader import download_chapter, DownloaderError
+        self._patch(monkeypatch, num_pages=40, fail_indexes={5})
+        manga = {"title": "Vinland Saga", "url": "https://cdn.test/x",
+                 "source": "cdn.test"}
+        with pytest.raises(DownloaderError) as exc:
+            download_chapter(manga, _partial_chapter(), tmp_path, "pdf",
+                             fake_state, max_retries=0)
+        assert exc.value.failed_pages == [6]  # 1-indexed
+        assert exc.value.total_pages == 40
+
+    def test_enabled_under_threshold_keeps_partial(
+            self, tmp_path, fake_state, monkeypatch):
+        """1/40 pages missing (2.5%) is within a 5% threshold — the
+        chapter is kept and on_partial is notified."""
+        from memanga.downloader import download_chapter
+        self._patch(monkeypatch, num_pages=40, fail_indexes={5})
+        manga = {"title": "Vinland Saga", "url": "https://cdn.test/x",
+                 "source": "cdn.test"}
+        seen = {}
+
+        def on_partial(failed, total):
+            seen["failed"] = failed
+            seen["total"] = total
+
+        out = download_chapter(
+            manga, _partial_chapter(), tmp_path, "pdf", fake_state,
+            max_retries=0, allow_partial=True, partial_threshold=5,
+            on_partial=on_partial)
+        assert out is not None and out.exists()
+        assert seen == {"failed": [6], "total": 40}
+
+    def test_enabled_over_threshold_still_raises(
+            self, tmp_path, fake_state, monkeypatch):
+        """5/40 pages missing (12.5%) exceeds a 5% threshold — still a
+        hard failure even with tolerance on."""
+        from memanga.downloader import download_chapter, DownloaderError
+        self._patch(monkeypatch, num_pages=40, fail_indexes={1, 2, 3, 4, 5})
+        manga = {"title": "Vinland Saga", "url": "https://cdn.test/x",
+                 "source": "cdn.test"}
+        with pytest.raises(DownloaderError) as exc:
+            download_chapter(
+                manga, _partial_chapter(), tmp_path, "pdf", fake_state,
+                max_retries=0, allow_partial=True, partial_threshold=5)
+        assert len(exc.value.failed_pages) == 5
+
+    def test_zero_usable_pages_is_hard_failure(
+            self, tmp_path, fake_state, monkeypatch):
+        """Even at 100% threshold, a chapter with no usable pages must
+        not be kept as an empty partial."""
+        from memanga.downloader import download_chapter, DownloaderError
+        self._patch(monkeypatch, num_pages=3, fail_indexes={0, 1, 2})
+        manga = {"title": "X", "url": "https://cdn.test/x", "source": "cdn.test"}
+        with pytest.raises(DownloaderError):
+            download_chapter(
+                manga, _partial_chapter(), tmp_path, "pdf", fake_state,
+                max_retries=0, allow_partial=True, partial_threshold=100)
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Restart browsers — Playwright pool reset, used by GUI memory-pressure
 # ─────────────────────────────────────────────────────────────────────────
 

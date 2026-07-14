@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import pytest
 import sys
+import types
 from unittest.mock import patch, MagicMock
 
 
@@ -196,6 +197,28 @@ class TestCheckCommand:
         rc = run_cli("check")
         assert rc == 0  # nothing to do — should exit cleanly
 
+    def test_partial_flags_are_accepted(self, run_cli, config):
+        # Issue #86: the partial-tolerance override flags must parse.
+        # With no manga, check exits cleanly regardless.
+        rc = run_cli("check", "--allow-partial", "--partial-threshold", "10")
+        assert rc == 0
+
+    def test_check_out_of_range_threshold_rejected(self, run_cli, config):
+        # Issue #86: out-of-range threshold is rejected consistently with
+        # `config` (argparse type error).
+        rc = run_cli("check", "--partial-threshold", "150")
+        assert rc != 0
+
+    def test_allow_and_no_partial_are_mutually_exclusive(self, run_cli, config):
+        rc = run_cli("check", "--allow-partial", "--no-partial")
+        assert rc != 0  # argparse rejects the conflicting pair
+
+    def test_partial_flags_listed_in_help(self, run_cli, capsys):
+        run_cli("check", "--help")
+        out = capsys.readouterr().out.lower()
+        assert "--allow-partial" in out
+        assert "--partial-threshold" in out
+
     def test_check_with_one_manga(self, run_cli, config, patch_get_scraper,
                                     monkeypatch):
         config.set("manga", [{
@@ -208,6 +231,172 @@ class TestCheckCommand:
         rc = run_cli("check")
         # Either returns 0 (success) or a small int — should not crash.
         assert rc in (0, 1)
+
+    def test_backup_success_in_email_mode_sends_before_marking_downloaded(
+            self, run_cli, config, monkeypatch, tmp_path):
+        """Issue #86 regression: backup recovery must still run Kindle
+        delivery before the chapter is marked downloaded."""
+        from memanga import cli
+        from memanga.downloader import DownloaderError
+        from memanga.state import State
+
+        config.set("delivery.mode", "email")
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "status": "reading",
+            "sources": [
+                {"source": "primary.test", "url": "https://primary.test/vs"},
+                {"source": "backup.test", "url": "https://backup.test/vs"},
+            ],
+        }])
+        config.save()
+
+        cli.state = State()
+        primary_ch = types.SimpleNamespace(
+            number="71", title="", url="https://primary.test/c/71",
+            source="primary.test", is_backup=False)
+        backup_ch = types.SimpleNamespace(
+            number="71", title="", url="https://backup.test/c/71",
+            source="backup.test", is_backup=True)
+        backup_path = tmp_path / "backup.pdf"
+        sent = []
+
+        monkeypatch.setattr(cli, "check_for_updates",
+                            lambda *a, **k: [primary_ch])
+        monkeypatch.setattr(cli, "_find_chapter_on_backup",
+                            lambda *a, **k: backup_ch)
+
+        def fake_download(manga, chapter, *args, **kwargs):
+            if getattr(chapter, "is_backup", False):
+                return backup_path
+            raise DownloaderError("primary incomplete",
+                                  failed_pages=[13], total_pages=40)
+
+        def fake_send_to_kindle(**kwargs):
+            sent.append(kwargs["pdf_path"])
+            assert not cli.state.is_chapter_downloaded("Vinland Saga", "71")
+
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+        monkeypatch.setattr(cli, "send_to_kindle", fake_send_to_kindle)
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+        rc = run_cli("check", "--auto", "--quiet")
+
+        assert rc == 0
+        assert sent == [backup_path]
+        assert cli.state.is_chapter_downloaded("Vinland Saga", "71")
+
+    def test_backup_partial_in_email_mode_sends_and_warns(
+            self, run_cli, config, monkeypatch, tmp_path):
+        """When both sources fail complete downloads, an accepted backup
+        partial must be delivered and logged before state is advanced."""
+        from memanga import cli
+        from memanga.downloader import DownloaderError
+        from memanga.state import State
+
+        config.set("delivery.mode", "email")
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("partial_chapters.enabled", True)
+        config.set("partial_chapters.threshold_percent", 10)
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "status": "reading",
+            "sources": [
+                {"source": "primary.test", "url": "https://primary.test/vs"},
+                {"source": "backup.test", "url": "https://backup.test/vs"},
+            ],
+        }])
+        config.save()
+
+        cli.state = State()
+        primary_ch = types.SimpleNamespace(
+            number="71", title="", url="https://primary.test/c/71",
+            source="primary.test", is_backup=False)
+        backup_ch = types.SimpleNamespace(
+            number="71", title="", url="https://backup.test/c/71",
+            source="backup.test", is_backup=True)
+        partial_path = tmp_path / "backup-partial.pdf"
+        sent = []
+
+        monkeypatch.setattr(cli, "check_for_updates",
+                            lambda *a, **k: [primary_ch])
+        monkeypatch.setattr(cli, "_find_chapter_on_backup",
+                            lambda *a, **k: backup_ch)
+
+        def fake_download(manga, chapter, *args, **kwargs):
+            if not getattr(chapter, "is_backup", False):
+                raise DownloaderError("primary incomplete",
+                                      failed_pages=[13], total_pages=40)
+            if not kwargs.get("allow_partial", False):
+                raise DownloaderError("backup incomplete",
+                                      failed_pages=[7], total_pages=40)
+            kwargs["on_partial"]([7], 40)
+            return partial_path
+
+        def fake_send_to_kindle(**kwargs):
+            sent.append(kwargs["pdf_path"])
+            assert not cli.state.is_chapter_downloaded("Vinland Saga", "71")
+
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+        monkeypatch.setattr(cli, "send_to_kindle", fake_send_to_kindle)
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+        rc = run_cli("check", "--auto", "--quiet")
+
+        assert rc == 0
+        assert sent == [partial_path]
+        assert cli.state.is_chapter_downloaded("Vinland Saga", "71")
+        notifications = cli.state.get("notifications", [])
+        assert any("saved as partial" in n["message"] for n in notifications)
+
+    def test_over_threshold_backup_failure_records_failure_not_downloaded(
+            self, run_cli, config, monkeypatch):
+        """If neither complete nor partial recovery is acceptable, the
+        chapter stays failed and is not marked downloaded."""
+        from memanga import cli
+        from memanga.downloader import DownloaderError
+        from memanga.state import State
+
+        config.set("partial_chapters.enabled", True)
+        config.set("partial_chapters.threshold_percent", 1)
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "status": "reading",
+            "sources": [
+                {"source": "primary.test", "url": "https://primary.test/vs"},
+                {"source": "backup.test", "url": "https://backup.test/vs"},
+            ],
+        }])
+        config.save()
+
+        cli.state = State()
+        primary_ch = types.SimpleNamespace(
+            number="71", title="", url="https://primary.test/c/71",
+            source="primary.test", is_backup=False)
+        backup_ch = types.SimpleNamespace(
+            number="71", title="", url="https://backup.test/c/71",
+            source="backup.test", is_backup=True)
+
+        monkeypatch.setattr(cli, "check_for_updates",
+                            lambda *a, **k: [primary_ch])
+        monkeypatch.setattr(cli, "_find_chapter_on_backup",
+                            lambda *a, **k: backup_ch)
+        monkeypatch.setattr(
+            cli, "download_chapter",
+            lambda *a, **k: (_ for _ in ()).throw(
+                DownloaderError("incomplete", failed_pages=[1], total_pages=10)
+            ),
+        )
+
+        rc = run_cli("check", "--auto", "--quiet")
+
+        assert rc == 0
+        assert not cli.state.is_chapter_downloaded("Vinland Saga", "71")
+        failed = cli.state.get_failed_chapters("Vinland Saga")
+        assert "71" in failed
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -241,6 +430,46 @@ class TestConfigCommand:
             # Reload config from disk
             from memanga.config import Config
             assert Config().get("delivery.output_format") == "epub"
+
+    # ── Non-interactive partial-chapter tolerance (issue #86) ──
+
+    def test_config_partial_on_persists(self, run_cli, config):
+        rc = run_cli("config", "--partial", "on", "--partial-threshold", "5")
+        assert rc == 0
+        assert config.get("partial_chapters.enabled") is True
+        assert float(config.get("partial_chapters.threshold_percent")) == 5.0
+
+    def test_config_partial_off_persists(self, run_cli, config):
+        run_cli("config", "--partial", "on")
+        rc = run_cli("config", "--partial", "off")
+        assert rc == 0
+        assert config.get("partial_chapters.enabled") is False
+
+    def test_config_threshold_only_keeps_enabled_state(self, run_cli, config):
+        # Turn tolerance on, then change only the threshold — enabled
+        # state must be preserved.
+        run_cli("config", "--partial", "on", "--partial-threshold", "5")
+        rc = run_cli("config", "--partial-threshold", "10")
+        assert rc == 0
+        assert config.get("partial_chapters.enabled") is True
+        assert float(config.get("partial_chapters.threshold_percent")) == 10.0
+
+    def test_config_out_of_range_threshold_rejected(self, run_cli, config):
+        rc = run_cli("config", "--partial-threshold", "150")
+        assert rc != 0  # argparse rejects it, nothing persisted
+        assert config.get("partial_chapters.threshold_percent") != 150
+
+    def test_config_non_numeric_threshold_rejected(self, run_cli, config):
+        rc = run_cli("config", "--partial-threshold", "lots")
+        assert rc != 0
+
+    def test_config_show_does_not_prompt(self, run_cli, config, monkeypatch):
+        # --show must return without touching stdin.
+        def _boom(*a, **k):
+            raise AssertionError("config --show should not prompt")
+        monkeypatch.setattr("builtins.input", _boom)
+        rc = run_cli("config", "--show")
+        assert rc == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────
