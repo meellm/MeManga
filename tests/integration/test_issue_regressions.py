@@ -431,6 +431,152 @@ def test_issue_45_reader_marks_read_at_end(app_window, qapp, sample_manga,
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# #104 — Remove chapters after reading
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_issue_104_removes_chapter_after_read(app_window, qapp, sample_manga,
+                                              make_cbz):
+    from pathlib import Path
+    app_window.config.set("reader.remove_after_read", True)
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
+    title = sample_manga["title"]
+    artifact = Path(app_window.config.download_dir) / title / \
+        f"{title} - Chapter 1.cbz"
+    assert artifact.exists()
+
+    bar = reader._scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "test needs scrollable reader content"
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+
+    # File gone, dropped from downloaded, but read progress kept.
+    assert not artifact.exists()
+    assert not app_window.app_state.is_chapter_downloaded(title, "1")
+    assert app_window.app_state.is_chapter_read(title, "1")
+
+
+def test_issue_104_next_survives_current_download_cleanup(
+        app_window, qapp, sample_manga, make_cbz):
+    from pathlib import Path
+    app_window.config.set("reader.remove_after_read", True)
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz,
+                          chapters=("1", "2"), pages=8)
+    title = sample_manga["title"]
+    chapter_1 = Path(app_window.config.download_dir) / title / \
+        f"{title} - Chapter 1.cbz"
+    chapter_2 = Path(app_window.config.download_dir) / title / \
+        f"{title} - Chapter 2.cbz"
+    assert chapter_1.exists()
+    assert chapter_2.exists()
+
+    bar = reader._scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "test needs scrollable reader content"
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+
+    assert not chapter_1.exists()
+    assert not app_window.app_state.is_chapter_downloaded(title, "1")
+    assert app_window.app_state.is_chapter_downloaded(title, "2")
+    assert app_window.app_state.is_chapter_read(title, "1")
+
+    reader._go_next_chapter()
+    qapp.processEvents()
+
+    assert str(reader._chapter) == "2"
+    assert reader._artifact_path == chapter_2
+    assert reader._images
+
+
+def test_issue_104_107_prefetch_keeps_immediate_next_after_cleanup(
+        app_window, qapp, sample_manga, make_cbz):
+    from pathlib import Path
+    app_window.config.set("reader.remove_after_read", True)
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz,
+                          chapters=("1", "3"), pages=8)
+    title = sample_manga["title"]
+    dl = Path(app_window.config.download_dir) / title
+    chapter_1 = dl / f"{title} - Chapter 1.cbz"
+    chapter_2 = dl / f"{title} - Chapter 2.cbz"
+
+    assert reader._navigation_neighbor(+1, title) == "3"
+
+    bar = reader._scroll.verticalScrollBar()
+    assert bar.maximum() > 0, "test needs scrollable reader content"
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+
+    assert not chapter_1.exists()
+    assert app_window.app_state.get_downloaded_chapters(title) == ["3"]
+
+    # A prefetch/download completion lands chapter 2 after the current
+    # chapter has already been removed from downloaded state.
+    chapter_2.write_bytes(
+        make_cbz(pages=8, name="ch2.cbz").read_bytes())
+    app_window.app_state.add_downloaded_chapter(title, "2")
+    assert app_window.app_state.get_downloaded_chapters(title) == ["2", "3"]
+
+    reader._on_download_complete({"title": title, "chapter": "2"})
+    qapp.processEvents()
+
+    assert reader._navigation_neighbor(+1, title) == "2"
+    assert not reader._next_btn.isHidden()
+    assert reader._next_footer_btn.text() == "Next: Chapter 2 >>"
+
+    reader._go_next_chapter()
+    qapp.processEvents()
+
+    assert str(reader._chapter) == "2"
+    assert reader._artifact_path == chapter_2
+    assert reader._images
+
+
+def test_issue_104_disabled_keeps_chapter(app_window, qapp, sample_manga,
+                                          make_cbz):
+    from pathlib import Path
+    app_window.config.set("reader.remove_after_read", False)
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
+    title = sample_manga["title"]
+    artifact = Path(app_window.config.download_dir) / title / \
+        f"{title} - Chapter 1.cbz"
+
+    bar = reader._scroll.verticalScrollBar()
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+
+    # Default behaviour: read but nothing deleted.
+    assert artifact.exists()
+    assert app_window.app_state.is_chapter_downloaded(title, "1")
+    assert app_window.app_state.is_chapter_read(title, "1")
+
+
+def test_issue_104_deletion_failure_keeps_downloaded(app_window, qapp,
+                                                     sample_manga, make_cbz):
+    # If the artifact can't be deleted, the chapter must stay downloaded
+    # (state must not desync from disk) and the reader must not crash.
+    from pathlib import Path
+    app_window.config.set("reader.remove_after_read", True)
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
+    title = sample_manga["title"]
+    artifact = Path(app_window.config.download_dir) / title / \
+        f"{title} - Chapter 1.cbz"
+
+    # Force the (file) deletion to fail, as a locked/permission-denied
+    # artifact would in the wild.
+    import unittest.mock as mock
+    with mock.patch.object(type(artifact), "unlink",
+                           side_effect=OSError("boom")):
+        bar = reader._scroll.verticalScrollBar()
+        bar.setValue(bar.maximum())
+        qapp.processEvents()
+
+    # Non-fatal: file untouched, chapter stays downloaded and read.
+    assert artifact.exists()
+    assert app_window.app_state.is_chapter_downloaded(title, "1")
+    assert app_window.app_state.is_chapter_read(title, "1")
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # #32 — Page-by-page reading modes (single / two-up) with arrow keys
 # ─────────────────────────────────────────────────────────────────────────
 

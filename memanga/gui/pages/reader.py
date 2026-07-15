@@ -5,6 +5,7 @@ Three layouts: continuous vertical scroll, single page, two-up spreads.
 
 import io
 import re
+import shutil
 import zipfile
 from pathlib import Path
 from typing import List, Optional
@@ -143,6 +144,10 @@ class ReaderPage(BasePage):
         super().__init__(parent, app)
         self._manga = None
         self._chapter = None
+        # Issue #104: concrete file/folder the current chapter was loaded
+        # from, recorded in _find_and_load_chapter so the "remove after
+        # reading" cleanup deletes exactly what the reader opened.
+        self._artifact_path: Optional[Path] = None
         self._images: List[QImage] = []
         self._page_labels: list = []
         self._zoom_level = 1.0
@@ -171,6 +176,11 @@ class ReaderPage(BasePage):
         self._next_btn = None
         self._next_footer = None
         self._next_footer_btn = None
+        # Issue #104/#107: navigation needs a stable anchor while the
+        # current chapter remains visible after remove-after-read drops it
+        # from downloaded-state. New downloads are merged into this list so
+        # dynamic Next controls still reveal prefetched successors.
+        self._navigation_chapters: List[str] = []
         self._prefetch_fallback_key = None
         self._prefetch_fallback_attempted_key = None
         self.app.events.subscribe("download_complete",
@@ -640,11 +650,47 @@ class ReaderPage(BasePage):
         # Issue #106: a finished chapter should reopen from its first
         # page, not keep resuming at the saved end-of-chapter position.
         self.app.app_state.clear_reader_position(title, str(self._chapter))
+        # Issue #104: optionally discard the local file now that the
+        # chapter is finished. Runs after the read set is updated so read
+        # progress survives even if the deletion fails.
+        self._remove_after_read(title, str(self._chapter))
         # Tell other pages (Library, Detail) to repaint without
         # waiting for the next navigation.
         self.app.events.publish("chapter_read", {
             "title": title, "chapter": str(self._chapter),
         })
+
+    def _remove_after_read(self, title: str, chapter: str):
+        """Delete the just-read chapter's local artifact and drop it from
+        downloaded-state when the "remove chapters after reading" setting
+        is on (issue #104).
+
+        Read-state is intentionally left intact — only the downloaded
+        record and the on-disk file/folder go away, so the Detail row
+        returns to the Download state. Deletion failures are non-fatal:
+        the chapter stays marked downloaded and a notification is logged
+        instead of desyncing state from disk or crashing the reader.
+        """
+        if not self.app.config.get("reader.remove_after_read", False):
+            return
+        path = self._artifact_path
+        if path is None:
+            return
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+            # If the file is already gone, treat that as success and let
+            # the downloaded-state removal below reconcile with disk.
+        except OSError as exc:
+            self.app.app_state.add_notification(
+                "error",
+                f"Couldn't remove {title} Chapter {chapter} after reading: {exc}",
+            )
+            return
+        self._artifact_path = None
+        self.app.app_state.remove_downloaded_chapter(title, chapter)
 
     def _mark_read_if_unscrollable(self):
         """A chapter that fits entirely in the viewport never scrolls, so
@@ -929,14 +975,10 @@ class ReaderPage(BasePage):
         top_layout.addStretch()
 
         # Chapter navigation
-        downloaded = self.app.app_state.get_downloaded_chapters(title)
-        try:
-            idx = downloaded.index(str(self._chapter))
-        except ValueError:
-            idx = -1
+        prev_ch = self._navigation_neighbor(-1, title)
+        next_ch = self._navigation_neighbor(+1, title)
 
-        if idx > 0:
-            prev_ch = downloaded[idx - 1]
+        if prev_ch is not None:
             prev_btn = QPushButton("‹ Prev")
             prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             prev_btn.clicked.connect(lambda checked=False, c=prev_ch: self._navigate_chapter(c))
@@ -950,7 +992,7 @@ class ReaderPage(BasePage):
         self._next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._next_btn.clicked.connect(
             lambda checked=False: self._go_next_chapter())
-        self._next_btn.setVisible(0 <= idx < len(downloaded) - 1)
+        self._next_btn.setVisible(next_ch is not None)
         top_layout.addWidget(self._next_btn)
 
         # ── Layout toggle (issues #24, #32) ─────────────────────────────
@@ -1075,13 +1117,12 @@ class ReaderPage(BasePage):
         # Issue #107: built even without a successor (hidden) so a
         # prefetch completion can flip it visible without a reload.
         if self._view_mode == "continuous":
-            has_next = 0 <= idx < len(downloaded) - 1
             next_frame = QWidget()
             next_frame_layout = QHBoxLayout(next_frame)
             next_frame_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
             next_chapter_btn = QPushButton(
-                self._next_footer_label(downloaded, idx))
+                self._next_footer_label(next_ch))
             next_chapter_btn.setProperty("class", "accent")
             next_chapter_btn.setFixedHeight(40)
             next_chapter_btn.setFixedWidth(250)
@@ -1092,7 +1133,7 @@ class ReaderPage(BasePage):
             next_frame_layout.addWidget(next_chapter_btn)
             self._image_layout.addSpacing(T.PAD_XL)
             self._image_layout.addWidget(next_frame)
-            next_frame.setVisible(has_next)
+            next_frame.setVisible(next_ch is not None)
             self._next_footer = next_frame
             self._next_footer_btn = next_chapter_btn
 
@@ -1151,6 +1192,9 @@ class ReaderPage(BasePage):
         # that predate this fix.
         from ...downloader import _format_chapter_number, _sanitize_filename
 
+        # Reset before resolving so a failed load can't leave a stale path
+        # pointing at the previous chapter (issue #104).
+        self._artifact_path = None
         title = self._manga.get("title", "")
         ch = str(self._chapter)
         download_dir = Path(self.app.config.download_dir)
@@ -1174,10 +1218,12 @@ class ReaderPage(BasePage):
                 for ext in [".pdf", ".epub", ".cbz", ".zip"]:
                     filepath = manga_dir / f"{base}{ext}"
                     if filepath.exists():
+                        self._artifact_path = filepath
                         return _extract_images_from_file(filepath)
 
                 folder = manga_dir / f"Chapter {label}"
                 if folder.is_dir():
+                    self._artifact_path = folder
                     return _extract_images_from_folder(folder)
 
         # Fallback: scan directories for anything chapter-shaped
@@ -1186,8 +1232,10 @@ class ReaderPage(BasePage):
                 if f.is_file() and any(
                     f"chapter {label.lower()}" in f.stem.lower() for label in labels
                 ):
+                    self._artifact_path = f
                     return _extract_images_from_file(f)
                 if f.is_dir() and any(label in f.name for label in labels):
+                    self._artifact_path = f
                     return _extract_images_from_folder(f)
 
         return []
@@ -1208,25 +1256,88 @@ class ReaderPage(BasePage):
         if not self._manga:
             return
         title = self._manga.get("title", "")
-        downloaded = self.app.app_state.get_downloaded_chapters(title)
-        try:
-            idx = downloaded.index(str(self._chapter))
-            if idx < len(downloaded) - 1:
-                self._navigate_chapter(downloaded[idx + 1])
-        except ValueError:
-            pass
+        next_ch = self._navigation_neighbor(+1, title)
+        if next_ch is not None:
+            self._navigate_chapter(next_ch)
 
     def _go_prev_chapter(self):
         if not self._manga:
             return
         title = self._manga.get("title", "")
-        downloaded = self.app.app_state.get_downloaded_chapters(title)
+        prev_ch = self._navigation_neighbor(-1, title)
+        if prev_ch is not None:
+            self._navigate_chapter(prev_ch)
+
+    def _sync_navigation_chapters(self, title: str) -> List[str]:
+        """Return the reader-local chapter order for Prev/Next.
+
+        When the current chapter is still in downloaded-state, the live
+        downloaded list is authoritative. If remove-after-read has already
+        dropped the visible chapter, keep the previous reader-local order as
+        the anchor and merge in any newly downloaded/prefetched chapters.
+        """
+        downloaded = [
+            str(ch) for ch in self.app.app_state.get_downloaded_chapters(title)
+        ]
+        current = str(self._chapter)
+        if current in downloaded:
+            self._navigation_chapters = downloaded
+            return self._navigation_chapters
+
+        merged = []
+        for chapter in self._navigation_chapters:
+            chapter = str(chapter)
+            if chapter not in merged:
+                merged.append(chapter)
+        if current not in merged:
+            self._insert_navigation_chapter(merged, current)
+        for chapter in downloaded:
+            chapter = str(chapter)
+            if chapter not in merged:
+                self._insert_navigation_chapter(merged, chapter)
+        self._navigation_chapters = merged
+        return self._navigation_chapters
+
+    def _insert_navigation_chapter(self, sequence: List[str], chapter: str):
+        """Insert a newly discovered chapter into reader-local order."""
+        key = _chapter_sort_key(chapter)
+        if key is None:
+            sequence.append(chapter)
+            return
+
+        for idx, existing in enumerate(sequence):
+            existing_key = _chapter_sort_key(existing)
+            if existing_key is not None and existing_key > key:
+                sequence.insert(idx, chapter)
+                return
+        sequence.append(chapter)
+
+    def _navigation_neighbor(self, direction: int,
+                             title: Optional[str] = None) -> Optional[str]:
+        """Find the nearest downloaded neighbor in the local navigation
+        sequence. Removed stale entries are skipped, but the current chapter
+        itself may remain as the anchor after remove-after-read."""
+        if not self._manga or self._chapter is None:
+            return None
+        title = title if title is not None else self._manga.get("title", "")
+        sequence = self._sync_navigation_chapters(title)
+        current = str(self._chapter)
         try:
-            idx = downloaded.index(str(self._chapter))
-            if idx > 0:
-                self._navigate_chapter(downloaded[idx - 1])
+            idx = sequence.index(current)
         except ValueError:
-            pass
+            return None
+
+        downloaded = set(
+            str(ch) for ch in self.app.app_state.get_downloaded_chapters(title)
+        )
+        step = 1 if direction > 0 else -1
+        i = idx + step
+        while 0 <= i < len(sequence):
+            chapter = sequence[i]
+            if chapter in downloaded:
+                return chapter
+            i += step
+        return None
 
     # -- Reader prefetch (issue #107) ------------------------------------
     def _maybe_prefetch_next(self):
@@ -1396,13 +1507,13 @@ class ReaderPage(BasePage):
             return
         self._refresh_next_controls()
 
-    def _next_footer_label(self, downloaded, idx):
+    def _next_footer_label(self, next_chapter):
         """Caption for the continuous-mode footer button, resolved from
-        the downloaded list at build/refresh time -- never captured -- so
+        reader navigation at build/refresh time -- never captured -- so
         a chapter prefetched mid-read shows its real number once
         _refresh_next_controls reveals the button (issue #107)."""
-        if 0 <= idx < len(downloaded) - 1:
-            return f"Next: Chapter {downloaded[idx + 1]} >>"
+        if next_chapter is not None:
+            return f"Next: Chapter {next_chapter} >>"
         return "Next Chapter >>"
 
     def _refresh_next_controls(self):
@@ -1413,16 +1524,12 @@ class ReaderPage(BasePage):
         if not self._manga or self._chapter is None:
             return
         title = self._manga.get("title", "")
-        downloaded = self.app.app_state.get_downloaded_chapters(title)
-        try:
-            idx = downloaded.index(str(self._chapter))
-        except ValueError:
-            idx = -1
-        has_next = 0 <= idx < len(downloaded) - 1
+        next_ch = self._navigation_neighbor(+1, title)
+        has_next = next_ch is not None
         if self._next_footer_btn is not None:
             try:
                 self._next_footer_btn.setText(
-                    self._next_footer_label(downloaded, idx))
+                    self._next_footer_label(next_ch))
             except RuntimeError:
                 pass
         for widget in (self._next_btn, self._next_footer):
