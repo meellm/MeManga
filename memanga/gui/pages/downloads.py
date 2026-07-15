@@ -561,6 +561,7 @@ class DownloadsPage(BasePage):
 
         global_kindle = self.app.config.delivery_mode == "email" and self.app.config.email_enabled
         naming_template = self.app.config.get("delivery.naming_template")
+        post_processing = self.app.config.get("delivery.post_processing")
 
         skipped = 0
         for r in to_queue:
@@ -592,6 +593,7 @@ class DownloadsPage(BasePage):
                     output_format=self.app.config.output_format,
                     state=self.app.app_state, kindle_cfg=kindle_cfg,
                     naming_template=naming_template,
+                    post_processing=post_processing,
                     allow_partial=self.app.config.partial_enabled,
                     partial_threshold=self.app.config.partial_threshold,
                 )

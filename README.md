@@ -152,7 +152,7 @@ Hit **Re-check health** to ping every enabled source and see their status.
 
 - **General** — output format (PDF/EPUB/CBZ/…), download folder, theme, concurrency
 - **Kindle / Email** — Gmail App Password setup for sending chapters to your Kindle
-- **Advanced** — fallback-source delay, cron, cache management
+- **Advanced** — fallback-source delay, post-processing, cron, cache management
 
 <p align="center">
   <img src="docs/screenshots/settings-kindle.png" alt="Settings page — Kindle/Email tab" width="900">

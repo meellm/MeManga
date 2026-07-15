@@ -29,6 +29,16 @@ def test_pages_handle_theme_switch(app_window, qapp, theme):
         theme.set_theme("dark", qapp); qapp.processEvents()
 
 
+def test_download_complete_clears_failed_chapter(app_window, qapp):
+    app_window.app_state.add_failed_chapter("M", "1", "mock.test", "boom")
+    assert "1" in app_window.app_state.get_failed_chapters("M")
+
+    app_window._on_download_complete({"title": "M", "chapter": "1", "path": ""})
+    qapp.processEvents()
+
+    assert "1" not in app_window.app_state.get_failed_chapters("M")
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Library
 # ─────────────────────────────────────────────────────────────────────────
@@ -227,6 +237,25 @@ class TestSettingsPage:
         page._save()
         # No exception = passes. Config got at least one write.
         assert app_window.config.get("delivery.output_format") is not None
+
+    def test_save_writes_post_processing_settings(self, app_window, qapp):
+        page = app_window._pages["settings"]
+        page._post_processing_check.setChecked(True)
+        page._post_processing_command.setText(
+            "python scripts/after_download.py {output_path}"
+        )
+        page._post_processing_fail_check.setChecked(True)
+
+        page._save()
+
+        assert app_window.config.get("delivery.post_processing.enabled") is True
+        assert app_window.config.get("delivery.post_processing.command") == (
+            "python scripts/after_download.py {output_path}"
+        )
+        assert (
+            app_window.config.get("delivery.post_processing.fail_on_error")
+            is True
+        )
 
     def test_partial_toggle_saves_to_config(self, app_window, qapp):
         # Partial-chapter tolerance (issue #86): the Advanced-tab toggle +

@@ -319,7 +319,8 @@ class BackgroundWorker:
 
     def download_chapter(self, manga, chapter, output_dir, output_format, state,
                          kindle_cfg=None, naming_template=None,
-                         allow_partial=False, partial_threshold=0.0):
+                         post_processing=None, allow_partial=False,
+                         partial_threshold=0.0):
         """Queue a chapter download.
 
         ``allow_partial``/``partial_threshold`` carry the partial-chapter
@@ -353,6 +354,7 @@ class BackgroundWorker:
             "state": state,
             "kindle_cfg": kindle_cfg,
             "naming_template": naming_template,
+            "post_processing": post_processing,
             "cancel": cancel,
             "allow_partial": allow_partial,
             "partial_threshold": partial_threshold,
@@ -498,6 +500,7 @@ class BackgroundWorker:
                 progress_callback=progress_cb,
                 naming_template=item.get("naming_template"),
                 cancel_event=item["cancel"],
+                post_processing=item.get("post_processing"),
                 allow_partial=primary_allow_partial,
                 partial_threshold=partial_threshold,
                 on_partial=on_partial,
@@ -521,6 +524,18 @@ class BackgroundWorker:
         except Exception as e:
             print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}", flush=True)
             traceback.print_exc()
+            state = item.get("state")
+            if state is not None and hasattr(state, "add_failed_chapter"):
+                source = getattr(chapter, "source", None) or manga.get("source", "?")
+                try:
+                    state.add_failed_chapter(
+                        manga["title"],
+                        chapter.number,
+                        source,
+                        str(e),
+                    )
+                except Exception:
+                    traceback.print_exc()
             self._events.publish("download_error", {
                 "task_id": task_id, "error": str(e),
                 "title": manga["title"], "chapter": chapter.number,
@@ -570,6 +585,7 @@ class BackgroundWorker:
                 progress_callback=progress_callback,
                 naming_template=item.get("naming_template"),
                 cancel_event=item["cancel"],
+                post_processing=item.get("post_processing"),
                 allow_partial=allow_partial_flag,
                 partial_threshold=partial_threshold,
                 on_partial=on_partial,
@@ -615,12 +631,30 @@ class BackgroundWorker:
         # 3) Nothing worked — surface the failure.
         if backup_ch and backup_err is not None:
             error_msg = f"Primary: {primary_err}; Backup: {backup_err}"
+            source = f"{getattr(chapter, 'source', None) or manga.get('source', '?')}+{backup_ch.source}"
         else:
             error_msg = str(primary_err)
+            source = getattr(chapter, "source", None) or manga.get("source", "?")
         print(
             f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {error_msg}",
             flush=True,
         )
+        state = item.get("state")
+        if state is not None and hasattr(state, "add_failed_chapter"):
+            try:
+                failed_pages = getattr(primary_err, "failed_pages", None)
+                if failed_pages is not None:
+                    state.add_failed_chapter(
+                        manga["title"], chapter.number, source, error_msg,
+                        failed_pages=failed_pages,
+                    )
+                else:
+                    state.add_failed_chapter(
+                        manga["title"], chapter.number, source, error_msg,
+                    )
+            except Exception:
+                import traceback
+                traceback.print_exc()
         self._events.publish("download_error", {
             "task_id": task_id, "error": error_msg,
             "title": manga["title"], "chapter": chapter.number,

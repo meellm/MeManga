@@ -572,6 +572,58 @@ class SettingsPage(BasePage):
 
         f.addSpacing(T.PAD_XL)
 
+        # Post-processing
+        self._section(f, "Post-Processing")
+
+        self._post_processing_check = QCheckBox("Run a command after each chapter download")
+        self._post_processing_check.setChecked(
+            self.app.config.get("delivery.post_processing.enabled", False)
+        )
+        self._post_processing_check.toggled.connect(
+            self._refresh_post_processing_enabled
+        )
+        f.addWidget(self._post_processing_check)
+
+        command_row = QHBoxLayout()
+        command_lbl = QLabel("Command:")
+        command_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+        command_row.addWidget(command_lbl)
+
+        self._post_processing_command = QLineEdit(
+            self.app.config.get("delivery.post_processing.command", "")
+        )
+        self._post_processing_command.setMinimumHeight(36)
+        self._post_processing_command.setMinimumWidth(280)
+        self._post_processing_command.setPlaceholderText(
+            "python scripts/after_download.py {output_path}"
+        )
+        command_row.addWidget(self._post_processing_command, 1)
+        f.addLayout(command_row)
+        self._post_processing_command.setToolTip(
+            "Runs after the final chapter file or folder is created"
+        )
+
+        self._post_processing_fail_check = QCheckBox(
+            "Mark download failed if the command exits with an error"
+        )
+        self._post_processing_fail_check.setChecked(
+            self.app.config.get("delivery.post_processing.fail_on_error", False)
+        )
+        f.addWidget(self._post_processing_fail_check)
+
+        pp_hint = QLabel(
+            "Available placeholders: {output_path}, {title}, {chapter}, "
+            "{source}, {format}, {is_dir}. The same values are also exposed "
+            "as MEMANGA_* environment variables.\nCommands run directly; invoke "
+            "a shell explicitly if you need shell features."
+        )
+        pp_hint.setWordWrap(True)
+        pp_hint.setProperty("role", "hint")
+        f.addWidget(pp_hint)
+        self._refresh_post_processing_enabled()
+
+        f.addSpacing(T.PAD_XL)
+
         # Import/Export
         self._section(f, "Import / Export")
         ie_row = QHBoxLayout()
@@ -628,6 +680,11 @@ class SettingsPage(BasePage):
         # Refresh cache size on display.
         from PySide6.QtCore import QTimer
         QTimer.singleShot(100, self._refresh_cache_size)
+
+    def _refresh_post_processing_enabled(self):
+        enabled = self._post_processing_check.isChecked()
+        self._post_processing_command.setEnabled(enabled)
+        self._post_processing_fail_check.setEnabled(enabled)
 
     def _refresh_cache_size(self):
         """Compute the on-disk size of the cover cache and update the label."""
@@ -813,6 +870,18 @@ class SettingsPage(BasePage):
             cron_time = "06:00"
         cfg.set("cron.enabled", self._cron_check.isChecked())
         cfg.set("cron.time", cron_time)
+        cfg.set(
+            "delivery.post_processing.enabled",
+            self._post_processing_check.isChecked(),
+        )
+        cfg.set(
+            "delivery.post_processing.command",
+            self._post_processing_command.text().strip(),
+        )
+        cfg.set(
+            "delivery.post_processing.fail_on_error",
+            self._post_processing_fail_check.isChecked(),
+        )
 
         # Partial-chapter tolerance (issue #86)
         if hasattr(self, "_partial_check"):
@@ -857,6 +926,17 @@ class SettingsPage(BasePage):
 
         self._cron_check.setChecked(cfg.get("cron.enabled", False))
         self._cron_time.setText(cfg.get("cron.time", "06:00"))
+
+        self._post_processing_check.setChecked(
+            cfg.get("delivery.post_processing.enabled", False)
+        )
+        self._post_processing_command.setText(
+            cfg.get("delivery.post_processing.command", "")
+        )
+        self._post_processing_fail_check.setChecked(
+            cfg.get("delivery.post_processing.fail_on_error", False)
+        )
+        self._refresh_post_processing_enabled()
 
         if hasattr(self, "_partial_check"):
             self._partial_check.setChecked(cfg.partial_enabled)

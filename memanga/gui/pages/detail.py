@@ -1153,6 +1153,7 @@ class DetailPage(BasePage):
                 kindle_cfg = None
 
         naming_template = self.app.config.get("delivery.naming_template")
+        post_processing = self.app.config.get("delivery.post_processing")
 
         self.app.worker.download_chapter(
             manga=self._manga, chapter=chapter,
@@ -1160,6 +1161,7 @@ class DetailPage(BasePage):
             output_format=self.app.config.output_format,
             state=self.app.app_state, kindle_cfg=kindle_cfg,
             naming_template=naming_template,
+            post_processing=post_processing,
             allow_partial=self.app.config.partial_enabled,
             partial_threshold=self.app.config.partial_threshold,
         )

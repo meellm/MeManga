@@ -438,6 +438,7 @@ def cmd_check(args):
     download_dir = config.download_dir
     output_format = getattr(args, 'format', None) or config.output_format
     email_cfg = config.get("email", {})
+    post_processing = config.get("delivery.post_processing")
 
     # Partial-chapter tolerance (issue #86). Config is the source of truth;
     # `check` flags can override it for a single run.
@@ -591,6 +592,7 @@ def cmd_check(args):
                     file_path = download_chapter(
                         manga, ch, download_dir, output_format,
                         max_retries=max_retries,
+                        post_processing=post_processing,
                         allow_partial=primary_allow_partial,
                         partial_threshold=partial_threshold,
                         on_partial=_capture_partial,
@@ -627,6 +629,7 @@ def cmd_check(args):
                             file_path = download_chapter(
                                 manga, backup_ch, download_dir, output_format,
                                 max_retries=max_retries,
+                                post_processing=post_processing,
                             )
                             _announce_saved(file_path, from_backup=True, partial=None)
                             _deliver_email(file_path)
@@ -656,6 +659,7 @@ def cmd_check(args):
                                 file_path = download_chapter(
                                     manga, cand, download_dir, output_format,
                                     max_retries=max_retries,
+                                    post_processing=post_processing,
                                     allow_partial=True,
                                     partial_threshold=partial_threshold,
                                     on_partial=_capture_partial,
@@ -734,6 +738,13 @@ def cmd_status(args):
         table.add_row("Kindle email", config.get("email.kindle_email") or "[red]not set[/red]")
         table.add_row("Sender email", config.get("email.sender_email") or "[red]not set[/red]")
     
+    pp_enabled = bool(config.get("delivery.post_processing.enabled"))
+    pp_status = "enabled" if pp_enabled else "disabled"
+    table.add_row(
+        "Post-processing",
+        f"[{'green' if pp_enabled else 'dim'}]{pp_status}[/]",
+    )
+
     cron_status = "enabled" if config.get("cron.enabled") else "disabled"
     cron_time = config.get("cron.time", "06:00")
     table.add_row("Cron", f"[{'green' if cron_status == 'enabled' else 'dim'}]{cron_status}[/] ({cron_time})")
@@ -858,6 +869,40 @@ def cmd_config(args):
         config.set("delivery.output_format", "png")
     elif fmt_choice == "7":
         config.set("delivery.output_format", "webp")
+
+    # Post-processing hook (optional, disabled by default)
+    pp_enabled = bool(config.get("delivery.post_processing.enabled"))
+    console.print(
+        f"\n[bold]Post-processing[/bold] (current: "
+        f"[cyan]{'enabled' if pp_enabled else 'disabled'}[/cyan])"
+    )
+    console.print(
+        "[dim]Run a command after each chapter is saved. "
+        "Only enable commands you trust.[/dim]"
+    )
+    if Confirm.ask("Enable post-processing command?", default=pp_enabled):
+        console.print(
+            "[dim]Placeholders: {output_path} {title} {chapter} {source} "
+            "{format} {is_dir} (also as MEMANGA_* env vars).[/dim]"
+        )
+        console.print(
+            "[dim]Commands run directly, without a shell. Invoke a shell "
+            "explicitly for pipes, redirects, or globbing. Scripts should "
+            "prefer MEMANGA_* env vars.[/dim]"
+        )
+        pp_command = Prompt.ask(
+            "Command",
+            default=config.get("delivery.post_processing.command", "")
+        )
+        pp_fail = Confirm.ask(
+            "Mark chapter as failed if the command fails?",
+            default=config.get("delivery.post_processing.fail_on_error", False)
+        )
+        config.set("delivery.post_processing.enabled", True)
+        config.set("delivery.post_processing.command", pp_command)
+        config.set("delivery.post_processing.fail_on_error", pp_fail)
+    else:
+        config.set("delivery.post_processing.enabled", False)
 
     # Partial-chapter tolerance (issue #86)
     current_partial = config.partial_enabled
@@ -1430,6 +1475,7 @@ def cmd_failed(args):
         download_dir = config.download_dir
         output_format = config.output_format
         email_cfg = config.get("email", {})
+        post_processing = config.get("delivery.post_processing")
         retried = 0
         succeeded = 0
 
@@ -1467,7 +1513,7 @@ def cmd_failed(args):
                 console.print(f"  [dim]⬇️  Retrying {manga_title} Chapter {chapter_num}...[/dim]")
                 retried += 1
                 try:
-                    file_path = download_chapter(manga, ch_obj, download_dir, output_format)
+                    file_path = download_chapter(manga, ch_obj, download_dir, output_format, post_processing=post_processing)
                     is_image_folder = file_path.is_dir()
                     if is_image_folder:
                         console.print(f"  [green]✅ Saved: {file_path.parent.name}/{file_path.name}/[/green]")
@@ -1497,7 +1543,7 @@ def cmd_failed(args):
                     if backup_ch:
                         console.print(f"  [yellow]⚠️  Primary failed, trying backup ({backup_ch.source})...[/yellow]")
                         try:
-                            file_path = download_chapter(manga, backup_ch, download_dir, output_format)
+                            file_path = download_chapter(manga, backup_ch, download_dir, output_format, post_processing=post_processing)
                             state.add_downloaded_chapter(manga_title, chapter_num)
                             state.clear_failed_chapter(manga_title, chapter_num)
                             label = f"{file_path.parent.name}/{file_path.name}/" if file_path.is_dir() else file_path.name
