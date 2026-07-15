@@ -308,6 +308,184 @@ class TestCheckForUpdatesGuard:
 
 
 # -------------------------------------------------------------------------
+# #102: existing catalogue backlog must not read as a suspicious jump
+# -------------------------------------------------------------------------
+
+
+# Blue Lock scenario: a large existing catalogue with only chapter 1 grabbed.
+BLUE_LOCK_MANGA = {
+    "title": "Blue Lock",
+    "mode": "manual",
+    "source": "primary.test",
+    "url": "https://primary.test/m",
+}
+
+
+def _cache_catalogue(state, title, numbers):
+    """Mimic the GUI persisting the primary chapter list after a check."""
+    state.set_available_chapters(title, [
+        {"number": f"{n:g}", "title": "", "source": "primary.test",
+         "source_url": "https://primary.test/m", "is_backup": False,
+         "url": f"u/{n:g}"}
+        for n in numbers
+    ])
+
+
+class TestManualBacklogNotSuspicious:
+    def test_first_manual_check_bootstraps_catalogue_baseline(self, state, monkeypatch):
+        # Exact #102 shape: no cached catalogue yet, only chapter 1 is
+        # downloaded, and the source reports a large existing catalogue.
+        # Manual mode should snapshot that catalogue instead of treating the
+        # old backlog as an auto-delivery anomaly.
+        from memanga.downloader import check_for_updates
+
+        state.add_downloaded_chapter("Blue Lock", "1")
+        assert state.get_available_chapters("Blue Lock") == []
+        assert state.get_catalogue_baseline("Blue Lock") is None
+        _patch_scrapers(monkeypatch, {
+            "primary.test": _scraper_returning([float(n) for n in range(1, 354)]),
+        })
+
+        new = check_for_updates(BLUE_LOCK_MANGA, state)
+
+        assert [c.number for c in new] == [str(n) for n in range(2, 354)]
+        assert state.get_suspicious_batch("Blue Lock") is None
+        assert state.get_catalogue_baseline("Blue Lock") == 353.0
+        assert not any(n["type"] == "warn" for n in state.get_notifications())
+
+    def test_undownloaded_backlog_is_not_flagged(self, state, monkeypatch):
+        # Manual manga: chapter 1 downloaded out of an existing 1..344
+        # catalogue that has since grown to 353. The backlog must stay
+        # visible/downloadable without a suspicious record (#102).
+        from memanga.downloader import check_for_updates
+
+        state.add_downloaded_chapter("Blue Lock", "1")
+        state.set_catalogue_baseline("Blue Lock", 344.0)
+        _patch_scrapers(monkeypatch, {
+            "primary.test": _scraper_returning([float(n) for n in range(1, 354)]),
+        })
+
+        new = check_for_updates(BLUE_LOCK_MANGA, state)
+
+        # The whole undownloaded backlog (2..353) is offered, none withheld.
+        assert [c.number for c in new] == [str(n) for n in range(2, 354)]
+        assert state.get_suspicious_batch("Blue Lock") is None
+        assert not any(n["type"] == "warn" for n in state.get_notifications())
+
+    def test_baseline_bootstrapped_from_cached_catalogue(self, state, monkeypatch):
+        # No explicit baseline yet (pre-existing manga), but the GUI has
+        # cached the catalogue up to 344 from an earlier check. That cache
+        # bootstraps the baseline so the backlog isn't flagged.
+        from memanga.downloader import check_for_updates
+
+        state.add_downloaded_chapter("Blue Lock", "1")
+        _cache_catalogue(state, "Blue Lock", range(1, 345))
+        assert state.get_catalogue_baseline("Blue Lock") is None
+        _patch_scrapers(monkeypatch, {
+            "primary.test": _scraper_returning([float(n) for n in range(1, 354)]),
+        })
+
+        new = check_for_updates(BLUE_LOCK_MANGA, state)
+
+        assert state.get_suspicious_batch("Blue Lock") is None
+        assert [c.number for c in new] == [str(n) for n in range(2, 354)]
+        # The baseline is now persisted at the current catalogue high.
+        assert state.get_catalogue_baseline("Blue Lock") == 353.0
+
+    def test_growth_beyond_baseline_is_still_scored(self, state, monkeypatch):
+        # A genuine bogus jump beyond the known catalogue is still caught,
+        # even when an old backlog sits below the baseline.
+        from memanga.downloader import check_for_updates
+
+        state.add_downloaded_chapter("Blue Lock", "1")
+        state.set_catalogue_baseline("Blue Lock", 344.0)
+        # Source suddenly re-numbers far past the catalogue high.
+        _patch_scrapers(monkeypatch, {
+            "primary.test": _scraper_returning(
+                [float(n) for n in range(1, 345)] + [900.0, 950.0, 999.0]
+            ),
+        })
+
+        new = check_for_updates(BLUE_LOCK_MANGA, state)
+
+        record = state.get_suspicious_batch("Blue Lock")
+        assert record is not None
+        # Only the newly-appeared chapters beyond 344 are held back; the
+        # existing backlog (2..344) is still offered.
+        assert record["chapters"] == ["900", "950", "999"]
+        assert [c.number for c in new] == [str(n) for n in range(2, 345)]
+        # Baseline stays at the trusted 344 — not advanced past the jump.
+        assert state.get_catalogue_baseline("Blue Lock") == 344.0
+
+    def test_baseline_advances_on_normal_growth(self, state, monkeypatch):
+        # A first check with no download baseline snapshots the catalogue;
+        # later growth is measured from that snapshot.
+        from memanga.downloader import check_for_updates
+
+        # Fresh manual manga, nothing downloaded yet: guard doesn't run but
+        # the catalogue is snapshotted as trusted.
+        _patch_scrapers(monkeypatch, {
+            "primary.test": _scraper_returning([float(n) for n in range(1, 345)]),
+        })
+        check_for_updates(BLUE_LOCK_MANGA, state)
+        assert state.get_catalogue_baseline("Blue Lock") == 344.0
+
+        # Now one chapter is downloaded and the source grows modestly.
+        state.add_downloaded_chapter("Blue Lock", "1")
+        _patch_scrapers(monkeypatch, {
+            "primary.test": _scraper_returning([float(n) for n in range(1, 354)]),
+        })
+        check_for_updates(BLUE_LOCK_MANGA, state)
+        assert state.get_suspicious_batch("Blue Lock") is None
+        assert state.get_catalogue_baseline("Blue Lock") == 353.0
+
+    def test_mangafire_jump_still_flagged_with_cached_catalogue(self, state, monkeypatch):
+        # #35 must be preserved: a manga tracked at 52.3 whose cached
+        # catalogue is also ~52 still flags the bogus jump to 148.
+        from memanga.downloader import check_for_updates
+
+        state.set_last_chapter("Tomodachi", "52.3")
+        _cache_catalogue(state, "Tomodachi", [50, 51, 52, 52.3])
+        _patch_scrapers(monkeypatch, {
+            "primary.test": _scraper_returning([52.3] + MANGAFIRE_BOGUS_BATCH),
+        })
+
+        new = check_for_updates(SINGLE_SOURCE_MANGA, state)
+
+        assert new == []
+        assert state.get_suspicious_batch("Tomodachi") is not None
+
+    def test_withheld_batch_not_trusted_from_gui_cache_on_next_check(self, state, monkeypatch):
+        # GUI checks cache `all_chapters`, including chapters that were
+        # withheld as suspicious. That cache must not become a trusted
+        # catalogue baseline while the suspicious record is active.
+        from memanga.downloader import check_for_updates
+
+        state.set_last_chapter("Tomodachi", "52.3")
+        _patch_scrapers(monkeypatch, {
+            "primary.test": _scraper_returning([52.3] + MANGAFIRE_BOGUS_BATCH),
+        })
+
+        first_new, first_all = check_for_updates(SINGLE_SOURCE_MANGA, state, return_all=True)
+        assert first_new == []
+        first_record = state.get_suspicious_batch("Tomodachi")
+        assert first_record is not None
+
+        state.set_available_chapters("Tomodachi", [
+            {"number": c.number, "title": c.title, "source": c.source,
+             "source_url": c.source_url, "is_backup": c.is_backup, "url": c.url}
+            for c in first_all
+        ])
+
+        second_new, _ = check_for_updates(SINGLE_SOURCE_MANGA, state, return_all=True)
+
+        assert second_new == []
+        second_record = state.get_suspicious_batch("Tomodachi")
+        assert second_record is not None
+        assert second_record["chapters"] == first_record["chapters"]
+
+
+# -------------------------------------------------------------------------
 # State persistence of the suspicious record
 # -------------------------------------------------------------------------
 

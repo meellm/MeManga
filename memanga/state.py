@@ -452,6 +452,36 @@ class State:
         """Get the cached chapter list for a manga (empty list if never checked)."""
         return self.get_manga_state(manga_title).get("available_chapters", [])
 
+    def get_catalogue_baseline(self, manga_title: str) -> Optional[float]:
+        """Highest chapter number the source has legitimately exposed so far.
+
+        This "last seen available chapter" high-water mark lets the
+        suspicious-batch guard tell an existing-but-undownloaded backlog
+        apart from a genuine source jump (#102). Returns ``None`` when no
+        trusted snapshot has been recorded yet.
+        """
+        value = self.get_manga_state(manga_title).get("catalogue_baseline")
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def set_catalogue_baseline(self, manga_title: str, highest: float):
+        """Record the trusted catalogue high-water mark for a manga (#102).
+
+        Only ever called with a value the source has actually shown and that
+        the guard did not hold back, so it never advances past an unverified
+        suspicious jump.
+        """
+        self._ensure_manga_entry(manga_title)
+        try:
+            self._data["manga"][manga_title]["catalogue_baseline"] = float(highest)
+        except (TypeError, ValueError):
+            return
+        self._mark_dirty()
+
     # ========================================================================
     # External Chapters (already read outside the app)
     # ========================================================================
