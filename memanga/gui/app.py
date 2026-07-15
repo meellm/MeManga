@@ -291,13 +291,9 @@ class MeMangaApp(QMainWindow):
         self.app_state.add_downloaded_chapter(title, str(chapter))
         self.app_state.clear_failed_chapter(title, str(chapter))
 
-        # Badge update depends on mode:
-        #   auto   → batch download flushes the whole badge at once
-        #   manual → user picked one chapter; just decrement
-        if self._get_manga_mode(title) == "manual":
-            self.app_state.decrement_new_chapters(title)
-        else:
-            self.app_state.clear_new_chapters(title)
+        # Badge update: always decrement so the badge reflects remaining
+        # new chapters even during a batch download.
+        self.app_state.decrement_new_chapters(title)
 
     def _resolve_external_threshold(self, manga, threshold_raw, all_chapters) -> bool:
         """Walk cached chapters and mark anything below the user's stated
