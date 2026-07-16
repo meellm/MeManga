@@ -367,6 +367,45 @@ class State:
                     best = {"title": title, **progress}
         return best
 
+    # ── Reader resume position (issue #106) ────────────────────────────
+    # Separate from `reading_progress.last_chapter` (the cursor) and
+    # `read_chapters` (the read set): this stores *where inside a chapter*
+    # the reader left off, so reopening a chapter can restore the exact
+    # page (paged mode) or scroll offset (webtoon/strip mode).
+
+    def set_reader_position(self, manga_title: str, chapter, mode: str,
+                            page_index: Optional[int] = None,
+                            scroll_ratio: Optional[float] = None):
+        """Save the in-chapter resume position for a manga/chapter."""
+        if chapter is None or str(chapter).strip() == "":
+            return
+        self._ensure_manga_entry(manga_title)
+        entry = self._data["manga"][manga_title]
+        positions = entry.setdefault("reader_positions", {})
+        pos: Dict[str, Any] = {
+            "mode": mode,
+            "updated_at": datetime.now().isoformat(),
+        }
+        if page_index is not None:
+            pos["page_index"] = max(0, int(page_index))
+        if scroll_ratio is not None:
+            pos["scroll_ratio"] = min(1.0, max(0.0, float(scroll_ratio)))
+        positions[str(chapter)] = pos
+        self._mark_dirty()
+
+    def get_reader_position(self, manga_title: str, chapter) -> Optional[Dict[str, Any]]:
+        """Get the saved resume position, or None if never saved."""
+        positions = self.get_manga_state(manga_title).get("reader_positions", {})
+        return positions.get(str(chapter))
+
+    def clear_reader_position(self, manga_title: str, chapter):
+        """Drop the saved resume position (e.g. chapter finished)."""
+        positions = self._data.get("manga", {}).get(manga_title, {}).get("reader_positions", {})
+        ch = str(chapter)
+        if ch in positions:
+            del positions[ch]
+            self._mark_dirty()
+
     # ── Per-chapter read tracking (issue #18) ──────────────────────────
     # `reading_progress.last_chapter` only tracks the cursor (the most-
     # recently-opened chapter). The set below tracks every individual

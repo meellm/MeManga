@@ -530,6 +530,182 @@ class TestReaderPage:
         reader._zoom_in()
         assert reader._zoom_level > z0
 
+    # ── In-chapter resume position (issue #106) ──────────────────────
+
+    @staticmethod
+    def _stage_chapter(app_window, manga, make_cbz, pages=6, chapter="1"):
+        """Drop a downloadable CBZ where the reader looks for it."""
+        from pathlib import Path
+        app_window.config.set("manga", [manga])
+        title = manga["title"]
+        dl = Path(app_window.config.download_dir) / title
+        dl.mkdir(parents=True, exist_ok=True)
+        cbz = make_cbz(pages=pages, name=f"ch{chapter}.cbz")
+        (dl / f"{title} - Chapter {chapter}.cbz").write_bytes(cbz.read_bytes())
+        app_window.app_state.add_downloaded_chapter(title, chapter)
+        return title
+
+    def test_single_mode_position_saved_and_restored(self, app_window, qapp,
+                                                     sample_manga, make_cbz):
+        title = self._stage_chapter(app_window, sample_manga, make_cbz)
+        app_window.config.set("gui.reader_view_mode", "single")
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        reader = app_window._pages["reader"]
+        reader._go_to_page(2)
+
+        # Back to detail → on_hide is the save point.
+        app_window.show_page("detail", manga=sample_manga)
+        qapp.processEvents()
+        pos = app_window.app_state.get_reader_position(title, "1")
+        assert pos["page_index"] == 2
+        assert pos["mode"] == "single"
+
+        # Reopening the same chapter resumes on the saved page.
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        assert reader._current_page == 2
+
+    def test_double_mode_saves_spread_first_page(self, app_window, qapp,
+                                                 sample_manga, make_cbz):
+        title = self._stage_chapter(app_window, sample_manga, make_cbz,
+                                    pages=8)
+        app_window.config.set("gui.reader_view_mode", "double")
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        reader = app_window._pages["reader"]
+        reader._go_to_page(3)  # double aligns spreads to even indices
+        assert reader._current_page == 2
+
+        app_window.show_page("detail", manga=sample_manga)
+        qapp.processEvents()
+        pos = app_window.app_state.get_reader_position(title, "1")
+        assert pos["page_index"] == 2
+
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        assert reader._current_page == 2
+
+    def test_finished_chapter_clears_position_and_reopens_at_start(
+            self, app_window, qapp, sample_manga, make_cbz):
+        title = self._stage_chapter(app_window, sample_manga, make_cbz)
+        app_window.config.set("gui.reader_view_mode", "single")
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        reader = app_window._pages["reader"]
+
+        reader._go_to_page(5)  # final page → read flip (issue #45)
+        assert app_window.app_state.is_chapter_read(title, "1")
+        assert app_window.app_state.get_reader_position(title, "1") is None
+
+        # Leaving from the end must not re-save an end-of-chapter position.
+        app_window.show_page("detail", manga=sample_manga)
+        qapp.processEvents()
+        assert app_window.app_state.get_reader_position(title, "1") is None
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        assert reader._current_page == 0
+
+    def test_stale_position_beyond_page_count_is_ignored(
+            self, app_window, qapp, sample_manga, make_cbz):
+        title = self._stage_chapter(app_window, sample_manga, make_cbz)
+        app_window.config.set("gui.reader_view_mode", "single")
+        # e.g. saved against a bigger re-release, then re-downloaded small.
+        app_window.app_state.set_reader_position(title, "1", mode="single",
+                                                 page_index=50)
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        reader = app_window._pages["reader"]
+        # Clamping would land on the last page and instantly flip the
+        # chapter to read — the restore must bail out instead.
+        assert reader._current_page == 0
+        assert not app_window.app_state.is_chapter_read(title, "1")
+
+    def test_continuous_ratio_restores_as_page_in_single_mode(
+            self, app_window, qapp, sample_manga, make_cbz):
+        title = self._stage_chapter(app_window, sample_manga, make_cbz)
+        # Saved while reading continuous, reopened after switching layouts.
+        app_window.app_state.set_reader_position(title, "1",
+                                                 mode="continuous",
+                                                 scroll_ratio=0.5)
+        app_window.config.set("gui.reader_view_mode", "single")
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        assert app_window._pages["reader"]._current_page == 3  # 0.5 * 6
+
+    def test_continuous_scroll_position_saved_and_restored(
+            self, app_window, qapp, sample_manga, make_cbz):
+        title = self._stage_chapter(app_window, sample_manga, make_cbz,
+                                    pages=8)
+        app_window.show()
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        reader = app_window._pages["reader"]
+        assert reader._view_mode == "continuous"
+        sb = reader._scroll.verticalScrollBar()
+        assert sb.maximum() > 0  # 8 tall pages overflow the viewport
+        sb.setValue(sb.maximum() // 2)
+
+        app_window.show_page("detail", manga=sample_manga)
+        qapp.processEvents()
+        pos = app_window.app_state.get_reader_position(title, "1")
+        assert pos["scroll_ratio"] == pytest.approx(0.5, abs=0.05)
+
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()  # restore is deferred one event-loop turn
+        qapp.processEvents()
+        sb = reader._scroll.verticalScrollBar()
+        assert sb.value() == pytest.approx(sb.maximum() * 0.5, abs=sb.maximum() * 0.05)
+        assert not app_window.app_state.is_chapter_read(title, "1")
+
+    def test_prev_next_navigation_saves_outgoing_position(
+            self, app_window, qapp, sample_manga, make_cbz):
+        title = self._stage_chapter(app_window, sample_manga, make_cbz,
+                                    chapter="1")
+        self._stage_chapter(app_window, sample_manga, make_cbz, chapter="2")
+        app_window.config.set("gui.reader_view_mode", "single")
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        reader = app_window._pages["reader"]
+        reader._go_to_page(2)
+
+        reader._go_next_chapter()
+        qapp.processEvents()
+        assert reader._chapter == "2"
+        assert app_window.app_state.get_reader_position(title, "1")[
+            "page_index"] == 2
+
+    def test_close_event_saves_position(self, app_window, qapp, sample_manga,
+                                        make_cbz):
+        title = self._stage_chapter(app_window, sample_manga, make_cbz)
+        app_window.config.set("gui.reader_view_mode", "single")
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        app_window._pages["reader"]._go_to_page(2)
+
+        app_window.close()  # closeEvent — never routes through show_page
+        assert app_window.app_state.get_reader_position(title, "1")[
+            "page_index"] == 2
+
+    def test_stale_position_with_missing_file_is_harmless(
+            self, app_window, qapp, sample_manga, make_cbz):
+        from pathlib import Path
+        title = self._stage_chapter(app_window, sample_manga, make_cbz)
+        app_window.app_state.set_reader_position(title, "1", mode="single",
+                                                 page_index=3)
+        # Cleanup (e.g. remove-after-read) deleted the artifact.
+        dl = Path(app_window.config.download_dir) / title
+        (dl / f"{title} - Chapter 1.cbz").unlink()
+
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        qapp.processEvents()
+        reader = app_window._pages["reader"]
+        assert reader._images == []  # error placeholder, no crash
+
+        # Leaving again must not corrupt or crash either.
+        app_window.show_page("detail", manga=sample_manga)
+        qapp.processEvents()
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Add Manga modal
