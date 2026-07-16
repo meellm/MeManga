@@ -18,6 +18,7 @@ If any of these go red, a previously-fixed bug has come back.
 | #45 | Chapter marked read before reaching the end |
 | #49 | "Next chapter" button label invisible |
 | #55 | Detail page blank when Email to Kindle delivery selected |
+| #111 | Reader missed downloads saved under sanitized/formatted names |
 """
 
 from __future__ import annotations
@@ -661,3 +662,73 @@ def test_issue_55_email_enabled_is_bool(config):
 
     config.set("delivery.mode", "local")
     assert config.email_enabled is False
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# #111 — Reader finds downloads under sanitized title / formatted label
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_issue_111_sanitized_title_folder(app_window, qapp, make_cbz):
+    """The downloader strips filesystem-unsafe characters before building
+    the manga folder and file name; the reader used to start from the raw
+    title folder and never found the download."""
+    from pathlib import Path
+    manga = {"title": 'Kaguya: "Love" is <War>?',
+             "url": "https://mangadex.org/title/x", "source": "mangadex.org",
+             "status": "reading", "mode": "manual"}
+    app_window.config.set("manga", [manga])
+    # Exactly what the downloader writes: sanitized folder + sanitized
+    # "{title} - Chapter {chapter}" base name.
+    dl = Path(app_window.config.download_dir) / "Kaguya Love is War"
+    dl.mkdir(parents=True, exist_ok=True)
+    (dl / "Kaguya Love is War - Chapter 1.cbz").write_bytes(
+        make_cbz(pages=2).read_bytes())
+    app_window.app_state.add_downloaded_chapter(manga["title"], "1")
+
+    app_window.show_page("reader", manga=manga, chapter="1")
+    qapp.processEvents()
+    reader = app_window._pages["reader"]
+    assert reader._images, (
+        "#111 regression: chapter under sanitized title folder unreachable")
+
+
+def test_issue_111_part_style_chapter_label(app_window, qapp, sample_manga,
+                                            make_cbz):
+    """Part-style labels are formatted for archive sorting on disk
+    ("2 Part 1" -> "2.01"); the reader used to search for the raw label
+    only."""
+    from pathlib import Path
+    app_window.config.set("manga", [sample_manga])
+    dl = Path(app_window.config.download_dir) / sample_manga["title"]
+    dl.mkdir(parents=True, exist_ok=True)
+    (dl / f"{sample_manga['title']} - Chapter 2.01.cbz").write_bytes(
+        make_cbz(pages=2).read_bytes())
+    app_window.app_state.add_downloaded_chapter(sample_manga["title"],
+                                                "2 Part 1")
+
+    app_window.show_page("reader", manga=sample_manga, chapter="2 Part 1")
+    qapp.processEvents()
+    reader = app_window._pages["reader"]
+    assert reader._images, (
+        "#111 regression: downloader-formatted part chapter unreachable")
+
+
+def test_issue_111_raw_locations_still_load(app_window, qapp, make_cbz):
+    """Backward compatibility: downloads that ended up under the raw
+    title folder with a raw chapter label must stay reachable."""
+    from pathlib import Path
+    manga = {"title": "Dr. Who?", "url": "https://mangadex.org/title/y",
+             "source": "mangadex.org", "status": "reading", "mode": "manual"}
+    app_window.config.set("manga", [manga])
+    dl = Path(app_window.config.download_dir) / "Dr. Who?"
+    dl.mkdir(parents=True, exist_ok=True)
+    (dl / "Dr. Who? - Chapter 2 Part 1.cbz").write_bytes(
+        make_cbz(pages=2).read_bytes())
+    app_window.app_state.add_downloaded_chapter(manga["title"], "2 Part 1")
+
+    app_window.show_page("reader", manga=manga, chapter="2 Part 1")
+    qapp.processEvents()
+    reader = app_window._pages["reader"]
+    assert reader._images, (
+        "#111 regression: pre-fix raw-title/raw-label download unreachable")
