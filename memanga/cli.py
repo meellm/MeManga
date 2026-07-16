@@ -21,6 +21,7 @@ from rich import box
 
 from .backup import EXPORT_VERSION, BackupVersionError, validate_backup
 from .config import Config, get_app_password, set_app_password
+from .cron import build_cron_line
 from .state import State
 from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga
 from .scrapers import get_scraper
@@ -983,8 +984,7 @@ def _cmd_cron_unix(args):
             console.print("[red]Invalid time format. Use HH:MM[/red]")
             return 1
 
-        cron_cmd = f"cd {project_dir} && {python_path} -m memanga check --auto --quiet"
-        cron_line = f"{minute} {hour} * * * {cron_cmd} >> {project_dir}/memanga.log 2>&1"
+        cron_line = build_cron_line(minute, hour, project_dir, python_path)
 
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         existing = result.stdout if result.returncode == 0 else ""

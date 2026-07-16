@@ -353,6 +353,36 @@ class TestSettingsPage:
                   for m in app_window.config.get("manga", []) or []]
         assert "FromBackup" in titles
 
+    def test_install_cron_unix_quotes_paths(self, app_window, qapp,
+                                            monkeypatch, tmp_path):
+        """#109: cron paths with spaces must be shell-quoted so the
+        generated crontab entry survives spaced install dirs."""
+        import subprocess
+        import sys
+
+        from memanga.cron import build_cron_line
+        from memanga.gui.pages import settings as settings_mod
+
+        page = app_window._pages["settings"]
+        project_dir = tmp_path / "My Manga"
+        project_dir.mkdir()
+
+        submitted = {}
+
+        def _fake_run(cmd, input=None, **kwargs):
+            if cmd == ["crontab", "-"]:
+                submitted["crontab"] = input
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            return subprocess.CompletedProcess(cmd, 1, "", "")
+
+        monkeypatch.setattr(settings_mod.subprocess, "run", _fake_run)
+
+        page._install_cron_unix(project_dir, "06", "30")
+
+        expected = build_cron_line("30", "06", project_dir, sys.executable)
+        assert expected in submitted["crontab"].splitlines()
+        assert f"'{project_dir}'" in submitted["crontab"]
+
     def test_import_rejects_versionless_backup(self, app_window, qapp,
                                                monkeypatch, tmp_path):
         # Regression for #42: import never read the export's `version`

@@ -755,6 +755,44 @@ class TestCronCommand:
         rc = run_cli("cron", "status")
         assert rc in (0, 1, 2)
 
+    def test_cron_install_submits_quoted_line(self, run_cli, monkeypatch):
+        """#109: `cron install` must submit the shell-safe crontab line
+        from build_cron_line() so paths with spaces survive."""
+        from pathlib import Path
+
+        from memanga import cli
+        from memanga.cron import build_cron_line
+
+        monkeypatch.setattr(cli.platform, "system", lambda: "Linux")
+
+        submitted = {}
+
+        class _FakePopen:
+            returncode = 0
+
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def communicate(self, input=None):
+                submitted["crontab"] = input
+                return ("", "")
+
+        monkeypatch.setattr(
+            cli.subprocess, "run",
+            lambda *a, **k: types.SimpleNamespace(returncode=1, stdout="",
+                                                  stderr=""))
+        monkeypatch.setattr(cli.subprocess, "Popen", _FakePopen)
+
+        rc = run_cli("cron", "install", "--time", "06:00")
+        assert rc == 0
+
+        project_dir = Path(cli.__file__).resolve().parent.parent
+        python_path = project_dir / "venv" / "bin" / "python3"
+        if not python_path.exists():
+            python_path = Path(sys.executable)
+        expected = build_cron_line(0, 6, project_dir, python_path)
+        assert expected in submitted["crontab"].splitlines()
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # `tui` — interactive mode — we don't drive it; just import-check
