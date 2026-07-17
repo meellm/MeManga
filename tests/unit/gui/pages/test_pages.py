@@ -383,6 +383,38 @@ class TestSettingsPage:
         assert expected in submitted["crontab"].splitlines()
         assert f"'{project_dir}'" in submitted["crontab"]
 
+    def test_import_merge_deduplicates_titles_within_backup(
+        self, app_window, qapp, monkeypatch, tmp_path
+    ):
+        import json
+        from PySide6.QtWidgets import QFileDialog
+
+        backup = tmp_path / "duplicates.json"
+        backup.write_text(json.dumps({
+            "version": 1,
+            "manga": [
+                {"title": "Existing", "url": "old",
+                 "source": "mangadex.org", "status": "reading"},
+                {"title": "Fresh", "url": "new",
+                 "source": "mangadex.org", "status": "reading"},
+                {"title": "fresh", "url": "duplicate",
+                 "source": "mangadex.org", "status": "reading"},
+            ],
+            "state": {},
+        }))
+        monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                            staticmethod(lambda *a, **k: (str(backup), "")))
+        app_window.config.set("manga", [
+            {"title": "Existing", "url": "local",
+             "source": "mangadex.org", "status": "reading"}
+        ])
+
+        app_window._pages["settings"]._import(replace=False)
+
+        titles = [m.get("title")
+                  for m in app_window.config.get("manga", []) or []]
+        assert titles == ["Existing", "Fresh"]
+
     def test_import_rejects_versionless_backup(self, app_window, qapp,
                                                monkeypatch, tmp_path):
         # Regression for #42: import never read the export's `version`

@@ -1153,12 +1153,13 @@ class SettingsPage(BasePage):
             else:
                 existing = self.app.config.get("manga", [])
                 existing_titles = {m.get("title", "").lower() for m in existing}
-                added = sum(
-                    1 for m in manga_list if m.get("title", "").lower() not in existing_titles
-                )
+                added = 0
                 for m in manga_list:
-                    if m.get("title", "").lower() not in existing_titles:
+                    title_key = m.get("title", "").lower()
+                    if title_key not in existing_titles:
                         existing.append(m)
+                        existing_titles.add(title_key)
+                        added += 1
                 self.app.config.set("manga", existing)
                 self.app.config.save()
                 self.app.app_state.merge_missing_manga_state(data.get("state", {}))
