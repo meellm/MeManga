@@ -130,6 +130,20 @@ class TestSendToKindle:
         assert "exceeding the 25MB email limit" not in msg
         smtp.assert_not_called()
 
+    def test_pdf_split_message_explains_raw_and_encoded_limits(
+        self, good_cfg, tiny_pdf, capsys
+    ):
+        smtp = _make_smtp_mock()
+        with patch("memanga.emailer.split_pdf", return_value=[tiny_pdf, tiny_pdf]):
+            with patch("smtplib.SMTP", return_value=smtp):
+                _call_send(good_cfg, tiny_pdf)
+
+        msg = capsys.readouterr().out
+        assert "Split into 2 parts" in msg
+        assert "18.0MB safe raw attachment limit" in msg
+        assert "25.0MB" in msg
+        assert "exceeded 25MB limit" not in msg
+
 
 # ─────────────────────────────────────────────────────────────────────
 # split_pdf — chunk huge PDFs under the attachment limit

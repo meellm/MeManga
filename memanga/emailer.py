@@ -162,7 +162,11 @@ def send_to_kindle(
         is_split = len(parts) > 1
         
         if is_split:
-            print(f"     📎 Split into {len(parts)} parts (exceeded 25MB limit)")
+            print(
+                f"     📎 Split into {len(parts)} parts (exceeded "
+                f"{_format_mb(MAX_ATTACHMENT_SIZE)} safe raw attachment limit; "
+                f"encoded email cap is {_format_mb(EMAIL_ATTACHMENT_LIMIT)})"
+            )
     
     # Send each part
     for i, part_path in enumerate(parts):
