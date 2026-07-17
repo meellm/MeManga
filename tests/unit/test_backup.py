@@ -69,6 +69,24 @@ class TestValidateBackup:
 
 
 class TestMergeMangaState:
+    def test_partial_chapters_preserve_imported_records_and_local_conflicts(self):
+        local = {
+            "partial_chapters": {
+                "4": {"pages": ["local-1.jpg"], "error": "local"},
+            }
+        }
+        imported = {
+            "partial_chapters": {
+                "4": {"pages": ["imported-1.jpg"], "error": "imported"},
+                "5": {"pages": ["imported-2.jpg"], "error": "backup"},
+            }
+        }
+
+        merged = merge_manga_state(local, imported)
+
+        assert merged["partial_chapters"]["4"] == local["partial_chapters"]["4"]
+        assert merged["partial_chapters"]["5"] == imported["partial_chapters"]["5"]
+
     def test_preserves_local_and_imported_progress_fields(self):
         local = {
             "downloaded": ["1", "3"],
