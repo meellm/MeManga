@@ -268,12 +268,22 @@ class MeMangaApp(QMainWindow):
         if partial:
             miss = partial.get("failed_pages", [])
             total = partial.get("total", 0)
+            self.app_state.add_partial_chapter(
+                title,
+                str(chapter),
+                source=data.get("source", ""),
+                failed_pages=miss,
+                total_pages=total,
+                path=path,
+                from_backup=bool(data.get("from_backup")),
+            )
             self.app_state.add_notification(
                 "warn",
                 f"Downloaded {title} Ch. {chapter} as partial: "
                 f"{len(miss)}/{total} page(s) missing (pages {miss}).",
             )
         else:
+            self.app_state.clear_partial_chapter(title, str(chapter))
             self.app_state.add_notification("download", f"Downloaded {title} Ch. {chapter}")
         self.events.publish("notification_added", {})
 

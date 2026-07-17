@@ -451,6 +451,7 @@ class DetailPage(BasePage):
         downloaded = self.app.app_state.get_downloaded_chapters(title)
         available = self.app.app_state.get_available_chapters(title)
         external = self.app.app_state.get_external_chapters(title)
+        partials = self.app.app_state.get_partial_chapters(title)
 
         # Build the merged set, keyed by chapter number string.
         # Available entries provide source/url metadata; downloaded entries
@@ -484,6 +485,7 @@ class DetailPage(BasePage):
 
         # Section header: "Chapters" h3 + "{dl} downloaded · {total} total · {new} new"
         n_dl = len(downloaded)
+        n_partial = len(partials)
         n_total = len(merged)
         n_new = self.app.app_state.get_new_chapters(title) or 0
         head_row = QHBoxLayout()
@@ -492,7 +494,7 @@ class DetailPage(BasePage):
         head_row.addWidget(h_lbl)
         head_row.addStretch(1)
         sub = QLabel(
-            f"{n_dl} downloaded  ·  {n_total} total  ·  {n_new} new"
+            f"{n_dl} downloaded  ·  {n_partial} partial  ·  {n_total} total  ·  {n_new} new"
         )
         sub.setProperty("role", "mono_meta")
         head_row.addWidget(sub)
@@ -515,7 +517,7 @@ class DetailPage(BasePage):
         # runs on every chip click via _set_chapter_filter, so resetting to
         # "all" here would clobber the click before the new chips paint.
         # Same fix-shape as the Newest/Oldest sort combo two sessions ago.
-        valid_filters = {"all", "downloaded", "not_downloaded", "unread"}
+        valid_filters = {"all", "downloaded", "partial", "not_downloaded", "unread"}
         current_filter = getattr(self, "_chapter_filter", "all")
         if current_filter not in valid_filters:
             current_filter = "all"
@@ -524,6 +526,7 @@ class DetailPage(BasePage):
         for key, label, count in [
             ("all", "All", n_total),
             ("downloaded", "Downloaded", n_dl),
+            ("partial", "Partial", n_partial),
             ("not_downloaded", "Not downloaded", n_total - n_dl),
             ("unread", "Unread", n_unread),
         ]:
@@ -575,11 +578,14 @@ class DetailPage(BasePage):
         for i, num in enumerate(sorted_nums):
             entry = merged[num]
             is_dl = self.app.app_state.is_chapter_downloaded(title, num)
+            partial_info = partials.get(num) if is_dl else None
             is_external = (not is_dl and self.app.app_state.is_external_chapter(title, num))
 
             # Filter
             f = self._chapter_filter
             if f == "downloaded" and not is_dl:
+                continue
+            if f == "partial" and not partial_info:
                 continue
             if f == "not_downloaded" and is_dl:
                 continue
@@ -610,7 +616,14 @@ class DetailPage(BasePage):
             status_box.setFixedSize(28, 28)
             status_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
             toks = T.tokens()
-            if is_read:
+            if partial_info:
+                status_box.setPixmap(
+                    _ic("alert_triangle", toks["status.warn"], 15).pixmap(QSize(15, 15)))
+                status_box.setStyleSheet(
+                    f"background-color: {toks['status.warn_soft']};"
+                    f"border-radius: 6px;"
+                )
+            elif is_read:
                 # Filled bright accent — strongest visual weight.
                 status_box.setPixmap(
                     _ic("check", toks["accent.on_primary"], 14).pixmap(QSize(14, 14)))
@@ -665,7 +678,14 @@ class DetailPage(BasePage):
                 f"font-size: 12pt; font-weight: {title_weight}; color: {title_color};"
             )
             title_l.addWidget(main_title)
-            if is_read:
+            if partial_info:
+                missing = partial_info.get("failed_pages", [])
+                total = partial_info.get("total_pages", 0)
+                sub_state = (
+                    f"Partial - {len(missing)}/{total} page(s) missing"
+                    if total else "Partial - missing pages"
+                )
+            elif is_read:
                 sub_state = "Read"
             elif is_dl:
                 sub_state = "Downloaded"
@@ -690,7 +710,27 @@ class DetailPage(BasePage):
                 ch_row.addWidget(date_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
             # Action column
-            if is_dl:
+            if partial_info:
+                actions = QHBoxLayout()
+                actions.setSpacing(8)
+                retry_btn = QPushButton("Retry")
+                retry_btn.setProperty("size", "sm")
+                retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                retry_btn.clicked.connect(
+                    lambda _, e=entry, b=retry_btn: self._download_chapter(
+                        e, b, retry_partial=True
+                    )
+                )
+                actions.addWidget(retry_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+                read_btn = QPushButton("Read")
+                read_btn.setProperty("variant", "primary")
+                read_btn.setProperty("size", "sm")
+                read_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                read_btn.clicked.connect(lambda _, c=num: self._read_chapter(c))
+                actions.addWidget(read_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+                ch_row.addLayout(actions)
+            elif is_dl:
                 btn = QPushButton("Read")
                 btn.setProperty("variant", "primary")
                 btn.setProperty("size", "sm")
@@ -1095,7 +1135,7 @@ class DetailPage(BasePage):
 
     # ── Per-chapter manual download ──
 
-    def _download_chapter(self, ch_dict: dict, button=None):
+    def _download_chapter(self, ch_dict: dict, button=None, retry_partial=False):
         """Queue a single chapter for download (manual-mode flow).
 
         Reconstructs a ``ChapterWithSource`` from the cached entry and routes
@@ -1169,7 +1209,11 @@ class DetailPage(BasePage):
             button.setText("Queued")
             self._pending_downloads[f"{self._manga['title']}:{number}"] = button
 
-        Toast(self, f"Queued Chapter {number}", kind="info")
+        Toast(
+            self,
+            f"Retrying partial Chapter {number}" if retry_partial else f"Queued Chapter {number}",
+            kind="info",
+        )
 
     def _on_any_download_complete(self, data):
         """Refresh the chapter list when a download for the current manga

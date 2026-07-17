@@ -162,6 +162,13 @@ ICONS: dict[str, str] = {
         '<path d="m10 14 10-10"/>'
         '</g></svg>'
     ),
+    "alert_triangle": (
+        '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">'
+        '<g fill="none" stroke="{color}" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+        '<path d="M10.3 4.5 2.7 18a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.5a2 2 0 0 0-3.4 0z"/>'
+        '<path d="M12 9v4"/><path d="M12 17h.01"/>'
+        '</g></svg>'
+    ),
 }
 
 

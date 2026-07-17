@@ -349,6 +349,7 @@ class TestCheckCommand:
         assert rc == 0
         assert sent == [partial_path]
         assert cli.state.is_chapter_downloaded("Vinland Saga", "71")
+        assert cli.state.get_partial_chapter("Vinland Saga", "71")["failed_pages"] == [7]
         notifications = cli.state.get("notifications", [])
         assert any("saved as partial" in n["message"] for n in notifications)
 
@@ -397,6 +398,49 @@ class TestCheckCommand:
         assert not cli.state.is_chapter_downloaded("Vinland Saga", "71")
         failed = cli.state.get_failed_chapters("Vinland Saga")
         assert "71" in failed
+
+    def test_failed_retry_includes_accepted_partials(
+            self, run_cli, config, monkeypatch, tmp_path):
+        from memanga import cli
+        from memanga.scrapers.base import Chapter
+        from memanga.state import State
+
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "status": "reading",
+            "source": "primary.test",
+            "url": "https://primary.test/vs",
+        }])
+        config.save()
+
+        cli.state = State()
+        cli.state.add_downloaded_chapter("Vinland Saga", "71")
+        cli.state.add_partial_chapter(
+            "Vinland Saga",
+            "71",
+            source="primary.test",
+            failed_pages=[7],
+            total_pages=40,
+        )
+        fixed_path = tmp_path / "fixed.pdf"
+        fixed_path.write_bytes(b"%PDF")
+
+        primary_ch = Chapter(
+            number="71", title="", url="https://primary.test/c/71", date=None,
+        )
+
+        class FakeScraper:
+            def get_chapters(self, url):
+                return [primary_ch]
+
+        monkeypatch.setattr(cli, "get_scraper", lambda source: FakeScraper())
+        monkeypatch.setattr(cli, "download_chapter", lambda *a, **k: fixed_path)
+
+        rc = run_cli("failed", "--retry")
+
+        assert rc == 0
+        assert cli.state.is_chapter_downloaded("Vinland Saga", "71")
+        assert cli.state.get_partial_chapter("Vinland Saga", "71") is None
 
 
 # ─────────────────────────────────────────────────────────────────────────

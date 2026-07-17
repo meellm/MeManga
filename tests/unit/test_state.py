@@ -124,6 +124,46 @@ class TestChapterTracking:
         assert state.get_downloaded_chapters("X") == ["Extra", "1"]
 
 
+class TestPartialChapters:
+    """Accepted partial downloads stay visible and retryable (#117)."""
+
+    def test_add_get_and_clear_partial_chapter(self, state):
+        state.add_partial_chapter(
+            "X",
+            "5",
+            source="mangadex.org",
+            failed_pages=[3, 9],
+            total_pages=40,
+            path="/tmp/x.pdf",
+            from_backup=True,
+        )
+
+        partial = state.get_partial_chapter("X", "5")
+        assert partial["source"] == "mangadex.org"
+        assert partial["failed_pages"] == [3, 9]
+        assert partial["total_pages"] == 40
+        assert partial["path"] == "/tmp/x.pdf"
+        assert partial["from_backup"] is True
+        assert "X" in state.get_all_partial_chapters()
+
+        state.clear_partial_chapter("X", "5")
+
+        assert state.get_partial_chapter("X", "5") is None
+
+    def test_reset_manga_progress_clears_requeued_partial_records(self, state):
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "5")
+        state.add_partial_chapter("X", "1", failed_pages=[2], total_pages=20)
+        state.add_partial_chapter("X", "5", failed_pages=[4], total_pages=20)
+
+        state.reset_manga_progress("X", from_chapter=5)
+
+        assert "1" in state.get_downloaded_chapters("X")
+        assert "5" not in state.get_downloaded_chapters("X")
+        assert "1" in state.get_partial_chapters("X")
+        assert "5" not in state.get_partial_chapters("X")
+
+
 class TestExternalChapters:
     def test_mark_and_check_external(self, state):
         state.mark_external_chapter("X", "3")

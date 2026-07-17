@@ -558,7 +558,7 @@ def cmd_check(args):
                     except EmailError as email_e:
                         console.print(f"     [red]📧 Email failed: {email_e}[/red]")
 
-                def _announce_saved(file_path, from_backup, partial):
+                def _announce_saved(file_path, from_backup, partial, source=None):
                     """Print the save line and, for partials, warn + log which
                     pages are missing so headless runs leave a trail."""
                     label = f"{file_path.parent.name}/{file_path.name}/" if file_path.is_dir() else file_path.name
@@ -575,7 +575,17 @@ def cmd_check(args):
                             f"'{title}' Chapter {ch.number} saved as partial: "
                             f"{len(miss)}/{total} page(s) missing (pages {miss}).",
                         )
+                        state.add_partial_chapter(
+                            title,
+                            ch.number,
+                            source=source or "",
+                            failed_pages=miss,
+                            total_pages=total,
+                            path=str(file_path),
+                            from_backup=from_backup,
+                        )
                     else:
+                        state.clear_partial_chapter(title, ch.number)
                         console.print(f"     [green]✅ Saved{src}: {label}[/green]")
 
                 try:
@@ -602,7 +612,12 @@ def cmd_check(args):
                         partial_threshold=partial_threshold,
                         on_partial=_capture_partial,
                     )
-                    _announce_saved(file_path, from_backup=False, partial=dict(partial_info))
+                    _announce_saved(
+                        file_path,
+                        from_backup=False,
+                        partial=dict(partial_info),
+                        source=getattr(ch, "source", None) or "unknown",
+                    )
                     _deliver_email(file_path)
 
                     # Update state
@@ -636,7 +651,12 @@ def cmd_check(args):
                                 max_retries=max_retries,
                                 post_processing=post_processing,
                             )
-                            _announce_saved(file_path, from_backup=True, partial=None)
+                            _announce_saved(
+                                file_path,
+                                from_backup=True,
+                                partial=None,
+                                source=getattr(backup_ch, "source", None),
+                            )
                             _deliver_email(file_path)
                             state.add_downloaded_chapter(title, ch.number)
                             state.clear_pending_backup(title, ch.number)
@@ -671,7 +691,12 @@ def cmd_check(args):
                                 )
                             except DownloaderError:
                                 continue
-                            _announce_saved(file_path, from_backup=from_backup, partial=dict(partial_info))
+                            _announce_saved(
+                                file_path,
+                                from_backup=from_backup,
+                                partial=dict(partial_info),
+                                source=getattr(cand, "source", None),
+                            )
                             _deliver_email(file_path)
                             state.add_downloaded_chapter(title, ch.number)
                             state.clear_pending_backup(title, ch.number)
@@ -1412,8 +1437,9 @@ def cmd_import(args):
 
 
 def cmd_failed(args):
-    """List and manage chapters that failed to download."""
+    """List and manage chapters that failed or were accepted as partial."""
     all_failed = state.get_all_failed_chapters()
+    all_partials = state.get_all_partial_chapters()
 
     # Filter by title if requested
     if args.title:
@@ -1421,36 +1447,59 @@ def cmd_failed(args):
             t: chapters for t, chapters in all_failed.items()
             if args.title.lower() in t.lower()
         }
+        all_partials = {
+            t: chapters for t, chapters in all_partials.items()
+            if args.title.lower() in t.lower()
+        }
 
-    if not all_failed:
-        console.print("[dim]No failed chapters recorded.[/dim]")
+    retryable = {}
+    for manga_title, chapters in all_failed.items():
+        retryable.setdefault(manga_title, {}).update(chapters)
+    for manga_title, chapters in all_partials.items():
+        bucket = retryable.setdefault(manga_title, {})
+        for chapter_num, info in chapters.items():
+            if chapter_num in bucket:
+                continue
+            bucket[chapter_num] = {
+                **info,
+                "partial": True,
+                "error": "Accepted partial download",
+            }
+
+    if not retryable:
+        console.print("[dim]No failed or partial chapters recorded.[/dim]")
         return
 
     table = Table(
-        title="⚠️  Failed Chapter Downloads",
+        title="⚠️  Retryable Chapter Downloads",
         box=box.ROUNDED,
         show_lines=True,
     )
     table.add_column("Manga", style="cyan bold")
     table.add_column("Chapter", style="yellow", justify="center")
-    table.add_column("Failed At", style="dim")
+    table.add_column("Status", justify="center")
+    table.add_column("Recorded At", style="dim")
     table.add_column("Source", style="green")
-    table.add_column("Pages Failed", justify="center")
+    table.add_column("Pages Missing", justify="center")
     table.add_column("Attempts", justify="center")
-    table.add_column("Error", style="red", no_wrap=False, max_width=40)
+    table.add_column("Reason", style="red", no_wrap=False, max_width=40)
 
-    for manga_title, chapters in sorted(all_failed.items()):
+    for manga_title, chapters in sorted(retryable.items()):
         for chapter_num, info in sorted(chapters.items(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else 0):
-            failed_at = info.get("failed_at", "")[:16].replace("T", " ")
+            is_partial = bool(info.get("partial")) or "accepted_at" in info
+            recorded_at = (
+                info.get("accepted_at") if is_partial else info.get("failed_at", "")
+            )[:16].replace("T", " ")
             pages = info.get("failed_pages", [])
             pages_str = str(pages) if pages else "—"
             table.add_row(
                 manga_title,
                 chapter_num,
-                failed_at,
+                "partial" if is_partial else "failed",
+                recorded_at,
                 info.get("source", "?"),
                 pages_str,
-                str(info.get("attempts", 1)),
+                "—" if is_partial else str(info.get("attempts", 1)),
                 info.get("error", ""),
             )
 
@@ -1461,7 +1510,10 @@ def cmd_failed(args):
         for manga_title, chapters in all_failed.items():
             for chapter_num in list(chapters):
                 state.clear_failed_chapter(manga_title, chapter_num)
-        console.print("[green]✅ Cleared all failure records.[/green]")
+        for manga_title, chapters in all_partials.items():
+            for chapter_num in list(chapters):
+                state.clear_partial_chapter(manga_title, chapter_num)
+        console.print("[green]✅ Cleared all failure and partial records.[/green]")
         return
 
     if args.retry:
@@ -1475,7 +1527,7 @@ def cmd_failed(args):
         retried = 0
         succeeded = 0
 
-        for manga_title, chapters in all_failed.items():
+        for manga_title, chapters in retryable.items():
             manga = manga_by_title.get(manga_title)
             if not manga:
                 console.print(f"  [yellow]⚠️  Manga not found in config: {manga_title}[/yellow]")
@@ -1532,6 +1584,7 @@ def cmd_failed(args):
 
                     state.add_downloaded_chapter(manga_title, chapter_num)
                     state.clear_failed_chapter(manga_title, chapter_num)
+                    state.clear_partial_chapter(manga_title, chapter_num)
                     succeeded += 1
                 except DownloaderError as retry_e:
                     # Try backup if available
@@ -1542,6 +1595,7 @@ def cmd_failed(args):
                             file_path = download_chapter(manga, backup_ch, download_dir, output_format, post_processing=post_processing)
                             state.add_downloaded_chapter(manga_title, chapter_num)
                             state.clear_failed_chapter(manga_title, chapter_num)
+                            state.clear_partial_chapter(manga_title, chapter_num)
                             label = f"{file_path.parent.name}/{file_path.name}/" if file_path.is_dir() else file_path.name
                             console.print(f"  [green]✅ Saved from backup: {label}[/green]")
                             succeeded += 1
