@@ -1121,7 +1121,7 @@ class SettingsPage(BasePage):
                 "version": EXPORT_VERSION,
                 "exported_at": datetime.now().isoformat(),
                 "manga": self.app.config.get("manga", []),
-                "state": self.app.app_state._data.get("manga", {}),
+                "state": self.app.app_state.get("manga", {}),
             }
             with open(path, "w") as f:
                 json.dump(data, f, indent=2, default=str)
@@ -1148,8 +1148,7 @@ class SettingsPage(BasePage):
             if replace:
                 self.app.config.set("manga", manga_list)
                 self.app.config.save()
-                self.app.app_state._data["manga"] = data.get("state", {})
-                self.app.app_state.save()
+                self.app.app_state.set("manga", data.get("state", {}))
                 Toast(self, f"Replaced with {len(manga_list)} manga", kind="success")
             else:
                 existing = self.app.config.get("manga", [])
@@ -1162,10 +1161,11 @@ class SettingsPage(BasePage):
                         existing.append(m)
                 self.app.config.set("manga", existing)
                 self.app.config.save()
+                merged_state = self.app.app_state.get("manga", {})
                 for t, sdata in data.get("state", {}).items():
-                    if not self.app.app_state.get_manga_state(t):
-                        self.app.app_state._data.setdefault("manga", {})[t] = sdata
-                self.app.app_state.save()
+                    if not merged_state.get(t):
+                        merged_state[t] = sdata
+                self.app.app_state.set("manga", merged_state)
                 Toast(self, f"Imported {added} manga", kind="success")
         except json.JSONDecodeError:
             Toast(self, "Invalid JSON", kind="error")

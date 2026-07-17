@@ -49,6 +49,69 @@ class TestAtomicSave:
         s = State(config_dir=cfg)
         assert s.get_notifications() == []
 
+    def test_older_save_cannot_overwrite_newer_state(self, state, monkeypatch):
+        """A delayed old save must not publish after a newer mutation."""
+        state.set("publication_order", "old")
+        original_replace = __import__("os").replace
+        first_replace_ready = threading.Event()
+        release_first_replace = threading.Event()
+        replace_count = 0
+        count_lock = threading.Lock()
+        publication_lock_held = []
+        thread_errors = []
+
+        def controlled_replace(src, dst):
+            nonlocal replace_count
+            with count_lock:
+                replace_count += 1
+                call_number = replace_count
+
+            probe_acquired_lock = []
+
+            def probe_lock():
+                acquired = state._lock.acquire(blocking=False)
+                probe_acquired_lock.append(acquired)
+                if acquired:
+                    state._lock.release()
+
+            probe = threading.Thread(target=probe_lock)
+            probe.start()
+            probe.join(timeout=5)
+            assert not probe.is_alive()
+            publication_lock_held.append(not probe_acquired_lock[0])
+
+            if call_number == 1:
+                first_replace_ready.set()
+                assert release_first_replace.wait(timeout=5)
+            original_replace(src, dst)
+
+        monkeypatch.setattr("memanga.state.os.replace", controlled_replace)
+
+        def capture_errors(fn, *args):
+            try:
+                fn(*args)
+            except Exception as exc:  # pragma: no cover - failure path
+                thread_errors.append(exc)
+
+        old_save = threading.Thread(target=capture_errors, args=(state.save,))
+        old_save.start()
+        assert first_replace_ready.wait(timeout=5)
+
+        newer_save = threading.Thread(
+            target=capture_errors,
+            args=(state.set, "publication_order", "new"))
+        newer_save.start()
+
+        release_first_replace.set()
+        old_save.join(timeout=5)
+        newer_save.join(timeout=5)
+
+        assert not old_save.is_alive()
+        assert not newer_save.is_alive()
+        assert thread_errors == []
+        assert publication_lock_held == [True, True]
+        assert json.loads(state.state_path.read_text())["publication_order"] == "new"
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Concurrent mutation — multiple workers writing State at once
@@ -153,3 +216,235 @@ class TestSchemaCompat:
         # Even with zero history, get_manga_state must not raise.
         st = state.get_manga_state("never-touched")
         assert isinstance(st, dict)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Getter isolation (issue #110) — returned containers are snapshots, so
+# GUI code can iterate them while workers mutate the underlying state
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestGetterIsolation:
+    def test_downloaded_list_is_a_copy(self, state):
+        state.add_downloaded_chapter("X", "1")
+        state.get_downloaded_chapters("X").append("999")
+        assert state.get_downloaded_chapters("X") == ["1"]
+
+    def test_manga_state_is_a_snapshot(self, state):
+        state.add_downloaded_chapter("X", "1")
+        snap = state.get_manga_state("X")
+        snap["downloaded"].append("999")
+        snap["last_chapter"] = "999"
+        assert state.get_downloaded_chapters("X") == ["1"]
+        assert state.get_last_chapter("X") == "1"
+
+    def test_source_health_is_a_copy(self, state):
+        state.update_source_health("a.test", True, latency_ms=50)
+        state.get_all_source_health()["a.test"]["status"] = "error"
+        state.get_source_health("a.test")["status"] = "error"
+        assert state.get_source_health("a.test")["status"] == "ok"
+
+    def test_notifications_are_copies(self, state):
+        state.add_notification("info", "x")
+        state.get_notifications()[0]["read"] = True
+        assert state.get_unread_count() == 1
+
+    def test_generic_get_returns_copy(self, state):
+        state.set("custom", {"nested": [1]})
+        state.get("custom")["nested"].append(2)
+        assert state.get("custom") == {"nested": [1]}
+
+    @pytest.mark.parametrize("getter", [
+        lambda state: state.get_available_chapters("X"),
+        lambda state: state.get_download_history(),
+        lambda state: state.get_all_pending_backups("X"),
+        lambda state: state.get_failed_chapters("X"),
+        lambda state: state.get_source_health("src.test"),
+        lambda state: state.get_all_source_health(),
+        lambda state: state.get_reading_progress("X"),
+        lambda state: state.get_check_history(),
+    ])
+    def test_nested_getters_return_snapshots(self, state, getter):
+        state.set("manga", {"X": {
+            "available_chapters": [{"metadata": {"tags": ["original"]}}],
+            "pending_backup": {"1": {"metadata": {"tags": ["original"]}}},
+            "failed_chapters": {"1": {"failed_pages": [[1]]}},
+            "reading_progress": {"metadata": {"tags": ["original"]}},
+        }})
+        state.set("download_history", [
+            {"metadata": {"tags": ["original"]}},
+        ])
+        state.set("check_history", [
+            {"metadata": {"tags": ["original"]}},
+        ])
+        state.set("source_health", {
+            "src.test": {"metadata": {"tags": ["original"]}},
+        })
+
+        snapshot = getter(state)
+        original = state._snapshot(snapshot)
+
+        def mutate_nested(value):
+            if isinstance(value, dict):
+                for child in value.values():
+                    if isinstance(child, (dict, list)):
+                        mutate_nested(child)
+                        return
+            elif isinstance(value, list):
+                if value and isinstance(value[0], (dict, list)):
+                    mutate_nested(value[0])
+                else:
+                    value.append("changed")
+
+        mutate_nested(snapshot)
+        assert getter(state) == original
+
+    def test_setter_inputs_are_snapshotted(self, state):
+        available = [{"metadata": {"tags": ["original"]}}]
+        suspicious = {"chapters": [{"number": "1"}]}
+        failed_pages = [[1]]
+        custom = {"nested": ["original"]}
+
+        state.set_available_chapters("X", available)
+        state.set_suspicious_batch("X", suspicious)
+        state.add_failed_chapter("X", "1", "src.test", "boom", failed_pages)
+        state.set("custom", custom)
+
+        available[0]["metadata"]["tags"].append("changed")
+        suspicious["chapters"][0]["number"] = "999"
+        failed_pages[0].append(2)
+        custom["nested"].append("changed")
+
+        assert state.get_available_chapters("X") == [
+            {"metadata": {"tags": ["original"]}},
+        ]
+        assert state.get_suspicious_batch("X") == {
+            "chapters": [{"number": "1"}],
+        }
+        assert state.get_failed_chapters("X")["1"]["failed_pages"] == [[1]]
+        assert state.get("custom") == {"nested": ["original"]}
+
+    def test_mutator_that_saves_does_not_deadlock(self, state):
+        # Immediate-save mutators call save() while holding the state
+        # lock — the reentrant lock must let that through.
+        state.set_pending_backup("X", "1", "backup.test", "https://b/1")
+        state.add_failed_chapter("X", "2", "src.test", "boom")
+        state.clear_pending_backup("X", "1")
+        assert state.get_pending_backup("X", "1") is None
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Stress (issue #110) — GUI-style worker mutations interleaved with the
+# main thread's periodic flush + close-time save
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestFlushMutationStress:
+    N_MANGA = 4
+    N_CHAPTERS = 25
+    N_SOURCES = 4
+    N_NOTIFICATIONS = 80
+
+    def test_no_lost_updates_under_interleaved_flush(self, state):
+        """Simulate the GUI: download/check/health workers mutating state
+        while the flush timer and close handler serialize it. No chapter,
+        read mark, notification, history entry, or health entry may be
+        lost, and the file on disk must stay valid JSON."""
+        stop = threading.Event()
+        errors = []
+
+        def guarded(fn):
+            def run(*args):
+                try:
+                    fn(*args)
+                except Exception as e:  # pragma: no cover - failure path
+                    errors.append(e)
+            return run
+
+        @guarded
+        def flusher():
+            while True:
+                state.flush()
+                state.save()
+                if stop.is_set():
+                    return
+                time.sleep(0.001)
+
+        @guarded
+        def download_worker(idx):
+            title = "Manga %d" % idx
+            for n in range(1, self.N_CHAPTERS + 1):
+                state.add_downloaded_chapter(title, str(n))
+                state.mark_chapter_read(title, str(n))
+                state.add_download_history(title, str(n), "cbz", size_mb=1.0)
+                state.add_failed_chapter(title, "f%d" % n, "src.test", "boom")
+
+        @guarded
+        def check_worker(idx):
+            title = "Manga %d" % idx
+            for n in range(self.N_CHAPTERS):
+                state.set_new_chapters(title, n)
+                state.set_available_chapters(
+                    title, [dict(number=str(i)) for i in range(n + 1)])
+                state.get_manga_state(title)  # GUI refresh-style read
+                state.get_stats()
+
+        @guarded
+        def health_worker(idx):
+            domain = "src%d.test" % idx
+            for n in range(self.N_CHAPTERS):
+                state.update_source_health(domain, n % 4 != 0,
+                                           "timeout", latency_ms=100 + n)
+                state.get_all_source_health()
+
+        @guarded
+        def notify_worker():
+            for n in range(self.N_NOTIFICATIONS):
+                state.add_notification("download", "n%d" % n)
+                state.get_notifications()
+
+        flush_thread = threading.Thread(target=flusher, daemon=True)
+        workers = []
+        for i in range(self.N_MANGA):
+            workers.append(threading.Thread(target=download_worker, args=(i,)))
+            workers.append(threading.Thread(target=check_worker, args=(i,)))
+        for i in range(self.N_SOURCES):
+            workers.append(threading.Thread(target=health_worker, args=(i,)))
+        workers.append(threading.Thread(target=notify_worker))
+
+        flush_thread.start()
+        for t in workers:
+            t.start()
+        for t in workers:
+            t.join(timeout=60)
+        stop.set()
+        flush_thread.join(timeout=60)
+        alive = [t for t in workers + [flush_thread] if t.is_alive()]
+        assert not alive, "threads deadlocked or still running"
+        assert errors == []
+
+        # In-memory: nothing lost.
+        expected = [str(n) for n in range(1, self.N_CHAPTERS + 1)]
+        for i in range(self.N_MANGA):
+            title = "Manga %d" % i
+            assert sorted(state.get_downloaded_chapters(title),
+                          key=float) == expected
+            assert sorted(state.get_read_chapters(title),
+                          key=float) == expected
+            assert len(state.get_failed_chapters(title)) == self.N_CHAPTERS
+            assert len(state.get_available_chapters(title)) == self.N_CHAPTERS
+        assert len(state.get_download_history(limit=1000)) == \
+            self.N_MANGA * self.N_CHAPTERS
+        assert len(state.get_notifications(limit=1000)) == self.N_NOTIFICATIONS
+        for i in range(self.N_SOURCES):
+            health = state.get_source_health("src%d.test" % i)
+            assert health.get("latency_ms") == 100 + self.N_CHAPTERS - 1
+
+        # On disk: valid JSON that round-trips the same data.
+        data = json.loads(state.state_path.read_text())
+        for i in range(self.N_MANGA):
+            assert sorted(data["manga"]["Manga %d" % i]["downloaded"],
+                          key=float) == expected
+        assert len(data["download_history"]) == self.N_MANGA * self.N_CHAPTERS
+        assert len(data["notifications"]) == self.N_NOTIFICATIONS
+        assert len(data["source_health"]) == self.N_SOURCES
