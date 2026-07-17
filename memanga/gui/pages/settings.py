@@ -20,6 +20,7 @@ from .base import BasePage
 from .. import theme as T
 from ..components.toast import Toast
 from ...backup import EXPORT_VERSION, BackupVersionError, validate_backup
+from ...cron import build_cron_line
 
 
 class SettingsPage(BasePage):
@@ -1006,10 +1007,7 @@ class SettingsPage(BasePage):
         venv_python = project_dir / "venv" / "bin" / "python3"
         if venv_python.exists():
             python_path = str(venv_python)
-        cron_cmd = (
-            f'{minute} {hour} * * * cd {project_dir} && {python_path} '
-            f'-m memanga check --auto --quiet >> {project_dir}/memanga.log 2>&1'
-        )
+        cron_cmd = build_cron_line(minute, hour, project_dir, python_path)
         try:
             result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
             existing = result.stdout if result.returncode == 0 else ""
