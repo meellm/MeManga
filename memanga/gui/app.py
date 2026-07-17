@@ -45,6 +45,7 @@ class MeMangaApp(QMainWindow):
         # Cover URLs we already tried to replace after a failed fetch —
         # once per URL per session, see _on_cover_load_failed.
         self._cover_fallback_attempted: set = set()
+        self._new_chapter_batches: dict[str, dict[str, set[str]]] = {}
 
         # Centralised network status — probes connectivity in a daemon
         # thread, publishes `network_online` / `network_offline` events.
@@ -62,6 +63,7 @@ class MeMangaApp(QMainWindow):
         self.events.subscribe("cover_loaded", self._on_cover_load_failed)
         self.events.subscribe("download_complete", self._on_download_complete)
         self.events.subscribe("download_error", self._on_download_error)
+        self.events.subscribe("download_cancelled", self._on_download_cancelled)
         self.events.subscribe("check_complete", self._on_check_complete)
         self.events.subscribe("check_error", self._on_check_error)
         self.events.subscribe("kindle_sent", self._on_kindle_sent)
@@ -301,12 +303,66 @@ class MeMangaApp(QMainWindow):
         self.app_state.add_downloaded_chapter(title, str(chapter))
         self.app_state.clear_failed_chapter(title, str(chapter))
 
-        # Badge update depends on mode:
-        #   auto   → batch download flushes the whole badge at once
-        #   manual → user picked one chapter; just decrement
-        if self._get_manga_mode(title) == "manual":
+        self._settle_new_chapter_download(
+            title, data.get("task_id"), failed=False
+        )
+
+    def register_new_chapter_batch(
+        self,
+        title: str,
+        task_ids,
+        already_resolved: int = 0,
+    ):
+        """Track an auto-mode batch so badges clear only after it settles."""
+        if not title or self._get_manga_mode(title) != "auto":
+            return
+
+        if already_resolved > 0:
+            current = self.app_state.get_new_chapters(title)
+            remaining = max(0, current - int(already_resolved))
+            if remaining:
+                self.app_state.set_new_chapters(title, remaining)
+            else:
+                self.app_state.clear_new_chapters(title)
+
+        accepted = set(task_ids)
+        if not accepted:
+            return
+
+        batch = self._new_chapter_batches.setdefault(
+            title, {"pending": set(), "failed": set()}
+        )
+        batch["pending"].update(accepted)
+
+    def _settle_new_chapter_download(
+        self, title: str, task_id: str | None, failed: bool
+    ):
+        """Update new-chapter badges when a queued chapter reaches terminal state."""
+        if not title:
+            return
+
+        batch = self._new_chapter_batches.get(title)
+        if batch:
+            if not task_id or task_id not in batch["pending"]:
+                return
+            batch["pending"].remove(task_id)
+            if failed:
+                batch["failed"].add(task_id)
+            else:
+                self.app_state.decrement_new_chapters(title)
+            if batch["pending"]:
+                return
+
+            self._new_chapter_batches.pop(title, None)
+            if not self.app_state.get_new_chapters(title):
+                self.app_state.clear_new_chapters(title)
+            return
+
+        # Non-batch fallback: manual downloads are one-offs; legacy auto
+        # paths that bypass DownloadsPage keep the old clear-on-success behavior.
+        if self._get_manga_mode(title) == "manual" and not failed:
             self.app_state.decrement_new_chapters(title)
-        else:
+        elif not failed:
             self.app_state.clear_new_chapters(title)
 
     def _resolve_external_threshold(self, manga, threshold_raw, all_chapters) -> bool:
@@ -405,6 +461,19 @@ class MeMangaApp(QMainWindow):
         error = data.get("error", "Unknown")
         self.app_state.add_notification("error", f"Failed: {title} - {error[:50]}")
         self.events.publish("notification_added", {})
+        self._settle_new_chapter_download(
+            title, data.get("task_id"), failed=True
+        )
+
+    def _on_download_cancelled(self, data):
+        title = data.get("title", "")
+        if not title:
+            task_id = data.get("task_id", "")
+            if ":" in task_id:
+                title = task_id.rsplit(":", 1)[0]
+        self._settle_new_chapter_download(
+            title, data.get("task_id"), failed=True
+        )
 
     def _on_check_complete(self, data):
         results = data.get("results", [])

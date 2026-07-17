@@ -716,9 +716,11 @@ class TestDetailPage:
         page = app_window._pages["detail"]
 
         queued = []
-        app_window.worker.download_chapter = (
-            lambda **kw: queued.append(str(kw["chapter"].number))
-        )
+        def accept(**kw):
+            number = str(kw["chapter"].number)
+            queued.append(number)
+            return f"{title}:{number}"
+        app_window.worker.download_chapter = accept
 
         page._download_chapter(
             app_window.app_state.get_available_chapters(title)[0],
@@ -809,6 +811,220 @@ class TestDownloadsQueueing:
         })
         # Chapter 1 is already on disk; only 2 is queued.
         assert queued == ["2"]
+
+    def test_auto_badge_clears_after_batch_finishes(self, app_window, qapp,
+                                                    sample_manga):
+        manga = {**sample_manga, "mode": "auto"}
+        title = manga["title"]
+        app_window.config.set("manga", [manga])
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+        queued = []
+        def accept(**kw):
+            number = str(kw["chapter"].number)
+            queued.append(number)
+            return f"{title}:{number}"
+        app_window.worker.download_chapter = accept
+        data = {"results": [self._result(manga, "1", "2")]}
+
+        app_window._on_check_complete(data)
+        page._on_check_complete(data)
+
+        assert queued == ["1", "2"]
+        assert app_window.app_state.get_new_chapters(title) == 2
+
+        app_window._on_download_complete({
+            "task_id": f"{title}:1", "title": title, "chapter": "1", "path": "",
+        })
+
+        assert app_window.app_state.get_new_chapters(title) == 1
+
+        app_window._on_download_complete({
+            "task_id": f"{title}:2", "title": title, "chapter": "2", "path": "",
+        })
+
+        assert app_window.app_state.get_new_chapters(title) == 0
+
+    def test_auto_badge_keeps_failed_batch_count(self, app_window, qapp,
+                                                 sample_manga):
+        manga = {**sample_manga, "mode": "auto"}
+        title = manga["title"]
+        app_window.config.set("manga", [manga])
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+        app_window.worker.download_chapter = (
+            lambda **kw: f"{title}:{kw['chapter'].number}"
+        )
+        data = {"results": [self._result(manga, "1", "2")]}
+
+        app_window._on_check_complete(data)
+        page._on_check_complete(data)
+        app_window._on_download_complete({
+            "task_id": f"{title}:1", "title": title, "chapter": "1", "path": "",
+        })
+        app_window._on_download_error({
+            "title": title,
+            "chapter": "2",
+            "task_id": f"{title}:2",
+            "error": "boom",
+        })
+
+        assert app_window.app_state.get_new_chapters(title) == 1
+
+    def test_manual_badge_unchanged_after_download_error(
+            self, app_window, sample_manga):
+        manga = {**sample_manga, "mode": "manual"}
+        title = manga["title"]
+        app_window.config.set("manga", [manga])
+        app_window.app_state.set_new_chapters(title, 2)
+
+        app_window._on_download_error({
+            "title": title,
+            "chapter": "1",
+            "task_id": f"{title}:1",
+            "error": "boom",
+        })
+
+        assert app_window.app_state.get_new_chapters(title) == 2
+
+    def test_manual_badge_unchanged_after_download_cancelled(
+            self, app_window, sample_manga):
+        manga = {**sample_manga, "mode": "manual"}
+        title = manga["title"]
+        app_window.config.set("manga", [manga])
+        app_window.app_state.set_new_chapters(title, 2)
+
+        app_window._on_download_cancelled({
+            "title": title,
+            "task_id": f"{title}:1",
+        })
+
+        assert app_window.app_state.get_new_chapters(title) == 2
+
+    def test_auto_batch_cancelled_uses_task_id_title_fallback(
+            self, app_window, sample_manga):
+        manga = {**sample_manga, "mode": "auto"}
+        title = manga["title"]
+        task_id = f"{title}:1"
+        app_window.config.set("manga", [manga])
+        app_window.app_state.set_new_chapters(title, 1)
+        app_window.register_new_chapter_batch(title, [task_id])
+
+        app_window._on_download_cancelled({"task_id": task_id})
+
+        assert app_window.app_state.get_new_chapters(title) == 1
+        assert title not in app_window._new_chapter_batches
+
+    def test_auto_badge_accounts_for_skipped_downloaded_chapters(
+            self, app_window, qapp, sample_manga):
+        manga = {**sample_manga, "mode": "auto"}
+        title = manga["title"]
+        app_window.config.set("manga", [manga])
+        app_window.app_state.add_downloaded_chapter(title, "1")
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+        queued = []
+        def accept(**kw):
+            number = str(kw["chapter"].number)
+            queued.append(number)
+            return f"{title}:{number}"
+        app_window.worker.download_chapter = accept
+        data = {"results": [self._result(manga, "1", "2")]}
+
+        app_window._on_check_complete(data)
+        page._on_check_complete(data)
+
+        assert queued == ["2"]
+        assert app_window.app_state.get_new_chapters(title) == 1
+
+        app_window._on_download_complete({
+            "task_id": f"{title}:2", "title": title, "chapter": "2", "path": "",
+        })
+
+        assert app_window.app_state.get_new_chapters(title) == 0
+
+    def test_overlapping_duplicate_check_waits_for_original_terminal_event(
+            self, app_window, qapp, sample_manga):
+        manga = {**sample_manga, "mode": "auto"}
+        title = manga["title"]
+        app_window.config.set("manga", [manga])
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+        accepted = iter((f"{title}:1", None))
+        app_window.worker.download_chapter = lambda **kw: next(accepted)
+        task_id = f"{title}:1"
+        data = {"results": [self._result(manga, "1")]}
+
+        # The first check starts the download. A second overlapping check sees
+        # the same task id and the worker rejects that duplicate enqueue.
+        app_window._on_check_complete(data)
+        page._on_check_complete(data)
+        app_window._on_check_complete(data)
+        page._on_check_complete(data)
+
+        assert app_window._new_chapter_batches[title]["pending"] == {task_id}
+
+        # The original download's terminal event still owns and settles it.
+        app_window._on_download_complete({
+            "task_id": task_id, "title": title, "chapter": "1", "path": "",
+        })
+
+        assert app_window.app_state.get_new_chapters(title) == 0
+        assert title not in app_window._new_chapter_batches
+
+    def test_immediate_terminal_event_settles_pre_registered_task(
+            self, app_window, qapp, sample_manga):
+        manga = {**sample_manga, "mode": "auto"}
+        title = manga["title"]
+        task_id = f"{title}:1"
+        app_window.config.set("manga", [manga])
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+
+        def complete_immediately(**kw):
+            app_window._on_download_complete({
+                "task_id": task_id,
+                "title": title,
+                "chapter": str(kw["chapter"].number),
+                "path": "",
+            })
+            return task_id
+
+        app_window.worker.download_chapter = complete_immediately
+        data = {"results": [self._result(manga, "1")]}
+
+        app_window._on_check_complete(data)
+        page._on_check_complete(data)
+
+        assert app_window.app_state.get_new_chapters(title) == 0
+        assert title not in app_window._new_chapter_batches
+
+    def test_unrelated_same_title_completion_does_not_consume_batch(
+            self, app_window, qapp, sample_manga):
+        manga = {**sample_manga, "mode": "auto"}
+        title = manga["title"]
+        app_window.config.set("manga", [manga])
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+        app_window.worker.download_chapter = (
+            lambda **kw: f"{title}:{kw['chapter'].number}"
+        )
+        data = {"results": [self._result(manga, "1")]}
+
+        app_window._on_check_complete(data)
+        page._on_check_complete(data)
+        app_window._on_download_complete({
+            "task_id": f"manual-{title}:99", "title": title,
+            "chapter": "99", "path": "",
+        })
+
+        assert app_window.app_state.get_new_chapters(title) == 1
+
+        app_window._on_download_complete({
+            "task_id": f"{title}:1", "title": title,
+            "chapter": "1", "path": "",
+        })
+        assert app_window.app_state.get_new_chapters(title) == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────
