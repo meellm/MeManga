@@ -152,6 +152,46 @@ class TestConcurrency:
         data = json.loads(state.state_path.read_text())
         assert "notifications" in data
 
+    def test_import_merge_serializes_with_worker_mutation(self, state):
+        """Backup merge must not publish an old manga snapshot over workers."""
+        state.add_downloaded_chapter("Existing", "1")
+        worker_started = threading.Event()
+        worker_done = threading.Event()
+        worker_errors = []
+        worker_threads = []
+
+        class InterleavingImport(dict):
+            def items(self):
+                def worker():
+                    try:
+                        worker_started.set()
+                        state.add_downloaded_chapter("Existing", "2")
+                        worker_done.set()
+                    except Exception as exc:  # pragma: no cover - failure path
+                        worker_errors.append(exc)
+
+                thread = threading.Thread(target=worker)
+                worker_threads.append(thread)
+                thread.start()
+                assert worker_started.wait(timeout=5)
+                time.sleep(0.02)
+                assert not worker_done.is_set()
+                return super().items()
+
+        imported = InterleavingImport({
+            "Existing": {"downloaded": ["imported"]},
+            "Missing": {"downloaded": ["9"]},
+        })
+
+        state.merge_missing_manga_state(imported)
+
+        for thread in worker_threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+        assert worker_errors == []
+        assert state.get_downloaded_chapters("Existing") == ["1", "2"]
+        assert state.get_downloaded_chapters("Missing") == ["9"]
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Config persistence — YAML round-trip
@@ -331,6 +371,18 @@ class TestGetterIsolation:
         state.add_failed_chapter("X", "2", "src.test", "boom")
         state.clear_pending_backup("X", "1")
         assert state.get_pending_backup("X", "1") is None
+
+    def test_rename_manga_moves_state_entry_and_persists(self, state):
+        state.add_downloaded_chapter("Old", "1")
+
+        assert state.rename_manga("Old", "New") is True
+        assert state.get_manga_state("Old") == {}
+        assert state.get_downloaded_chapters("New") == ["1"]
+        assert "New" in json.loads(state.state_path.read_text())["manga"]
+
+    def test_rename_manga_returns_false_for_missing_entry(self, state):
+        assert state.rename_manga("Missing", "New") is False
+        assert state.get_manga_state("New") == {}
 
 
 # ─────────────────────────────────────────────────────────────────────────

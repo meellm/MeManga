@@ -149,6 +149,23 @@ class State:
             data[key] = self._snapshot(value)
             self.save()
 
+    def merge_missing_manga_state(self, imported_state: Dict[str, Any]):
+        """Merge imported manga state entries without replacing local state.
+
+        Issue #110: Settings backup import used to build a snapshot with
+        get("manga"), mutate it, then set("manga") wholesale. A worker update
+        between those calls could be overwritten. Keep the read/merge/save under
+        the State lock so local worker mutations serialize with import.
+        """
+        if not isinstance(imported_state, dict):
+            imported_state = {}
+        with self._locked() as data:
+            manga = data.setdefault("manga", {})
+            for title, state_data in imported_state.items():
+                if not manga.get(title):
+                    manga[title] = self._snapshot(state_data)
+            self.save()
+
     # ========================================================================
     # Manga State
     # ========================================================================
