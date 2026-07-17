@@ -138,6 +138,31 @@ def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
     }]
 
 
+def _max_cached_chapter(cached: List[Dict[str, Any]]) -> float:
+    """Highest numeric chapter number in a cached available-chapters list.
+
+    Used to bootstrap the catalogue baseline for manga that predate the
+    stored ``catalogue_baseline`` field (#102). Entries are the dicts the
+    GUI persists via ``set_available_chapters`` (``{"number": ...}``).
+    Returns 0.0 when nothing usable is present.
+    """
+    best = 0.0
+    for entry in cached or []:
+        if not isinstance(entry, dict):
+            continue
+        num = entry.get("number")
+        if num is None:
+            continue
+        try:
+            best = max(best, float(num))
+        except (TypeError, ValueError):
+            # Fall back to the leading number in strings like "12 Part 1".
+            match = re.search(r"\d+\.?\d*", str(num))
+            if match:
+                best = max(best, float(match.group()))
+    return best
+
+
 def check_for_updates(
     manga: Dict[str, Any],
     state: State,
@@ -276,55 +301,124 @@ def check_for_updates(
             f"All sources failed for '{title}': " + "; ".join(source_errors)
         )
 
-    # Suspicious-batch guard. Only meaningful when we have a baseline (a
-    # previously tracked chapter) and the user isn't explicitly
-    # bulk-downloading with from_chapter.
-    if from_chapter is None and last_num > 0 and primary_checked:
-        from .suspicion import evaluate_new_chapters
+    # Suspicious-batch guard.
+    #
+    # The batch is scored against the source's *catalogue baseline* — the
+    # highest chapter the source has legitimately exposed before — not the
+    # last downloaded chapter. Scoring against the last download makes a
+    # manual-mode backlog (only an early chapter grabbed from an
+    # already-large catalogue) look like a giant source jump on every check
+    # (#102). Only chapters that appear beyond the known catalogue are
+    # candidates for suspicion; anything at or below it is an existing,
+    # still-undownloaded backlog and stays freely downloadable.
+    if primary_checked:
+        primary_high = max((ch.numeric for ch in primary_all), default=0.0)
 
-        suspicion = evaluate_new_chapters(
-            state, title,
-            [ch.numeric for ch in primary_chapters.values()],
-            last_num,
+        get_suspicious_batch = getattr(state, "get_suspicious_batch", None)
+        active_suspicious = (
+            get_suspicious_batch(title)
+            if callable(get_suspicious_batch)
+            else None
         )
-        if suspicion.suspicious and not force_suspicious:
-            suspect = sorted(primary_chapters.values())
-            suspect_numbers = [round(ch.numeric, 3) for ch in suspect]
+        get_catalogue_baseline = getattr(state, "get_catalogue_baseline", None)
+        baseline = (
+            get_catalogue_baseline(title)
+            if callable(get_catalogue_baseline)
+            else None
+        )
+        if baseline is None and not active_suspicious:
+            # No trusted snapshot yet (manga predates this field, or was
+            # never checked). Bootstrap from the last cached catalogue so an
+            # existing large backlog isn't mistaken for a jump.
+            get_available_chapters = getattr(state, "get_available_chapters", None)
+            cached = (
+                get_available_chapters(title)
+                if callable(get_available_chapters)
+                else []
+            )
+            baseline = _max_cached_chapter(cached)
+        if baseline is None:
+            baseline = 0.0
+        bootstrapped_manual_baseline = False
+        if baseline <= 0 and manga.get("mode") == "manual" and from_chapter is None:
+            # First manual-mode check after adding/importing a manga. Manual
+            # mode only surfaces Download buttons, so this snapshot is not an
+            # auto-delivery risk; use it as the initial catalogue baseline
+            # instead of scoring the whole undownloaded backlog against the
+            # user's last downloaded/read chapter (#102).
+            baseline = primary_high
+            bootstrapped_manual_baseline = True
 
-            # Verify against backup sources before withholding anything.
-            confirmed = sum(1 for n in suspect_numbers if n in backup_all_numbers)
-            if backup_sources_checked and confirmed / len(suspect_numbers) >= 0.5:
-                # Backup largely agrees with the primary, so accept the batch.
-                state.clear_suspicious_batch(title)
-            else:
-                if backup_sources_checked:
-                    backup_status = (
-                        f"backup confirmed only {confirmed}/{len(suspect_numbers)} chapters"
-                    )
-                else:
-                    backup_status = "no backup source available to verify"
-                state.set_suspicious_batch(title, {
-                    "detected_at": datetime.now().isoformat(),
-                    "chapters": [ch.number for ch in suspect],
-                    "count": len(suspect),
-                    "last_chapter": last_num,
-                    "highest": max(suspect_numbers),
-                    "score": suspicion.score,
-                    "reasons": suspicion.reasons,
-                    "backup_status": backup_status,
-                })
-                state.add_notification(
-                    "warn",
-                    f"Suspicious chapter batch for '{title}': "
-                    f"{len(suspect)} chapter(s) up to {max(suspect_numbers):g} "
-                    f"({backup_status}). Skipped auto-delivery.",
+        catalogue_trusted = True
+        # Only score when we have a download baseline and the user isn't
+        # explicitly bulk-downloading with from_chapter.
+        if from_chapter is None and last_num > 0:
+            from .suspicion import evaluate_new_chapters
+
+            guard_from = max(last_num, baseline)
+            scored = {
+                num: ch for num, ch in primary_chapters.items()
+                if ch.numeric > guard_from
+            }
+            suspicion = (
+                evaluate_new_chapters(
+                    state, title,
+                    [ch.numeric for ch in scored.values()],
+                    guard_from,
                 )
-                # Withhold the whole primary batch from download/delivery.
-                primary_chapters = {}
-        else:
-            # Batch is normal, forced, or backup-confirmed. Drop any
-            # stale suspicious record so warnings don't linger.
-            state.clear_suspicious_batch(title)
+                if scored else None
+            )
+            if suspicion is not None and suspicion.suspicious and not force_suspicious:
+                suspect = sorted(scored.values())
+                suspect_numbers = [round(ch.numeric, 3) for ch in suspect]
+
+                # Verify against backup sources before withholding anything.
+                confirmed = sum(1 for n in suspect_numbers if n in backup_all_numbers)
+                if backup_sources_checked and confirmed / len(suspect_numbers) >= 0.5:
+                    # Backup largely agrees with the primary, so accept the batch.
+                    state.clear_suspicious_batch(title)
+                else:
+                    if backup_sources_checked:
+                        backup_status = (
+                            f"backup confirmed only {confirmed}/{len(suspect_numbers)} chapters"
+                        )
+                    else:
+                        backup_status = "no backup source available to verify"
+                    state.set_suspicious_batch(title, {
+                        "detected_at": datetime.now().isoformat(),
+                        "chapters": [ch.number for ch in suspect],
+                        "count": len(suspect),
+                        "last_chapter": guard_from,
+                        "highest": max(suspect_numbers),
+                        "score": suspicion.score,
+                        "reasons": suspicion.reasons,
+                        "backup_status": backup_status,
+                    })
+                    state.add_notification(
+                        "warn",
+                        f"Suspicious chapter batch for '{title}': "
+                        f"{len(suspect)} chapter(s) up to {max(suspect_numbers):g} "
+                        f"({backup_status}). Skipped auto-delivery.",
+                    )
+                    # Withhold only the suspicious newly-appeared chapters;
+                    # the known backlog stays downloadable. Don't advance the
+                    # trusted baseline past an unverified jump.
+                    for num in scored:
+                        primary_chapters.pop(num, None)
+                    catalogue_trusted = False
+            else:
+                # Batch is normal, forced, or backup-confirmed. Drop any
+                # stale suspicious record so warnings don't linger.
+                state.clear_suspicious_batch(title)
+
+        # Advance the trusted catalogue high-water mark unless we just held
+        # back an unverified jump. Recording it even when the guard didn't
+        # run (fresh manga, explicit from_chapter) gives later checks a
+        # baseline so a big existing backlog is never re-scored as a jump.
+        if catalogue_trusted and (primary_high > baseline or bootstrapped_manual_baseline):
+            set_catalogue_baseline = getattr(state, "set_catalogue_baseline", None)
+            if callable(set_catalogue_baseline):
+                set_catalogue_baseline(title, primary_high)
 
     # Process primary chapters first (always download these)
     for ch_num, ch in primary_chapters.items():
