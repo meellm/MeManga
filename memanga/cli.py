@@ -19,7 +19,11 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich import box
 
-from .backup import EXPORT_VERSION, BackupVersionError, validate_backup
+from .backup import (
+    EXPORT_VERSION,
+    BackupVersionError,
+    validate_backup,
+)
 from .config import Config, get_app_password, set_app_password
 from .cron import build_cron_line
 from .state import State

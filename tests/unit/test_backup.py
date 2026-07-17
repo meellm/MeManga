@@ -15,6 +15,8 @@ import pytest
 from memanga.backup import (
     EXPORT_VERSION,
     BackupVersionError,
+    merge_backup_state,
+    merge_manga_state,
     validate_backup,
     _MIGRATIONS,
 )
@@ -64,3 +66,75 @@ class TestValidateBackup:
         )
         out = validate_backup({"version": 0, "manga": []})
         assert out["migrated"] is True
+
+
+class TestMergeMangaState:
+    def test_preserves_local_and_imported_progress_fields(self):
+        local = {
+            "downloaded": ["1", "3"],
+            "read_chapters": ["1"],
+            "external_chapters": ["7"],
+            "failed_chapters": {
+                "4": {"error": "local", "attempts": 2},
+            },
+            "available_chapters": [
+                {"number": "1", "source": "local", "source_url": "local/1"},
+            ],
+            "reading_progress": {
+                "last_chapter": "3",
+                "last_read": "2026-07-17T09:00:00",
+            },
+            "new_chapters_available": 1,
+        }
+        imported = {
+            "downloaded": ["2", "3"],
+            "read_chapters": ["2"],
+            "external_chapters": ["8"],
+            "failed_chapters": {
+                "4": {"error": "imported", "attempts": 1},
+                "5": {"error": "backup", "attempts": 1},
+            },
+            "available_chapters": [
+                {"number": "1", "source": "local", "source_url": "local/1"},
+                {"number": "2", "source": "backup", "source_url": "backup/2"},
+            ],
+            "reading_progress": {
+                "last_chapter": "5",
+                "last_read": "2026-07-17T10:00:00",
+            },
+            "new_chapters_available": 4,
+        }
+
+        merged = merge_manga_state(local, imported)
+
+        assert merged["downloaded"] == ["1", "2", "3"]
+        assert merged["read_chapters"] == ["1", "2"]
+        assert merged["external_chapters"] == ["7", "8"]
+        assert merged["failed_chapters"]["4"]["error"] == "local"
+        assert merged["failed_chapters"]["5"]["error"] == "backup"
+        assert merged["available_chapters"] == [
+            {"number": "1", "source": "local", "source_url": "local/1"},
+            {"number": "2", "source": "backup", "source_url": "backup/2"},
+        ]
+        assert merged["reading_progress"]["last_chapter"] == "5"
+        assert merged["new_chapters_available"] == 4
+
+    def test_merge_backup_state_adds_new_titles(self):
+        merged = merge_backup_state(
+            {"Local": {"downloaded": ["1"]}},
+            {
+                "Local": {"downloaded": ["2"]},
+                "Imported": {"read_chapters": ["9"]},
+            },
+        )
+
+        assert merged["Local"]["downloaded"] == ["1", "2"]
+        assert merged["Imported"]["read_chapters"] == ["9"]
+
+    def test_last_chapter_uses_chapter_order_not_string_order(self):
+        merged = merge_manga_state(
+            {"last_chapter": "9"},
+            {"last_chapter": "10"},
+        )
+
+        assert merged["last_chapter"] == "10"

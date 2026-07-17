@@ -524,6 +524,61 @@ class TestExportImport:
             titles = [m["title"] for m in config.get("manga", []) or []]
             assert "FromImport" in titles
 
+    def test_import_merge_preserves_existing_manga_state(
+            self, run_cli, config, isolated_home, tmp_path):
+        from memanga import cli
+        from memanga.state import State
+
+        config.set("manga", [{"title": "Stateful", "url": "local",
+                              "source": "mangadex.org",
+                              "status": "reading"}])
+        config.save()
+        cli.state = State(config_dir=isolated_home / ".config" / "memanga")
+        cli.state.set("manga", {
+            "Stateful": {
+                "downloaded": ["1"],
+                "read_chapters": ["1"],
+                "failed_chapters": {
+                    "4": {"error": "local", "attempts": 2},
+                },
+                "reading_progress": {
+                    "last_chapter": "1",
+                    "last_read": "2026-07-17T09:00:00",
+                },
+            }
+        })
+        backup = tmp_path / "state.json"
+        backup.write_text(json.dumps({
+            "version": 1,
+            "manga": [{"title": "Stateful", "url": "imported",
+                       "source": "mangadex.org", "status": "reading"}],
+            "state": {
+                "Stateful": {
+                    "downloaded": ["2"],
+                    "read_chapters": ["2"],
+                    "external_chapters": ["3"],
+                    "failed_chapters": {
+                        "4": {"error": "imported", "attempts": 1},
+                        "5": {"error": "backup", "attempts": 1},
+                    },
+                    "reading_progress": {
+                        "last_chapter": "2",
+                        "last_read": "2026-07-17T10:00:00",
+                    },
+                }
+            },
+        }))
+
+        assert run_cli("import", str(backup)) == 0
+
+        merged = cli.state.get("manga", {})["Stateful"]
+        assert merged["downloaded"] == ["1", "2"]
+        assert merged["read_chapters"] == ["1", "2"]
+        assert merged["external_chapters"] == ["3"]
+        assert merged["failed_chapters"]["4"]["error"] == "local"
+        assert merged["failed_chapters"]["5"]["error"] == "backup"
+        assert merged["reading_progress"]["last_chapter"] == "2"
+
     def test_import_roundtrip(self, run_cli, config, tmp_path):
         """An export produced by the CLI must import cleanly (issue #42)."""
         config.set("manga", [{"title": "RoundTrip", "url": "u",

@@ -1162,7 +1162,10 @@ class SettingsPage(BasePage):
                         added += 1
                 self.app.config.set("manga", existing)
                 self.app.config.save()
-                self.app.app_state.merge_missing_manga_state(data.get("state", {}))
+                self.app.app_state.merge_missing_manga_state(
+                    data.get("state", {}),
+                    merge_existing_downloaded=True,
+                )
                 Toast(self, f"Imported {added} manga", kind="success")
         except json.JSONDecodeError:
             Toast(self, "Invalid JSON", kind="error")

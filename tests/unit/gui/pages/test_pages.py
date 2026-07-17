@@ -415,6 +415,63 @@ class TestSettingsPage:
                   for m in app_window.config.get("manga", []) or []]
         assert titles == ["Existing", "Fresh"]
 
+    def test_import_merge_preserves_existing_manga_state(
+        self, app_window, qapp, monkeypatch, tmp_path
+    ):
+        import json
+        from PySide6.QtWidgets import QFileDialog
+
+        backup = tmp_path / "state.json"
+        backup.write_text(json.dumps({
+            "version": 1,
+            "manga": [{"title": "Stateful", "url": "imported",
+                       "source": "mangadex.org", "status": "reading"}],
+            "state": {
+                "Stateful": {
+                    "downloaded": ["2"],
+                    "read_chapters": ["2"],
+                    "external_chapters": ["3"],
+                    "failed_chapters": {
+                        "4": {"error": "imported", "attempts": 1},
+                        "5": {"error": "backup", "attempts": 1},
+                    },
+                    "reading_progress": {
+                        "last_chapter": "2",
+                        "last_read": "2026-07-17T10:00:00",
+                    },
+                }
+            },
+        }))
+        monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                            staticmethod(lambda *a, **k: (str(backup), "")))
+        app_window.config.set("manga", [
+            {"title": "Stateful", "url": "local",
+             "source": "mangadex.org", "status": "reading"}
+        ])
+        app_window.app_state.set("manga", {
+            "Stateful": {
+                "downloaded": ["1"],
+                "read_chapters": ["1"],
+                "failed_chapters": {
+                    "4": {"error": "local", "attempts": 2},
+                },
+                "reading_progress": {
+                    "last_chapter": "1",
+                    "last_read": "2026-07-17T09:00:00",
+                },
+            }
+        })
+
+        app_window._pages["settings"]._import(replace=False)
+
+        merged = app_window.app_state.get("manga", {})["Stateful"]
+        assert merged["downloaded"] == ["1", "2"]
+        assert merged["read_chapters"] == ["1", "2"]
+        assert merged["external_chapters"] == ["3"]
+        assert merged["failed_chapters"]["4"]["error"] == "local"
+        assert merged["failed_chapters"]["5"]["error"] == "backup"
+        assert merged["reading_progress"]["last_chapter"] == "2"
+
     def test_import_rejects_versionless_backup(self, app_window, qapp,
                                                monkeypatch, tmp_path):
         # Regression for #42: import never read the export's `version`
