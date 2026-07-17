@@ -49,6 +49,8 @@ def validate_backup(data: Any) -> dict:
             f"Backup version {version} is newer than this app supports "
             f"(max {EXPORT_VERSION}); update MeManga"
         )
+    if "state" in data and not isinstance(data["state"], dict):
+        raise BackupVersionError("Invalid backup: state must be an object")
 
     while version < EXPORT_VERSION:
         migrate = _MIGRATIONS.get(version)

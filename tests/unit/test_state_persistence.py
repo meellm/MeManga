@@ -192,6 +192,24 @@ class TestConcurrency:
         assert state.get_downloaded_chapters("Existing") == ["1", "2"]
         assert state.get_downloaded_chapters("Missing") == ["9"]
 
+    def test_cli_import_merge_unions_downloaded_under_lock(self, state):
+        state.add_downloaded_chapter("Existing", "1")
+
+        state.merge_missing_manga_state(
+            {
+                "Existing": {"downloaded": ["2", "10"]},
+                "Missing": {"downloaded": ["3"]},
+            },
+            merge_existing_downloaded=True,
+        )
+
+        assert state.get_downloaded_chapters("Existing") == ["1", "2", "10"]
+        assert state.get_downloaded_chapters("Missing") == ["3"]
+
+    def test_import_merge_rejects_non_dict_state(self, state):
+        with pytest.raises(TypeError):
+            state.merge_missing_manga_state([])
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Config persistence — YAML round-trip

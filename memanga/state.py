@@ -149,7 +149,19 @@ class State:
             data[key] = self._snapshot(value)
             self.save()
 
-    def merge_missing_manga_state(self, imported_state: Dict[str, Any]):
+    @staticmethod
+    def _chapter_sort_key(chapter):
+        try:
+            return float(chapter)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def merge_missing_manga_state(
+        self,
+        imported_state: Dict[str, Any],
+        *,
+        merge_existing_downloaded: bool = False,
+    ):
         """Merge imported manga state entries without replacing local state.
 
         Issue #110: Settings backup import used to build a snapshot with
@@ -157,12 +169,26 @@ class State:
         between those calls could be overwritten. Keep the read/merge/save under
         the State lock so local worker mutations serialize with import.
         """
-        if not isinstance(imported_state, dict):
+        if imported_state is None:
             imported_state = {}
+        if not isinstance(imported_state, dict):
+            raise TypeError("imported_state must be a dict")
         with self._locked() as data:
             manga = data.setdefault("manga", {})
             for title, state_data in imported_state.items():
-                if not manga.get(title):
+                if title in manga and merge_existing_downloaded:
+                    entry = manga[title]
+                    if not isinstance(entry, dict):
+                        entry = {}
+                        manga[title] = entry
+                    if isinstance(state_data, dict):
+                        existing_downloaded = set(entry.get("downloaded", []))
+                        imported_downloaded = set(state_data.get("downloaded", []))
+                        entry["downloaded"] = sorted(
+                            existing_downloaded | imported_downloaded,
+                            key=self._chapter_sort_key,
+                        )
+                elif not manga.get(title):
                     manga[title] = self._snapshot(state_data)
             self.save()
 

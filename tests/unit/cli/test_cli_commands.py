@@ -537,6 +537,32 @@ class TestExportImport:
         titles = [m["title"] for m in config.get("manga", []) or []]
         assert "RoundTrip" in titles
 
+    def test_import_merge_unions_downloaded_state(self, run_cli, config,
+                                                  isolated_home, monkeypatch,
+                                                  tmp_path):
+        from memanga import cli as cli_mod
+        from memanga.state import State
+
+        config.set("manga", [{"title": "Existing", "url": "u",
+                              "source": "mangadex.org", "status": "reading"}])
+        config.save()
+        state = State(config_dir=isolated_home / ".config" / "memanga")
+        monkeypatch.setattr(cli_mod, "state", state)
+        state.add_downloaded_chapter("Existing", "1")
+
+        backup = tmp_path / "merge-state.json"
+        backup.write_text(json.dumps({
+            "version": 1,
+            "manga": [{"title": "Existing", "url": "u",
+                       "source": "mangadex.org", "status": "reading"}],
+            "state": {"Existing": {"downloaded": ["2", "10"]}},
+        }))
+
+        assert run_cli("import", str(backup)) == 0
+
+        reloaded = State(config_dir=isolated_home / ".config" / "memanga")
+        assert reloaded.get_downloaded_chapters("Existing") == ["1", "2", "10"]
+
     def test_import_missing_version_rejected(self, run_cli, config, tmp_path,
                                              capsys):
         """Issue #42: a file without the export's `version` stamp is not
