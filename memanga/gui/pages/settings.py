@@ -579,6 +579,22 @@ class SettingsPage(BasePage):
 
         f.addSpacing(T.PAD_XL)
 
+        # Reader prefetch (issue #107)
+        self._section(f, "Reader")
+        prefetch_hint = QLabel(
+            "While reading a manual-mode manga, download the next chapter "
+            "in the background so Next continues without leaving the reader."
+        )
+        prefetch_hint.setProperty("role", "hint")
+        prefetch_hint.setWordWrap(True)
+        f.addWidget(prefetch_hint)
+
+        self._prefetch_check = QCheckBox("Prefetch the next chapter while reading")
+        self._prefetch_check.setChecked(self.app.config.reader_prefetch_enabled)
+        f.addWidget(self._prefetch_check)
+
+        f.addSpacing(T.PAD_XL)
+
         # Post-processing
         self._section(f, "Post-Processing")
 
@@ -895,6 +911,10 @@ class SettingsPage(BasePage):
             cfg.set("partial_chapters.enabled", self._partial_check.isChecked())
             cfg.set("partial_chapters.threshold_percent", int(self._partial_threshold.value()))
 
+        # Reader prefetch (issue #107)
+        if hasattr(self, "_prefetch_check"):
+            cfg.set("gui.reader_prefetch_next", self._prefetch_check.isChecked())
+
         cfg.save()
         Toast(self, "Settings saved", kind="success")
 
@@ -949,6 +969,9 @@ class SettingsPage(BasePage):
             self._partial_check.setChecked(cfg.partial_enabled)
             self._partial_threshold.setValue(int(round(cfg.partial_threshold)))
             self._partial_threshold.setEnabled(self._partial_check.isChecked())
+
+        if hasattr(self, "_prefetch_check"):
+            self._prefetch_check.setChecked(cfg.reader_prefetch_enabled)
 
         self._refresh_filename_preview()
 

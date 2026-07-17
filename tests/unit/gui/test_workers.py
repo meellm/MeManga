@@ -764,6 +764,36 @@ class TestCheckUpdates:
         ], force=True)
         assert checked == ["Plan one"]
 
+    def test_correlated_check_tags_progress(self, worker, event_bus, state,
+                                            monkeypatch):
+        import time
+        import memanga.downloader as downloader
+
+        def _fake_check(_manga, _state, return_all=False):
+            return ([], []) if return_all else []
+
+        monkeypatch.setattr(downloader, "check_for_updates", _fake_check)
+
+        progress = []
+        done = []
+        event_bus.subscribe("check_progress", lambda d: progress.append(d))
+        event_bus.subscribe("check_complete", lambda d: done.append(d))
+
+        worker.check_updates([
+            {"title": "Correlated one", "status": "reading",
+             "source": "mock.test", "url": "u"},
+        ], state, config=None, force=True, request_id="Correlated one:1")
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not done:
+            event_bus.poll()
+            time.sleep(0.02)
+        event_bus.poll()
+
+        assert progress
+        assert progress[0]["request_id"] == "Correlated one:1"
+        assert done[0]["request_id"] == "Correlated one:1"
+
 
 class TestSearchRelevanceFilter:
     """Regression for the 'searching Blue Lock returns Beastars, Tokyo

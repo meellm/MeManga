@@ -83,6 +83,10 @@ class Config:
                 "sort_by": "title",
                 "auto_check": True,
                 "auto_check_interval": 3600,
+                # Reader prefetch (issue #107). Off by default: while
+                # reading a manual-mode manga, the reader quietly queues
+                # the immediate next available chapter in the background.
+                "reader_prefetch_next": False,
             },
             # Partial-chapter tolerance (issue #86). Off by default: any
             # missing page still aborts the chapter and discards output.
@@ -210,6 +214,12 @@ class Config:
         except (TypeError, ValueError):
             return 5.0
         return max(0.0, min(100.0, value))
+
+    @property
+    def reader_prefetch_enabled(self):
+        """Whether the reader prefetches the next manual-mode chapter
+        while reading (issue #107)."""
+        return bool(self.get("gui.reader_prefetch_next", False))
 
 
 _KEYRING_SERVICE = "memanga"

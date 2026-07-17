@@ -103,6 +103,26 @@ class TestChapterTracking:
         st = state.get_manga_state("never-added")
         assert isinstance(st, dict)
 
+    def test_labelled_chapter_sorts_by_embedded_number(self, state):
+        # Issue #107: reader prefetch can download labelled chapters like
+        # "2 Part 1"; they must sort after "1" (by Chapter.numeric-style
+        # extraction) or the reader's Next controls never find them.
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "2 Part 1")
+        assert state.get_downloaded_chapters("X") == ["1", "2 Part 1"]
+
+    def test_labelled_chapters_interleave_with_plain_numbers(self, state):
+        for ch in ["10 Part 1", "Chapter 2", "1", "3"]:
+            state.add_downloaded_chapter("X", ch)
+        assert state.get_downloaded_chapters("X") == [
+            "1", "Chapter 2", "3", "10 Part 1"]
+
+    def test_nonnumeric_chapter_keeps_sort_first_fallback(self, state):
+        # Fully non-numeric labels keep the old 0.0 fallback (sort first).
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "Extra")
+        assert state.get_downloaded_chapters("X") == ["Extra", "1"]
+
 
 class TestExternalChapters:
     def test_mark_and_check_external(self, state):
@@ -427,6 +447,14 @@ class TestResetManga:
         state.add_downloaded_chapter("X", "2 Part 1")
         state.reset_manga_progress("X", from_chapter=0)
         assert state.get_downloaded_chapters("X") == []
+
+    def test_reset_with_threshold_handles_labelled_chapters(self, state):
+        # float("2 Part 1") raises; the threshold filter must use the
+        # same numeric extraction as the downloaded-list sort (issue #107).
+        for c in ["1", "2 Part 1", "Chapter 3", "4"]:
+            state.add_downloaded_chapter("X", c)
+        state.reset_manga_progress("X", from_chapter=3)
+        assert state.get_downloaded_chapters("X") == ["1", "2 Part 1"]
 
     def test_remove_manga(self, state):
         state.add_downloaded_chapter("X", "1")

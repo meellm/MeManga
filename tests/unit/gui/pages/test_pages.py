@@ -722,6 +722,23 @@ class TestDownloadsQueueing:
         })
         assert queued == []
 
+    def test_correlated_check_complete_does_not_toast_manual_results(
+            self, app_window, qapp, sample_manga, mocker):
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+        toast = mocker.patch("memanga.gui.pages.downloads.Toast")
+
+        page._on_check_complete({
+            "results": [self._result(sample_manga, "1", "2")],
+            "request_id": f"{sample_manga['title']}:1",
+        })
+        toast.assert_not_called()
+
+        page._on_check_complete({
+            "results": [self._result(sample_manga, "1", "2")],
+        })
+        toast.assert_called_once()
+
     def test_explicit_download_skips_already_downloaded(self, app_window, qapp,
                                                         sample_manga):
         app_window.show_page("downloads"); qapp.processEvents()

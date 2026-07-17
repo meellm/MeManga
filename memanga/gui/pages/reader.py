@@ -4,6 +4,7 @@ Three layouts: continuous vertical scroll, single page, two-up spreads.
 """
 
 import io
+import re
 import zipfile
 from pathlib import Path
 from typing import List, Optional
@@ -83,6 +84,29 @@ def _extract_images_from_file(filepath: Path) -> List[QImage]:
     return images
 
 
+def _chapter_sort_key(number) -> Optional[float]:
+    """Numeric sort key for a chapter number, or None when it can't be
+    parsed. Used by the reader prefetch (issue #107) to find the
+    immediate next chapter without assuming the cache is pre-sorted.
+    Mirrors Chapter.numeric's extraction so labels like "Chapter 2" or
+    "2 Part 1" resolve too, but yields None instead of 0.0 when nothing
+    numeric is found -- an unparseable chapter must skip prefetch, not
+    sort as chapter zero."""
+    if number is None:
+        return None
+    try:
+        return float(str(number).strip())
+    except (ValueError, TypeError):
+        pass
+    match = re.search(r"(\d+\.?\d*)", str(number))
+    if match:
+        return float(match.group(1))
+    return None
+
+
+_PREFETCH_SKIP = object()
+
+
 def _extract_images_from_folder(folder: Path) -> List[QImage]:
     extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
     images = []
@@ -139,6 +163,19 @@ class ReaderPage(BasePage):
         # Issue #45: set once the current chapter has been marked read,
         # so the scroll handler only fires the state write + event once.
         self._read_marked = False
+        # Issue #107: reader prefetch of the next manual-mode chapter.
+        # Handles to the Next controls live here so a prefetched
+        # download finishing mid-read can reveal them without reloading
+        # the chapter; _prefetch_fallback_key marks a prefetch that is
+        # waiting on a forced source lookup (cache-miss fallback).
+        self._next_btn = None
+        self._next_footer = None
+        self._next_footer_btn = None
+        self._prefetch_fallback_key = None
+        self._prefetch_fallback_attempted_key = None
+        self.app.events.subscribe("download_complete",
+                                  self._on_download_complete)
+        self.app.events.subscribe("check_complete", self._on_check_complete)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -835,6 +872,14 @@ class ReaderPage(BasePage):
         # Issue #45: each chapter load starts with an unread gate, even
         # when navigating Prev/Next within the reader.
         self._read_marked = False
+        # Issue #107: the previous chapter's Next controls die with
+        # self._content above — drop the handles so a stray refresh
+        # can't poke deleted widgets.
+        self._next_btn = None
+        self._next_footer = None
+        self._next_footer_btn = None
+        self._prefetch_fallback_key = None
+        self._prefetch_fallback_attempted_key = None
         # Issue #32: every chapter opens on its first page, in whatever
         # layout this manga last used (or the global/legacy fallback) —
         # unless a resume position was saved for it (issue #106), which
@@ -897,12 +942,16 @@ class ReaderPage(BasePage):
             prev_btn.clicked.connect(lambda checked=False, c=prev_ch: self._navigate_chapter(c))
             top_layout.addWidget(prev_btn)
 
-        if idx >= 0 and idx < len(downloaded) - 1:
-            next_ch = downloaded[idx + 1]
-            next_btn = QPushButton("Next ›")
-            next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            next_btn.clicked.connect(lambda checked=False, c=next_ch: self._navigate_chapter(c))
-            top_layout.addWidget(next_btn)
+        # Issue #107: the Next button always exists (hidden without a
+        # successor) so a prefetched chapter finishing mid-read can
+        # reveal it via _refresh_next_controls instead of a full reload.
+        # It resolves its target on click, so no chapter is captured.
+        self._next_btn = QPushButton("Next ›")
+        self._next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._next_btn.clicked.connect(
+            lambda checked=False: self._go_next_chapter())
+        self._next_btn.setVisible(0 <= idx < len(downloaded) - 1)
+        top_layout.addWidget(self._next_btn)
 
         # ── Layout toggle (issues #24, #32) ─────────────────────────────
         # Three iconified buttons (same style as the zoom +/- chip):
@@ -1019,23 +1068,29 @@ class ReaderPage(BasePage):
         # "Next Chapter" button at bottom — continuous mode only: the
         # paged layouts re-render per page, so an in-flow footer would
         # show under every single page rather than after the last one.
-        if self._view_mode == "continuous" and 0 <= idx < len(downloaded) - 1:
-            next_ch = downloaded[idx + 1]
+        # Issue #107: built even without a successor (hidden) so a
+        # prefetch completion can flip it visible without a reload.
+        if self._view_mode == "continuous":
+            has_next = 0 <= idx < len(downloaded) - 1
             next_frame = QWidget()
             next_frame_layout = QHBoxLayout(next_frame)
             next_frame_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            next_chapter_btn = QPushButton(f"Next: Chapter {next_ch} >>")
+            next_chapter_btn = QPushButton(
+                self._next_footer_label(downloaded, idx))
             next_chapter_btn.setProperty("class", "accent")
             next_chapter_btn.setFixedHeight(40)
             next_chapter_btn.setFixedWidth(250)
             next_chapter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             next_chapter_btn.clicked.connect(
-                lambda checked=False, c=next_ch: self._navigate_chapter(c)
+                lambda checked=False: self._go_next_chapter()
             )
             next_frame_layout.addWidget(next_chapter_btn)
             self._image_layout.addSpacing(T.PAD_XL)
             self._image_layout.addWidget(next_frame)
+            next_frame.setVisible(has_next)
+            self._next_footer = next_frame
+            self._next_footer_btn = next_chapter_btn
 
         content_layout.addWidget(self._scroll, 1)
 
@@ -1080,6 +1135,9 @@ class ReaderPage(BasePage):
         # fit the viewport whole is immediately fully visible — the
         # scroll threshold can never fire for it.
         QTimer.singleShot(0, self._mark_read_if_unscrollable)
+        # Issue #107: with the chapter on screen, quietly prepare the
+        # next one for manual-mode manga (setting-gated, cache-first).
+        self._maybe_prefetch_next()
 
     def _find_and_load_chapter(self) -> List[QImage]:
         title = self._manga.get("title", "")
@@ -1155,3 +1213,210 @@ class ReaderPage(BasePage):
                 self._navigate_chapter(downloaded[idx - 1])
         except ValueError:
             pass
+
+    # -- Reader prefetch (issue #107) ------------------------------------
+    def _maybe_prefetch_next(self):
+        """Quietly queue the immediate next available chapter for a
+        manual-mode manga so Next keeps working without leaving the
+        reader. Setting-gated and cache-first; every failure path is a
+        silent no-op so it can never block or disrupt reading."""
+        try:
+            if not self.app.config.reader_prefetch_enabled:
+                return
+            if not self._manga or self._chapter is None:
+                return
+            # Manual mode only. Auto-mode manga already queue ahead on
+            # their own schedule, so prefetch here would be redundant.
+            if (self._manga.get("mode") or "auto") != "manual":
+                return
+            title = self._manga.get("title", "")
+            if not title:
+                return
+            # Never fire background network requests while the app knows
+            # it is offline -- download_chapter would only surface a
+            # download_error the user did not ask for.
+            worker = self.app.worker
+            if getattr(worker, "_is_offline", None) and worker._is_offline():
+                return
+            entry = self._resolve_next_chapter_entry()
+            if entry is _PREFETCH_SKIP:
+                return
+            if entry is None:
+                # Missing cache: optionally force one bounded lookup.
+                self._maybe_prefetch_fallback(title)
+                return
+            self._queue_prefetch(entry)
+        except Exception:
+            # Best-effort: a prefetch failure must never interrupt reading.
+            pass
+
+    def _resolve_next_chapter_entry(self):
+        """Return the cached available-chapters entry for the immediate
+        next chapter after the current one, or None. Skips when that
+        chapter is already downloaded (Next already works)."""
+        title = self._manga.get("title", "")
+        available = self.app.app_state.get_available_chapters(title)
+        if not available:
+            return None
+        current = _chapter_sort_key(self._chapter)
+        if current is None:
+            return _PREFETCH_SKIP
+        downloaded = set(self.app.app_state.get_downloaded_chapters(title))
+        best_key = None
+        best_entry = None
+        for entry in available:
+            key = _chapter_sort_key(entry.get("number"))
+            if key is None or key <= current:
+                continue
+            if best_key is None or key < best_key:
+                best_key = key
+                best_entry = entry
+        if best_entry is None:
+            # A cached list that stops at/before the current chapter may be
+            # stale, so let the bounded fallback refresh it once.
+            return None
+        # The immediate next chapter is already on disk -- nothing to do.
+        if str(best_entry.get("number")) in downloaded:
+            return _PREFETCH_SKIP
+        return best_entry
+
+    def _queue_prefetch(self, entry):
+        """Route a cached chapter entry through the shared download queue,
+        mirroring the manual Detail-page flow so output format, Kindle
+        delivery, naming, post-processing and partial tolerance all match.
+        The worker dedups the task id, so a queued/active chapter is a
+        no-op there too."""
+        try:
+            from ...downloader import ChapterWithSource
+            from ...scrapers.base import Chapter
+        except Exception:
+            return
+        number = str(entry.get("number", ""))
+        if not number:
+            return
+        title = self._manga.get("title", "")
+        # Guard the double-check race: a completion could have landed
+        # between resolve and here.
+        if self.app.app_state.is_chapter_downloaded(title, number):
+            return
+        url = entry.get("url") or entry.get("source_url") or ""
+        if not url:
+            return
+        source = entry.get("source", "")
+        source_url = entry.get("source_url") or url
+        is_backup = bool(entry.get("is_backup", False))
+        ch_title = entry.get("title") or ""
+        base = Chapter(number=number, title=ch_title, url=url, date=None)
+        chapter = ChapterWithSource(base, source, source_url, is_backup=is_backup)
+
+        cfg = self.app.config
+        kindle_cfg = None
+        global_email_on = (cfg.delivery_mode == "email" and cfg.email_enabled)
+        if global_email_on and self._manga.get("send_to_kindle", True):
+            try:
+                from ...config import get_app_password
+                kindle_cfg = dict(
+                    kindle_email=cfg.get("email.kindle_email"),
+                    sender_email=cfg.get("email.sender_email"),
+                    app_password=get_app_password(cfg),
+                    smtp_server=cfg.get("email.smtp_server", "smtp.gmail.com"),
+                    smtp_port=cfg.get("email.smtp_port", 587),
+                )
+            except Exception:
+                kindle_cfg = None
+
+        self.app.worker.download_chapter(
+            manga=self._manga, chapter=chapter,
+            output_dir=cfg.download_dir,
+            output_format=cfg.output_format,
+            state=self.app.app_state, kindle_cfg=kindle_cfg,
+            naming_template=cfg.get("delivery.naming_template"),
+            post_processing=cfg.get("delivery.post_processing"),
+            allow_partial=cfg.partial_enabled,
+            partial_threshold=cfg.partial_threshold,
+        )
+
+    def _maybe_prefetch_fallback(self, title):
+        """Missing-cache fallback: kick off one forced check so the next
+        chapter metadata can be populated, then retry on the matching
+        completion. The per-chapter attempt key bounds source failures to
+        one lookup for each reader load."""
+        key = "%s:%s" % (title, self._chapter)
+        if (self._prefetch_fallback_key is not None
+                or self._prefetch_fallback_attempted_key == key):
+            return
+        worker = self.app.worker
+        if getattr(worker, "_is_offline", None) and worker._is_offline():
+            return
+        self._prefetch_fallback_key = key
+        self._prefetch_fallback_attempted_key = key
+        try:
+            worker.check_updates(
+                [self._manga], self.app.app_state, self.app.config, force=True,
+                request_id=key)
+        except Exception:
+            self._prefetch_fallback_key = None
+
+    def _on_check_complete(self, data):
+        """A fallback check we started finished -- its results are cached
+        now, so retry the prefetch and reveal Next if a successor
+        appeared. Ignores checks we did not initiate."""
+        if (self._prefetch_fallback_key is None
+                or data.get("request_id") != self._prefetch_fallback_key):
+            return
+        self._prefetch_fallback_key = None
+        if not self._manga:
+            return
+        self._refresh_next_controls()
+        entry = self._resolve_next_chapter_entry()
+        if entry is not None and entry is not _PREFETCH_SKIP:
+            self._queue_prefetch(entry)
+
+    def _on_download_complete(self, data):
+        """A background download finished. If it belongs to the manga we
+        are reading, refresh the Next controls so a chapter prefetched
+        mid-read becomes navigable without reloading the current one."""
+        if not self._manga:
+            return
+        if data.get("title") != self._manga.get("title", ""):
+            return
+        self._refresh_next_controls()
+
+    def _next_footer_label(self, downloaded, idx):
+        """Caption for the continuous-mode footer button, resolved from
+        the downloaded list at build/refresh time -- never captured -- so
+        a chapter prefetched mid-read shows its real number once
+        _refresh_next_controls reveals the button (issue #107)."""
+        if 0 <= idx < len(downloaded) - 1:
+            return f"Next: Chapter {downloaded[idx + 1]} >>"
+        return "Next Chapter >>"
+
+    def _refresh_next_controls(self):
+        """Re-evaluate whether a next downloaded chapter exists and
+        show/hide the Next controls accordingly. Safe to call after a
+        background download completes -- it never rebuilds the reader and
+        tolerates widgets already torn down by a reload."""
+        if not self._manga or self._chapter is None:
+            return
+        title = self._manga.get("title", "")
+        downloaded = self.app.app_state.get_downloaded_chapters(title)
+        try:
+            idx = downloaded.index(str(self._chapter))
+        except ValueError:
+            idx = -1
+        has_next = 0 <= idx < len(downloaded) - 1
+        if self._next_footer_btn is not None:
+            try:
+                self._next_footer_btn.setText(
+                    self._next_footer_label(downloaded, idx))
+            except RuntimeError:
+                pass
+        for widget in (self._next_btn, self._next_footer):
+            if widget is None:
+                continue
+            try:
+                widget.setVisible(has_next)
+            except RuntimeError:
+                # Widget was deleted by a chapter reload; the fresh build
+                # will re-evaluate visibility itself.
+                pass

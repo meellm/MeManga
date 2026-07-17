@@ -213,7 +213,8 @@ class BackgroundWorker:
     # ------------------------------------------------------------------
 
     def check_updates(self, manga_list: list, state, config,
-                      force: bool = False, queue_all: bool = False):
+                      force: bool = False, queue_all: bool = False,
+                      request_id=None):
         """Check for new chapters across a list of manga.
 
         The library-wide sweep only checks manga whose status is
@@ -230,15 +231,36 @@ class BackgroundWorker:
         are otherwise only surfaced, never auto-queued.
         """
         import sys as _sys
+
+        def _complete_payload(results, **extra):
+            payload = {"results": results, **extra}
+            if request_id is not None:
+                payload["request_id"] = request_id
+            return payload
+
+        def _error_payload(title, error):
+            # Issue #107: errors carry the caller's request_id too, so a
+            # correlated background check (the reader prefetch fallback)
+            # can be kept out of the user-facing error surfaces while
+            # ordinary checks keep their notifications/toasts.
+            payload = {"title": title, "error": error}
+            if request_id is not None:
+                payload["request_id"] = request_id
+            return payload
+
+        def _progress_payload(current, total, title):
+            payload = {"current": current, "total": total, "title": title}
+            if request_id is not None:
+                payload["request_id"] = request_id
+            return payload
+
         # Short-circuit when we know we're offline. Every per-manga
         # check_for_updates() would otherwise burn 30 s × 3 retries
         # against an unreachable host.
         if self._is_offline():
-            self._events.publish("check_error", {
-                "title": "Offline",
-                "error": "Can't check for updates while offline.",
-            })
-            self._events.publish("check_complete", {"results": []})
+            self._events.publish("check_error", _error_payload(
+                "Offline", "Can't check for updates while offline."))
+            self._events.publish("check_complete", _complete_payload([]))
             return
         print(f"[Check] check_updates called with {len(manga_list)} manga", flush=True)
         for m in manga_list:
@@ -253,8 +275,9 @@ class BackgroundWorker:
                 print(f"[Check] FATAL: Failed to import downloader: {e}", flush=True)
                 traceback.print_exc()
                 _sys.stdout.flush()
-                self._events.publish("check_error", {"title": "Import Error", "error": str(e)})
-                self._events.publish("check_complete", {"results": []})
+                self._events.publish(
+                    "check_error", _error_payload("Import Error", str(e)))
+                self._events.publish("check_complete", _complete_payload([]))
                 return
             results = []
             _sys.stdout.flush()
@@ -265,11 +288,10 @@ class BackgroundWorker:
                     continue
                 title = manga.get("title", "")
                 print(f"[Check] Checking '{title}' ({i+1}/{len(manga_list)})", flush=True)
-                self._events.publish("check_progress", {
-                    "current": i + 1,
-                    "total": len(manga_list),
-                    "title": title,
-                })
+                self._events.publish(
+                    "check_progress",
+                    _progress_payload(i + 1, len(manga_list), title),
+                )
 
                 # Determine source domain for health tracking
                 sources = manga.get("sources", [])
@@ -303,13 +325,13 @@ class BackgroundWorker:
                     # Mark source unhealthy
                     if domain:
                         state.update_source_health(domain, success=False, error_msg=str(e))
-                    self._events.publish("check_error", {
-                        "title": title, "error": str(e),
-                    })
+                    self._events.publish(
+                        "check_error", _error_payload(title, str(e)))
             print(f"[Check] Done. Total results: {len(results)} manga with new chapters", flush=True)
-            self._events.publish("check_complete", {
-                "results": results, "queue_all": queue_all,
-            })
+            self._events.publish(
+                "check_complete",
+                _complete_payload(results, queue_all=queue_all),
+            )
 
         self._safe_submit(_task)
 
@@ -329,6 +351,11 @@ class BackgroundWorker:
         caller opts in.
         """
         task_id = f"{manga['title']}:{chapter.number}"
+        # Issue #107: drop duplicate requests for a chapter that is
+        # already active or queued (its cancel flag stays registered
+        # until the job finishes). The reader prefetch, a Detail-page
+        # click and quick chapter changes could otherwise race the same
+        # title:chapter task id into the queue twice.
         # Refuse to enqueue while offline — the request would just
         # block a worker slot until per-source retries time out.
         # Surfacing `download_error` lets the Downloads page + Toast
@@ -342,25 +369,29 @@ class BackgroundWorker:
                 "offline": True,
             })
             return
-        cancel = threading.Event()
-        self._cancel_flags[task_id] = cancel
-
-        item = {
-            "task_id": task_id,
-            "manga": manga,
-            "chapter": chapter,
-            "output_dir": output_dir,
-            "output_format": output_format,
-            "state": state,
-            "kindle_cfg": kindle_cfg,
-            "naming_template": naming_template,
-            "post_processing": post_processing,
-            "cancel": cancel,
-            "allow_partial": allow_partial,
-            "partial_threshold": partial_threshold,
-        }
-
         with self._lock:
+            # Check and register under the same lock: reader windows and
+            # Detail-page actions can enqueue from separate GUI callbacks,
+            # and a check outside the lock leaves a duplicate race.
+            existing = self._cancel_flags.get(task_id)
+            if existing is not None and not existing.is_set():
+                return
+            cancel = threading.Event()
+            self._cancel_flags[task_id] = cancel
+            item = {
+                "task_id": task_id,
+                "manga": manga,
+                "chapter": chapter,
+                "output_dir": output_dir,
+                "output_format": output_format,
+                "state": state,
+                "kindle_cfg": kindle_cfg,
+                "naming_template": naming_template,
+                "post_processing": post_processing,
+                "cancel": cancel,
+                "allow_partial": allow_partial,
+                "partial_threshold": partial_threshold,
+            }
             paused = self._paused
             if (not paused) and self._active_downloads < self._max_concurrent_downloads:
                 self._active_downloads += 1
