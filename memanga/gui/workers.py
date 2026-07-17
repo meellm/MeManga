@@ -189,7 +189,7 @@ class BackgroundWorker:
                 cache.mark_failed(url)
             self._events.publish("cover_loaded", {"url": url, "error": True,
                                                     "offline": True})
-            return
+            return None
 
         def _task():
             try:
@@ -375,7 +375,7 @@ class BackgroundWorker:
             # and a check outside the lock leaves a duplicate race.
             existing = self._cancel_flags.get(task_id)
             if existing is not None and not existing.is_set():
-                return
+                return None
             cancel = threading.Event()
             self._cancel_flags[task_id] = cancel
             item = {
@@ -404,6 +404,7 @@ class BackgroundWorker:
                     "title": manga["title"],
                     "chapter": chapter.number,
                 })
+        return task_id
 
     def cancel_download(self, task_id: str):
         """Signal a download to cancel."""

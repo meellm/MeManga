@@ -571,9 +571,12 @@ class DownloadsPage(BasePage):
         post_processing = self.app.config.get("delivery.post_processing")
 
         skipped = 0
+        jobs = []
+        auto_batches: dict[str, dict[str, object]] = {}
         for r in to_queue:
             manga = r["manga"]
             m_title = manga.get("title", "")
+            is_auto = manga.get("mode", "auto") == "auto"
             for ch in r["chapters"]:
                 # Issue #15: never re-queue a chapter that's already on
                 # disk. Belt-and-suspenders against any caller that
@@ -581,6 +584,11 @@ class DownloadsPage(BasePage):
                 # auto-check, etc.).
                 if self.app.app_state.is_chapter_downloaded(m_title, str(ch.number)):
                     skipped += 1
+                    if is_auto:
+                        batch = auto_batches.setdefault(
+                            m_title, {"task_ids": [], "resolved": 0}
+                        )
+                        batch["resolved"] += 1
                     continue
 
                 kindle_cfg = None
@@ -594,15 +602,39 @@ class DownloadsPage(BasePage):
                         "smtp_port": self.app.config.get("email.smtp_port", 587),
                     }
 
-                self.app.worker.download_chapter(
-                    manga=manga, chapter=ch,
-                    output_dir=self.app.config.download_dir,
-                    output_format=self.app.config.output_format,
-                    state=self.app.app_state, kindle_cfg=kindle_cfg,
-                    naming_template=naming_template,
-                    post_processing=post_processing,
-                    allow_partial=self.app.config.partial_enabled,
-                    partial_threshold=self.app.config.partial_threshold,
-                )
+                jobs.append({
+                    "manga": manga,
+                    "chapter": ch,
+                    "kindle_cfg": kindle_cfg,
+                    "task_id": f"{m_title}:{ch.number}",
+                })
+
+                if is_auto:
+                    batch = auto_batches.setdefault(
+                        m_title, {"task_ids": [], "resolved": 0}
+                    )
+                    batch["task_ids"].append(jobs[-1]["task_id"])
+
+        # Worker task ids follow the title:chapter-number contract. Register
+        # every expected auto task before enqueue so even an immediate terminal
+        # event can settle the batch.
+        for title, batch in auto_batches.items():
+            self.app.register_new_chapter_batch(
+                title,
+                task_ids=batch["task_ids"],
+                already_resolved=batch["resolved"],
+            )
+
+        for job in jobs:
+            self.app.worker.download_chapter(
+                manga=job["manga"], chapter=job["chapter"],
+                output_dir=self.app.config.download_dir,
+                output_format=self.app.config.output_format,
+                state=self.app.app_state, kindle_cfg=job["kindle_cfg"],
+                naming_template=naming_template,
+                post_processing=post_processing,
+                allow_partial=self.app.config.partial_enabled,
+                partial_threshold=self.app.config.partial_threshold,
+            )
         if skipped:
             Toast(self, f"Skipped {skipped} chapter(s) already on disk", kind="info")
