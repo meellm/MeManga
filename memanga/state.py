@@ -390,6 +390,62 @@ class State:
                 del failed[chapter_str]
                 self.save()
 
+    # ========================================================================
+    # Accepted Partial Chapter Tracking
+    # ========================================================================
+
+    def add_partial_chapter(
+        self,
+        manga_title: str,
+        chapter: str,
+        source: str = "",
+        failed_pages: Optional[List[int]] = None,
+        total_pages: int = 0,
+        path: str = "",
+        from_backup: bool = False,
+    ):
+        """Record an accepted partial chapter so it remains retryable."""
+        with self._locked() as data:
+            self._ensure_manga_entry(manga_title)
+            chapter_str = str(chapter)
+            entry = data["manga"][manga_title]
+            entry.setdefault("partial_chapters", {})[chapter_str] = {
+                "accepted_at": datetime.now().isoformat(),
+                "source": source,
+                "failed_pages": self._snapshot(failed_pages or []),
+                "total_pages": int(total_pages or 0),
+                "path": path,
+                "from_backup": bool(from_backup),
+            }
+            self.save()
+
+    def get_partial_chapters(self, manga_title: str) -> Dict[str, Any]:
+        """Get accepted partial chapter records for a manga."""
+        return self._entry_value(manga_title, "partial_chapters", {})
+
+    def get_partial_chapter(self, manga_title: str, chapter: str) -> Optional[Dict[str, Any]]:
+        """Get one accepted partial chapter record."""
+        partials = self.get_partial_chapters(manga_title)
+        return partials.get(str(chapter))
+
+    def get_all_partial_chapters(self) -> Dict[str, Dict[str, Any]]:
+        """Get accepted partial chapters for all manga."""
+        with self._locked() as data:
+            return {
+                title: self._snapshot(partials)
+                for title, manga_state in data.get("manga", {}).items()
+                if (partials := manga_state.get("partial_chapters", {}))
+            }
+
+    def clear_partial_chapter(self, manga_title: str, chapter: str):
+        """Remove an accepted partial record after a complete re-download."""
+        with self._locked() as data:
+            chapter_str = str(chapter)
+            partials = data.get("manga", {}).get(manga_title, {}).get("partial_chapters", {})
+            if chapter_str in partials:
+                del partials[chapter_str]
+                self.save()
+
     def _ensure_manga_entry(self, manga_title: str):
         """Ensure manga entry exists in state. Caller must hold ``_lock``."""
         if "manga" not in self._data:
@@ -404,6 +460,7 @@ class State:
                 "new_chapters_available": 0,
                 "available_chapters": [],
                 "external_chapters": [],
+                "partial_chapters": {},
             }
 
     # ========================================================================
@@ -857,6 +914,7 @@ class State:
             if from_chapter == 0:
                 entry["last_chapter"] = None
                 entry["downloaded"] = []
+                entry["partial_chapters"] = {}
             else:
                 # Keep only chapters before from_chapter, remove the rest.
                 # Labelled chapters (e.g. "Chapter 3" or "3 Part 1") compare
@@ -870,6 +928,11 @@ class State:
                     ch for ch in entry.get("downloaded", [])
                     if _keep_downloaded(ch)
                 ]
+                entry["partial_chapters"] = {
+                    ch: info
+                    for ch, info in entry.get("partial_chapters", {}).items()
+                    if _keep_downloaded(ch)
+                }
                 entry["last_chapter"] = None
             entry["last_updated"] = datetime.now().isoformat()
             self.save()

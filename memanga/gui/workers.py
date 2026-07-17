@@ -464,7 +464,7 @@ class BackgroundWorker:
             partial_info["failed_pages"] = failed_pages
             partial_info["total"] = total
 
-        def _finish(path, from_backup):
+        def _finish(path, from_backup, source=None):
             """Deliver to Kindle (if configured) and publish
             download_complete, carrying any accepted partial detail."""
             # Kindle delivery
@@ -490,6 +490,7 @@ class BackgroundWorker:
                 "title": manga["title"],
                 "chapter": chapter.number,
                 "from_backup": from_backup,
+                "source": source or getattr(chapter, "source", None) or manga.get("source", "?"),
             }
             if partial_info:
                 complete_payload["partial"] = dict(partial_info)
@@ -536,7 +537,11 @@ class BackgroundWorker:
                 partial_threshold=partial_threshold,
                 on_partial=on_partial,
             )
-            _finish(path, from_backup=False)
+            _finish(
+                path,
+                from_backup=False,
+                source=getattr(chapter, "source", None) or manga.get("source", "?"),
+            )
         except InterruptedError:
             self._events.publish("download_cancelled", {"task_id": task_id})
         except DownloaderError as e:
@@ -634,7 +639,7 @@ class BackgroundWorker:
             partial_info.clear()
             try:
                 path = _dl(backup_ch, False)
-                finish(path, from_backup=True)
+                finish(path, from_backup=True, source=getattr(backup_ch, "source", None))
                 return
             except DownloaderError as be:
                 backup_err = be
@@ -656,7 +661,7 @@ class BackgroundWorker:
                     path = _dl(cand, True)
                 except DownloaderError:
                     continue
-                finish(path, from_backup=from_backup)
+                finish(path, from_backup=from_backup, source=getattr(cand, "source", None))
                 return
 
         # 3) Nothing worked — surface the failure.

@@ -216,6 +216,7 @@ class TestPartialDownload:
         assert seen_kwargs == {"allow_partial": True, "partial_threshold": 5}
         assert completed and completed[0].get("partial") == {
             "failed_pages": [6], "total": 40}
+        assert completed[0].get("source") == "?"
 
 
 class TestBackupFirst:

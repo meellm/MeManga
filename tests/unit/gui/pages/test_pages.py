@@ -42,6 +42,29 @@ def test_download_complete_clears_failed_chapter(app_window, qapp):
     assert "1" not in app_window.app_state.get_failed_chapters("M")
 
 
+def test_download_complete_records_and_clears_partial_chapter(app_window, qapp):
+    app_window._on_download_complete({
+        "title": "M",
+        "chapter": "1",
+        "path": "/tmp/M-1.pdf",
+        "source": "mangadex.org",
+        "from_backup": True,
+        "partial": {"failed_pages": [4, 8], "total": 40},
+    })
+    qapp.processEvents()
+
+    partial = app_window.app_state.get_partial_chapter("M", "1")
+    assert partial["failed_pages"] == [4, 8]
+    assert partial["total_pages"] == 40
+    assert partial["source"] == "mangadex.org"
+    assert partial["from_backup"] is True
+
+    app_window._on_download_complete({"title": "M", "chapter": "1", "path": ""})
+    qapp.processEvents()
+
+    assert app_window.app_state.get_partial_chapter("M", "1") is None
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Library
 # ─────────────────────────────────────────────────────────────────────────
@@ -672,6 +695,37 @@ class TestDetailPage:
         # last_chapter set to 4.999 so check_for_updates returns 5+
         assert app_window.app_state.get_last_chapter(
             sample_manga["title"]) == "4.999"
+
+    def test_partial_chapter_retry_queues_even_when_downloaded(
+            self, app_window, qapp, sample_manga):
+        title = sample_manga["title"]
+        app_window.config.set("manga", [sample_manga])
+        app_window.app_state.set_available_chapters(title, [{
+            "number": "7",
+            "title": "Partial chapter",
+            "source": "mangadex.org",
+            "source_url": "https://mangadex.org/title/abc/test-manga",
+            "url": "https://mangadex.org/chapter/7",
+            "is_backup": False,
+        }])
+        app_window.app_state.add_downloaded_chapter(title, "7")
+        app_window.app_state.add_partial_chapter(
+            title, "7", failed_pages=[3], total_pages=20,
+        )
+        app_window.show_page("detail", manga=sample_manga); qapp.processEvents()
+        page = app_window._pages["detail"]
+
+        queued = []
+        app_window.worker.download_chapter = (
+            lambda **kw: queued.append(str(kw["chapter"].number))
+        )
+
+        page._download_chapter(
+            app_window.app_state.get_available_chapters(title)[0],
+            retry_partial=True,
+        )
+
+        assert queued == ["7"]
 
 
 class TestDownloadsQueueing:

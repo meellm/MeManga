@@ -150,7 +150,7 @@ def merge_manga_state(local: Dict[str, Any], imported: Dict[str, Any]) -> Dict[s
     for key in ("available_chapters",):
         merged[key] = _merge_chapter_records(local.get(key), imported.get(key))
 
-    for key in ("failed_chapters", "pending_backup"):
+    for key in ("failed_chapters", "pending_backup", "partial_chapters"):
         imported_map = imported.get(key) if isinstance(imported.get(key), dict) else {}
         local_map = local.get(key) if isinstance(local.get(key), dict) else {}
         if imported_map or local_map:
