@@ -617,6 +617,12 @@ class MeMangaApp(QMainWindow):
                 self.worker.check_updates(manga_list, self.app_state, self.config)
 
     def closeEvent(self, event):
+        # Issue #106: closing the app doesn't route through show_page, so
+        # the reader never gets its on_hide save point — ask the current
+        # page to persist its reading position before the final flush.
+        page = self._pages.get(self._current_page)
+        if page is not None and hasattr(page, "save_reading_position"):
+            page.save_reading_position()
         self.app_state.flush()
         self.worker.shutdown()
         if hasattr(self, "network"):

@@ -179,6 +179,10 @@ class ReaderPage(BasePage):
         self.setFocus()
 
     def on_hide(self):
+        # Issue #106: any navigation away from the reader (Back button,
+        # Escape, sidebar — everything routed through show_page) is a
+        # save point for the in-chapter resume position.
+        self.save_reading_position()
         self._images.clear()
         self._page_labels.clear()
 
@@ -596,6 +600,9 @@ class ReaderPage(BasePage):
             return
         self._read_marked = True
         self.app.app_state.mark_chapter_read(title, str(self._chapter))
+        # Issue #106: a finished chapter should reopen from its first
+        # page, not keep resuming at the saved end-of-chapter position.
+        self.app.app_state.clear_reader_position(title, str(self._chapter))
         # Tell other pages (Library, Detail) to repaint without
         # waiting for the next navigation.
         self.app.events.publish("chapter_read", {
@@ -619,6 +626,119 @@ class ReaderPage(BasePage):
             return
         if content.sizeHint().height() <= viewport_h:
             self._mark_current_read()
+
+    # ── In-chapter resume position (issue #106) ───────────────────────
+    # Separate from the chapter cursor (`reading_progress.last_chapter`)
+    # and the read set (issue #45): remembers *where inside* a chapter
+    # the user stopped, so reopening that chapter picks up there. Saved
+    # on every way out of the reader — Back/Escape/sidebar via on_hide,
+    # Prev/Next via _navigate_chapter, app close via MeMangaApp.closeEvent
+    # — and cleared once the chapter is finished, so completed chapters
+    # reopen from the start instead of forever near the end.
+
+    def save_reading_position(self):
+        """Persist (or clear) the resume position for the open chapter.
+        Positions at the very start or at/over the completion threshold
+        aren't worth resuming — the start is the default and the end
+        means the chapter was finished — so those clear instead."""
+        if not self._manga or not self._chapter or not self._images:
+            return
+        title = self._manga.get("title", "")
+        if not title:
+            return
+        state = self.app.app_state
+        chapter = str(self._chapter)
+
+        if self._view_mode in self.PAGED_MODES:
+            last = self._current_page + (1 if self._view_mode == "double"
+                                         else 0)
+            if self._current_page <= 0 or last >= len(self._images) - 1:
+                state.clear_reader_position(title, chapter)
+                return
+            state.set_reader_position(title, chapter, mode=self._view_mode,
+                                      page_index=self._current_page)
+            return
+
+        if self._scroll is None:
+            return
+        try:
+            sb = self._scroll.verticalScrollBar()
+            maximum, value = sb.maximum(), sb.value()
+        except RuntimeError:
+            return  # scroll area already torn down
+        if maximum <= 0:
+            # Chapter fits the viewport whole — nothing to resume.
+            state.clear_reader_position(title, chapter)
+            return
+        ratio = value / maximum
+        if ratio <= 0.0 or ratio >= self.READ_THRESHOLD:
+            state.clear_reader_position(title, chapter)
+            return
+        state.set_reader_position(title, chapter, mode="continuous",
+                                  scroll_ratio=ratio)
+
+    def _restore_reader_position(self):
+        """Re-apply a previously saved in-chapter position. Paged modes
+        jump straight to the saved page/spread before the first render;
+        continuous mode defers the scroll one event-loop turn so the
+        freshly-built layout has a scrollbar range to scroll within.
+        Everything is clamped, cross-converted between page index and
+        scroll ratio when the layout changed since the save, and ignored
+        at/over the completion threshold — a restore must never flip the
+        chapter to read by itself, and stale data (page count changed,
+        chapter re-downloaded) must stay harmless."""
+        title = (self._manga or {}).get("title", "")
+        if not title or not self._images:
+            return
+        pos = self.app.app_state.get_reader_position(title, str(self._chapter))
+        if not pos:
+            return
+        total = len(self._images)
+        page_index = pos.get("page_index")
+        scroll_ratio = pos.get("scroll_ratio")
+
+        if self._view_mode in self.PAGED_MODES:
+            if page_index is None:
+                # Saved from continuous mode: estimate the page from the
+                # scroll ratio, same mapping _set_view_mode uses.
+                if scroll_ratio is None:
+                    return
+                page_index = int(float(scroll_ratio) * total)
+            index = max(0, min(total - 1, int(page_index)))
+            if self._view_mode == "double":
+                index -= index % 2  # spreads stay aligned to fixed pairs
+            last = index + (1 if self._view_mode == "double" else 0)
+            if index <= 0 or last >= total - 1:
+                return
+            self._current_page = index
+            return
+
+        if scroll_ratio is None:
+            # Saved from a paged mode: page N of M lands at ratio N/M.
+            if page_index is None:
+                return
+            scroll_ratio = int(page_index) / total
+        ratio = min(1.0, max(0.0, float(scroll_ratio)))
+        if ratio <= 0.0 or ratio >= self.READ_THRESHOLD:
+            return
+        # The scrollbar range is still 0 while _load_chapter builds the
+        # layout — defer one turn, same trick as _mark_read_if_unscrollable.
+        chapter = str(self._chapter)
+        QTimer.singleShot(
+            0, lambda: self._apply_saved_scroll_ratio(chapter, ratio))
+
+    def _apply_saved_scroll_ratio(self, chapter: str, ratio: float):
+        """Deferred half of the continuous-mode restore."""
+        # The user may have navigated on before the timer fired; only
+        # apply to the chapter the ratio was saved against.
+        if str(self._chapter) != chapter or self._scroll is None:
+            return
+        try:
+            sb = self._scroll.verticalScrollBar()
+            if sb.maximum() > 0:
+                sb.setValue(int(ratio * sb.maximum()))
+        except RuntimeError:
+            pass  # scroll area torn down before the timer fired
 
     def _render_images(self):
         # Total width the spread is allowed to occupy.
@@ -716,7 +836,9 @@ class ReaderPage(BasePage):
         # when navigating Prev/Next within the reader.
         self._read_marked = False
         # Issue #32: every chapter opens on its first page, in whatever
-        # layout this manga last used (or the global/legacy fallback).
+        # layout this manga last used (or the global/legacy fallback) —
+        # unless a resume position was saved for it (issue #106), which
+        # _restore_reader_position re-applies once the images are in.
         self._current_page = 0
         self._view_mode = self._resolve_view_mode()
 
@@ -848,6 +970,11 @@ class ReaderPage(BasePage):
             empty.setWordWrap(True)
             content_layout.addWidget(empty, 1)
             return
+
+        # Issue #106: land back where the user left this chapter. Sits
+        # after the empty-images bail-out above, so a chapter whose file
+        # was cleaned up never touches (or trips over) its stale position.
+        self._restore_reader_position()
 
         self._page_indicator.setText(
             f"{int(self._zoom_level * 100)}%  |  {len(self._images)} pages"
@@ -994,6 +1121,9 @@ class ReaderPage(BasePage):
         return []
 
     def _navigate_chapter(self, chapter):
+        # Issue #106: keep the outgoing chapter's resume point before the
+        # cursor moves on — Prev/Next never goes through on_hide.
+        self.save_reading_position()
         self._chapter = chapter
         if self._manga:
             title = self._manga.get("title", "")

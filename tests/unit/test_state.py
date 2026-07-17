@@ -183,6 +183,81 @@ class TestReadingProgress:
         assert state.get_continue_reading() is None
 
 
+class TestReaderPosition:
+    """Issue #106 — per-chapter in-reader resume position."""
+
+    def test_set_and_get_paged_position(self, state):
+        state.set_reader_position("X", "7", mode="paged", page_index=12)
+        pos = state.get_reader_position("X", "7")
+        assert pos["mode"] == "paged"
+        assert pos["page_index"] == 12
+        assert "scroll_ratio" not in pos
+        assert pos["updated_at"]  # ISO timestamp string
+
+    def test_set_and_get_scroll_position(self, state):
+        state.set_reader_position("X", "7", mode="webtoon", scroll_ratio=0.42)
+        pos = state.get_reader_position("X", "7")
+        assert pos["mode"] == "webtoon"
+        assert pos["scroll_ratio"] == pytest.approx(0.42)
+        assert "page_index" not in pos
+
+    def test_positions_are_per_chapter(self, state):
+        state.set_reader_position("X", "1", mode="paged", page_index=3)
+        state.set_reader_position("X", "2", mode="paged", page_index=9)
+        assert state.get_reader_position("X", "1")["page_index"] == 3
+        assert state.get_reader_position("X", "2")["page_index"] == 9
+
+    def test_set_overwrites_previous(self, state):
+        state.set_reader_position("X", "1", mode="paged", page_index=3)
+        state.set_reader_position("X", "1", mode="webtoon", scroll_ratio=0.5)
+        pos = state.get_reader_position("X", "1")
+        assert pos["mode"] == "webtoon"
+        assert "page_index" not in pos
+
+    def test_page_index_clamped_nonnegative(self, state):
+        state.set_reader_position("X", "1", mode="paged", page_index=-5)
+        assert state.get_reader_position("X", "1")["page_index"] == 0
+
+    def test_scroll_ratio_clamped_to_unit_range(self, state):
+        state.set_reader_position("X", "1", mode="webtoon", scroll_ratio=1.7)
+        assert state.get_reader_position("X", "1")["scroll_ratio"] == 1.0
+        state.set_reader_position("X", "2", mode="webtoon", scroll_ratio=-0.3)
+        assert state.get_reader_position("X", "2")["scroll_ratio"] == 0.0
+
+    def test_chapter_keys_are_stringified(self, state):
+        state.set_reader_position("X", 7, mode="paged", page_index=1)
+        assert state.get_reader_position("X", "7")["page_index"] == 1
+
+    def test_get_unknown_manga_or_chapter_returns_none(self, state):
+        assert state.get_reader_position("never-added", "1") is None
+        state.set_reader_position("X", "1", mode="paged", page_index=0)
+        assert state.get_reader_position("X", "99") is None
+
+    def test_clear_reader_position(self, state):
+        state.set_reader_position("X", "1", mode="paged", page_index=4)
+        state.clear_reader_position("X", "1")
+        assert state.get_reader_position("X", "1") is None
+
+    def test_clear_unknown_is_noop(self, state):
+        state.clear_reader_position("never-added", "1")  # must not raise
+        state.set_reader_position("X", "1", mode="paged", page_index=0)
+        state.clear_reader_position("X", "99")  # must not raise
+
+    def test_blank_chapter_id_ignored(self, state):
+        state.set_reader_position("X", "", mode="paged", page_index=1)
+        state.set_reader_position("X", None, mode="paged", page_index=1)
+        assert state.get_manga_state("X").get("reader_positions", {}) == {}
+
+    def test_old_state_file_without_reader_positions(self, state):
+        # Entry created before the feature existed lacks the key entirely.
+        state._ensure_manga_entry("Legacy")
+        state._data["manga"]["Legacy"].pop("reader_positions", None)
+        assert state.get_reader_position("Legacy", "1") is None
+        state.clear_reader_position("Legacy", "1")  # must not raise
+        state.set_reader_position("Legacy", "1", mode="paged", page_index=2)
+        assert state.get_reader_position("Legacy", "1")["page_index"] == 2
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Notifications + filter API (issue #18)
 # ─────────────────────────────────────────────────────────────────────────
