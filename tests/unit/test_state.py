@@ -78,6 +78,14 @@ class TestChapterTracking:
         assert not state.is_chapter_downloaded("X", "2")
         assert not state.is_chapter_downloaded("Y", "1")
 
+    def test_downloaded_part_labels_sort_by_leading_chapter(self, state):
+        for chapter in ["10 Part 1", "Extra", "2 Part 1", "3.5 Part 1", "3"]:
+            state.add_downloaded_chapter("X", chapter)
+
+        assert state.get_downloaded_chapters("X") == [
+            "Extra", "2 Part 1", "3", "3.5 Part 1", "10 Part 1"
+        ]
+
     def test_set_last_chapter(self, state):
         state.set_last_chapter("X", "10")
         assert state.get_last_chapter("X") == "10"
@@ -107,6 +115,14 @@ class TestExternalChapters:
         state.mark_external_chapter("X", "2")
         ext = state.get_external_chapters("X")
         assert "1" in ext and "2" in ext
+
+    def test_external_part_labels_sort_by_leading_chapter(self, state):
+        for chapter in ["10 Part 1", "Extra", "2 Part 1", "3.5 Part 1", "3"]:
+            state.mark_external_chapter("X", chapter)
+
+        assert state.get_external_chapters("X") == [
+            "Extra", "2 Part 1", "3", "3.5 Part 1", "10 Part 1"
+        ]
 
     def test_available_chapters_set_and_get(self, state):
         chapters = [{"number": "1", "title": "first"},
@@ -303,6 +319,39 @@ class TestResetManga:
         # Only chapters strictly < 3 survive
         assert "1" in kept and "2" in kept
         assert "3" not in kept and "4" not in kept and "5" not in kept
+
+    def test_reset_with_threshold_tolerates_nonnumeric_labels(self, state):
+        # Issue #112: part-style labels like "2 Part 1" must not raise
+        # during a partial reset, and their leading chapter number should
+        # decide whether they are kept.
+        for c in ["1", "2 Part 1", "2 Part 2", "3", "4"]:
+            state.add_downloaded_chapter("X", c)
+        state.reset_manga_progress("X", from_chapter=3)
+        kept = state.get_downloaded_chapters("X")
+        assert "1" in kept
+        assert "2 Part 1" in kept and "2 Part 2" in kept
+        assert "3" not in kept and "4" not in kept
+        assert state.get_last_chapter("X") is None
+
+    def test_reset_with_threshold_removes_part_labels_at_or_above_threshold(self, state):
+        for c in ["Extra", "1", "2 Part 1", "3 Part 1", "3 Part 2", "10 Part 1"]:
+            state.add_downloaded_chapter("X", c)
+
+        state.reset_manga_progress("X", from_chapter=3)
+
+        kept = state.get_downloaded_chapters("X")
+        assert "Extra" in kept
+        assert "1" in kept and "2 Part 1" in kept
+        assert "3 Part 1" not in kept
+        assert "3 Part 2" not in kept
+        assert "10 Part 1" not in kept
+        assert state.get_last_chapter("X") is None
+
+    def test_reset_with_zero_clears_nonnumeric_labels(self, state):
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "2 Part 1")
+        state.reset_manga_progress("X", from_chapter=0)
+        assert state.get_downloaded_chapters("X") == []
 
     def test_remove_manga(self, state):
         state.add_downloaded_chapter("X", "1")

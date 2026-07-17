@@ -5,12 +5,24 @@ State management for MeManga - tracks downloaded chapters and check history
 import copy
 import json
 import os
+import re
 import tempfile
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+
+
+_LEADING_CHAPTER_RE = re.compile(r"\s*(\d+(?:\.\d+)?)")
+
+
+def _leading_chapter_number(label: Any) -> Optional[float]:
+    """Return the leading numeric chapter value, if the label starts with one."""
+    match = _LEADING_CHAPTER_RE.match(str(label))
+    if not match:
+        return None
+    return float(match.group(1))
 
 
 class State:
@@ -235,10 +247,8 @@ class State:
             if chapter_str not in entry["downloaded"]:
                 entry["downloaded"].append(chapter_str)
                 def _sort_key(x):
-                    try:
-                        return float(x)
-                    except (ValueError, TypeError):
-                        return 0.0
+                    num = _leading_chapter_number(x)
+                    return num if num is not None else 0.0
                 entry["downloaded"].sort(key=_sort_key)
 
             entry["last_chapter"] = chapter_str
@@ -588,10 +598,8 @@ class State:
                 entry["external_chapters"].append(ch_str)
 
                 def _sort_key(x):
-                    try:
-                        return float(x)
-                    except (ValueError, TypeError):
-                        return 0.0
+                    num = _leading_chapter_number(x)
+                    return num if num is not None else 0.0
 
                 entry["external_chapters"].sort(key=_sort_key)
                 self._mark_dirty()
@@ -782,10 +790,17 @@ class State:
                 entry["last_chapter"] = None
                 entry["downloaded"] = []
             else:
-                # Keep only chapters before from_chapter, remove the rest
+                # Keep only chapters before from_chapter, remove the rest.
+                # Part-style labels (e.g. "3 Part 1") compare by their leading
+                # chapter number. Labels with no leading number are preserved
+                # because they cannot be ordered safely against the threshold.
+                def _keep_downloaded(ch):
+                    num = _leading_chapter_number(ch)
+                    return num is None or num < from_chapter
+
                 entry["downloaded"] = [
                     ch for ch in entry.get("downloaded", [])
-                    if float(ch) < from_chapter
+                    if _keep_downloaded(ch)
                 ]
                 entry["last_chapter"] = None
             entry["last_updated"] = datetime.now().isoformat()
