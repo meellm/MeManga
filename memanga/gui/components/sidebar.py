@@ -170,7 +170,10 @@ class Sidebar(QWidget):
 
         # Wire up all nav count badges (library / downloads / notifications / sources).
         self.app.events.subscribe("notification_added", lambda d: self._refresh_badges())
-        self.app.events.subscribe("check_complete", lambda d: self._refresh_badges())
+        self.app.events.subscribe(
+            "check_complete",
+            lambda d: None if (d or {}).get("request_id") is not None else self._refresh_badges(),
+        )
         self.app.events.subscribe("library_updated", lambda d: self._refresh_badges())
         self.app.events.subscribe("download_complete", lambda d: self._refresh_badges())
         # Initial paint.
@@ -305,14 +308,20 @@ class Sidebar(QWidget):
 
         # Wire to actual check events.
         self.app.events.subscribe("check_progress", self._on_check_progress)
-        self.app.events.subscribe("check_complete", lambda d: self._on_check_done())
+        self.app.events.subscribe(
+            "check_complete",
+            lambda d: None if (d or {}).get("request_id") is not None else self._on_check_done(),
+        )
 
         return w
 
     # ── events ──
 
     def _on_check_progress(self, data):
-        done = data.get("done", 0)
+        data = data or {}
+        if data.get("request_id") is not None:
+            return
+        done = data.get("done", data.get("current", 0))
         total = data.get("total", 1)
         pct = int(100 * done / max(total, 1))
         self._sync_progress.setValue(pct)

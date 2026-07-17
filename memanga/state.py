@@ -16,15 +16,29 @@ from typing import List, Optional, Dict, Any, Mapping
 from .backup import merge_backup_state
 
 
-_LEADING_CHAPTER_RE = re.compile(r"\s*(\d+(?:\.\d+)?)")
+_CHAPTER_NUMBER_RE = re.compile(r"(\d+(?:\.\d+)?)")
 
 
-def _leading_chapter_number(label: Any) -> Optional[float]:
-    """Return the leading numeric chapter value, if the label starts with one."""
-    match = _LEADING_CHAPTER_RE.match(str(label))
+def _chapter_number(label: Any) -> Optional[float]:
+    """Return the first numeric chapter value embedded in a label."""
+    match = _CHAPTER_NUMBER_RE.search(str(label))
     if not match:
         return None
     return float(match.group(1))
+
+
+def _chapter_sort_key(chapter) -> float:
+    """Numeric sort key for a chapter identifier.
+
+    Mirrors Chapter.numeric (scrapers/base.py): plain numbers sort by
+    value and labelled numbers like "2 Part 1" or "Chapter 10" by their
+    first embedded number, so labelled chapters land after their plain
+    predecessors and the reader's Next controls can reach a prefetched
+    "2 Part 1" from chapter "1" (issue #107). Fully non-numeric labels
+    keep the old float()-only fallback of 0.0.
+    """
+    num = _chapter_number(chapter)
+    return num if num is not None else 0.0
 
 
 class State:
@@ -163,13 +177,6 @@ class State:
             data[key] = self._snapshot(value)
             self.save()
 
-    @staticmethod
-    def _chapter_sort_key(chapter):
-        try:
-            return float(chapter)
-        except (TypeError, ValueError):
-            return 0.0
-
     def merge_missing_manga_state(
         self,
         imported_state: Dict[str, Any],
@@ -246,10 +253,7 @@ class State:
             chapter_str = str(chapter)
             if chapter_str not in entry["downloaded"]:
                 entry["downloaded"].append(chapter_str)
-                def _sort_key(x):
-                    num = _leading_chapter_number(x)
-                    return num if num is not None else 0.0
-                entry["downloaded"].sort(key=_sort_key)
+                entry["downloaded"].sort(key=_chapter_sort_key)
 
             entry["last_chapter"] = chapter_str
             entry["last_updated"] = datetime.now().isoformat()
@@ -635,12 +639,7 @@ class State:
             ch_str = str(chapter)
             if ch_str not in entry["external_chapters"]:
                 entry["external_chapters"].append(ch_str)
-
-                def _sort_key(x):
-                    num = _leading_chapter_number(x)
-                    return num if num is not None else 0.0
-
-                entry["external_chapters"].sort(key=_sort_key)
+                entry["external_chapters"].sort(key=_chapter_sort_key)
                 self._mark_dirty()
 
     def get_external_chapters(self, manga_title: str) -> List[str]:
@@ -830,11 +829,11 @@ class State:
                 entry["downloaded"] = []
             else:
                 # Keep only chapters before from_chapter, remove the rest.
-                # Part-style labels (e.g. "3 Part 1") compare by their leading
-                # chapter number. Labels with no leading number are preserved
+                # Labelled chapters (e.g. "Chapter 3" or "3 Part 1") compare
+                # by their embedded chapter number. Labels with no number are preserved
                 # because they cannot be ordered safely against the threshold.
                 def _keep_downloaded(ch):
-                    num = _leading_chapter_number(ch)
+                    num = _chapter_number(ch)
                     return num is None or num < from_chapter
 
                 entry["downloaded"] = [

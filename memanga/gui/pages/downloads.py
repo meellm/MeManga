@@ -512,11 +512,18 @@ class DownloadsPage(BasePage):
     # ── Check event handlers ──
 
     def _on_check_error(self, data):
+        # Issue #107: correlated background checks (request_id set, e.g.
+        # the reader prefetch fallback) fail silently -- only checks the
+        # user initiated toast here.
+        if data.get("request_id") is not None:
+            return
         title = data.get("title", "")
         error = data.get("error", "Unknown error")
         Toast(self, f"Error: {title}: {error[:50]}", kind="error")
 
     def _on_check_complete(self, data):
+        if data.get("request_id") is not None:
+            return
         results = data.get("results", [])
         # Set by an explicit "Download All" / "Download from chapter" action.
         # Such a request must queue the resolved chapters regardless of mode;

@@ -379,6 +379,11 @@ class MeMangaApp(QMainWindow):
         return "auto"
 
     def _on_check_error(self, data):
+        # Issue #107: a request_id marks a correlated background check
+        # (the reader's prefetch fallback). Its initiator handles the
+        # outcome, so no notification for a lookup the user never made.
+        if data.get("request_id") is not None:
+            return
         title = data.get("title", "")
         error = data.get("error", "Unknown")
         self.app_state.add_notification("error", f"Check failed: {title} - {error[:80]}")
@@ -393,6 +398,7 @@ class MeMangaApp(QMainWindow):
 
     def _on_check_complete(self, data):
         results = data.get("results", [])
+        correlated = data.get("request_id") is not None
         total_new = sum(len(r["chapters"]) for r in results)
         config_dirty = False
 
@@ -400,7 +406,7 @@ class MeMangaApp(QMainWindow):
             manga = r["manga"]
             title = manga.get("title", "")
             count = len(r["chapters"])
-            if count > 0:
+            if count > 0 and not correlated:
                 self.app_state.set_new_chapters(title, count)
 
             # Cache the full chapter list from the primary source so the
@@ -426,7 +432,7 @@ class MeMangaApp(QMainWindow):
             # caching available_chapters so we always have something to walk.
             # One-shot: pop the sentinel and re-save config.
             threshold_raw = manga.get("external_threshold")
-            if threshold_raw is not None:
+            if threshold_raw is not None and not correlated:
                 if all_chapters:
                     if self._resolve_external_threshold(manga, threshold_raw, all_chapters):
                         config_dirty = True
@@ -437,6 +443,9 @@ class MeMangaApp(QMainWindow):
                     # second failure to keep config clean.
                     if self._increment_threshold_attempts(manga.get("title", "")):
                         config_dirty = True
+
+        if correlated:
+            return
 
         if config_dirty:
             # Persist the popped sentinels and the freshly-set last_chapter.
