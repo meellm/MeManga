@@ -1007,8 +1007,12 @@ class ReaderPage(BasePage):
         self._page_labels.clear()
 
         if not self._images:
+            from ...downloader import _sanitize_filename
             download_dir = self.app.config.download_dir
-            manga_dir = Path(download_dir) / self._manga.get("title", "")
+            # Issue #111: report the sanitized folder — the one the
+            # downloader actually writes to — not the raw title.
+            manga_dir = Path(download_dir) / _sanitize_filename(
+                self._manga.get("title", ""))
             empty = QLabel(
                 f"Could not load chapter {self._chapter} images.\n\n"
                 f"Looked in: {manga_dir}\n"
@@ -1140,41 +1144,51 @@ class ReaderPage(BasePage):
         self._maybe_prefetch_next()
 
     def _find_and_load_chapter(self) -> List[QImage]:
+        # Issue #111: the downloader saves under the *sanitized* title
+        # folder and formats chapter labels for sorting ("2 Part 1" ->
+        # "2.01"), so the lookup must mirror those exact conventions.
+        # Raw title/label locations are kept as fallbacks for downloads
+        # that predate this fix.
+        from ...downloader import _format_chapter_number, _sanitize_filename
+
         title = self._manga.get("title", "")
-        ch = self._chapter
-        download_dir = self.app.config.download_dir
-        manga_dir = Path(download_dir) / title
+        ch = str(self._chapter)
+        download_dir = Path(self.app.config.download_dir)
 
-        if not manga_dir.exists():
-            return []
+        labels = []
+        for label in (_format_chapter_number(ch), ch, f"{ch}.0"):
+            if label not in labels:
+                labels.append(label)
 
-        def sanitize(name):
-            for c in '<>:"/\\|?*':
-                name = name.replace(c, '')
-            return name.strip()[:100]
+        manga_dirs = []
+        for d in (download_dir / _sanitize_filename(title), download_dir / title):
+            if d.is_dir() and d not in manga_dirs:
+                manga_dirs.append(d)
 
-        patterns = [
-            f"{sanitize(title)} - Chapter {ch}",
-            f"{sanitize(title)} - Chapter {ch}.0",
-        ]
+        for manga_dir in manga_dirs:
+            for label in labels:
+                # Sanitize the full base name, not just the title — the
+                # downloader builds "{title} - Chapter {chapter}" first
+                # and sanitizes the result (incl. the length cap).
+                base = _sanitize_filename(f"{title} - Chapter {label}")
+                for ext in [".pdf", ".epub", ".cbz", ".zip"]:
+                    filepath = manga_dir / f"{base}{ext}"
+                    if filepath.exists():
+                        return _extract_images_from_file(filepath)
 
-        for pattern in patterns:
-            for ext in [".pdf", ".epub", ".cbz", ".zip"]:
-                filepath = manga_dir / f"{pattern}{ext}"
-                if filepath.exists():
-                    return _extract_images_from_file(filepath)
+                folder = manga_dir / f"Chapter {label}"
+                if folder.is_dir():
+                    return _extract_images_from_folder(folder)
 
-            folder = manga_dir / f"Chapter {ch}"
-            if folder.is_dir():
-                return _extract_images_from_folder(folder)
-
-        # Fallback: scan directory
-        ch_str = str(ch)
-        for f in manga_dir.iterdir():
-            if f.is_file() and f"chapter {ch_str}" in f.stem.lower():
-                return _extract_images_from_file(f)
-            if f.is_dir() and ch_str in f.name:
-                return _extract_images_from_folder(f)
+        # Fallback: scan directories for anything chapter-shaped
+        for manga_dir in manga_dirs:
+            for f in manga_dir.iterdir():
+                if f.is_file() and any(
+                    f"chapter {label.lower()}" in f.stem.lower() for label in labels
+                ):
+                    return _extract_images_from_file(f)
+                if f.is_dir() and any(label in f.name for label in labels):
+                    return _extract_images_from_folder(f)
 
         return []
 
