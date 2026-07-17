@@ -43,6 +43,10 @@ class TestValidateBackup:
         with pytest.raises(BackupVersionError, match="Invalid backup version"):
             validate_backup({"version": bad, "manga": []})
 
+    def test_non_dict_state_rejected(self):
+        with pytest.raises(BackupVersionError, match="state must be an object"):
+            validate_backup({"version": EXPORT_VERSION, "manga": [], "state": []})
+
     def test_newer_version_rejected_with_update_hint(self):
         with pytest.raises(BackupVersionError, match="newer.*update MeManga"):
             validate_backup({"version": EXPORT_VERSION + 1, "manga": []})

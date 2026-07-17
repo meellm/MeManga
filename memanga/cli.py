@@ -1377,8 +1377,6 @@ def cmd_import(args):
         # Merge mode: skip duplicates, merge chapter lists
         existing_manga = config.get("manga", [])
         existing_titles = {m["title"].lower() for m in existing_manga}
-        existing_state = state.get("manga", {})
-
         added = 0
         skipped = 0
         for m in imported_manga:
@@ -1389,28 +1387,12 @@ def cmd_import(args):
             existing_titles.add(m["title"].lower())
             added += 1
 
-        # Merge state (downloaded chapter lists)
-        for title, s in imported_state.items():
-            if title in existing_state:
-                # Merge downloaded lists
-                existing_downloaded = set(existing_state[title].get("downloaded", []))
-                imported_downloaded = set(s.get("downloaded", []))
-                def _sort_key(x):
-                    try:
-                        return float(x)
-                    except (ValueError, TypeError):
-                        return 0.0
-                merged = sorted(
-                    existing_downloaded | imported_downloaded,
-                    key=_sort_key,
-                )
-                existing_state[title]["downloaded"] = merged
-            else:
-                existing_state[title] = s
-
         config.set("manga", existing_manga)
         config.save()
-        state.set("manga", existing_state)
+        state.merge_missing_manga_state(
+            imported_state,
+            merge_existing_downloaded=True,
+        )
 
         console.print(f"[green]Imported: {added} added, {skipped} skipped (duplicate)[/green]")
 

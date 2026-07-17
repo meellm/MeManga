@@ -944,10 +944,7 @@ class DetailPage(BasePage):
                     m.pop("fallback_delay_days", None)
 
                 if new_title != old_title:
-                    old_state = self.app.app_state.get_manga_state(old_title)
-                    if old_state:
-                        self.app.app_state._data.setdefault("manga", {})[new_title] = old_state
-                        self.app.app_state.remove_manga(old_title)
+                    self.app.app_state.rename_manga(old_title, new_title)
                     # Move already-downloaded files to the new title so the
                     # reader can still find them (state migrates above, but
                     # the on-disk folder/filenames are keyed by title too).
