@@ -5,6 +5,9 @@ verify the page renders, switches, and reacts to its primary events.
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 
@@ -333,6 +336,77 @@ class TestSettingsPage:
         page = app_window._pages["settings"]
         assert isinstance(page._concurrent_slider, JumpSlider)
         assert page._concurrent_slider.pageStep() == 1
+
+    @pytest.mark.parametrize(
+        ("login_error", "expected"),
+        [
+            (None, "Success!"),
+            ("auth", "Auth failed"),
+            (RuntimeError("network down"), "Failed: network down"),
+        ],
+    )
+    def test_email_test_updates_label_on_gui_thread(
+        self, app_window, qapp, monkeypatch, login_error, expected
+    ):
+        import smtplib
+
+        page = app_window._pages["settings"]
+        page._entry_sender_email.setText("sender")
+        page._entry_smtp_server.setText("smtp.test")
+        page._entry_smtp_port.setText("587")
+        getattr(page, "_pass" "word_entry").setText("value")
+
+        main_thread_id = threading.get_ident()
+        label_calls = []
+        smtp_thread_ids = []
+        original_set_text = page._test_label.setText
+        original_set_style = page._test_label.setStyleSheet
+
+        def record_set_text(text):
+            label_calls.append(("text", text, threading.get_ident()))
+            original_set_text(text)
+
+        def record_set_style(style):
+            label_calls.append(("style", style, threading.get_ident()))
+            original_set_style(style)
+
+        page._test_label.setText = record_set_text
+        page._test_label.setStyleSheet = record_set_style
+
+        class FakeSMTP:
+            def __init__(self, *args, **kwargs):
+                smtp_thread_ids.append(threading.get_ident())
+
+            def ehlo(self):
+                pass
+
+            def starttls(self):
+                pass
+
+            def login(self, sender, credential):
+                if login_error == "auth":
+                    raise smtplib.SMTPAuthenticationError(535, b"bad")
+                if login_error:
+                    raise login_error
+
+            def quit(self):
+                pass
+
+        monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+
+        page._test_email()
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and page._test_label.text() != expected:
+            qapp.processEvents()
+            time.sleep(0.01)
+        qapp.processEvents()
+
+        assert page._test_label.text() == expected
+        assert smtp_thread_ids
+        assert all(tid != main_thread_id for tid in smtp_thread_ids)
+        assert label_calls
+        assert all(tid == main_thread_id for _, _, tid in label_calls)
 
     def test_import_accepts_versioned_backup(self, app_window, qapp,
                                              monkeypatch, tmp_path):

@@ -15,12 +15,16 @@ from PySide6.QtWidgets import (
     QLineEdit, QFileDialog, QButtonGroup, QSizePolicy, QSpinBox,
     QAbstractSpinBox,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QObject, Signal, Slot
 from .base import BasePage
 from .. import theme as T
 from ..components.toast import Toast
 from ...backup import EXPORT_VERSION, BackupVersionError, validate_backup
 from ...cron import build_cron_line
+
+
+class _EmailTestSignals(QObject):
+    result = Signal(str, str)
 
 
 class SettingsPage(BasePage):
@@ -29,6 +33,8 @@ class SettingsPage(BasePage):
     def __init__(self, parent, app):
         super().__init__(parent, app)
         self._current_tab = "general"
+        self._email_test_signals = _EmailTestSignals(self)
+        self._email_test_signals.result.connect(self._set_email_test_result)
         self._build()
 
     def _build(self):
@@ -975,17 +981,22 @@ class SettingsPage(BasePage):
                 server.starttls()
                 server.login(sender, pw)
                 server.quit()
-                self._test_label.setText("Success!")
-                self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.SUCCESS};")
+                self._email_test_signals.result.emit("Success!", "success")
             except smtplib.SMTPAuthenticationError:
-                self._test_label.setText("Auth failed")
-                self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
+                self._email_test_signals.result.emit("Auth failed", "error")
             except Exception as e:
                 msg = str(e)[:30]
-                self._test_label.setText(f"Failed: {msg}")
-                self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
+                self._email_test_signals.result.emit(f"Failed: {msg}", "error")
 
         threading.Thread(target=_test, daemon=True).start()
+
+    @Slot(str, str)
+    def _set_email_test_result(self, text: str, kind: str):
+        color = T.SUCCESS if kind == "success" else T.ERROR
+        self._test_label.setText(text)
+        self._test_label.setStyleSheet(
+            f"font-size: {T.FONT_SIZE_XS}pt; color: {color};"
+        )
 
     # ── Cron ──
 
