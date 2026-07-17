@@ -19,7 +19,11 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich import box
 
-from .backup import EXPORT_VERSION, BackupVersionError, validate_backup
+from .backup import (
+    EXPORT_VERSION,
+    BackupVersionError,
+    validate_backup,
+)
 from .config import Config, get_app_password, set_app_password
 from .cron import build_cron_line
 from .state import State
@@ -1376,15 +1380,24 @@ def cmd_import(args):
     else:
         # Merge mode: skip duplicates, merge chapter lists
         existing_manga = config.get("manga", [])
-        existing_titles = {m["title"].lower() for m in existing_manga}
+        existing_titles = {
+            m["title"].lower(): m["title"]
+            for m in existing_manga
+        }
+        state_title_aliases = {}
         added = 0
         skipped = 0
         for m in imported_manga:
-            if m["title"].lower() in existing_titles:
+            title = m["title"]
+            title_key = title.lower()
+            existing_title = existing_titles.get(title_key)
+            if existing_title is not None:
+                if title != existing_title:
+                    state_title_aliases[title] = existing_title
                 skipped += 1
                 continue
             existing_manga.append(m)
-            existing_titles.add(m["title"].lower())
+            existing_titles[title_key] = title
             added += 1
 
         config.set("manga", existing_manga)
@@ -1392,6 +1405,7 @@ def cmd_import(args):
         state.merge_missing_manga_state(
             imported_state,
             merge_existing_downloaded=True,
+            title_aliases=state_title_aliases,
         )
 
         console.print(f"[green]Imported: {added} added, {skipped} skipped (duplicate)[/green]")

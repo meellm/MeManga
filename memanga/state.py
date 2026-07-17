@@ -11,7 +11,9 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Mapping
+
+from .backup import merge_backup_state
 
 
 _LEADING_CHAPTER_RE = re.compile(r"\s*(\d+(?:\.\d+)?)")
@@ -173,6 +175,7 @@ class State:
         imported_state: Dict[str, Any],
         *,
         merge_existing_downloaded: bool = False,
+        title_aliases: Optional[Mapping[str, str]] = None,
     ):
         """Merge imported manga state entries without replacing local state.
 
@@ -187,21 +190,18 @@ class State:
             raise TypeError("imported_state must be a dict")
         with self._locked() as data:
             manga = data.setdefault("manga", {})
-            for title, state_data in imported_state.items():
-                if title in manga and merge_existing_downloaded:
-                    entry = manga[title]
-                    if not isinstance(entry, dict):
-                        entry = {}
-                        manga[title] = entry
-                    if isinstance(state_data, dict):
-                        existing_downloaded = set(entry.get("downloaded", []))
-                        imported_downloaded = set(state_data.get("downloaded", []))
-                        entry["downloaded"] = sorted(
-                            existing_downloaded | imported_downloaded,
-                            key=self._chapter_sort_key,
-                        )
-                elif not manga.get(title):
-                    manga[title] = self._snapshot(state_data)
+            if merge_existing_downloaded:
+                data["manga"] = self._snapshot(
+                    merge_backup_state(
+                        manga,
+                        imported_state,
+                        title_aliases=title_aliases,
+                    )
+                )
+            else:
+                for title, state_data in imported_state.items():
+                    if not manga.get(title):
+                        manga[title] = self._snapshot(state_data)
             self.save()
 
     # ========================================================================
