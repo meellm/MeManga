@@ -12,7 +12,7 @@ show :class:`BackupVersionError` messages to the user as-is, so keep
 them short and self-explanatory.
 """
 
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Mapping, Optional
 
 EXPORT_VERSION = 1
 
@@ -185,16 +185,33 @@ def merge_manga_state(local: Dict[str, Any], imported: Dict[str, Any]) -> Dict[s
 def merge_backup_state(
     local_state: Dict[str, Dict[str, Any]],
     imported_state: Dict[str, Dict[str, Any]],
+    *,
+    title_aliases: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Merge all imported manga state entries into local manga state."""
     if not isinstance(local_state, dict):
         local_state = {}
     if not isinstance(imported_state, dict):
         imported_state = {}
+    if title_aliases is None:
+        title_aliases = {}
+    casefolded_aliases = {
+        title.casefold(): canonical
+        for title, canonical in title_aliases.items()
+        if isinstance(title, str)
+    }
 
     merged = dict(local_state)
     for title, imported_entry in imported_state.items():
-        if title in merged:
+        alias_title = title_aliases.get(title) if isinstance(title, str) else None
+        if alias_title is None and isinstance(title, str):
+            alias_title = casefolded_aliases.get(title.casefold())
+        if alias_title and alias_title != title:
+            merged[alias_title] = merge_manga_state(
+                merged.get(alias_title, {}),
+                imported_entry,
+            )
+        elif title in merged:
             merged[title] = merge_manga_state(merged[title], imported_entry)
         else:
             merged[title] = imported_entry

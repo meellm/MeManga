@@ -11,7 +11,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Mapping
 
 from .backup import merge_backup_state
 
@@ -175,6 +175,7 @@ class State:
         imported_state: Dict[str, Any],
         *,
         merge_existing_downloaded: bool = False,
+        title_aliases: Optional[Mapping[str, str]] = None,
     ):
         """Merge imported manga state entries without replacing local state.
 
@@ -191,7 +192,11 @@ class State:
             manga = data.setdefault("manga", {})
             if merge_existing_downloaded:
                 data["manga"] = self._snapshot(
-                    merge_backup_state(manga, imported_state)
+                    merge_backup_state(
+                        manga,
+                        imported_state,
+                        title_aliases=title_aliases,
+                    )
                 )
             else:
                 for title, state_data in imported_state.items():

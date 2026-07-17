@@ -131,6 +131,43 @@ class TestMergeMangaState:
         assert merged["Local"]["downloaded"] == ["1", "2"]
         assert merged["Imported"]["read_chapters"] == ["9"]
 
+    def test_merge_backup_state_alias_preserves_local_key_casing(self):
+        merged = merge_backup_state(
+            {
+                "Stateful": {
+                    "downloaded": ["1"],
+                    "failed_chapters": {
+                        "4": {"error": "local", "attempts": 2},
+                    },
+                }
+            },
+            {
+                "stateful": {
+                    "downloaded": ["2"],
+                    "failed_chapters": {
+                        "4": {"error": "imported", "attempts": 1},
+                        "5": {"error": "backup", "attempts": 1},
+                    },
+                }
+            },
+            title_aliases={"stateful": "Stateful"},
+        )
+
+        assert list(merged) == ["Stateful"]
+        assert merged["Stateful"]["downloaded"] == ["1", "2"]
+        assert merged["Stateful"]["failed_chapters"]["4"]["error"] == "local"
+        assert merged["Stateful"]["failed_chapters"]["5"]["error"] == "backup"
+        assert "stateful" not in merged
+
+    def test_merge_backup_state_keeps_new_import_casing_without_alias(self):
+        merged = merge_backup_state(
+            {"Stateful": {"downloaded": ["1"]}},
+            {"stateful": {"downloaded": ["2"]}},
+        )
+
+        assert merged["Stateful"]["downloaded"] == ["1"]
+        assert merged["stateful"]["downloaded"] == ["2"]
+
     def test_last_chapter_uses_chapter_order_not_string_order(self):
         merged = merge_manga_state(
             {"last_chapter": "9"},

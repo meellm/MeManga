@@ -1152,19 +1152,29 @@ class SettingsPage(BasePage):
                 Toast(self, f"Replaced with {len(manga_list)} manga", kind="success")
             else:
                 existing = self.app.config.get("manga", [])
-                existing_titles = {m.get("title", "").lower() for m in existing}
+                existing_titles = {
+                    m.get("title", "").lower(): m.get("title", "")
+                    for m in existing
+                }
+                state_title_aliases = {}
                 added = 0
                 for m in manga_list:
-                    title_key = m.get("title", "").lower()
-                    if title_key not in existing_titles:
-                        existing.append(m)
-                        existing_titles.add(title_key)
-                        added += 1
+                    title = m.get("title", "")
+                    title_key = title.lower()
+                    existing_title = existing_titles.get(title_key)
+                    if existing_title is not None:
+                        if title != existing_title:
+                            state_title_aliases[title] = existing_title
+                        continue
+                    existing.append(m)
+                    existing_titles[title_key] = title
+                    added += 1
                 self.app.config.set("manga", existing)
                 self.app.config.save()
                 self.app.app_state.merge_missing_manga_state(
                     data.get("state", {}),
                     merge_existing_downloaded=True,
+                    title_aliases=state_title_aliases,
                 )
                 Toast(self, f"Imported {added} manga", kind="success")
         except json.JSONDecodeError:
