@@ -263,6 +263,27 @@ class State:
         """Check if a chapter has been downloaded."""
         return str(chapter) in self.get_downloaded_chapters(manga_title)
 
+    def remove_downloaded_chapter(self, manga_title: str, chapter: str) -> bool:
+        """Drop a single chapter from the downloaded list (issue #104).
+
+        Deliberately narrow: it touches only ``downloaded`` and leaves
+        ``read_chapters`` alone, so removing a chapter's local file after
+        it is read returns the Detail row to the Download state without
+        losing read progress. Returns True if the chapter was present.
+        No-op for unknown manga or chapters not marked downloaded.
+        """
+        with self._locked() as data:
+            manga_state = data.get("manga", {}).get(manga_title)
+            if not manga_state:
+                return False
+            downloaded = manga_state.get("downloaded", [])
+            chapter_str = str(chapter)
+            if chapter_str not in downloaded:
+                return False
+            downloaded.remove(chapter_str)
+            self._mark_dirty()
+            return True
+
     # ========================================================================
     # Backup Source Tracking
     # ========================================================================

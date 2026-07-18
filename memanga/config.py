@@ -88,6 +88,13 @@ class Config:
                 # the immediate next available chapter in the background.
                 "reader_prefetch_next": False,
             },
+            # Built-in reader behaviour (issue #104). Kept separate from
+            # delivery.delete_after_send, which is tied to email delivery —
+            # this is reader-driven local cleanup. Off by default: a chapter
+            # stays on disk after it is read unless the user opts in.
+            "reader": {
+                "remove_after_read": False,
+            },
             # Partial-chapter tolerance (issue #86). Off by default: any
             # missing page still aborts the chapter and discards output.
             # When enabled, a chapter whose failure rate is within

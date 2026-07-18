@@ -327,6 +327,26 @@ class TestSettingsPage:
         assert not page._partial_threshold.isEnabled()
         assert app_window.config.get("manga") == [{"title": "KeepMe"}]
 
+    def test_remove_after_read_saves_to_config(self, app_window, qapp):
+        # Issue #104: the Advanced-tab "remove chapters after reading"
+        # toggle should persist to config on save. Off by default.
+        page = app_window._pages["settings"]
+        assert not page._remove_after_read_check.isChecked()
+        page._remove_after_read_check.setChecked(True)
+        page._save()
+        assert app_window.config.get("reader.remove_after_read") is True
+
+    def test_reset_defaults_clears_remove_after_read(self, app_window, qapp):
+        page = app_window._pages["settings"]
+        app_window.config.set("reader.remove_after_read", True)
+        page._remove_after_read_check.setChecked(True)
+
+        page._reset_to_defaults()
+        qapp.processEvents()
+
+        assert app_window.config.get("reader.remove_after_read") is False
+        assert not page._remove_after_read_check.isChecked()
+
     def test_template_preview_substitutes(self, app_window, qapp):
         page = app_window._pages["settings"]
         page._naming_entry.setText("X-{chapter}")

@@ -647,6 +647,27 @@ class SettingsPage(BasePage):
 
         f.addSpacing(T.PAD_XL)
 
+        # Remove chapters after reading (issue #104)
+        self._section(f, "Reader Cleanup")
+        remove_read_hint = QLabel(
+            "Delete a chapter's local download once you finish it in the "
+            "built-in reader. Read progress is kept, so the chapter simply "
+            "returns to the Download state on the Detail page."
+        )
+        remove_read_hint.setProperty("role", "hint")
+        remove_read_hint.setWordWrap(True)
+        f.addWidget(remove_read_hint)
+
+        self._remove_after_read_check = QCheckBox(
+            "Remove chapters after reading"
+        )
+        self._remove_after_read_check.setChecked(
+            self.app.config.get("reader.remove_after_read", False)
+        )
+        f.addWidget(self._remove_after_read_check)
+
+        f.addSpacing(T.PAD_XL)
+
         # Import/Export
         self._section(f, "Import / Export")
         ie_row = QHBoxLayout()
@@ -915,13 +936,21 @@ class SettingsPage(BasePage):
         if hasattr(self, "_prefetch_check"):
             cfg.set("gui.reader_prefetch_next", self._prefetch_check.isChecked())
 
+        # Remove chapters after reading (issue #104)
+        if hasattr(self, "_remove_after_read_check"):
+            cfg.set(
+                "reader.remove_after_read",
+                self._remove_after_read_check.isChecked(),
+            )
+
         cfg.save()
         Toast(self, "Settings saved", kind="success")
 
     def _reset_to_defaults(self):
         cfg = self.app.config
         defaults = cfg._default_config()
-        for section in ("delivery", "email", "cron", "gui", "partial_chapters"):
+        for section in ("delivery", "email", "cron", "gui", "partial_chapters",
+                        "reader"):
             cfg.set(section, defaults[section])
         cfg.save()
         self._load_config_into_widgets()
@@ -972,6 +1001,11 @@ class SettingsPage(BasePage):
 
         if hasattr(self, "_prefetch_check"):
             self._prefetch_check.setChecked(cfg.reader_prefetch_enabled)
+
+        if hasattr(self, "_remove_after_read_check"):
+            self._remove_after_read_check.setChecked(
+                cfg.get("reader.remove_after_read", False)
+            )
 
         self._refresh_filename_preview()
 

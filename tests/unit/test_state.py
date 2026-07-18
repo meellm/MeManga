@@ -86,6 +86,29 @@ class TestChapterTracking:
             "Extra", "2 Part 1", "3", "3.5 Part 1", "10 Part 1"
         ]
 
+    def test_remove_downloaded_chapter(self, state):
+        # Issue #104: narrow removal drops only the downloaded record.
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "2")
+        assert state.remove_downloaded_chapter("X", "1") is True
+        assert state.get_downloaded_chapters("X") == ["2"]
+        assert not state.is_chapter_downloaded("X", "1")
+
+    def test_remove_downloaded_chapter_keeps_read_state(self, state):
+        # Read progress must survive the local file being removed.
+        state.add_downloaded_chapter("X", "1")
+        state.mark_chapter_read("X", "1")
+        state.remove_downloaded_chapter("X", "1")
+        assert not state.is_chapter_downloaded("X", "1")
+        assert state.is_chapter_read("X", "1")
+
+    def test_remove_downloaded_chapter_noop(self, state):
+        # Unknown manga / chapter must not raise and return False.
+        assert state.remove_downloaded_chapter("never", "1") is False
+        state.add_downloaded_chapter("X", "1")
+        assert state.remove_downloaded_chapter("X", "2") is False
+        assert state.get_downloaded_chapters("X") == ["1"]
+
     def test_set_last_chapter(self, state):
         state.set_last_chapter("X", "10")
         assert state.get_last_chapter("X") == "10"
