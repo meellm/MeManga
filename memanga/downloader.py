@@ -1374,7 +1374,12 @@ def _sanitize_filename(name: str) -> str:
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
         name = name.replace(char, '')
-    return name.strip()[:100]  # Limit length
+    name = name.strip()[:100]  # Limit length
+    # Never yield a dot-only ('.', '..') or empty result; those are
+    # directory references, not usable path components.
+    if not name.strip('.'):
+        return 'untitled'
+    return name
 
 
 def rename_manga_downloads(download_dir, old_title: str, new_title: str) -> bool:

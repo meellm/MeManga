@@ -21,6 +21,22 @@ from .base import BasePage
 from .. import theme as T
 
 
+def _is_inside_download_dir(candidate: Path, download_dir: Path) -> bool:
+    """True when *candidate* resolves to a location strictly inside
+    *download_dir*.
+
+    Validates that the candidate resolves strictly inside the download
+    directory. The download root itself does not qualify. Either path
+    may be non-existent; resolution is done without requiring existence.
+    """
+    try:
+        resolved = candidate.resolve()
+        root = download_dir.resolve()
+    except OSError:
+        return False
+    return resolved != root and resolved.is_relative_to(root)
+
+
 def _extract_images_from_file(filepath: Path) -> List[QImage]:
     """Extract images from a downloaded chapter file."""
     suffix = filepath.suffix.lower()
@@ -1206,7 +1222,11 @@ class ReaderPage(BasePage):
 
         manga_dirs = []
         for d in (download_dir / _sanitize_filename(title), download_dir / title):
-            if d.is_dir() and d not in manga_dirs:
+            if (
+                d.is_dir()
+                and d not in manga_dirs
+                and _is_inside_download_dir(d, download_dir)
+            ):
                 manga_dirs.append(d)
 
         for manga_dir in manga_dirs:
@@ -1221,8 +1241,15 @@ class ReaderPage(BasePage):
                         self._artifact_path = filepath
                         return _extract_images_from_file(filepath)
 
+                # The downloader only writes a single-component
+                # "Chapter <label>" folder, so require that exact shape
+                # before loading legacy image folders.
                 folder = manga_dir / f"Chapter {label}"
-                if folder.is_dir():
+                if (
+                    folder.parent == manga_dir
+                    and _is_inside_download_dir(folder, download_dir)
+                    and folder.is_dir()
+                ):
                     self._artifact_path = folder
                     return _extract_images_from_folder(folder)
 
