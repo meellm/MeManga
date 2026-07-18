@@ -347,6 +347,38 @@ class TestSettingsPage:
         assert app_window.config.get("reader.remove_after_read") is False
         assert not page._remove_after_read_check.isChecked()
 
+    def test_advanced_tab_section_order(self, app_window, qapp):
+        # The remove-after-read toggle lives in the Reader section next to
+        # the prefetch toggle, and Reader leads the Advanced tab.
+        from PySide6.QtWidgets import QLabel
+
+        page = app_window._pages["settings"]
+        layout = page._advanced_layout
+        titles = {}
+        positions = {}
+        for i in range(layout.count()):
+            w = layout.itemAt(i).widget()
+            if w is None:
+                continue
+            positions[w] = i
+            if isinstance(w, QLabel) and "bold" in w.styleSheet():
+                titles[w.text()] = i
+
+        assert list(titles) == [
+            "Reader",
+            "Scheduled Checks",
+            "Partial Chapters",
+            "Post-Processing",
+            "Import / Export",
+            "Diagnostics",
+        ]
+        assert (
+            titles["Reader"]
+            < positions[page._prefetch_check]
+            < positions[page._remove_after_read_check]
+            < titles["Scheduled Checks"]
+        )
+
     def test_template_preview_substitutes(self, app_window, qapp):
         page = app_window._pages["settings"]
         page._naming_entry.setText("X-{chapter}")

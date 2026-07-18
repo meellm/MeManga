@@ -493,6 +493,40 @@ class SettingsPage(BasePage):
     def _build_advanced(self):
         f = self._advanced_layout
 
+        # Reader prefetch (issue #107)
+        self._section(f, "Reader")
+        prefetch_hint = QLabel(
+            "While reading a manual-mode manga, download the next chapter "
+            "in the background so Next continues without leaving the reader."
+        )
+        prefetch_hint.setProperty("role", "hint")
+        prefetch_hint.setWordWrap(True)
+        f.addWidget(prefetch_hint)
+
+        self._prefetch_check = QCheckBox("Prefetch the next chapter while reading")
+        self._prefetch_check.setChecked(self.app.config.reader_prefetch_enabled)
+        f.addWidget(self._prefetch_check)
+
+        # Remove chapters after reading (issue #104)
+        remove_read_hint = QLabel(
+            "Delete a chapter's local download once you finish it in the "
+            "built-in reader. Read progress is kept, so the chapter simply "
+            "returns to the Download state on the Detail page."
+        )
+        remove_read_hint.setProperty("role", "hint")
+        remove_read_hint.setWordWrap(True)
+        f.addWidget(remove_read_hint)
+
+        self._remove_after_read_check = QCheckBox(
+            "Remove chapters after reading"
+        )
+        self._remove_after_read_check.setChecked(
+            self.app.config.get("reader.remove_after_read", False)
+        )
+        f.addWidget(self._remove_after_read_check)
+
+        f.addSpacing(T.PAD_XL)
+
         # Scheduled checks
         self._section(f, "Scheduled Checks")
         cron_row = QHBoxLayout()
@@ -579,22 +613,6 @@ class SettingsPage(BasePage):
 
         f.addSpacing(T.PAD_XL)
 
-        # Reader prefetch (issue #107)
-        self._section(f, "Reader")
-        prefetch_hint = QLabel(
-            "While reading a manual-mode manga, download the next chapter "
-            "in the background so Next continues without leaving the reader."
-        )
-        prefetch_hint.setProperty("role", "hint")
-        prefetch_hint.setWordWrap(True)
-        f.addWidget(prefetch_hint)
-
-        self._prefetch_check = QCheckBox("Prefetch the next chapter while reading")
-        self._prefetch_check.setChecked(self.app.config.reader_prefetch_enabled)
-        f.addWidget(self._prefetch_check)
-
-        f.addSpacing(T.PAD_XL)
-
         # Post-processing
         self._section(f, "Post-Processing")
 
@@ -644,27 +662,6 @@ class SettingsPage(BasePage):
         pp_hint.setProperty("role", "hint")
         f.addWidget(pp_hint)
         self._refresh_post_processing_enabled()
-
-        f.addSpacing(T.PAD_XL)
-
-        # Remove chapters after reading (issue #104)
-        self._section(f, "Reader Cleanup")
-        remove_read_hint = QLabel(
-            "Delete a chapter's local download once you finish it in the "
-            "built-in reader. Read progress is kept, so the chapter simply "
-            "returns to the Download state on the Detail page."
-        )
-        remove_read_hint.setProperty("role", "hint")
-        remove_read_hint.setWordWrap(True)
-        f.addWidget(remove_read_hint)
-
-        self._remove_after_read_check = QCheckBox(
-            "Remove chapters after reading"
-        )
-        self._remove_after_read_check.setChecked(
-            self.app.config.get("reader.remove_after_read", False)
-        )
-        f.addWidget(self._remove_after_read_check)
 
         f.addSpacing(T.PAD_XL)
 
