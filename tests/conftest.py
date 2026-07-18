@@ -47,6 +47,10 @@ def isolated_home(monkeypatch, tmp_path) -> Path:
     Returns the new home path so tests can poke at created files.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Path.home() on Windows resolves USERPROFILE and ignores HOME
+    # (Python 3.8+), so without this the suite reads and writes the
+    # developer's real config/state and download directories.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     (tmp_path / ".config" / "memanga").mkdir(parents=True, exist_ok=True)

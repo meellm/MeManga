@@ -1375,6 +1375,9 @@ def _sanitize_filename(name: str) -> str:
     for char in invalid_chars:
         name = name.replace(char, '')
     name = name.strip()[:100]  # Limit length
+    # Windows trims trailing dots/spaces from path components, so remove
+    # them explicitly after truncation to keep generated paths stable.
+    name = name.rstrip(". ")
     # Never yield a dot-only ('.', '..') or empty result; those are
     # directory references, not usable path components.
     if not name.strip('.'):

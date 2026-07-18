@@ -32,7 +32,9 @@ class Config:
     def _load(self):
         """Load config from file."""
         if self.config_path.exists():
-            with open(self.config_path, "r") as f:
+            # Explicit UTF-8: titles are arbitrary Unicode and the
+            # platform default encoding may not represent them.
+            with open(self.config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             # Merge with defaults to ensure new fields exist
             defaults = self._default_config()
@@ -151,7 +153,7 @@ class Config:
 
         fd, tmp_path = tempfile.mkstemp(dir=self.config_dir, suffix=".tmp")
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(payload)
             os.replace(tmp_path, self.config_path)
         except Exception:
