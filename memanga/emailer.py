@@ -6,6 +6,7 @@ Automatically splits large PDFs that exceed Gmail's 25MB limit.
 
 import shutil
 import smtplib
+import ssl
 import tempfile
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -233,8 +234,9 @@ def _send_single_email(
     
     # Send
     try:
+        context = ssl.create_default_context()
         with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
+            server.starttls(context=context)
             server.login(sender_email, app_password)
             server.send_message(msg)
         return True
@@ -260,8 +262,9 @@ def test_email_config(
         True if connection successful
     """
     try:
+        context = ssl.create_default_context()
         with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
+            server.starttls(context=context)
             server.login(sender_email, app_password)
         return True
     except Exception:

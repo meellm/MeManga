@@ -434,6 +434,8 @@ class TestSettingsPage:
         main_thread_id = threading.get_ident()
         label_calls = []
         smtp_thread_ids = []
+        starttls_contexts = []
+        smtp_calls = []
         original_set_text = page._test_label.setText
         original_set_style = page._test_label.setStyleSheet
 
@@ -455,10 +457,12 @@ class TestSettingsPage:
             def ehlo(self):
                 pass
 
-            def starttls(self):
-                pass
+            def starttls(self, context=None):
+                smtp_calls.append("starttls")
+                starttls_contexts.append(context)
 
             def login(self, sender, credential):
+                smtp_calls.append("login")
                 if login_error == "auth":
                     raise smtplib.SMTPAuthenticationError(535, b"bad")
                 if login_error:
@@ -480,6 +484,10 @@ class TestSettingsPage:
         assert page._test_label.text() == expected
         assert smtp_thread_ids
         assert all(tid != main_thread_id for tid in smtp_thread_ids)
+        import ssl
+        assert starttls_contexts
+        assert all(isinstance(ctx, ssl.SSLContext) for ctx in starttls_contexts)
+        assert smtp_calls.index("starttls") < smtp_calls.index("login")
         assert label_calls
         assert all(tid == main_thread_id for _, _, tid in label_calls)
 
@@ -1283,6 +1291,68 @@ class TestReaderPage:
         # Leaving again must not corrupt or crash either.
         app_window.show_page("detail", manga=sample_manga)
         qapp.processEvents()
+
+    def test_legacy_title_folder_stays_contained(self, tmp_path):
+        # Guards legacy title-folder resolution for unusual stored titles.
+        from pathlib import Path
+        from memanga.gui.pages.reader import _is_inside_download_dir
+        root = tmp_path / "downloads"
+        (root / "Some Manga").mkdir(parents=True)
+        (tmp_path / "sibling").mkdir()
+
+        assert _is_inside_download_dir(root / "Some Manga", root)
+        assert _is_inside_download_dir(root / "Dr. Who?", root)
+        assert not _is_inside_download_dir(root / ".." / "sibling", root)
+        assert not _is_inside_download_dir(root / "../sibling", root)
+        # Absolute-like stored titles are not valid manga folders.
+        assert not _is_inside_download_dir(root / str(tmp_path / "sibling"),
+                                           root)
+        # The download dir itself is not a valid manga folder.
+        assert not _is_inside_download_dir(root, root)
+        assert not _is_inside_download_dir(root / ".", root)
+
+    def test_invalid_chapter_label_folder_is_ignored(self, app_window, qapp,
+                                                     sample_manga):
+        # Legacy image-folder lookup must stay scoped to the selected manga.
+        from pathlib import Path
+        from PIL import Image
+        app_window.config.set("manga", [sample_manga])
+        dl = Path(app_window.config.download_dir)
+        manga_dir = dl / sample_manga["title"]
+        # A literal "Chapter .." folder is a legal on-disk name and keeps
+        # this regression representative of older folder layouts.
+        (manga_dir / "Chapter ..").mkdir(parents=True)
+        sibling = dl / "Sibling Manga" / "Chapter 1"
+        sibling.mkdir(parents=True)
+        Image.new("RGB", (40, 60), "white").save(sibling / "p000.jpg",
+                                                 "JPEG")
+
+        reader = app_window._pages["reader"]
+        reader._manga = sample_manga
+        reader._chapter = "../../../Sibling Manga/Chapter 1"
+        assert reader._find_and_load_chapter() == []
+        assert reader._artifact_path is None
+        assert sibling.is_dir()
+
+    def test_image_folder_chapter_still_loads(self, app_window, qapp,
+                                              sample_manga):
+        # Image formats are saved as "<manga>/Chapter <label>/" with the
+        # sort-formatted label; the containment guard must not break
+        # that lookup.
+        from pathlib import Path
+        from PIL import Image
+        app_window.config.set("manga", [sample_manga])
+        folder = (Path(app_window.config.download_dir)
+                  / sample_manga["title"] / "Chapter 2.01")
+        folder.mkdir(parents=True)
+        Image.new("RGB", (40, 60), "white").save(folder / "p000.jpg",
+                                                 "JPEG")
+
+        reader = app_window._pages["reader"]
+        reader._manga = sample_manga
+        reader._chapter = "2 Part 1"
+        assert reader._find_and_load_chapter()
+        assert reader._artifact_path == folder
 
 
 # ─────────────────────────────────────────────────────────────────────────

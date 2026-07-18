@@ -1029,10 +1029,12 @@ class SettingsPage(BasePage):
 
         def _test():
             import smtplib
+            import ssl
             try:
+                context = ssl.create_default_context()
                 server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=10)
                 server.ehlo()
-                server.starttls()
+                server.starttls(context=context)
                 server.login(sender, pw)
                 server.quit()
                 self._email_test_signals.result.emit("Success!", "success")

@@ -878,3 +878,60 @@ def test_issue_111_raw_locations_still_load(app_window, qapp, make_cbz):
     reader = app_window._pages["reader"]
     assert reader._images, (
         "#111 regression: pre-fix raw-title/raw-label download unreachable")
+
+
+def test_invalid_legacy_title_folder_is_ignored(app_window, qapp, make_cbz):
+    """Invalid legacy title folders should be skipped."""
+    from pathlib import Path
+    download_dir = Path(app_window.config.download_dir)
+    # The legacy-folder candidate only exists after the download root exists.
+    download_dir.mkdir(parents=True, exist_ok=True)
+    legacy = download_dir.parent / "legacy-title-target"
+    legacy.mkdir(parents=True, exist_ok=True)
+    bait = legacy / "legacy-title-target - Chapter 1.cbz"
+    bait.write_bytes(make_cbz(pages=2).read_bytes())
+
+    manga = {"title": "../legacy-title-target",
+             "url": "https://mangadex.org/title/z", "source": "mangadex.org",
+             "status": "reading", "mode": "manual"}
+    app_window.config.set("manga", [manga])
+    app_window.config.set("reader.remove_after_read", True)
+    app_window.app_state.add_downloaded_chapter(manga["title"], "1")
+
+    app_window.show_page("reader", manga=manga, chapter="1")
+    qapp.processEvents()
+    reader = app_window._pages["reader"]
+    assert reader._images == [], "invalid legacy title folder was loaded"
+    assert reader._artifact_path is None
+    # The ignored legacy candidate remains untouched.
+    assert bait.exists()
+
+
+def test_invalid_chapter_image_folder_is_ignored(app_window, qapp,
+                                                sample_manga):
+    """Invalid chapter image folders should be skipped."""
+    from pathlib import Path
+    from PIL import Image
+
+    download_dir = Path(app_window.config.download_dir)
+    manga_dir = download_dir / sample_manga["title"]
+    # A literal "Chapter .." folder is a legal on-disk name and keeps this
+    # regression representative of older folder layouts.
+    (manga_dir / "Chapter ..").mkdir(parents=True)
+    legacy = download_dir.parent / "legacy-chapter-target"
+    legacy.mkdir(parents=True, exist_ok=True)
+    bait = legacy / "page000.jpg"
+    Image.new("RGB", (40, 60), "white").save(bait, "JPEG")
+
+    ch = "../../../../legacy-chapter-target"
+    app_window.config.set("manga", [sample_manga])
+    app_window.config.set("reader.remove_after_read", True)
+    app_window.app_state.add_downloaded_chapter(sample_manga["title"], ch)
+
+    app_window.show_page("reader", manga=sample_manga, chapter=ch)
+    qapp.processEvents()
+    reader = app_window._pages["reader"]
+    assert reader._images == [], "invalid chapter image folder was loaded"
+    assert reader._artifact_path is None
+    # The ignored legacy candidate remains untouched.
+    assert bait.exists()

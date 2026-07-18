@@ -33,6 +33,22 @@ class TestSanitizeFilename:
         from memanga.downloader import _sanitize_filename
         assert _sanitize_filename("Chainsaw Man") == "Chainsaw Man"
 
+    def test_dot_components_fall_back(self):
+        from memanga.downloader import _sanitize_filename
+        assert _sanitize_filename(".") == "untitled"
+        assert _sanitize_filename("..") == "untitled"
+        # "../" loses its slash and would otherwise collapse to ".."
+        assert _sanitize_filename("../") == "untitled"
+
+    def test_empty_and_whitespace_fall_back(self):
+        from memanga.downloader import _sanitize_filename
+        assert _sanitize_filename("") == "untitled"
+        assert _sanitize_filename("   ") == "untitled"
+
+    def test_all_invalid_chars_fall_back(self):
+        from memanga.downloader import _sanitize_filename
+        assert _sanitize_filename('<>:"/\\|?*') == "untitled"
+
 
 class TestFormatChapterNumber:
     def test_integer_passes_through(self):
@@ -125,6 +141,22 @@ class TestDownloadChapterPath:
         assert rel.parts[0] == "Bleach", (
             f"format {fmt!r} produced {rel} — not under Bleach/"
         )
+
+    def test_invalid_title_uses_safe_folder(self, tmp_path,
+                                            patch_get_scraper, fake_state):
+        """Invalid stored titles should use a safe manga folder."""
+        from memanga.downloader import download_chapter
+        out = tmp_path / "downloads"
+        manga = {"title": "../", "url": "https://mock.test/m",
+                 "source": "mock.test"}
+        chapter = types.SimpleNamespace(
+            number="1", title="", url="https://mock.test/c/1",
+            source="mock.test", source_url="https://mock.test/c/1",
+            is_backup=False,
+        )
+        path = download_chapter(manga, chapter, out, "cbz", fake_state)
+        rel = Path(path).resolve().relative_to(out.resolve())
+        assert rel.parts[0] == "untitled"
 
 
 class TestNamingTemplate:
