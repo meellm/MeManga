@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QTimer
 from .base import BasePage
+from ...perf import timed
 from .. import theme as T
 from ..components.manga_card import MangaCard
 from ..components.manga_row import MangaRow
@@ -25,6 +26,16 @@ class LibraryPage(BasePage):
         self._search_query = ""
         self._sort_by = self.app.config.get("gui.sort_by", "title")
         self._cards: list = []
+        # Coalesces event-driven refreshes (check/download/read/library
+        # events) so a burst - e.g. every chapter of a batch download
+        # completing - triggers one grid rebuild, not one per event.
+        self._refresh_pending = False
+        # Debounces the filter box: rebuilding the grid on every
+        # keystroke made typing feel laggy on larger libraries.
+        self._filter_debounce = QTimer(self)
+        self._filter_debounce.setSingleShot(True)
+        self._filter_debounce.setInterval(250)
+        self._filter_debounce.timeout.connect(self._on_filter_debounce)
 
         self._build()
 
@@ -307,6 +318,7 @@ class LibraryPage(BasePage):
             # Tick must never raise — it fires on a timer.
             pass
 
+    @timed("gui.library.refresh")
     def _refresh(self):
         # Continue Reading rail first
         self._refresh_continue_rail()
@@ -381,7 +393,7 @@ class LibraryPage(BasePage):
             # Issue #18: pass per-chapter read / total counts so the card
             # can render "Read X/N" and a read-based progress bar.
             read_count = self.app.app_state.get_read_count(title)
-            total_count = len(self.app.app_state.get_available_chapters(title) or [])
+            total_count = self.app.app_state.get_available_chapter_count(title)
 
             card = MangaCard(
                 self._scroll_content, manga=manga, cover_image=cover_img,
@@ -490,6 +502,11 @@ class LibraryPage(BasePage):
 
     def _on_search(self, text):
         self._search_query = text.strip()
+        # Restart on each keystroke - the grid rebuilds once, when the
+        # user pauses typing.
+        self._filter_debounce.start()
+
+    def _on_filter_debounce(self):
         self._refresh()
 
     def _on_status_filter(self, value):
@@ -617,5 +634,12 @@ class LibraryPage(BasePage):
             self._refresh()
 
     def _on_check_done(self):
+        if not self.isVisible() or self._refresh_pending:
+            return
+        self._refresh_pending = True
+        QTimer.singleShot(300, self._run_pending_refresh)
+
+    def _run_pending_refresh(self):
+        self._refresh_pending = False
         if self.isVisible():
-            QTimer.singleShot(300, self._refresh)
+            self._refresh()

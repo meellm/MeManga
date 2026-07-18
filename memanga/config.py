@@ -8,6 +8,8 @@ import threading
 import yaml
 from pathlib import Path
 
+from .perf import timed
+
 
 class Config:
     """Manages configuration file.
@@ -139,6 +141,7 @@ class Config:
             data = data[k]
         data[keys[-1]] = value
     
+    @timed("config.save")
     def save(self):
         """Save config to file atomically. Thread-safe.
 

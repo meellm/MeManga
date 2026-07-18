@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Mapping
 
 from .backup import merge_backup_state
+from .perf import timed
 
 
 _CHAPTER_NUMBER_RE = re.compile(r"(\d+(?:\.\d+)?)")
@@ -136,6 +137,7 @@ class State:
             value = data.get("manga", {}).get(manga_title, {}).get(key, default)
             return self._snapshot(value)
 
+    @timed("state.save")
     def save(self):
         """Save state to file atomically. Thread-safe."""
         with self._lock:
@@ -645,7 +647,16 @@ class State:
         return self._entry_value(manga_title, "read_chapters", []) or []
 
     def get_read_count(self, manga_title: str) -> int:
-        return len(self.get_read_chapters(manga_title))
+        """Number of chapters read, without snapshotting the read list.
+
+        The Library page calls this per manga on every refresh (grid
+        cards + the header's read total), so it counts under the lock
+        instead of paying get_read_chapters()'s deep copy each time.
+        """
+        with self._locked() as data:
+            return len(
+                data.get("manga", {}).get(manga_title, {}).get("read_chapters", []) or []
+            )
 
     # ========================================================================
     # New Chapter Badges
@@ -698,6 +709,18 @@ class State:
     def get_available_chapters(self, manga_title: str) -> List[Dict[str, Any]]:
         """Get the cached chapter list for a manga (empty list if never checked)."""
         return self._entry_value(manga_title, "available_chapters", [])
+
+    def get_available_chapter_count(self, manga_title: str) -> int:
+        """Number of cached available chapters, without snapshotting them.
+
+        Callers that only need the total (Library cards' "Read X/N"
+        line) would otherwise deep-copy the whole cached list - per
+        card, per refresh - just to call len() on it.
+        """
+        with self._locked() as data:
+            return len(
+                data.get("manga", {}).get(manga_title, {}).get("available_chapters", []) or []
+            )
 
     def get_catalogue_baseline(self, manga_title: str) -> Optional[float]:
         """Highest chapter number the source has legitimately exposed so far.
