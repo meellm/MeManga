@@ -863,13 +863,15 @@ def test_issue_111_part_style_chapter_label(app_window, qapp, sample_manga,
 def test_issue_111_raw_locations_still_load(app_window, qapp, make_cbz):
     """Backward compatibility: downloads that ended up under the raw
     title folder with a raw chapter label must stay reachable."""
+    import os
     from pathlib import Path
-    manga = {"title": "Dr. Who?", "url": "https://mangadex.org/title/y",
+    title = "Dr. Who" if os.name == "nt" else "Dr. Who?"
+    manga = {"title": title, "url": "https://mangadex.org/title/y",
              "source": "mangadex.org", "status": "reading", "mode": "manual"}
     app_window.config.set("manga", [manga])
-    dl = Path(app_window.config.download_dir) / "Dr. Who?"
+    dl = Path(app_window.config.download_dir) / title
     dl.mkdir(parents=True, exist_ok=True)
-    (dl / "Dr. Who? - Chapter 2 Part 1.cbz").write_bytes(
+    (dl / f"{title} - Chapter 2 Part 1.cbz").write_bytes(
         make_cbz(pages=2).read_bytes())
     app_window.app_state.add_downloaded_chapter(manga["title"], "2 Part 1")
 

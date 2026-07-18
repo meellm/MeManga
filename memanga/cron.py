@@ -4,7 +4,7 @@ by the CLI (`memanga cron install`) and the GUI Settings page.
 """
 
 import shlex
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 def quote_cron_path(path) -> str:
@@ -19,7 +19,8 @@ def quote_cron_path(path) -> str:
 
 def build_cron_line(minute, hour, project_dir, python_path) -> str:
     """Build the daily auto-check crontab entry with shell-safe paths."""
-    project_dir = Path(project_dir)
+    project_dir = PurePosixPath(Path(project_dir).as_posix())
+    python_path = Path(python_path).as_posix()
     command = (
         f"cd {quote_cron_path(project_dir)} && "
         f"{quote_cron_path(python_path)} -m memanga check --auto --quiet"

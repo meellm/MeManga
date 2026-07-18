@@ -49,6 +49,12 @@ class TestSanitizeFilename:
         from memanga.downloader import _sanitize_filename
         assert _sanitize_filename('<>:"/\\|?*') == "untitled"
 
+    def test_truncation_never_leaves_trailing_dot_or_space(self):
+        from memanga.downloader import _sanitize_filename
+        assert _sanitize_filename("a" * 99 + " b") == "a" * 99
+        assert _sanitize_filename("a" * 99 + ".b") == "a" * 99
+        assert _sanitize_filename("Vol. 2.") == "Vol. 2"
+
 
 class TestFormatChapterNumber:
     def test_integer_passes_through(self):
@@ -356,7 +362,7 @@ class TestPostProcessing:
         }
 
         download_chapter(manga, chapter, tmp_path, "pdf", fake_state,
-                         post_processing=pp)
+                         post_processing=pp, naming_template="{chapter}")
 
         assert marker.read_text() == manga["title"]
         assert not injected.exists()
