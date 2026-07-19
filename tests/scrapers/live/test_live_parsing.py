@@ -120,11 +120,11 @@ def test_scraper_pipeline_live(domain, spec, health_recorder):
     reach = probe_url(f"https://{domain}")
     stages = [StageResult(STAGE_REACHABILITY, reach.status, reach.detail,
                             reach.elapsed_ms)]
-    if reach.status not in (STATUS_OK, STATUS_PROTECTED):
+    if reach.status == STATUS_DEAD:
         health_recorder(HealthResult(
-            domain, reach.status, STAGE_REACHABILITY, reach.detail,
+            domain, STATUS_DEAD, STAGE_REACHABILITY, reach.detail,
             reach.elapsed_ms, extra={"stages": [asdict(s) for s in stages]}))
-        pytest.fail(f"[{reach.status}:reachability] {domain}: {reach.detail}")
+        pytest.fail(f"[DEAD:reachability] {domain}: {reach.detail}")
     # PROTECTED is not fatal — the real scraper bypasses Cloudflare,
     # so still run the pipeline and let its stages decide.
 

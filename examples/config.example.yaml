@@ -24,6 +24,24 @@ delivery:
   delete_after_send: false  # Delete PDF after sending to Kindle (email mode only)
   output_format: pdf  # "pdf", "epub", "cbz", "zip", "jpg", "png", or "webp"
 
+  # Optional post-processing command, run after each chapter's output
+  # file/folder is created. Disabled by default. Only enable commands you trust.
+  # The command is split into arguments and run directly, without a shell.
+  # Placeholder values are substituted after splitting. Scripts can read the
+  # MEMANGA_* environment variables instead.
+  #
+  # Available placeholders (also passed as MEMANGA_* environment variables):
+  #   {output_path} MEMANGA_OUTPUT_PATH   - final file or folder path
+  #   {title}       MEMANGA_MANGA_TITLE   - manga title
+  #   {chapter}     MEMANGA_CHAPTER       - chapter number
+  #   {source}      MEMANGA_SOURCE        - source the chapter came from
+  #   {format}      MEMANGA_OUTPUT_FORMAT - output format
+  #   {is_dir}      MEMANGA_IS_DIR        - "1" if output is a folder, else "0"
+  post_processing:
+    enabled: false
+    command: ""            # e.g. 'cp -R {output_path} /mnt/archive/'
+    fail_on_error: false   # true = a failed command marks the chapter failed
+
 # Email settings (only needed if delivery.mode = "email")
 email:
   kindle_email: ""        # your-kindle@kindle.com

@@ -111,6 +111,39 @@ class TestSendToKindle:
             with pytest.raises((EmailError, smtplib.SMTPException)):
                 _call_send(good_cfg, tiny_pdf)
 
+    def test_large_single_file_error_explains_raw_and_encoded_limits(
+        self, good_cfg, tmp_path
+    ):
+        from memanga.emailer import EmailError, MAX_ATTACHMENT_SIZE
+        cbz = tmp_path / "large.cbz"
+        cbz.write_bytes(b"0" * (MAX_ATTACHMENT_SIZE + 1024 * 1024))
+
+        with patch("smtplib.SMTP") as smtp:
+            with pytest.raises(EmailError) as exc_info:
+                _call_send(good_cfg, cbz)
+
+        msg = str(exc_info.value)
+        assert "CBZ file is 19.0MB" in msg
+        assert "18.0MB safe raw attachment limit" in msg
+        assert "25.0MB encoded email cap" in msg
+        assert "base64 encoded" in msg
+        assert "exceeding the 25MB email limit" not in msg
+        smtp.assert_not_called()
+
+    def test_pdf_split_message_explains_raw_and_encoded_limits(
+        self, good_cfg, tiny_pdf, capsys
+    ):
+        smtp = _make_smtp_mock()
+        with patch("memanga.emailer.split_pdf", return_value=[tiny_pdf, tiny_pdf]):
+            with patch("smtplib.SMTP", return_value=smtp):
+                _call_send(good_cfg, tiny_pdf)
+
+        msg = capsys.readouterr().out
+        assert "Split into 2 parts" in msg
+        assert "18.0MB safe raw attachment limit" in msg
+        assert "25.0MB" in msg
+        assert "exceeded 25MB limit" not in msg
+
 
 # ─────────────────────────────────────────────────────────────────────
 # split_pdf — chunk huge PDFs under the attachment limit

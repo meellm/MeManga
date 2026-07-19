@@ -18,3 +18,9 @@ config.yaml
 state.json
 .DS_Store
 Thumbs.db
+
+# The GUI sub-package is excluded from the Docker build context.
+# The container runs the CLI only; memanga/gui/ is not needed and
+# would add unnecessary source from main's desktop-app layer.
+# Passing --gui inside the container will fail (the module is absent).
+memanga/gui

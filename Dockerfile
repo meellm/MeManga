@@ -9,12 +9,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    HOME=/home/memanga
+    HOME=/home/memanga \
+    MEMANGA_CLI_ONLY=1
 
 WORKDIR /app
 
-# Install dependencies and the Playwright Firefox runtime first so this
-# expensive layer stays cached when only application source changes.
+# Install CLI-only dependencies and the Playwright Firefox runtime first so
+# this expensive layer stays cached when only application source changes.
+# The cli branch's requirements.txt already excludes PySide6 and other
+# GUI-only packages, so the container stays lean and headless.
 COPY requirements.txt ./
 RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt \
@@ -24,6 +27,7 @@ RUN python -m pip install --upgrade pip \
     && chown -R memanga:memanga /home/memanga
 
 # Install the package itself (deps already satisfied above).
+# .dockerignore excludes memanga/gui so only the CLI source lands in the image.
 COPY pyproject.toml README.md ./
 COPY memanga ./memanga
 RUN python -m pip install --no-deps .
