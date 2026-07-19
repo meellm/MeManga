@@ -13,6 +13,7 @@ Works offline once chapters are downloaded.
 <p align="center">
   <a href="https://github.com/meellm/MeManga/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/meellm/MeManga"></a>
   <a href="https://github.com/meellm/MeManga/releases"><img alt="release downloads" src="https://img.shields.io/github/downloads/meellm/MeManga/total?label=downloads"></a>
+  <a href="https://hub.docker.com/r/meellm/memanga"><img alt="Docker pulls" src="https://img.shields.io/docker/pulls/meellm/memanga?label=docker%20pulls"></a>
   <img alt="platforms" src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-supported-success">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
@@ -175,14 +176,9 @@ PDFs over 18 MB are split automatically; EPUB / CBZ files can't be split so they
 
 # Part 2 — Command-line interface
 
-> **Just the light-weight CLI** A dedicated [`cli` branch](https://github.com/meellm/MeManga/tree/cli)
-> strips PySide6 and the GUI module out of the tree,
-> faster `pip install`, no Qt runtime to worry about, ideal for
-> headless servers and Docker images. `main` keeps both.
-
 The CLI ships in the source tree (not the release binary). It's the
-right tool and what I use for cron jobs, headless servers, batch operations, 
-and scripting. The desktop app and the CLI share the same config, state,
+right tool for cron jobs, headless servers, batch operations, and
+scripting. The desktop app and the CLI share the same config, state,
 and download files — you can drive your library from both interchangeably.
 
 ## Install
@@ -205,6 +201,62 @@ On macOS / Linux:
 
 ```bash
 ./scripts/run.sh <command>
+```
+
+## Docker
+
+The Docker image packages the CLI and Playwright Firefox runtime for
+headless servers, NAS boxes, Raspberry Pi systems, and cron-style
+automation. It does **not** include PySide6 or any other GUI runtime.
+
+```bash
+docker build -t memanga:cli .
+docker run --rm memanga:cli --help
+```
+
+Release tags publish the official image to Docker Hub and GitHub
+Container Registry:
+
+```bash
+docker pull meellm/memanga:latest
+docker run --rm meellm/memanga:latest --help
+
+docker pull ghcr.io/meellm/memanga:latest
+docker run --rm ghcr.io/meellm/memanga:latest --help
+```
+
+Stable releases are published with `X.Y.Z`, `X.Y`, and `latest` tags;
+pin to a specific `X.Y.Z` tag for reproducible runs. Build locally for
+unreleased changes.
+
+Persist config/state and downloads with two mounts:
+
+```bash
+mkdir -p memanga-data/config memanga-data/downloads
+
+docker run --rm \
+  -v "$PWD/memanga-data/config:/home/memanga/.config/memanga" \
+  -v "$PWD/memanga-data/downloads:/home/memanga/Downloads/MeManga" \
+  memanga:cli status
+```
+
+> The container runs as UID 1000, so bind-mounted directories must be
+> writable by UID 1000 (`sudo chown -R 1000:1000 memanga-data` if your
+> host user differs). The Compose setup below uses named volumes and
+> sidesteps this.
+
+Use the included `compose.yaml` for repeated commands:
+
+```bash
+docker compose build
+docker compose run --rm memanga list
+docker compose run --rm memanga check --auto
+```
+
+For a host cron job, run Compose from the repository directory:
+
+```cron
+0 6 * * * cd /path/to/MeManga && docker compose run --rm memanga check --auto --quiet >> memanga-docker.log 2>&1
 ```
 
 ## Commands

@@ -17,6 +17,7 @@ them to your Kindle.
 - [Setup — Windows](#setup--windows)
 - [Setup — macOS](#setup--macos)
 - [Setup — Linux](#setup--linux)
+- [Setup — Docker](#setup--docker)
 - [Your First Manga](#your-first-manga)
 - [Checking for New Chapters](#checking-for-new-chapters)
 - [Downloading From the Start](#downloading-from-the-start)
@@ -249,6 +250,93 @@ Or run directly through the virtual environment:
 /home/YourName/.config/memanga/state.json        # Download history
 /home/YourName/.config/memanga/downloads/        # Downloaded chapters
 ```
+
+---
+
+## Setup — Docker
+
+Docker is the easiest option for headless servers, NAS boxes, Raspberry
+Pi systems, and cron-style automation because the image includes the CLI
+and Playwright Firefox runtime without requiring a local Python install.
+The Docker image does **not** include PySide6 or any other GUI runtime.
+
+### Requirements
+
+- Docker
+- Docker Compose v2 if you want to use `compose.yaml`
+
+### Build and run
+
+```bash
+git clone https://github.com/meellm/MeManga.git
+cd MeManga
+docker build -t memanga:cli .
+docker run --rm memanga:cli --help
+```
+
+Official release images are published to Docker Hub and GitHub Container
+Registry when a release tag is pushed:
+
+```bash
+docker pull meellm/memanga:latest
+docker run --rm meellm/memanga:latest --help
+
+docker pull ghcr.io/meellm/memanga:latest
+docker run --rm ghcr.io/meellm/memanga:latest --help
+```
+
+Stable releases are published to both registries with `X.Y.Z`, `X.Y`,
+and `latest` tags; pin to a specific `X.Y.Z` tag for reproducible runs.
+Use a local `docker build` when testing unreleased code from the
+repository.
+
+### Persist config, state, and downloads
+
+MeManga stores config and state under
+`/home/memanga/.config/memanga` in the container. Downloads use the
+default path `/home/memanga/Downloads/MeManga`.
+
+```bash
+mkdir -p memanga-data/config memanga-data/downloads
+
+docker run --rm \
+  -v "$PWD/memanga-data/config:/home/memanga/.config/memanga" \
+  -v "$PWD/memanga-data/downloads:/home/memanga/Downloads/MeManga" \
+  memanga:cli status
+```
+
+> The container runs as a non-root user with UID 1000. With host bind
+> mounts like the ones above, the mounted directories must be writable by
+> UID 1000 or downloads and config saves will fail with permission
+> errors. This works automatically when your host user is UID 1000 (the
+> default first user on most Linux and Raspberry Pi systems); otherwise
+> run `sudo chown -R 1000:1000 memanga-data`. The Compose setup below
+> uses named volumes and avoids the issue entirely.
+
+### Compose
+
+The included `compose.yaml` keeps config/state and downloads in named
+volumes:
+
+```bash
+docker compose build
+docker compose run --rm memanga list
+docker compose run --rm memanga check --auto
+docker compose run --rm memanga config
+```
+
+For daily checks, add a host cron entry from the repository directory:
+
+```cron
+0 6 * * * cd /path/to/MeManga && docker compose run --rm memanga check --auto --quiet >> memanga-docker.log 2>&1
+```
+
+### Kindle delivery
+
+Run `docker compose run --rm memanga config`, choose email delivery, and
+enter the Kindle/Gmail settings. Keep the Docker config volume private:
+containers usually do not have a desktop keyring, so MeManga may store
+the Gmail app credential in the config volume as a fallback.
 
 ---
 
