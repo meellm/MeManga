@@ -271,8 +271,8 @@ docker build -t memanga:cli .
 docker run --rm memanga:cli --help
 ```
 
-Official release images are published to Docker Hub and GitHub Container
-Registry when a release tag is pushed:
+Official prebuilt images are published to Docker Hub and GitHub
+Container Registry from release tags on the `main` branch:
 
 ```bash
 docker pull meellm/memanga:latest
@@ -284,8 +284,8 @@ docker run --rm ghcr.io/meellm/memanga:latest --help
 
 Stable releases are published to both registries with `X.Y.Z`, `X.Y`,
 and `latest` tags; pin to a specific `X.Y.Z` tag for reproducible runs.
-Use a local `docker build` when testing unreleased code from the
-repository.
+The `cli` branch does not publish images; use a local `docker build`
+when running code from this branch or testing unreleased changes.
 
 ### Persist config, state, and downloads
 
