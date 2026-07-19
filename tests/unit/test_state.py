@@ -213,6 +213,13 @@ class TestExternalChapters:
         state.set_available_chapters("X", chapters)
         assert state.get_available_chapters("X") == chapters
 
+    def test_available_chapter_count(self, state):
+        state.set_available_chapters("X", [{"number": "1"}, {"number": "2"}])
+        assert state.get_available_chapter_count("X") == 2
+
+    def test_available_chapter_count_unknown_manga_is_zero(self, state):
+        assert state.get_available_chapter_count("never") == 0
+
 
 class TestReadChapters:
     """Issue #18 — per-chapter read tracking."""
@@ -222,6 +229,9 @@ class TestReadChapters:
         state.mark_chapter_read("X", "5")
         assert state.get_read_chapters("X") == ["5"]
         assert state.get_read_count("X") == 1
+
+    def test_read_count_unknown_manga_is_zero(self, state):
+        assert state.get_read_count("never") == 0
 
     def test_unmark_chapter_read(self, state):
         state.mark_chapter_read("X", "5")

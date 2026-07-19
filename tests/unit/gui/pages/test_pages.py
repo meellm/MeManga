@@ -103,6 +103,48 @@ class TestLibraryPage:
                                    {"title": "X", "chapter": "1"})
         app_window.events.poll(); qapp.processEvents()
 
+    def test_search_is_debounced(self, app_window, qapp):
+        # Typing must not rebuild the grid per keystroke - only once,
+        # after the pause timer fires.
+        page = app_window._pages["library"]
+        calls = []
+        page._refresh = lambda: calls.append(1)
+
+        page._on_search("a")
+        page._on_search("ab")
+        assert calls == []
+        assert page._search_query == "ab"
+        assert page._filter_debounce.isActive()
+
+        # Fire the pending timeout now instead of waiting 250 ms.
+        page._filter_debounce.setInterval(0)
+        page._filter_debounce.start()
+        deadline = time.time() + 2
+        while not calls and time.time() < deadline:
+            qapp.processEvents()
+        assert calls == [1]
+
+    def test_check_done_coalesces_bursts(self, app_window, qapp):
+        # A burst of completion events (e.g. batch download) must fold
+        # into a single deferred refresh.
+        app_window.show()
+        app_window.show_page("library"); qapp.processEvents()
+        page = app_window._pages["library"]
+        assert page.isVisible()
+        calls = []
+        page._refresh = lambda: calls.append(1)
+
+        for _ in range(5):
+            page._on_check_done()
+        assert page._refresh_pending
+        assert calls == []
+
+        deadline = time.time() + 2
+        while not calls and time.time() < deadline:
+            qapp.processEvents()
+        assert calls == [1]
+        assert not page._refresh_pending
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Downloads
