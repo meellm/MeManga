@@ -1,4 +1,4 @@
-# 📖 MeManga (CLI)
+# MeManga (CLI)
 
 **Automatic manga downloader — command-line edition.**
 
@@ -11,8 +11,9 @@ engine and a cron-friendly CLI.
   <a href="https://github.com/meellm/MeManga/releases"><img alt="latest release" src="https://img.shields.io/github/v/release/meellm/MeManga"></a>
   <a href="https://github.com/meellm/MeManga/releases"><img alt="release downloads" src="https://img.shields.io/github/downloads/meellm/MeManga/total?label=downloads"></a>
   <a href="https://hub.docker.com/r/meellm/memanga"><img alt="Docker pulls" src="https://img.shields.io/docker/pulls/meellm/memanga?label=docker%20pulls"></a>
-  <img alt="platforms" src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-supported-success">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <img alt="platforms" src="https://img.shields.io/badge/Windows%20%7C%20macOS%20%7C%20Linux-supported-success">
+  <img alt="python" src="https://img.shields.io/badge/python-3.10%2B-blue">
 </p>
 
 > **Want the desktop app?** The [`main` branch](https://github.com/meellm/MeManga/tree/main)
@@ -23,20 +24,20 @@ engine and a cron-friendly CLI.
 
 ---
 
-## ✨ Highlights
+## Highlights
 
-- 🤝 **Power-user CLI** — scriptable, cron-friendly, works on headless servers
-- 📚 **Library tracking** — read/unread state survives reboots
-- 🔍 **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
-- 📥 **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output
-- 📧 **Kindle delivery** — auto-send chapters by email after download
-- 🔄 **Backup sources** — fall back to a second source if the primary stops updating
-- 🌐 **Offline-aware** — gracefully fails on network actions when offline
-- 🔒 **No telemetry, no accounts, no cloud** — everything stays on your machine
+- **Power-user CLI** — scriptable, cron-friendly, works on headless servers
+- **Library tracking** — read/unread state survives reboots
+- **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
+- **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output
+- **E-Reader delivery** — auto-send chapters by email after download
+- **Backup sources** — fall back to a second source if the primary stops updating
+- **Offline-aware** — gracefully fails on network actions when offline
+- **No telemetry, no accounts, no cloud** — everything stays on your machine
 
 ---
 
-## 🚀 Install
+## Install
 
 ```bash
 git clone -b cli https://github.com/meellm/MeManga.git
@@ -58,7 +59,7 @@ On macOS / Linux:
 ./scripts/run.sh <command>
 ```
 
-> **First run downloads Firefox** (~90 MB, one-time) via Playwright for
+> **First run downloads Firefox** (~80 MB download, one-time) via Playwright for
 > the JS-heavy sources (MangaFire, WeebCentral, …). After that, startup
 > is instant.
 
@@ -126,7 +127,7 @@ not available inside the container.
 
 ---
 
-## 🧭 First five minutes
+## First five minutes
 
 ```bash
 # 1. Track a manga (either interactive or one-shot)
@@ -146,7 +147,7 @@ library from both interchangeably.
 
 ---
 
-## 📜 Commands
+## Commands
 
 | Command | Purpose |
 |---|---|
@@ -169,7 +170,7 @@ Run any subcommand with `--help` for full flags.
 
 ---
 
-## 🍳 Common recipes
+## Common recipes
 
 ### Add a manga with a backup source
 
@@ -199,7 +200,7 @@ flat across long bulk runs.
 # Linux/macOS — installs a crontab entry
 python -m memanga cron install --time 06:00
 
-# Windows — registers a Task Scheduler entry (run as the current user)
+# Windows — register a Task Scheduler entry (run as your user)
 python -m memanga cron install --time 06:00
 ```
 
@@ -209,14 +210,14 @@ python -m memanga cron install --time 06:00
 python -m memanga failed --retry
 ```
 
-`failed` is the safety net for the "downloaded but incomplete" class
-of errors — the downloader refuses to mark a chapter complete if any
-page failed, and tracks the failure so the next run can batch-retry it.
+`failed` is the safety net for the "downloaded but incomplete" class of
+errors - the modern downloader refuses to mark a chapter complete if
+any page failed, and tracks the failure so you can batch-retry later.
 
 ### Send a manga to your Kindle after every download
 
 1. [Generate a Gmail App Password](https://support.google.com/accounts/answer/185833)
-   (regular passwords won't work; Google blocks them for SMTP).
+   (regular passwords won't work).
 2. Add your Gmail address to your
    [Amazon "Approved Personal Document E-mail List"](https://www.amazon.com/hz/mycd/myx#/home/settings/payment).
 3. Run `python -m memanga config` and fill in Kindle email, sender
@@ -229,7 +230,7 @@ split so they fail-loud with a size warning.
 
 ---
 
-## 🌐 Sources
+## Sources
 
 The default search sweep covers these 15 verified working aggregators
 (popularity order):
@@ -238,10 +239,12 @@ The default search sweep covers these 15 verified working aggregators
 |---|---|---|
 | mangadex.org | API | Largest fan-translation library |
 | mangapill.com | Requests | Fast, no Cloudflare |
-| mangafire.to | Playwright | VRF bypass + image descrambling |
+| mangapark1.com | Requests | Large mirror with live diagnostics |
+| mangafire.to | Requests | Current JSON APIs + image descrambling |
 | mangabuddy.com | Playwright | Popular aggregator |
 | weebcentral.com | Playwright | 1000+ series |
 | mangakatana.com | Playwright | General library |
+| comix.to | Playwright | Rendered search + reader extraction |
 | comick.io | Playwright | Clean API |
 | mangahub.io | Requests | Huge library |
 | mangahere.cc | Requests | Reliable mirror |
@@ -249,8 +252,6 @@ The default search sweep covers these 15 verified working aggregators
 | mangaclash.com | Playwright | Manhwa-heavy |
 | mangahere.onl | Playwright | Alternate mirror |
 | mangataro.org | Requests | ComicK replacement |
-| luminousscans.com | Requests | Scanlation focus |
-| tcbonepiecechapters.com | Requests | Jump titles (One Piece, JJK, MHA) |
 
 200+ more aggregators are in the registry — toggle them on via
 `python -m memanga sources`. See the
@@ -258,7 +259,7 @@ The default search sweep covers these 15 verified working aggregators
 
 ---
 
-## 📂 Where your data lives
+## Where your data lives
 
 | Path | What |
 |---|---|
@@ -269,14 +270,14 @@ The default search sweep covers these 15 verified working aggregators
 
 Sensitive credentials (SMTP App Password) are stored in the OS keyring
 (Keychain on macOS, Credential Manager on Windows, Secret Service on
-Linux) — never in plain text on disk.
+Linux).
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 **Will my downloads work without internet?**
-Yes — once a chapter is on disk it's just files in your download
+Yes. Once a chapter is on disk it's just files in your download
 folder. The CLI gracefully fails on network actions (Search, Check,
 Download) when no connection is available.
 
@@ -291,15 +292,16 @@ JS-heavy sites. One-time. After that, startup is instant.
 **A source I use stopped working — what now?**
 - Run `python -m memanga sources` to see health status. If it's
   marked unhealthy, the site is genuinely down or changed its HTML.
-  File an issue with the **Scraper broken** template.
+  File an issue with the **Scraper broken** template so we can
+  investigate together.
 - Use `python -m memanga update <title>` to switch the manga to a
   backup source until the scraper is fixed.
 
-**Can I use this on a Raspberry Pi?**
-Yes — the CLI runs anywhere Python 3.10+ runs. On a headless Pi a
-typical setup is cron + `--auto` flag + `xvfb-run` for Playwright
-sources. You can also use the Docker setup above if Docker is available
-on the Pi.
+**Can I use this on headless devices?**
+The CLI runs anywhere Python 3.10+ runs. You'd typically use cron,
+the CLI's `--auto` flag, and `xvfb-run` for Playwright sources. The
+Docker setup above also works on NAS boxes and Raspberry Pi systems
+if Docker is available.
 
 **Why is there a separate `cli` branch?**
 `main` ships a full PySide6 desktop app — useful, but heavy. Some
@@ -310,7 +312,7 @@ config + state files, so you can switch between them freely.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 PRs welcome — bug fixes, new scrapers, CLI polish, all of it.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, test
@@ -325,6 +327,6 @@ branches don't drift further than necessary.
 
 For security-sensitive reports, see [SECURITY.md](SECURITY.md).
 
-## 📄 License
+## License
 
 MIT — see [LICENSE](LICENSE).

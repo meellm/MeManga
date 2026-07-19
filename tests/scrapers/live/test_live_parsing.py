@@ -1,15 +1,21 @@
-"""End-to-end parsing health checks against live sites.
+"""End-to-end pipeline health checks against live sites.
 
 Reachability alone isn't enough — a site can be up while its HTML
-changed in a way that breaks the parser. This file actually invokes
-each scraper's search() / get_chapters() / get_pages() against the
-real site and fails when the parser returns zero results (likely
-indicates the site's structure drifted).
+changed in a way that breaks the parser. Each probe here walks the
+same stages a real download does, in order, against the live site:
+
+    reachability → search → chapters → pages → image
+
+and fails on the FIRST broken stage, so the pytest output (and the
+--health-report JSON) tells you *which part* of the scraper is broken,
+e.g. `[STALE:pages] mangapill.com: get_pages(...) returned 0 page
+URLs` — not just a generic STALE.
 
 We can't maintain a known-good URL per domain forever, so this file
 is deliberately curated — it tests a focused set of high-traffic
 sources + every scraper template family (one representative per
-template).
+template). Broad one-request-per-domain coverage lives in
+test_live_reachability.py.
 
 Skipped by default. Opt in with:
     pytest -m live tests/scrapers/live/test_live_parsing.py -v
@@ -21,143 +27,140 @@ Single source:
 
 from __future__ import annotations
 
+from dataclasses import dataclass, asdict
+
 import pytest
 
 from memanga.scrapers import get_scraper
 
 from _helpers import (  # injected onto sys.path by conftest.py
-    HealthResult, STATUS_OK, STATUS_STALE, STATUS_PROTECTED, STATUS_DEAD,
-    probe_url, assert_alive, assert_parsed_something, LIVE_TIMEOUT,
+    HealthResult, StageResult, StageFailure, ScraperPipeline,
+    STATUS_OK, STATUS_STALE, STATUS_PROTECTED, STATUS_DEAD, STATUS_HTTP_ERROR,
+    STAGE_REACHABILITY,
+    probe_url, scraper_base_url,
 )
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Per-source health probes.
+# Per-source probe specs.
 #
-# Each probe is a callable that takes the scraper instance and either:
-#   - returns silently on success
-#   - calls pytest.fail / pytest.skip with a classified message
+# query=None means a single-manga template site: skip search and get
+# chapters straight from the configured base URL.
 #
-# Keep these LIGHT — one search + one get_chapters per probe is plenty.
-# Avoid get_pages on Playwright sites (too slow + brittle for CI).
+# Keep these LIGHT — the full pipeline is ~4 requests per source
+# (search, chapters, pages, one image). Disable later stages where a
+# site makes them too slow/brittle (e.g. check_pages=False for
+# Playwright-rendered readers).
 # ─────────────────────────────────────────────────────────────────────
 
 
-def _probe_search_then_chapters(scraper, query: str, *,
-                                  expect_results: int = 1,
-                                  expect_chapters: int = 1,
-                                  do_chapters: bool = True):
-    """search(query) → ≥1 result; first result's chapters → ≥1 chapter."""
-    results = assert_parsed_something(scraper.search, query,
-                                        min_items=expect_results)
-    if not do_chapters:
-        return
-    first = results[0]
-    assert_parsed_something(scraper.get_chapters, first.url,
-                              min_items=expect_chapters)
+@dataclass(frozen=True)
+class ProbeSpec:
+    description: str
+    query: str | None = None      # None → single-manga template site
+    check_chapters: bool = True
+    check_pages: bool = True
+    check_image: bool = True
 
 
-def _probe_single_manga_chapters(scraper):
-    """For single-manga template sites: chapters from the configured base."""
-    base = getattr(scraper, "BASE_URL", None) or getattr(scraper, "base_url", "")
-    assert_parsed_something(scraper.get_chapters, base, min_items=1)
-
-
-# Domain → (description, probe-fn). Curated list of sites we test
-# end-to-end. Easy to expand: just add another entry.
 PARSING_PROBES = {
-    # ── Aggregators (search + chapters) ──
-    "mangadex.org": (
-        "API client", lambda s: _probe_search_then_chapters(s, "one piece"),
-    ),
-    "mangapill.com": (
-        "Simple HTTP aggregator",
-        lambda s: _probe_search_then_chapters(s, "one piece"),
-    ),
-    "tcbonepiecechapters.com": (
-        "TCB Scans (project list)",
-        lambda s: _probe_search_then_chapters(s, "one piece"),
-    ),
-    "mangakakalot.com": (
-        "Mangakakalot",
-        lambda s: _probe_search_then_chapters(s, "naruto"),
-    ),
-    "manganato.com": (
-        "Manganato",
-        lambda s: _probe_search_then_chapters(s, "naruto"),
-    ),
-    "mangahub.io": (
-        "MangaHub", lambda s: _probe_search_then_chapters(s, "one piece"),
-    ),
+    # ── Aggregators (full pipeline) ──
+    # "one piece" is fully external on MangaDex (MangaPlus) → 0 readable
+    # chapters, so probe a title that is actually hosted there.
+    "mangadex.org": ProbeSpec("API client", query="chainsaw man"),
+    "mangapill.com": ProbeSpec("Simple HTTP aggregator", query="one piece"),
+    "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),
+    "tcbonepiecechapters.com": ProbeSpec("TCB Scans (project list)",
+                                           query="one piece"),
+    "mangakakalot.com": ProbeSpec("Mangakakalot", query="naruto"),
+    "manganato.com": ProbeSpec("Manganato", query="naruto"),
+    "mangahub.io": ProbeSpec("MangaHub", query="one piece"),
+    "comix.to": ProbeSpec("Comix.to", query="kubera"),
 
     # ── One representative per template family ──
-    "dddmanga.com": (
-        "NuxtSSR template (single-manga)",
-        _probe_single_manga_chapters,
-    ),
-    "akiramanga.com": (
-        "OGImageMeta template (single-manga)",
-        _probe_single_manga_chapters,
-    ),
-    "overlord-manga.online": (
-        "LaiondCDN template (single-manga)",
-        _probe_single_manga_chapters,
-    ),
-    "hxhmanga.com": (
-        "Mangosm template (single-manga)",
-        _probe_single_manga_chapters,
-    ),
-    "hiperdex.com": (
-        "WordPress Madara template (aggregator)",
-        lambda s: _probe_search_then_chapters(s, "solo leveling"),
-    ),
+    "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),
+    "akiramanga.com": ProbeSpec("OGImageMeta template (single-manga)"),
+    "overlord-manga.online": ProbeSpec("LaiondCDN template (single-manga)"),
+    "hxhmanga.com": ProbeSpec("Mangosm template (single-manga)"),
+    "hiperdex.com": ProbeSpec("WordPress Madara template (aggregator)",
+                                query="solo leveling"),
 
     # ── ReadManga base family ──
-    "readsnk.com": (
-        "ReadManga base (Attack on Titan)",
-        lambda s: _probe_search_then_chapters(s, "attack on titan",
-                                                do_chapters=False),
-    ),
+    # Search-only: chapter listing needs a manga URL slug this site's
+    # search results don't provide reliably.
+    "readsnk.com": ProbeSpec("ReadManga base (Attack on Titan)",
+                               query="attack on titan",
+                               check_chapters=False),
 }
+
+
+def _fail_message(domain: str, failure: StageFailure) -> str:
+    """Multi-line failure: broken stage first, then what already passed."""
+    lines = [f"[{failure.failed.status}:{failure.failed.stage}] "
+             f"{domain}: {failure.failed.detail}"]
+    for s in failure.stages:
+        if s is failure.failed:
+            mark = "FAIL"
+        elif s.status == STATUS_OK:
+            mark = "OK"
+        else:
+            mark = "WARN"
+        lines.append(f"  {mark} {s.stage:12s} {s.detail}  ({s.elapsed_ms:.0f}ms)")
+    return "\n".join(lines)
 
 
 @pytest.mark.live
 @pytest.mark.health
-@pytest.mark.parametrize("domain,description,probe",
-                          [(d, desc, fn) for d, (desc, fn) in PARSING_PROBES.items()],
+@pytest.mark.parametrize("domain,spec",
+                          list(PARSING_PROBES.items()),
                           ids=list(PARSING_PROBES.keys()))
-def test_scraper_parses_live_site(domain, description, probe, health_recorder):
-    """Full end-to-end check: reachability + parser still extracts data."""
+def test_scraper_pipeline_live(domain, spec, health_recorder):
+    """Stage-by-stage check: reachability, search, chapters, pages, image."""
     # 1. Reachability first — fail fast if the site is dead.
-    base = f"https://{domain}"
-    reach = probe_url(base)
-    if reach.status == STATUS_DEAD:
-        health_recorder(reach)
-        pytest.fail(f"[DEAD] {domain}: {reach.detail}")
-    if reach.status == STATUS_PROTECTED:
-        # Real scraper bypasses Cloudflare — still try the probe.
-        pass
+    reach = probe_url(f"https://{domain}")
+    stages = [StageResult(STAGE_REACHABILITY, reach.status, reach.detail,
+                            reach.elapsed_ms)]
+    if reach.status not in (STATUS_OK, STATUS_PROTECTED):
+        health_recorder(HealthResult(
+            domain, reach.status, STAGE_REACHABILITY, reach.detail,
+            reach.elapsed_ms, extra={"stages": [asdict(s) for s in stages]}))
+        pytest.fail(f"[{reach.status}:reachability] {domain}: {reach.detail}")
+    # PROTECTED is not fatal — the real scraper bypasses Cloudflare,
+    # so still run the pipeline and let its stages decide.
 
-    # 2. Run the probe. Wraps any exception into STALE-style failure.
+    # 2. Walk the pipeline; first broken stage raises StageFailure.
     scraper = get_scraper(domain)
+    pipe = ScraperPipeline(scraper, domain)
+    pipe.stages = stages
+    failure = None
     try:
-        probe(scraper)
-        result = HealthResult(domain, STATUS_OK, description,
-                                reach.elapsed_ms)
-    except pytest.skip.Exception:
-        raise
-    except (pytest.fail.Exception, AssertionError) as e:
-        result = HealthResult(domain, STATUS_STALE, str(e), reach.elapsed_ms)
-        health_recorder(result)
-        raise
-    except Exception as e:
-        result = HealthResult(domain, STATUS_STALE,
-                                f"{type(e).__name__}: {e}", reach.elapsed_ms)
-        health_recorder(result)
-        raise
+        if spec.query is None:
+            manga_url = scraper_base_url(scraper)
+        else:
+            results = pipe.search(spec.query)
+            manga_url = results[0].url
+        if spec.check_chapters:
+            chapters = pipe.chapters(manga_url)
+            if spec.check_pages:
+                pages = pipe.pages(chapters[0])
+                if spec.check_image:
+                    pipe.image(pages[0])
+    except StageFailure as e:
+        health_recorder(HealthResult(
+            domain, e.failed.status, e.failed.stage, e.failed.detail,
+            reach.elapsed_ms,
+            extra={"stages": [asdict(s) for s in e.stages]}))
+        failure = e
 
+    if failure:
+        pytest.fail(_fail_message(domain, failure), pytrace=False)
+
+    result = HealthResult(
+        domain, STATUS_OK, "", spec.description, reach.elapsed_ms,
+        extra={"stages": [asdict(s) for s in pipe.stages]})
     health_recorder(result)
-    print(f"[{result.status:9s}] {domain:38s} {description}")
+    ran = ", ".join(s.stage for s in pipe.stages)
+    print(f"[{result.status:9s}] {domain:38s} {spec.description} ({ran})")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -188,10 +191,12 @@ def test_zzz_health_summary_report():  # name puts it last alphabetically
 
     by_status: dict[str, list[str]] = {}
     for r in _RESULTS:
-        by_status.setdefault(r.status, []).append(r.domain)
+        label = f"{r.domain} (broke at: {r.stage})" if r.stage else r.domain
+        by_status.setdefault(r.status, []).append(label)
 
     lines = ["", "=" * 60, "SCRAPER HEALTH SUMMARY", "=" * 60]
-    for status in (STATUS_OK, STATUS_PROTECTED, STATUS_STALE, STATUS_DEAD):
+    for status in (STATUS_OK, STATUS_PROTECTED, STATUS_STALE,
+                     STATUS_HTTP_ERROR, STATUS_DEAD):
         domains = by_status.get(status, [])
         lines.append(f"{status:10s}: {len(domains):4d}")
         for d in sorted(domains):

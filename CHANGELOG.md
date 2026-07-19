@@ -11,6 +11,49 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-07-12
+
+### Fixed
+- #83 MangaDex API requests could fail with HTTP 400 because the shared
+  scraper session claimed a browser user agent without the `Sec-Fetch-*`
+  headers MangaDex expects. Default scraper headers now include those
+  browser fetch metadata headers, restoring MangaDex search and chapter
+  requests.
+
+### Acknowledgements
+- Special thanks to @Camponotus-vagus for the detailed issue diagnostics
+  and follow-up testing that helped shape the fixes.
+
+## [0.3.2] - 2026-07-08
+
+### Added
+- #77 Comix.to is now available as a supported source. Search runs
+  through the rendered search flow, chapter discovery reads paginated
+  chapter rows, and reader image extraction/downloads use the headers
+  required by the site.
+- #78 MangaPark is now available as a supported source through
+  `mangapark1.com`, including search, chapter-list parsing, reader page
+  extraction, CDN image downloads, and live scraper diagnostics.
+- Live scraper diagnostics now include staged parsing probes that make
+  source-specific breakage easier to confirm without running the full
+  application workflow.
+
+### Fixed
+- #74 MangaFire search now reads the current `/api/titles` JSON payload
+  instead of scraping the old browser search page, restoring title
+  discovery for queries such as `one piece`, `ao no hako`, and
+  `super no ura`.
+
+## [0.3.1] - 2026-07-06
+
+### Fixed
+- #71 MangaFire changed its chapter and page endpoints, so saved
+  MangaFire library entries could no longer fetch real chapter lists.
+  MangaFire now reads the current `/api` chapter and page payloads,
+  keeps old saved MangaFire URLs compatible, follows paginated chapter
+  lists, and deduplicates repeated chapter numbers before update checks
+  or downloads run.
+
 ## [0.3.0] - 2026-06-13
 
 ### Added
