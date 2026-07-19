@@ -1,0 +1,37 @@
+# CLI-only dependencies for the Docker image.
+# Identical to requirements.txt minus PySide6 and any other GUI-only packages.
+# The main requirements.txt includes PySide6 for the desktop app; this file
+# is used by the Dockerfile so the container stays lean and headless.
+
+# Core
+rich>=13.0.0
+pyyaml>=6.0
+requests>=2.28.0
+
+# PDF generation
+img2pdf>=0.5.0
+Pillow>=10.0.0
+
+# EPUB generation
+ebooklib>=0.18
+
+# Scrapers
+beautifulsoup4>=4.12.0
+playwright>=1.40.0
+cloudscraper>=1.2.71
+
+# PDF splitting (for email delivery of large files)
+pikepdf>=8.0.0
+
+# Secure credential storage
+keyring>=24.0.0
+# Backs keyring's Windows Credential Manager backend. keyring declares
+# this as a conditional dep already; pinning it explicitly shields
+# against version drift dropping it silently.
+pywin32-ctypes>=0.2.0; sys_platform == "win32"
+
+# Stealth mode for Playwright scrapers
+playwright-stealth>=1.0.0
+
+# SSL CA bundle -- pinned here too so build scripts can resolve it
+certifi>=2024.7.0

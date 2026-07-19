@@ -1,0 +1,12 @@
+services:
+  memanga:
+    build: .
+    image: memanga:cli
+    volumes:
+      - memanga-config:/home/memanga/.config/memanga
+      - memanga-downloads:/home/memanga/Downloads/MeManga
+    command: ["list"]
+
+volumes:
+  memanga-config:
+  memanga-downloads:

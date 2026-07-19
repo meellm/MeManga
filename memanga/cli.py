@@ -6,6 +6,7 @@ A friendly CLI for tracking and downloading manga chapters.
 
 import argparse
 import json
+import os
 import platform
 import sys
 import subprocess
@@ -1754,10 +1755,9 @@ def cmd_tui(args):
 # ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="📖 MeManga - Automatic manga downloader",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+    _cli_only = bool(os.environ.get("MEMANGA_CLI_ONLY"))
+
+    _epilog = """
 Examples:
   memanga list                          # Show tracked manga
   memanga add -i                        # Add manga interactively
@@ -1767,10 +1767,22 @@ Examples:
   memanga check --auto                  # Auto-download new chapters
   memanga cron install                  # Set up daily checks
   memanga config                        # Configure settings
-  memanga --gui                         # Launch graphical interface
-        """,
+"""
+    if not _cli_only:
+        _epilog += "  memanga --gui                         # Launch graphical interface\n"
+
+    parser = argparse.ArgumentParser(
+        description="📖 MeManga - Automatic manga downloader",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_epilog,
     )
-    parser.add_argument("--gui", action="store_true", help="Launch the graphical user interface")
+    # In CLI-only Docker images (MEMANGA_CLI_ONLY=1) the GUI is not installed;
+    # suppress the flag from help and reject it at runtime with a clear message.
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help=argparse.SUPPRESS if _cli_only else "Launch the graphical user interface",
+    )
     
     subparsers = parser.add_subparsers(dest="command", title="commands")
     
@@ -1893,6 +1905,11 @@ Examples:
     args = parser.parse_args()
 
     if args.gui:
+        if _cli_only:
+            sys.stderr.write(
+                "error: --gui is not available in this image (CLI-only Docker build)\n"
+            )
+            sys.exit(1)
         from .gui import launch_gui
         launch_gui()
         return
