@@ -244,6 +244,114 @@ class TestImagesToCbz:
         except Exception:
             pass
 
+    def test_embeds_comicinfo_at_root_without_disturbing_pages(
+            self, jpg_paths, tmp_path):
+        # ComicInfo.xml must sit at the archive root and must NOT be counted
+        # among the page entries or change their names/order.
+        from memanga.downloader import _images_to_cbz
+        out = tmp_path / "ch.cbz"
+        _images_to_cbz(jpg_paths, out, comicinfo_xml=b"<ComicInfo/>")
+        with zipfile.ZipFile(out) as zf:
+            names = zf.namelist()
+            assert "ComicInfo.xml" in names
+            pages = [n for n in names if n != "ComicInfo.xml"]
+            assert len(pages) == 3
+            assert all(n.startswith("page_") for n in pages)
+            assert pages == sorted(pages)
+            assert zf.read("ComicInfo.xml") == b"<ComicInfo/>"
+
+    def test_no_metadata_keeps_plain_archive(self, jpg_paths, tmp_path):
+        # Omitting metadata must leave the archive exactly as before.
+        from memanga.downloader import _images_to_cbz
+        out = tmp_path / "plain.cbz"
+        _images_to_cbz(jpg_paths, out)
+        with zipfile.ZipFile(out) as zf:
+            assert "ComicInfo.xml" not in zf.namelist()
+
+
+class TestComicInfoXml:
+    """ComicInfo.xml generation from metadata already on hand,
+    with no extra network requests."""
+
+    @staticmethod
+    def _parse(xml_bytes):
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_bytes)
+        assert root.tag == "ComicInfo"
+        return {child.tag: child.text for child in root}
+
+    def test_basic_fields_always_present(self):
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        manga = {"title": "Berserk"}
+        ch = Chapter(number="5", title=None, url="https://x.test/c/5")
+        fields = self._parse(_build_comicinfo_xml(manga, ch, page_count=12))
+        assert fields["Series"] == "Berserk"
+        # No chapter title: falls back to "Chapter <number>".
+        assert fields["Title"] == "Chapter 5"
+        assert fields["Number"] == "5"
+        assert fields["PageCount"] == "12"
+        assert fields["Web"] == "https://x.test/c/5"
+
+    def test_optional_fields_written_when_available(self):
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        import xml.etree.ElementTree as ET
+        manga = {
+            "title": "Berserk",
+            "description": "A wandering swordsman.",
+            "author": "Kentaro Miura",
+            "url": "https://x.test/manga",
+        }
+        ch = Chapter(number="5", title="The Golden Age",
+                     url="https://x.test/c/5", date="2016-05-06")
+        fields = self._parse(_build_comicinfo_xml(manga, ch, page_count=20))
+        assert fields["Title"] == "The Golden Age"
+        assert fields["Summary"] == "A wandering swordsman."
+        assert fields["Writer"] == "Kentaro Miura"
+        assert fields["Year"] == "2016"
+        assert fields["Month"] == "5"
+        assert fields["Day"] == "6"
+        root = ET.fromstring(_build_comicinfo_xml(manga, ch, page_count=20))
+        assert [child.tag for child in root] == [
+            "Title", "Series", "Number", "Summary", "Year", "Month",
+            "Day", "Writer", "Web", "PageCount",
+        ]
+
+    def test_missing_optional_fields_are_omitted(self):
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        manga = {"title": "Berserk"}
+        ch = Chapter(number="5", url="")
+        fields = self._parse(_build_comicinfo_xml(manga, ch, page_count=1))
+        # No description/author/date/url: those tags simply don't appear.
+        for absent in ("Summary", "Writer", "Year", "Month", "Day", "Web"):
+            assert absent not in fields
+
+    def test_special_characters_are_escaped(self):
+        # Raw XML metacharacters must be escaped by the serializer and
+        # survive a round-trip parse without corrupting the document.
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        manga = {"title": 'Fist of the <North> & "Star"',
+                 "author": "A & B"}
+        ch = Chapter(number="1", title="Ch <1> & more", url="https://x.test/?a=1&b=2")
+        xml_bytes = _build_comicinfo_xml(manga, ch, page_count=3)
+        assert b"&amp;" in xml_bytes  # escaped, not raw
+        fields = self._parse(xml_bytes)  # must still parse cleanly
+        assert fields["Series"] == 'Fist of the <North> & "Star"'
+        assert fields["Title"] == "Ch <1> & more"
+        assert fields["Writer"] == "A & B"
+        assert fields["Web"] == "https://x.test/?a=1&b=2"
+
+    def test_year_omitted_for_unparseable_date(self):
+        from memanga.downloader import _build_comicinfo_xml
+        from memanga.scrapers.base import Chapter
+        manga = {"title": "X"}
+        ch = Chapter(number="1", date="an hour ago")
+        fields = self._parse(_build_comicinfo_xml(manga, ch, page_count=1))
+        assert "Year" not in fields
+
 
 class TestImagesToPdf:
     def test_creates_valid_pdf(self, jpg_paths, tmp_path):
@@ -385,6 +493,111 @@ class TestDownloadChapterErrors:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Partial-chapter tolerance (issue #86) — opt-in; a few missing pages are
+# kept instead of discarding the whole chapter when within threshold.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _PartialScraper:
+    """Fake scraper whose download_image fails a chosen set of page
+    indexes (0-based) and writes a valid JPEG for the rest."""
+
+    def __init__(self, num_pages, fail_indexes):
+        self._num_pages = num_pages
+        self._fail = set(fail_indexes)
+
+    def get_pages(self, url):
+        return [f"https://cdn.test/p{i}.jpg" for i in range(self._num_pages)]
+
+    def download_image(self, url, path):
+        # Index encoded in the filename we asked for: page_%03d.ext
+        idx = int(Path(url).stem[1:])
+        if idx in self._fail:
+            return False
+        Image.new("RGB", (200, 300), (10, 20, 30)).save(path, "JPEG")
+        return True
+
+    def get_cover_url(self, url):
+        return None
+
+
+def _partial_chapter():
+    return types.SimpleNamespace(
+        number="71", title="", url="https://cdn.test/c/71",
+        source="cdn.test", source_url="https://cdn.test/c/71",
+        is_backup=False)
+
+
+class TestPartialChapterTolerance:
+    def _patch(self, monkeypatch, num_pages, fail_indexes):
+        import memanga.downloader as dl
+        monkeypatch.setattr(
+            dl, "get_scraper",
+            lambda d: _PartialScraper(num_pages, fail_indexes))
+
+    def test_disabled_by_default_raises_with_structured_detail(
+            self, tmp_path, fake_state, monkeypatch):
+        """Default behavior unchanged: one missing page discards the
+        chapter, and the error carries structured failure detail."""
+        from memanga.downloader import download_chapter, DownloaderError
+        self._patch(monkeypatch, num_pages=40, fail_indexes={5})
+        manga = {"title": "Vinland Saga", "url": "https://cdn.test/x",
+                 "source": "cdn.test"}
+        with pytest.raises(DownloaderError) as exc:
+            download_chapter(manga, _partial_chapter(), tmp_path, "pdf",
+                             fake_state, max_retries=0)
+        assert exc.value.failed_pages == [6]  # 1-indexed
+        assert exc.value.total_pages == 40
+
+    def test_enabled_under_threshold_keeps_partial(
+            self, tmp_path, fake_state, monkeypatch):
+        """1/40 pages missing (2.5%) is within a 5% threshold — the
+        chapter is kept and on_partial is notified."""
+        from memanga.downloader import download_chapter
+        self._patch(monkeypatch, num_pages=40, fail_indexes={5})
+        manga = {"title": "Vinland Saga", "url": "https://cdn.test/x",
+                 "source": "cdn.test"}
+        seen = {}
+
+        def on_partial(failed, total):
+            seen["failed"] = failed
+            seen["total"] = total
+
+        out = download_chapter(
+            manga, _partial_chapter(), tmp_path, "pdf", fake_state,
+            max_retries=0, allow_partial=True, partial_threshold=5,
+            on_partial=on_partial)
+        assert out is not None and out.exists()
+        assert seen == {"failed": [6], "total": 40}
+
+    def test_enabled_over_threshold_still_raises(
+            self, tmp_path, fake_state, monkeypatch):
+        """5/40 pages missing (12.5%) exceeds a 5% threshold — still a
+        hard failure even with tolerance on."""
+        from memanga.downloader import download_chapter, DownloaderError
+        self._patch(monkeypatch, num_pages=40, fail_indexes={1, 2, 3, 4, 5})
+        manga = {"title": "Vinland Saga", "url": "https://cdn.test/x",
+                 "source": "cdn.test"}
+        with pytest.raises(DownloaderError) as exc:
+            download_chapter(
+                manga, _partial_chapter(), tmp_path, "pdf", fake_state,
+                max_retries=0, allow_partial=True, partial_threshold=5)
+        assert len(exc.value.failed_pages) == 5
+
+    def test_zero_usable_pages_is_hard_failure(
+            self, tmp_path, fake_state, monkeypatch):
+        """Even at 100% threshold, a chapter with no usable pages must
+        not be kept as an empty partial."""
+        from memanga.downloader import download_chapter, DownloaderError
+        self._patch(monkeypatch, num_pages=3, fail_indexes={0, 1, 2})
+        manga = {"title": "X", "url": "https://cdn.test/x", "source": "cdn.test"}
+        with pytest.raises(DownloaderError):
+            download_chapter(
+                manga, _partial_chapter(), tmp_path, "pdf", fake_state,
+                max_retries=0, allow_partial=True, partial_threshold=100)
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Restart browsers — Playwright pool reset, used by GUI memory-pressure
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -395,3 +608,79 @@ class TestRestartBrowsers:
         live Playwright browsers."""
         from memanga.downloader import restart_browsers
         restart_browsers()  # must not raise
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Rename migration — keep downloaded files reachable after a manga rename
+# (issue #41). The reader derives the folder and file names from the
+# manga's current title, so a rename must move both.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestRenameMangaDownloads:
+    def test_moves_folder_and_rewrites_title_prefix(self, tmp_path):
+        from memanga.downloader import rename_manga_downloads
+        old_dir = tmp_path / "Old Title"
+        old_dir.mkdir()
+        (old_dir / "Old Title - Chapter 1.cbz").write_text("a")
+        (old_dir / "Old Title - Chapter 2.cbz").write_text("b")
+
+        assert rename_manga_downloads(tmp_path, "Old Title", "New Title") is True
+
+        new_dir = tmp_path / "New Title"
+        assert not old_dir.exists()
+        assert (new_dir / "New Title - Chapter 1.cbz").read_text() == "a"
+        assert (new_dir / "New Title - Chapter 2.cbz").read_text() == "b"
+
+    def test_moves_non_title_prefixed_entries_as_is(self, tmp_path):
+        # Image-format downloads use "Chapter N" folders with no title.
+        from memanga.downloader import rename_manga_downloads
+        old_dir = tmp_path / "Old"
+        (old_dir / "Chapter 1").mkdir(parents=True)
+        (old_dir / "Chapter 1" / "001.jpg").write_text("img")
+
+        assert rename_manga_downloads(tmp_path, "Old", "New") is True
+        assert (tmp_path / "New" / "Chapter 1" / "001.jpg").read_text() == "img"
+
+    def test_no_downloads_returns_false(self, tmp_path):
+        from memanga.downloader import rename_manga_downloads
+        assert rename_manga_downloads(tmp_path, "Missing", "New") is False
+
+    def test_unchanged_sanitized_title_is_noop(self, tmp_path):
+        # The sanitizer strips characters like ':' — titles that collapse
+        # to the same safe name must not move anything.
+        from memanga.downloader import rename_manga_downloads
+        d = tmp_path / "Title"
+        d.mkdir()
+        assert rename_manga_downloads(tmp_path, "Title", "Title:") is False
+        assert d.exists()
+
+    def test_does_not_clobber_existing_destination(self, tmp_path):
+        from memanga.downloader import rename_manga_downloads
+        old_dir = tmp_path / "Old"
+        old_dir.mkdir()
+        (old_dir / "Old - Chapter 1.cbz").write_text("new-source")
+        new_dir = tmp_path / "New"
+        new_dir.mkdir()
+        (new_dir / "New - Chapter 1.cbz").write_text("keep-me")
+
+        rename_manga_downloads(tmp_path, "Old", "New")
+
+        # Existing destination file is preserved; the colliding source is
+        # left behind in the old folder rather than overwritten.
+        assert (new_dir / "New - Chapter 1.cbz").read_text() == "keep-me"
+        assert (old_dir / "Old - Chapter 1.cbz").read_text() == "new-source"
+
+    def test_merges_into_existing_new_folder(self, tmp_path):
+        from memanga.downloader import rename_manga_downloads
+        old_dir = tmp_path / "Old"
+        old_dir.mkdir()
+        (old_dir / "Old - Chapter 2.cbz").write_text("two")
+        new_dir = tmp_path / "New"
+        new_dir.mkdir()
+        (new_dir / "New - Chapter 1.cbz").write_text("one")
+
+        assert rename_manga_downloads(tmp_path, "Old", "New") is True
+        assert (new_dir / "New - Chapter 1.cbz").read_text() == "one"
+        assert (new_dir / "New - Chapter 2.cbz").read_text() == "two"
+        assert not old_dir.exists()

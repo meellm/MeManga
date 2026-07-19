@@ -78,6 +78,37 @@ class TestChapterTracking:
         assert not state.is_chapter_downloaded("X", "2")
         assert not state.is_chapter_downloaded("Y", "1")
 
+    def test_downloaded_part_labels_sort_by_leading_chapter(self, state):
+        for chapter in ["10 Part 1", "Extra", "2 Part 1", "3.5 Part 1", "3"]:
+            state.add_downloaded_chapter("X", chapter)
+
+        assert state.get_downloaded_chapters("X") == [
+            "Extra", "2 Part 1", "3", "3.5 Part 1", "10 Part 1"
+        ]
+
+    def test_remove_downloaded_chapter(self, state):
+        # Issue #104: narrow removal drops only the downloaded record.
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "2")
+        assert state.remove_downloaded_chapter("X", "1") is True
+        assert state.get_downloaded_chapters("X") == ["2"]
+        assert not state.is_chapter_downloaded("X", "1")
+
+    def test_remove_downloaded_chapter_keeps_read_state(self, state):
+        # Read progress must survive the local file being removed.
+        state.add_downloaded_chapter("X", "1")
+        state.mark_chapter_read("X", "1")
+        state.remove_downloaded_chapter("X", "1")
+        assert not state.is_chapter_downloaded("X", "1")
+        assert state.is_chapter_read("X", "1")
+
+    def test_remove_downloaded_chapter_noop(self, state):
+        # Unknown manga / chapter must not raise and return False.
+        assert state.remove_downloaded_chapter("never", "1") is False
+        state.add_downloaded_chapter("X", "1")
+        assert state.remove_downloaded_chapter("X", "2") is False
+        assert state.get_downloaded_chapters("X") == ["1"]
+
     def test_set_last_chapter(self, state):
         state.set_last_chapter("X", "10")
         assert state.get_last_chapter("X") == "10"
@@ -95,6 +126,66 @@ class TestChapterTracking:
         st = state.get_manga_state("never-added")
         assert isinstance(st, dict)
 
+    def test_labelled_chapter_sorts_by_embedded_number(self, state):
+        # Issue #107: reader prefetch can download labelled chapters like
+        # "2 Part 1"; they must sort after "1" (by Chapter.numeric-style
+        # extraction) or the reader's Next controls never find them.
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "2 Part 1")
+        assert state.get_downloaded_chapters("X") == ["1", "2 Part 1"]
+
+    def test_labelled_chapters_interleave_with_plain_numbers(self, state):
+        for ch in ["10 Part 1", "Chapter 2", "1", "3"]:
+            state.add_downloaded_chapter("X", ch)
+        assert state.get_downloaded_chapters("X") == [
+            "1", "Chapter 2", "3", "10 Part 1"]
+
+    def test_nonnumeric_chapter_keeps_sort_first_fallback(self, state):
+        # Fully non-numeric labels keep the old 0.0 fallback (sort first).
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "Extra")
+        assert state.get_downloaded_chapters("X") == ["Extra", "1"]
+
+
+class TestPartialChapters:
+    """Accepted partial downloads stay visible and retryable (#117)."""
+
+    def test_add_get_and_clear_partial_chapter(self, state):
+        state.add_partial_chapter(
+            "X",
+            "5",
+            source="mangadex.org",
+            failed_pages=[3, 9],
+            total_pages=40,
+            path="/tmp/x.pdf",
+            from_backup=True,
+        )
+
+        partial = state.get_partial_chapter("X", "5")
+        assert partial["source"] == "mangadex.org"
+        assert partial["failed_pages"] == [3, 9]
+        assert partial["total_pages"] == 40
+        assert partial["path"] == "/tmp/x.pdf"
+        assert partial["from_backup"] is True
+        assert "X" in state.get_all_partial_chapters()
+
+        state.clear_partial_chapter("X", "5")
+
+        assert state.get_partial_chapter("X", "5") is None
+
+    def test_reset_manga_progress_clears_requeued_partial_records(self, state):
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "5")
+        state.add_partial_chapter("X", "1", failed_pages=[2], total_pages=20)
+        state.add_partial_chapter("X", "5", failed_pages=[4], total_pages=20)
+
+        state.reset_manga_progress("X", from_chapter=5)
+
+        assert "1" in state.get_downloaded_chapters("X")
+        assert "5" not in state.get_downloaded_chapters("X")
+        assert "1" in state.get_partial_chapters("X")
+        assert "5" not in state.get_partial_chapters("X")
+
 
 class TestExternalChapters:
     def test_mark_and_check_external(self, state):
@@ -108,11 +199,26 @@ class TestExternalChapters:
         ext = state.get_external_chapters("X")
         assert "1" in ext and "2" in ext
 
+    def test_external_part_labels_sort_by_leading_chapter(self, state):
+        for chapter in ["10 Part 1", "Extra", "2 Part 1", "3.5 Part 1", "3"]:
+            state.mark_external_chapter("X", chapter)
+
+        assert state.get_external_chapters("X") == [
+            "Extra", "2 Part 1", "3", "3.5 Part 1", "10 Part 1"
+        ]
+
     def test_available_chapters_set_and_get(self, state):
         chapters = [{"number": "1", "title": "first"},
                     {"number": "2", "title": "second"}]
         state.set_available_chapters("X", chapters)
         assert state.get_available_chapters("X") == chapters
+
+    def test_available_chapter_count(self, state):
+        state.set_available_chapters("X", [{"number": "1"}, {"number": "2"}])
+        assert state.get_available_chapter_count("X") == 2
+
+    def test_available_chapter_count_unknown_manga_is_zero(self, state):
+        assert state.get_available_chapter_count("never") == 0
 
 
 class TestReadChapters:
@@ -123,6 +229,9 @@ class TestReadChapters:
         state.mark_chapter_read("X", "5")
         assert state.get_read_chapters("X") == ["5"]
         assert state.get_read_count("X") == 1
+
+    def test_read_count_unknown_manga_is_zero(self, state):
+        assert state.get_read_count("never") == 0
 
     def test_unmark_chapter_read(self, state):
         state.mark_chapter_read("X", "5")
@@ -165,6 +274,81 @@ class TestReadingProgress:
 
     def test_get_continue_reading_none_when_empty(self, state):
         assert state.get_continue_reading() is None
+
+
+class TestReaderPosition:
+    """Issue #106 — per-chapter in-reader resume position."""
+
+    def test_set_and_get_paged_position(self, state):
+        state.set_reader_position("X", "7", mode="paged", page_index=12)
+        pos = state.get_reader_position("X", "7")
+        assert pos["mode"] == "paged"
+        assert pos["page_index"] == 12
+        assert "scroll_ratio" not in pos
+        assert pos["updated_at"]  # ISO timestamp string
+
+    def test_set_and_get_scroll_position(self, state):
+        state.set_reader_position("X", "7", mode="webtoon", scroll_ratio=0.42)
+        pos = state.get_reader_position("X", "7")
+        assert pos["mode"] == "webtoon"
+        assert pos["scroll_ratio"] == pytest.approx(0.42)
+        assert "page_index" not in pos
+
+    def test_positions_are_per_chapter(self, state):
+        state.set_reader_position("X", "1", mode="paged", page_index=3)
+        state.set_reader_position("X", "2", mode="paged", page_index=9)
+        assert state.get_reader_position("X", "1")["page_index"] == 3
+        assert state.get_reader_position("X", "2")["page_index"] == 9
+
+    def test_set_overwrites_previous(self, state):
+        state.set_reader_position("X", "1", mode="paged", page_index=3)
+        state.set_reader_position("X", "1", mode="webtoon", scroll_ratio=0.5)
+        pos = state.get_reader_position("X", "1")
+        assert pos["mode"] == "webtoon"
+        assert "page_index" not in pos
+
+    def test_page_index_clamped_nonnegative(self, state):
+        state.set_reader_position("X", "1", mode="paged", page_index=-5)
+        assert state.get_reader_position("X", "1")["page_index"] == 0
+
+    def test_scroll_ratio_clamped_to_unit_range(self, state):
+        state.set_reader_position("X", "1", mode="webtoon", scroll_ratio=1.7)
+        assert state.get_reader_position("X", "1")["scroll_ratio"] == 1.0
+        state.set_reader_position("X", "2", mode="webtoon", scroll_ratio=-0.3)
+        assert state.get_reader_position("X", "2")["scroll_ratio"] == 0.0
+
+    def test_chapter_keys_are_stringified(self, state):
+        state.set_reader_position("X", 7, mode="paged", page_index=1)
+        assert state.get_reader_position("X", "7")["page_index"] == 1
+
+    def test_get_unknown_manga_or_chapter_returns_none(self, state):
+        assert state.get_reader_position("never-added", "1") is None
+        state.set_reader_position("X", "1", mode="paged", page_index=0)
+        assert state.get_reader_position("X", "99") is None
+
+    def test_clear_reader_position(self, state):
+        state.set_reader_position("X", "1", mode="paged", page_index=4)
+        state.clear_reader_position("X", "1")
+        assert state.get_reader_position("X", "1") is None
+
+    def test_clear_unknown_is_noop(self, state):
+        state.clear_reader_position("never-added", "1")  # must not raise
+        state.set_reader_position("X", "1", mode="paged", page_index=0)
+        state.clear_reader_position("X", "99")  # must not raise
+
+    def test_blank_chapter_id_ignored(self, state):
+        state.set_reader_position("X", "", mode="paged", page_index=1)
+        state.set_reader_position("X", None, mode="paged", page_index=1)
+        assert state.get_manga_state("X").get("reader_positions", {}) == {}
+
+    def test_old_state_file_without_reader_positions(self, state):
+        # Entry created before the feature existed lacks the key entirely.
+        state._ensure_manga_entry("Legacy")
+        state._data["manga"]["Legacy"].pop("reader_positions", None)
+        assert state.get_reader_position("Legacy", "1") is None
+        state.clear_reader_position("Legacy", "1")  # must not raise
+        state.set_reader_position("Legacy", "1", mode="paged", page_index=2)
+        assert state.get_reader_position("Legacy", "1")["page_index"] == 2
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -255,8 +439,18 @@ class TestSourceHealth:
         assert h["status"] == "ok"
         assert h["latency_ms"] == 120
 
+    def test_moderate_latency_stays_ok(self, state):
+        # Sub-threshold responses are normal network variance, not a
+        # problem — they must not be flagged. Regression test for the
+        # old 500 ms threshold that painted healthy sources "warning".
+        for latency in (589, 635, 711, state.SLOW_LATENCY_MS):
+            state.update_source_health("ok.test", True, latency_ms=latency)
+            assert state.get_source_health("ok.test")["status"] == "ok"
+
     def test_slow_latency_flagged_warning(self, state):
-        state.update_source_health("slow.test", True, latency_ms=900)
+        state.update_source_health(
+            "slow.test", True, latency_ms=state.SLOW_LATENCY_MS + 1,
+        )
         assert state.get_source_health("slow.test")["status"] == "warning"
 
     def test_repeated_failures_escalate_to_error(self, state):
@@ -293,6 +487,47 @@ class TestResetManga:
         # Only chapters strictly < 3 survive
         assert "1" in kept and "2" in kept
         assert "3" not in kept and "4" not in kept and "5" not in kept
+
+    def test_reset_with_threshold_tolerates_nonnumeric_labels(self, state):
+        # Issue #112: part-style labels like "2 Part 1" must not raise
+        # during a partial reset, and their leading chapter number should
+        # decide whether they are kept.
+        for c in ["1", "2 Part 1", "2 Part 2", "3", "4"]:
+            state.add_downloaded_chapter("X", c)
+        state.reset_manga_progress("X", from_chapter=3)
+        kept = state.get_downloaded_chapters("X")
+        assert "1" in kept
+        assert "2 Part 1" in kept and "2 Part 2" in kept
+        assert "3" not in kept and "4" not in kept
+        assert state.get_last_chapter("X") is None
+
+    def test_reset_with_threshold_removes_part_labels_at_or_above_threshold(self, state):
+        for c in ["Extra", "1", "2 Part 1", "3 Part 1", "3 Part 2", "10 Part 1"]:
+            state.add_downloaded_chapter("X", c)
+
+        state.reset_manga_progress("X", from_chapter=3)
+
+        kept = state.get_downloaded_chapters("X")
+        assert "Extra" in kept
+        assert "1" in kept and "2 Part 1" in kept
+        assert "3 Part 1" not in kept
+        assert "3 Part 2" not in kept
+        assert "10 Part 1" not in kept
+        assert state.get_last_chapter("X") is None
+
+    def test_reset_with_zero_clears_nonnumeric_labels(self, state):
+        state.add_downloaded_chapter("X", "1")
+        state.add_downloaded_chapter("X", "2 Part 1")
+        state.reset_manga_progress("X", from_chapter=0)
+        assert state.get_downloaded_chapters("X") == []
+
+    def test_reset_with_threshold_handles_labelled_chapters(self, state):
+        # float("2 Part 1") raises; the threshold filter must use the
+        # same numeric extraction as the downloaded-list sort (issue #107).
+        for c in ["1", "2 Part 1", "Chapter 3", "4"]:
+            state.add_downloaded_chapter("X", c)
+        state.reset_manga_progress("X", from_chapter=3)
+        assert state.get_downloaded_chapters("X") == ["1", "2 Part 1"]
 
     def test_remove_manga(self, state):
         state.add_downloaded_chapter("X", "1")

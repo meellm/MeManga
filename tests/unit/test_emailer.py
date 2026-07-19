@@ -44,6 +44,21 @@ class TestSendEmail:
         called = mk.call_count + getattr(smtp, "starttls", MagicMock()).call_count
         assert called >= 0
 
+    def test_starttls_uses_ssl_context(self, cfg, tmp_path):
+        import ssl
+        f = tmp_path / "ch.pdf"
+        f.write_bytes(b"%PDF-1.4 fake")
+        smtp = MagicMock()
+        smtp.__enter__ = MagicMock(return_value=smtp)
+        smtp.__exit__ = MagicMock(return_value=False)
+        with patch("smtplib.SMTP", return_value=smtp):
+            _call_send(cfg, f)
+        assert smtp.starttls.call_count == 1
+        ctx = smtp.starttls.call_args.kwargs.get("context")
+        assert isinstance(ctx, ssl.SSLContext)
+        method_names = [call[0] for call in smtp.method_calls]
+        assert method_names.index("starttls") < method_names.index("login")
+
     def test_missing_file_raises_or_returns_false(self, cfg):
         from memanga.emailer import EmailError
         try:
@@ -61,3 +76,19 @@ class TestSendEmail:
             _call_send({}, f)
         except Exception:
             pass  # raising is acceptable
+
+
+class TestEmailConfigCheck:
+    def test_starttls_uses_ssl_context(self):
+        import ssl
+        from memanga.emailer import test_email_config as check_config
+        smtp = MagicMock()
+        smtp.__enter__ = MagicMock(return_value=smtp)
+        smtp.__exit__ = MagicMock(return_value=False)
+        with patch("smtplib.SMTP", return_value=smtp):
+            assert check_config("sender", "smtp.example.test", 587, "abc")
+        assert smtp.starttls.call_count == 1
+        ctx = smtp.starttls.call_args.kwargs.get("context")
+        assert isinstance(ctx, ssl.SSLContext)
+        method_names = [call[0] for call in smtp.method_calls]
+        assert method_names.index("starttls") < method_names.index("login")

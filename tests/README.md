@@ -8,6 +8,7 @@ pytest                          # full suite
 pytest -x                       # stop on first failure
 pytest -k state                 # only tests with "state" in the name
 pytest tests/unit/              # only unit tests
+pytest tests/integration/       # only integration
 pytest --cov=memanga --cov-report=html   # HTML coverage report
 ```
 

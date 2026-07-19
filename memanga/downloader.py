@@ -10,8 +10,13 @@ Handles:
 """
 
 import io
+import os
+import re
+import signal
+import shlex
 import time
 import atexit
+import subprocess
 import tempfile
 import shutil
 import uuid
@@ -57,10 +62,23 @@ OutputFormat = Literal["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"]
 # Default days to wait before falling back to backup source
 DEFAULT_FALLBACK_DELAY_DAYS = 2
 
+# How long a post-processing command may run before it's killed (seconds).
+POST_PROCESSING_TIMEOUT = 600
+
 
 class DownloaderError(Exception):
-    """Base exception for downloader errors."""
-    pass
+    """Base exception for downloader errors.
+
+    Incomplete-download failures carry structured detail so callers can
+    record/act on them without parsing the message string:
+    ``failed_pages`` (1-indexed page numbers) and ``total_pages``.
+    Both are ``None`` for errors unrelated to per-page failures.
+    """
+
+    def __init__(self, message, failed_pages=None, total_pages=None):
+        super().__init__(message)
+        self.failed_pages = failed_pages
+        self.total_pages = total_pages
 
 
 class ChapterWithSource(Chapter):
@@ -118,6 +136,31 @@ def _get_sources_from_manga(manga: Dict[str, Any]) -> List[Dict[str, str]]:
         "source": manga.get("source", ""),
         "url": manga.get("url", ""),
     }]
+
+
+def _max_cached_chapter(cached: List[Dict[str, Any]]) -> float:
+    """Highest numeric chapter number in a cached available-chapters list.
+
+    Used to bootstrap the catalogue baseline for manga that predate the
+    stored ``catalogue_baseline`` field (#102). Entries are the dicts the
+    GUI persists via ``set_available_chapters`` (``{"number": ...}``).
+    Returns 0.0 when nothing usable is present.
+    """
+    best = 0.0
+    for entry in cached or []:
+        if not isinstance(entry, dict):
+            continue
+        num = entry.get("number")
+        if num is None:
+            continue
+        try:
+            best = max(best, float(num))
+        except (TypeError, ValueError):
+            # Fall back to the leading number in strings like "12 Part 1".
+            match = re.search(r"\d+\.?\d*", str(num))
+            if match:
+                best = max(best, float(match.group()))
+    return best
 
 
 def check_for_updates(
@@ -258,55 +301,124 @@ def check_for_updates(
             f"All sources failed for '{title}': " + "; ".join(source_errors)
         )
 
-    # Suspicious-batch guard. Only meaningful when we have a baseline (a
-    # previously tracked chapter) and the user isn't explicitly
-    # bulk-downloading with from_chapter.
-    if from_chapter is None and last_num > 0 and primary_checked:
-        from .suspicion import evaluate_new_chapters
+    # Suspicious-batch guard.
+    #
+    # The batch is scored against the source's *catalogue baseline* — the
+    # highest chapter the source has legitimately exposed before — not the
+    # last downloaded chapter. Scoring against the last download makes a
+    # manual-mode backlog (only an early chapter grabbed from an
+    # already-large catalogue) look like a giant source jump on every check
+    # (#102). Only chapters that appear beyond the known catalogue are
+    # candidates for suspicion; anything at or below it is an existing,
+    # still-undownloaded backlog and stays freely downloadable.
+    if primary_checked:
+        primary_high = max((ch.numeric for ch in primary_all), default=0.0)
 
-        suspicion = evaluate_new_chapters(
-            state, title,
-            [ch.numeric for ch in primary_chapters.values()],
-            last_num,
+        get_suspicious_batch = getattr(state, "get_suspicious_batch", None)
+        active_suspicious = (
+            get_suspicious_batch(title)
+            if callable(get_suspicious_batch)
+            else None
         )
-        if suspicion.suspicious and not force_suspicious:
-            suspect = sorted(primary_chapters.values())
-            suspect_numbers = [round(ch.numeric, 3) for ch in suspect]
+        get_catalogue_baseline = getattr(state, "get_catalogue_baseline", None)
+        baseline = (
+            get_catalogue_baseline(title)
+            if callable(get_catalogue_baseline)
+            else None
+        )
+        if baseline is None and not active_suspicious:
+            # No trusted snapshot yet (manga predates this field, or was
+            # never checked). Bootstrap from the last cached catalogue so an
+            # existing large backlog isn't mistaken for a jump.
+            get_available_chapters = getattr(state, "get_available_chapters", None)
+            cached = (
+                get_available_chapters(title)
+                if callable(get_available_chapters)
+                else []
+            )
+            baseline = _max_cached_chapter(cached)
+        if baseline is None:
+            baseline = 0.0
+        bootstrapped_manual_baseline = False
+        if baseline <= 0 and manga.get("mode") == "manual" and from_chapter is None:
+            # First manual-mode check after adding/importing a manga. Manual
+            # mode only surfaces Download buttons, so this snapshot is not an
+            # auto-delivery risk; use it as the initial catalogue baseline
+            # instead of scoring the whole undownloaded backlog against the
+            # user's last downloaded/read chapter (#102).
+            baseline = primary_high
+            bootstrapped_manual_baseline = True
 
-            # Verify against backup sources before withholding anything.
-            confirmed = sum(1 for n in suspect_numbers if n in backup_all_numbers)
-            if backup_sources_checked and confirmed / len(suspect_numbers) >= 0.5:
-                # Backup largely agrees with the primary, so accept the batch.
-                state.clear_suspicious_batch(title)
-            else:
-                if backup_sources_checked:
-                    backup_status = (
-                        f"backup confirmed only {confirmed}/{len(suspect_numbers)} chapters"
-                    )
-                else:
-                    backup_status = "no backup source available to verify"
-                state.set_suspicious_batch(title, {
-                    "detected_at": datetime.now().isoformat(),
-                    "chapters": [ch.number for ch in suspect],
-                    "count": len(suspect),
-                    "last_chapter": last_num,
-                    "highest": max(suspect_numbers),
-                    "score": suspicion.score,
-                    "reasons": suspicion.reasons,
-                    "backup_status": backup_status,
-                })
-                state.add_notification(
-                    "warn",
-                    f"Suspicious chapter batch for '{title}': "
-                    f"{len(suspect)} chapter(s) up to {max(suspect_numbers):g} "
-                    f"({backup_status}). Skipped auto-delivery.",
+        catalogue_trusted = True
+        # Only score when we have a download baseline and the user isn't
+        # explicitly bulk-downloading with from_chapter.
+        if from_chapter is None and last_num > 0:
+            from .suspicion import evaluate_new_chapters
+
+            guard_from = max(last_num, baseline)
+            scored = {
+                num: ch for num, ch in primary_chapters.items()
+                if ch.numeric > guard_from
+            }
+            suspicion = (
+                evaluate_new_chapters(
+                    state, title,
+                    [ch.numeric for ch in scored.values()],
+                    guard_from,
                 )
-                # Withhold the whole primary batch from download/delivery.
-                primary_chapters = {}
-        else:
-            # Batch is normal, forced, or backup-confirmed. Drop any
-            # stale suspicious record so warnings don't linger.
-            state.clear_suspicious_batch(title)
+                if scored else None
+            )
+            if suspicion is not None and suspicion.suspicious and not force_suspicious:
+                suspect = sorted(scored.values())
+                suspect_numbers = [round(ch.numeric, 3) for ch in suspect]
+
+                # Verify against backup sources before withholding anything.
+                confirmed = sum(1 for n in suspect_numbers if n in backup_all_numbers)
+                if backup_sources_checked and confirmed / len(suspect_numbers) >= 0.5:
+                    # Backup largely agrees with the primary, so accept the batch.
+                    state.clear_suspicious_batch(title)
+                else:
+                    if backup_sources_checked:
+                        backup_status = (
+                            f"backup confirmed only {confirmed}/{len(suspect_numbers)} chapters"
+                        )
+                    else:
+                        backup_status = "no backup source available to verify"
+                    state.set_suspicious_batch(title, {
+                        "detected_at": datetime.now().isoformat(),
+                        "chapters": [ch.number for ch in suspect],
+                        "count": len(suspect),
+                        "last_chapter": guard_from,
+                        "highest": max(suspect_numbers),
+                        "score": suspicion.score,
+                        "reasons": suspicion.reasons,
+                        "backup_status": backup_status,
+                    })
+                    state.add_notification(
+                        "warn",
+                        f"Suspicious chapter batch for '{title}': "
+                        f"{len(suspect)} chapter(s) up to {max(suspect_numbers):g} "
+                        f"({backup_status}). Skipped auto-delivery.",
+                    )
+                    # Withhold only the suspicious newly-appeared chapters;
+                    # the known backlog stays downloadable. Don't advance the
+                    # trusted baseline past an unverified jump.
+                    for num in scored:
+                        primary_chapters.pop(num, None)
+                    catalogue_trusted = False
+            else:
+                # Batch is normal, forced, or backup-confirmed. Drop any
+                # stale suspicious record so warnings don't linger.
+                state.clear_suspicious_batch(title)
+
+        # Advance the trusted catalogue high-water mark unless we just held
+        # back an unverified jump. Recording it even when the guard didn't
+        # run (fresh manga, explicit from_chapter) gives later checks a
+        # baseline so a big existing backlog is never re-scored as a jump.
+        if catalogue_trusted and (primary_high > baseline or bootstrapped_manual_baseline):
+            set_catalogue_baseline = getattr(state, "set_catalogue_baseline", None)
+            if callable(set_catalogue_baseline):
+                set_catalogue_baseline(title, primary_high)
 
     # Process primary chapters first (always download these)
     for ch_num, ch in primary_chapters.items():
@@ -387,6 +499,10 @@ def download_chapter(
     naming_template: Optional[str] = None,
     cancel_event=None,
     max_retries: int = 3,
+    post_processing: Optional[Dict[str, Any]] = None,
+    allow_partial: bool = False,
+    partial_threshold: float = 0.0,
+    on_partial=None,
 ) -> Optional[Path]:
     """
     Download a chapter and convert to PDF or EPUB.
@@ -402,11 +518,39 @@ def download_chapter(
             InterruptedError before/during page fetching to abort the download.
         max_retries: Number of times to retry failed page downloads
             (with exponential back-off). 0 to disable.
+        post_processing: Optional ``delivery.post_processing`` config dict
+            ({"enabled", "command", "fail_on_error"}). When enabled, the
+            command is run after the output file/folder is created. If
+            ``fail_on_error`` is set, a command failure raises
+            :class:`DownloaderError` so normal failed-chapter handling applies;
+            otherwise it only prints a warning.
+        allow_partial: When True, a chapter that still has missing pages
+            after retries is kept as a *partial* download (only the pages
+            that succeeded, in order) instead of raising — provided the
+            failure rate is within ``partial_threshold``. Off by default,
+            so the historical "any failure aborts the chapter" behavior is
+            unchanged unless a caller opts in (issue #86).
+        partial_threshold: Maximum share of pages allowed to fail, as a
+            percentage (0-100). A partial is kept only when
+            ``failed_pages / total_pages * 100 <= partial_threshold`` and
+            at least one page downloaded. With the default 0, any failure
+            still aborts.
+        on_partial: Optional callable(failed_page_nums, total_pages) invoked
+            when a partial download is accepted, so callers can log/surface
+            it and record which pages are missing.
 
     Returns:
         Path to downloaded file, or None if failed
     """
     title = manga["title"]
+
+    # Defensive: keep the tolerance within [0, 100] even if a caller passes
+    # something out of range directly (issue #86). The CLI/config already
+    # clamp, but download_chapter is a public entry point.
+    try:
+        partial_threshold = max(0.0, min(100.0, float(partial_threshold)))
+    except (TypeError, ValueError):
+        partial_threshold = 0.0
 
     def _check_cancel():
         if cancel_event is not None and cancel_event.is_set():
@@ -517,10 +661,36 @@ def download_chapter(
         still_failed = [idx for idx, _, _ in download_tasks if idx not in results]
         if still_failed:
             failed_page_nums = [i + 1 for i in still_failed]
-            raise DownloaderError(
-                f"Incomplete download: {len(still_failed)}/{len(page_urls)} "
-                f"pages failed (pages {failed_page_nums})"
+            failed_pct = len(still_failed) / total_pages * 100
+
+            # Partial-chapter tolerance (issue #86): when enabled and the
+            # failure rate is within the configured threshold, keep the
+            # pages we did get instead of discarding the whole chapter.
+            # At least one page must have downloaded — a chapter with zero
+            # usable pages is a hard failure regardless of the threshold.
+            partial_ok = (
+                allow_partial
+                and results
+                and failed_pct <= partial_threshold
             )
+            if not partial_ok:
+                raise DownloaderError(
+                    f"Incomplete download: {len(still_failed)}/{len(page_urls)} "
+                    f"pages failed (pages {failed_page_nums})",
+                    failed_pages=failed_page_nums,
+                    total_pages=total_pages,
+                )
+
+            print(
+                f"  Partial chapter kept: {len(still_failed)}/{total_pages} "
+                f"page(s) missing ({failed_pct:.0f}% <= "
+                f"{partial_threshold:g}% tolerance), pages {failed_page_nums}"
+            )
+            if on_partial is not None:
+                try:
+                    on_partial(failed_page_nums, total_pages)
+                except Exception:
+                    pass
 
         # Preserve page order
         image_paths = [results[i] for i in sorted(results)]
@@ -577,7 +747,8 @@ def download_chapter(
         elif output_format == "cbz":
             output_path = manga_dir / f"{base_name}.cbz"
             try:
-                _images_to_cbz(image_paths, output_path)
+                comicinfo_xml = _build_comicinfo_xml(manga, chapter, len(image_paths))
+                _images_to_cbz(image_paths, output_path, comicinfo_xml)
             except Exception as e:
                 raise DownloaderError(f"Failed to create CBZ: {e}")
         elif output_format == "zip":
@@ -599,8 +770,274 @@ def download_chapter(
                 _images_to_pdf(image_paths, output_path)
             except Exception as e:
                 raise DownloaderError(f"Failed to create PDF: {e}")
-        
+
+        # Run the user's post-processing hook (if configured) after the
+        # output exists but before the caller records the chapter as
+        # downloaded, so a fail_on_error failure surfaces normally.
+        _run_post_processing(
+            post_processing,
+            output_path=output_path,
+            title=title,
+            chapter_num=chapter.number,
+            source=source,
+            output_format=output_format,
+        )
+
         return output_path
+
+
+def _run_post_processing(
+    post_processing: Optional[Dict[str, Any]],
+    output_path: Path,
+    title: str,
+    chapter_num: str,
+    source: str,
+    output_format: str,
+):
+    """Run the optional user post-processing command for a finished chapter.
+
+    The command is split into argv and run directly, not through a shell.
+    Useful values are passed both as ``{placeholder}`` substitutions in command
+    arguments and as ``MEMANGA_*`` environment variables:
+
+    - ``{output_path}`` / ``MEMANGA_OUTPUT_PATH`` - final file or folder path
+    - ``{title}`` / ``MEMANGA_MANGA_TITLE`` - manga title
+    - ``{chapter}`` / ``MEMANGA_CHAPTER`` - chapter number
+    - ``{source}`` / ``MEMANGA_SOURCE`` - source the chapter came from
+    - ``{format}`` / ``MEMANGA_OUTPUT_FORMAT`` - output format
+    - ``{is_dir}`` / ``MEMANGA_IS_DIR`` - "1" if output is a folder, else "0"
+
+    Placeholder values are substituted after argv parsing, so metadata cannot
+    become shell syntax. For shell features such as pipes or redirects, invoke
+    a shell explicitly and prefer the ``MEMANGA_*`` environment variables.
+
+    A non-zero exit, timeout, or launch error is treated as failure: if
+    ``fail_on_error`` is set the failure is re-raised as
+    :class:`DownloaderError`; otherwise a warning is printed and the download
+    stays successful.
+    """
+    if not post_processing or not post_processing.get("enabled"):
+        return
+
+    command = (post_processing.get("command") or "").strip()
+    if not command:
+        return
+
+    fail_on_error = bool(post_processing.get("fail_on_error"))
+    is_dir = "1" if output_path.is_dir() else "0"
+    output_path_str = str(output_path)
+    title = str(title)
+    chapter_num = str(chapter_num)
+    source = str(source)
+    output_format = str(output_format)
+
+    replacements = {
+        "output_path": output_path_str,
+        "title": title,
+        "chapter": chapter_num,
+        "source": source,
+        "format": output_format,
+        "is_dir": is_dir,
+    }
+
+    def _fail(message: str):
+        if fail_on_error:
+            raise DownloaderError(message)
+        print(f"  [Warning] {message}")
+
+    try:
+        command_args = _split_post_processing_command(command)
+    except ValueError as e:
+        _fail(f"Post-processing command could not be parsed: {e}")
+        return
+    if not command_args:
+        return
+
+    resolved_args = [
+        _substitute_post_processing_placeholders(arg, replacements)
+        for arg in command_args
+    ]
+
+    env = os.environ.copy()
+    env.update({
+        "MEMANGA_OUTPUT_PATH": output_path_str,
+        "MEMANGA_MANGA_TITLE": title,
+        "MEMANGA_CHAPTER": chapter_num,
+        "MEMANGA_SOURCE": source,
+        "MEMANGA_OUTPUT_FORMAT": output_format,
+        "MEMANGA_IS_DIR": is_dir,
+    })
+
+    try:
+        result = _run_post_processing_command(
+            resolved_args,
+            env=env,
+            timeout=POST_PROCESSING_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        _fail(
+            f"Post-processing command timed out after "
+            f"{POST_PROCESSING_TIMEOUT}s"
+        )
+        return
+    except Exception as e:
+        _fail(f"Post-processing command failed to start: {e}")
+        return
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        message = f"Post-processing command exited with code {result.returncode}"
+        if detail:
+            message += f": {detail}"
+        _fail(message)
+
+
+def _run_post_processing_command(
+    args: List[str],
+    env: Dict[str, str],
+    timeout: int,
+) -> subprocess.CompletedProcess:
+    """Run a post-processing command and terminate its process tree on timeout."""
+    kwargs: Dict[str, Any] = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = (
+            getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            | getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        )
+    else:
+        kwargs["start_new_session"] = True
+
+    process = subprocess.Popen(
+        args,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        **kwargs,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        # The process tree is killed first, then we drain the pipes with a
+        # bounded wait. If a surviving grandchild still holds the pipe handles
+        # open, communicate() would block forever, so every drain here has its
+        # own timeout and we ultimately abandon the output rather than hang.
+        _terminate_process_tree(process)
+        stdout, stderr = _drain_after_timeout(process)
+        exc.output = stdout
+        exc.stderr = stderr
+        raise exc
+
+    return subprocess.CompletedProcess(args, process.returncode, stdout, stderr)
+
+
+def _drain_after_timeout(
+    process: subprocess.Popen,
+    drain_timeout: int = 5,
+) -> tuple:
+    """Read remaining output from a killed process without ever blocking.
+
+    Returns ``(stdout, stderr)``. If the pipes cannot be drained even after a
+    second kill, they are force-closed and ``(None, None)`` is returned so the
+    caller never waits on a wedged child that inherited the handles.
+    """
+    try:
+        return process.communicate(timeout=drain_timeout)
+    except subprocess.TimeoutExpired:
+        pass
+
+    process.kill()
+    try:
+        return process.communicate(timeout=drain_timeout)
+    except subprocess.TimeoutExpired:
+        pass
+
+    for stream in (process.stdout, process.stderr):
+        if stream is not None:
+            try:
+                stream.close()
+            except Exception:
+                pass
+    return None, None
+
+
+_POST_PROCESSING_PLACEHOLDER_RE = re.compile(
+    r"\{(output_path|title|chapter|source|format|is_dir)\}"
+)
+
+
+def _substitute_post_processing_placeholders(
+    arg: str,
+    replacements: Dict[str, str],
+) -> str:
+    """Replace placeholders once, without expanding placeholder text in values."""
+    return _POST_PROCESSING_PLACEHOLDER_RE.sub(
+        lambda match: replacements[match.group(1)],
+        arg,
+    )
+
+
+def _split_post_processing_command(command: str) -> List[str]:
+    """Split a command string into argv without damaging Windows paths."""
+    if os.name != "nt":
+        return shlex.split(command)
+
+    args: List[str] = []
+    current: List[str] = []
+    in_quotes = False
+    quote_char = ""
+
+    for ch in command:
+        if ch in ("'", '"'):
+            if in_quotes and ch == quote_char:
+                in_quotes = False
+                quote_char = ""
+            elif not in_quotes:
+                in_quotes = True
+                quote_char = ch
+            else:
+                current.append(ch)
+        elif ch.isspace() and not in_quotes:
+            if current:
+                args.append("".join(current))
+                current = []
+        else:
+            current.append(ch)
+
+    if in_quotes:
+        raise ValueError("No closing quotation")
+    if current:
+        args.append("".join(current))
+    return args
+
+
+def _terminate_process_tree(process: subprocess.Popen) -> bool:
+    """Terminate a process and its children where the platform supports it."""
+    if process.poll() is not None:
+        return True
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True
+        except Exception:
+            pass
+    else:
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            return True
+        except Exception:
+            pass
+    try:
+        process.kill()
+        return True
+    except Exception:
+        return False
 
 
 def _image_to_jpeg_bytes(img_path: Path) -> tuple:
@@ -762,11 +1199,103 @@ def _images_to_pdf(image_paths: List[Path], output_path: Path):
     output_path.write_bytes(pdf_bytes)
 
 
-def _images_to_cbz(image_paths: List[Path], output_path: Path):
+def _parse_comicinfo_date(date_str: Optional[str]) -> Optional[Tuple[int, int, int]]:
+    """Best-effort parse of a chapter/source date into (year, month, day).
+
+    Chapter dates arrive in many shapes across scrapers (ISO 8601 from API
+    sources like ``publishAt``, free-form text elsewhere). Returns ``None``
+    when nothing usable can be extracted so the caller simply omits the
+    Year/Month/Day fields.
+    """
+    if not date_str:
+        return None
+    text = str(date_str).strip()
+    if not text:
+        return None
+
+    # ISO 8601 first (covers the trailing "...Z" suffix common to API sources).
+    try:
+        iso_text = text[:-1] + "+00:00" if text.endswith("Z") else text
+        dt = datetime.fromisoformat(iso_text)
+        return dt.year, dt.month, dt.day
+    except ValueError:
+        pass
+
+    for fmt in (
+        "%Y-%m-%d", "%Y/%m/%d", "%d-%m-%Y", "%m/%d/%Y",
+        "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y",
+    ):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.year, dt.month, dt.day
+        except ValueError:
+            continue
+    return None
+
+
+def _build_comicinfo_xml(
+    manga: Dict[str, Any],
+    chapter: Chapter,
+    page_count: int,
+) -> bytes:
+    """Build a ComicInfo.xml document from already-known metadata.
+
+    Only fields MeManga already has on hand (the tracked manga config and
+    the ``Chapter`` object) are written; no extra network requests are
+    made. Optional fields with no data are omitted entirely. Serialization
+    and XML escaping are handled by ElementTree.
+    """
+    from xml.etree.ElementTree import Element, SubElement, tostring
+
+    root = Element("ComicInfo", {
+        "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        "xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
+    })
+
+    def add(tag: str, value: Any):
+        if value is None:
+            return
+        text = str(value).strip()
+        if not text:
+            return
+        SubElement(root, tag).text = text
+
+    chapter_title = getattr(chapter, "title", None)
+    add("Title", chapter_title or f"Chapter {chapter.number}")
+    add("Series", manga.get("title"))
+    add("Number", chapter.number)
+
+    add("Summary", manga.get("description"))
+
+    parsed = _parse_comicinfo_date(getattr(chapter, "date", None))
+    if parsed:
+        year, month, day = parsed
+        add("Year", year)
+        add("Month", month)
+        add("Day", day)
+
+    add("Writer", manga.get("author"))
+
+    # Web: prefer the specific chapter URL, fall back to the manga URL.
+    add("Web", getattr(chapter, "url", "") or manga.get("url", ""))
+    add("PageCount", page_count)
+
+    return tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _images_to_cbz(
+    image_paths: List[Path],
+    output_path: Path,
+    comicinfo_xml: Optional[bytes] = None,
+):
     """Convert a list of images to a CBZ (Comic Book ZIP) archive.
 
     Images are stored as-is (no re-encoding) with sequential names
     for correct reading order.
+
+    When ``comicinfo_xml`` is provided it is written to the archive root as
+    ``ComicInfo.xml`` so offline libraries and e-readers can read chapter
+    metadata. Page names and order are unaffected.
     """
     import zipfile
 
@@ -777,6 +1306,8 @@ def _images_to_cbz(image_paths: List[Path], output_path: Path):
         for i, img_path in enumerate(image_paths):
             ext = img_path.suffix.lower() or '.jpg'
             cbz.write(img_path, f"page_{i:03d}{ext}")
+        if comicinfo_xml is not None:
+            cbz.writestr("ComicInfo.xml", comicinfo_xml)
 
 
 def _images_to_folder(image_paths: List[Path], output_dir: Path, img_format: str):
@@ -843,7 +1374,70 @@ def _sanitize_filename(name: str) -> str:
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
         name = name.replace(char, '')
-    return name.strip()[:100]  # Limit length
+    name = name.strip()[:100]  # Limit length
+    # Windows trims trailing dots/spaces from path components, so remove
+    # them explicitly after truncation to keep generated paths stable.
+    name = name.rstrip(". ")
+    # Never yield a dot-only ('.', '..') or empty result; those are
+    # directory references, not usable path components.
+    if not name.strip('.'):
+        return 'untitled'
+    return name
+
+
+def rename_manga_downloads(download_dir, old_title: str, new_title: str) -> bool:
+    """Move a manga's downloaded files when the manga is renamed.
+
+    Downloads live under ``<download_dir>/<sanitized title>/`` and the
+    default naming template embeds the title in each file
+    (``{title} - Chapter N``). The reader derives both the folder and the
+    file name from the manga's current title, so a rename leaves the old
+    files unreachable — the chapter shows as downloaded but "Read" finds
+    nothing.
+
+    This moves the per-manga folder to the new title and rewrites the
+    title prefix on any contained file or folder name so the reader's
+    lookup matches again. Existing files at the destination are left
+    untouched rather than overwritten.
+
+    Returns ``True`` if anything was moved, ``False`` if there was nothing
+    to migrate (no prior downloads, or the sanitized title is unchanged).
+    """
+    old_safe = _sanitize_filename(old_title)
+    new_safe = _sanitize_filename(new_title)
+    if not old_safe or not new_safe or old_safe == new_safe:
+        return False
+
+    base = Path(download_dir)
+    old_dir = base / old_safe
+    if not old_dir.is_dir():
+        return False
+
+    new_dir = base / new_safe
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    moved = False
+    for entry in list(old_dir.iterdir()):
+        name = entry.name
+        # Swap the leading title prefix (e.g. "Old - Chapter 5.cbz" ->
+        # "New - Chapter 5.cbz"). Names that don't start with the title
+        # (e.g. image-format "Chapter 5" folders) are moved as-is.
+        if name.startswith(old_safe):
+            name = new_safe + name[len(old_safe):]
+        target = new_dir / name
+        if target.exists():
+            continue
+        shutil.move(str(entry), str(target))
+        moved = True
+
+    # Drop the old folder if it's now empty; leave it if collisions
+    # forced some files to stay behind.
+    try:
+        old_dir.rmdir()
+    except OSError:
+        pass
+
+    return moved
 
 
 def _format_chapter_number(chapter_num: str) -> str:

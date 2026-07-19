@@ -6,6 +6,7 @@ Automatically splits large PDFs that exceed Gmail's 25MB limit.
 
 import shutil
 import smtplib
+import ssl
 import tempfile
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -22,8 +23,15 @@ class EmailError(Exception):
     pass
 
 
-# Gmail limit is 25MB, use 23MB to be safe (base64 encoding adds ~33% overhead)
-MAX_ATTACHMENT_SIZE = 18 * 1024 * 1024  # 18MB raw (~24MB after base64, under Gmail's 25MB limit)
+# Gmail's attachment cap is 25MB after email encoding. Base64 adds roughly
+# 33%, so keep raw files lower to stay under the encoded cap.
+EMAIL_ATTACHMENT_LIMIT = 25 * 1024 * 1024
+MAX_ATTACHMENT_SIZE = 18 * 1024 * 1024  # 18MB raw (~24MB after base64)
+
+
+def _format_mb(size: int) -> str:
+    """Format a byte count as MiB for user-facing messages."""
+    return f"{size / (1024 * 1024):.1f}MB"
 
 
 def split_pdf(pdf_path: Path, max_size: int = MAX_ATTACHMENT_SIZE) -> List[Path]:
@@ -139,8 +147,13 @@ def send_to_kindle(
         if file_size > MAX_ATTACHMENT_SIZE:
             fmt = suffix.lstrip('.').upper()
             raise EmailError(
-                f"{fmt} file is {file_size / (1024*1024):.1f}MB, exceeding the 25MB email limit. "
-                f"{fmt} files cannot be split. Use PDF format instead (set in 'memanga config')."
+                f"{fmt} file is {_format_mb(file_size)}, exceeding MeManga's "
+                f"{_format_mb(MAX_ATTACHMENT_SIZE)} safe raw attachment limit. "
+                f"Email attachments are base64 encoded, so the raw file must "
+                f"stay below this limit to fit under the "
+                f"{_format_mb(EMAIL_ATTACHMENT_LIMIT)} encoded email cap. "
+                f"{fmt} files cannot be split. Use PDF format instead "
+                f"(set in 'memanga config')."
             )
         parts = [pdf_path]
         is_split = False
@@ -150,7 +163,11 @@ def send_to_kindle(
         is_split = len(parts) > 1
         
         if is_split:
-            print(f"     📎 Split into {len(parts)} parts (exceeded 25MB limit)")
+            print(
+                f"     📎 Split into {len(parts)} parts (exceeded "
+                f"{_format_mb(MAX_ATTACHMENT_SIZE)} safe raw attachment limit; "
+                f"encoded email cap is {_format_mb(EMAIL_ATTACHMENT_LIMIT)})"
+            )
     
     # Send each part
     for i, part_path in enumerate(parts):
@@ -217,8 +234,9 @@ def _send_single_email(
     
     # Send
     try:
+        context = ssl.create_default_context()
         with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
+            server.starttls(context=context)
             server.login(sender_email, app_password)
             server.send_message(msg)
         return True
@@ -244,8 +262,9 @@ def test_email_config(
         True if connection successful
     """
     try:
+        context = ssl.create_default_context()
         with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
+            server.starttls(context=context)
             server.login(sender_email, app_password)
         return True
     except Exception:

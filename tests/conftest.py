@@ -29,11 +29,15 @@ if str(_REPO_ROOT) not in sys.path:
 
 @pytest.fixture
 def isolated_home(monkeypatch, tmp_path) -> Path:
-    """Redirect HOME (and APPDATA / XDG_CONFIG_HOME) to a tmp dir so
-    no test ever writes to the real config. Returns the new home
-    path so tests can poke at created files.
+    """Redirect HOME (and APPDATA/XDG_CONFIG_HOME) to a tmp dir so the
+    test never writes to the developer's real config.
+    Returns the new home path so tests can poke at created files.
     """
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Path.home() on Windows resolves USERPROFILE and ignores HOME
+    # (Python 3.8+), so without this the suite reads and writes the
+    # developer's real config/state and download directories.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     (tmp_path / ".config" / "memanga").mkdir(parents=True, exist_ok=True)
@@ -56,8 +60,8 @@ def state(isolated_home):
 def config(isolated_home, monkeypatch):
     """Fresh Config instance pointed at the isolated home."""
     from memanga import config as cfg_mod
-    # Config infers its path from $HOME — isolated_home already
-    # redirected that, so this just wraps it.
+    # Some Config implementations infer the path from $HOME, so the
+    # isolated_home fixture already did the work.
     return cfg_mod.Config()
 
 
@@ -97,7 +101,7 @@ def sample_manga_with_backup():
 
 class MockScraper:
     """Minimal scraper that returns a deterministic chapter list.
-    Use as a drop-in for any real scraper in downloader tests.
+    Use as a drop-in for any real scraper in `downloader` tests.
     """
 
     name = "mock"
@@ -143,7 +147,7 @@ def mock_scraper():
 
 @pytest.fixture
 def patch_get_scraper(monkeypatch, mock_scraper):
-    """Make ``memanga.scrapers.get_scraper(...)`` always return the mock."""
+    """Make `memanga.scrapers.get_scraper(...)` always return the mock."""
     import memanga.scrapers as scrapers_pkg
     import memanga.downloader as dl
     monkeypatch.setattr(scrapers_pkg, "get_scraper", lambda d: mock_scraper)

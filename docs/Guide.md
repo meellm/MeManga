@@ -1,13 +1,13 @@
-# MeManga Setup & Usage Guide (CLI)
+# MeManga Setup & Usage Guide
 
-Automatic manga downloader with Kindle support. Track manga from 224
-scrapers / 319 domains, download chapters as PDF / EPUB / CBZ / ZIP /
-JPG / PNG / WEBP, and optionally email them to your Kindle.
+CLI manga downloader. Track manga from 224 scrapers / 319 domains,
+download chapters as PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP, and
+optionally email them to your Kindle.
 
-> This guide covers the CLI flow. For the desktop app, switch to the
-> [`main` branch](https://github.com/meellm/MeManga/tree/main) and
-> follow that README — the GUI ships there as a single-file
-> `MeManga.exe` / `MeManga`.
+> This guide covers the CLI flow only. For the desktop app, grab the
+> latest `MeManga.exe` / `MeManga` from the
+> [GitHub releases page](https://github.com/meellm/MeManga/releases)
+> and double-click — there's nothing to configure up front.
 
 ---
 
@@ -23,6 +23,7 @@ JPG / PNG / WEBP, and optionally email them to your Kindle.
 - [Downloading From a Specific Chapter](#downloading-from-a-specific-chapter)
 - [Managing Status](#managing-status)
 - [Changing Output Format](#changing-output-format)
+- [Post-Processing After Download](#post-processing-after-download)
 - [Setting Up Kindle Email](#setting-up-kindle-email)
 - [Backup Sources](#backup-sources)
 - [Updating Manga Details](#updating-manga-details)
@@ -255,7 +256,8 @@ Or run directly through the virtual environment:
 
 Docker is the easiest option for headless servers, NAS boxes, Raspberry
 Pi systems, and cron-style automation because the image includes the CLI
-and Playwright Firefox runtime.
+and Playwright Firefox runtime without requiring a local Python install.
+The Docker image does **not** include PySide6 or any other GUI runtime.
 
 ### Requirements
 
@@ -265,14 +267,14 @@ and Playwright Firefox runtime.
 ### Build and run
 
 ```bash
-git clone -b cli <repo-url>
+git clone -b cli https://github.com/meellm/MeManga.git
 cd MeManga
 docker build -t memanga:cli .
 docker run --rm memanga:cli --help
 ```
 
-Official prebuilt images are published to Docker Hub and GitHub
-Container Registry from release tags on the `main` branch:
+Official release images are published to Docker Hub and GitHub Container
+Registry when a release tag is pushed:
 
 ```bash
 docker pull meellm/memanga:latest
@@ -284,8 +286,8 @@ docker run --rm ghcr.io/meellm/memanga:latest --help
 
 Stable releases are published to both registries with `X.Y.Z`, `X.Y`,
 and `latest` tags; pin to a specific `X.Y.Z` tag for reproducible runs.
-The `cli` branch does not publish images; use a local `docker build`
-when running code from this branch or testing unreleased changes.
+Use a local `docker build` when testing unreleased code from the
+repository.
 
 ### Persist config, state, and downloads
 
@@ -617,6 +619,93 @@ Download one manga in CBZ:
 
 ```bash
 run check -t "One Piece" --format cbz --auto
+```
+
+---
+
+## Post-Processing After Download
+
+MeManga can run a command of your choice after each chapter's output
+file (or image folder) is created - for converting, compressing, copying to an
+archive, or triggering another tool.
+
+Post-processing is **disabled by default**.
+
+> ⚠️ The command runs on your machine. Only enable commands you trust and
+> understand.
+
+### Enable it
+
+Run the config wizard and answer the post-processing prompts:
+
+```bash
+run config
+```
+
+Or edit `~/.config/memanga/config.yaml` directly:
+
+```yaml
+delivery:
+  post_processing:
+    enabled: true
+    command: 'cp -R {output_path} /mnt/archive/'
+    fail_on_error: false
+```
+
+### Available values
+
+Each value is available both as a `{placeholder}` in the command string and as
+an environment variable:
+
+| Placeholder | Environment variable | Meaning |
+|-------------|----------------------|---------|
+| `{output_path}` | `MEMANGA_OUTPUT_PATH` | Final file or folder path |
+| `{title}` | `MEMANGA_MANGA_TITLE` | Manga title |
+| `{chapter}` | `MEMANGA_CHAPTER` | Chapter number |
+| `{source}` | `MEMANGA_SOURCE` | Source the chapter came from |
+| `{format}` | `MEMANGA_OUTPUT_FORMAT` | Output format (`pdf`, `cbz`, `jpg`, …) |
+| `{is_dir}` | `MEMANGA_IS_DIR` | `1` if the output is a folder (image formats), else `0` |
+
+The hook receives the final output path whether it is an archive/document file
+(`pdf`, `epub`, `cbz`, `zip`) or an image folder (`jpg`, `png`, `webp`).
+The command is split into arguments and run directly, without a shell.
+Placeholder values are substituted after splitting, so manga metadata cannot
+become shell syntax. For shell features like pipes, redirects, or globbing,
+invoke a shell explicitly and prefer the `MEMANGA_*` environment variables.
+
+### Failure behavior
+
+- `fail_on_error: false` (default) - a failed command prints a warning but the
+  chapter is still recorded as downloaded.
+- `fail_on_error: true` - a failed command marks the chapter as failed, so it
+  shows up under `run failed` for retry. During CLI checks, backup-source
+  handling applies the same way it does for other download failures.
+
+A command is considered failed if it exits non-zero, times out (10 minute
+limit), or can't be launched.
+
+### Examples
+
+Copy every download into an archive directory:
+
+```yaml
+command: 'cp -R {output_path} /mnt/archive/'
+```
+
+Optimize a CBZ/ZIP or run a script with the passed environment variables:
+
+```yaml
+command: '/opt/memanga-hooks/process-chapter.sh'
+```
+
+```bash
+#!/usr/bin/env bash
+# process-chapter.sh
+echo "Finished $MEMANGA_MANGA_TITLE chapter $MEMANGA_CHAPTER ($MEMANGA_OUTPUT_FORMAT)"
+if [ "$MEMANGA_IS_DIR" = "1" ]; then
+  # image-folder output, e.g. compress each image
+  find "$MEMANGA_OUTPUT_PATH" -name '*.png' -print
+fi
 ```
 
 ---

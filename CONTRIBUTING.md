@@ -39,6 +39,8 @@ memanga/
 ├── state.py            # State journal (downloaded chapters, etc.)
 ├── downloader.py       # Chapter download + format conversion
 ├── emailer.py          # Kindle/SMTP delivery
+├── cron.py             # Crontab line builder
+├── perf.py             # Optional timing instrumentation
 └── scrapers/           # 200+ site scrapers
     ├── base.py         # BaseScraper / Chapter / Manga dataclasses
     ├── playwright_base.py
@@ -71,7 +73,8 @@ pytest -m live tests/scrapers/live/test_live_parsing.py -v
 pytest -m live tests/scrapers/live/ --health-report=health.json
 ```
 
-All checked-in tests should pass before you push.
+All checked-in tests should pass before you push. CI runs `pytest` on
+every push.
 
 ## Adding a scraper
 
@@ -83,6 +86,20 @@ All checked-in tests should pass before you push.
 4. Register the domain in `memanga/scrapers/__init__.py` (or the
    registry's `TEMPLATE_SCRAPERS` map for template-based scrapers).
 5. Add a fixture-based test under `tests/scrapers/`.
+
+## Dependency pinning
+
+The dev install (`pip install -r requirements.txt`) uses `>=` ranges so
+you get the latest patch-level updates while iterating.
+
+**When to refresh the lock for Docker/reproducible builds:**
+
+```bash
+pip install pip-tools
+pip-compile --output-file=requirements-docker.txt --strip-extras requirements.txt
+git add requirements-docker.txt
+git commit -m "chore(deps): refresh requirements-docker.txt"
+```
 
 ## Commit style
 

@@ -19,8 +19,13 @@ from rich.prompt import Prompt, Confirm
 from rich.table import Table
 from rich import box
 
-from .backup import EXPORT_VERSION, BackupVersionError, validate_backup
+from .backup import (
+    EXPORT_VERSION,
+    BackupVersionError,
+    validate_backup,
+)
 from .config import Config, get_app_password, set_app_password
+from .cron import build_cron_line
 from .state import State
 from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga
 from .scrapers import get_scraper
@@ -36,6 +41,26 @@ state = State()
 # ============================================================================
 
 VALID_STATUSES = ["reading", "on-hold", "dropped", "completed"]
+
+
+def _partial_threshold_arg(value):
+    """argparse type for --partial-threshold: a percentage in [0, 100].
+
+    Rejects non-numeric or out-of-range input at parse time so both
+    `config` and `check` give a clear error instead of silently clamping
+    on the command line (issue #86).
+    """
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"invalid threshold {value!r}: expected a number"
+        )
+    if not (0.0 <= num <= 100.0):
+        raise argparse.ArgumentTypeError(
+            f"threshold must be between 0 and 100, got {num:g}"
+        )
+    return num
 
 
 def _get_status_display(manga: Dict[str, Any]) -> str:
@@ -356,6 +381,13 @@ def cmd_update(args):
         if old_title in manga_state:
             manga_state[args.title] = manga_state.pop(old_title)
             state.set("manga", manga_state)
+        # Move already-downloaded files so they stay reachable under the
+        # new title (folder + filenames are keyed by title).
+        from .downloader import rename_manga_downloads
+        try:
+            rename_manga_downloads(config.download_dir, old_title, args.title)
+        except Exception:
+            pass
         changes.append(f"Title → {args.title}")
 
     if not changes:
@@ -411,7 +443,19 @@ def cmd_check(args):
     download_dir = config.download_dir
     output_format = getattr(args, 'format', None) or config.output_format
     email_cfg = config.get("email", {})
-    
+    post_processing = config.get("delivery.post_processing")
+
+    # Partial-chapter tolerance (issue #86). Config is the source of truth;
+    # `check` flags can override it for a single run.
+    allow_partial = config.partial_enabled
+    if getattr(args, 'allow_partial', False):
+        allow_partial = True
+    if getattr(args, 'no_partial', False):
+        allow_partial = False
+    partial_threshold = getattr(args, 'partial_threshold', None)
+    if partial_threshold is None:
+        partial_threshold = config.partial_threshold
+
     for manga in manga_list:
         title = manga["title"]
         status = manga.get("status", "reading")
@@ -479,6 +523,71 @@ def cmd_check(args):
                 if not should_download:
                     continue
 
+                max_retries = getattr(args, 'retries', 3)
+
+                # Captures partial-download details from download_chapter so
+                # we can surface which pages are missing without parsing the
+                # log line. Reset per attempt.
+                partial_info = {}
+
+                def _capture_partial(failed_pages, total, _info=partial_info):
+                    _info["failed_pages"] = failed_pages
+                    _info["total"] = total
+
+                def _deliver_email(file_path):
+                    """Send to Kindle if configured (skips image folders)."""
+                    if not (delivery_mode == "email" and email_cfg.get("kindle_email")):
+                        return
+                    if file_path.is_dir():
+                        console.print("     [dim]📧 Skipped email (image folders cannot be emailed)[/dim]")
+                        return
+                    console.print("     [dim]📧 Sending to Kindle...[/dim]")
+                    try:
+                        send_to_kindle(
+                            pdf_path=file_path,
+                            kindle_email=email_cfg["kindle_email"],
+                            sender_email=email_cfg["sender_email"],
+                            smtp_server=email_cfg.get("smtp_server", "smtp.gmail.com"),
+                            smtp_port=email_cfg.get("smtp_port", 587),
+                            app_password=get_app_password(config),
+                        )
+                        console.print("     [green]📬 Sent to Kindle![/green]")
+                        if config.get("delivery.delete_after_send", False):
+                            file_path.unlink()
+                            console.print("     [dim]🗑️  Deleted local copy[/dim]")
+                    except EmailError as email_e:
+                        console.print(f"     [red]📧 Email failed: {email_e}[/red]")
+
+                def _announce_saved(file_path, from_backup, partial, source=None):
+                    """Print the save line and, for partials, warn + log which
+                    pages are missing so headless runs leave a trail."""
+                    label = f"{file_path.parent.name}/{file_path.name}/" if file_path.is_dir() else file_path.name
+                    src = " from backup" if from_backup else ""
+                    if partial:
+                        miss = partial.get("failed_pages", [])
+                        total = partial.get("total", 0)
+                        console.print(
+                            f"     [yellow]⚠️  Saved partial{src}: {label} — "
+                            f"{len(miss)}/{total} page(s) missing (pages {miss})[/yellow]"
+                        )
+                        state.add_notification(
+                            "warn",
+                            f"'{title}' Chapter {ch.number} saved as partial: "
+                            f"{len(miss)}/{total} page(s) missing (pages {miss}).",
+                        )
+                        state.add_partial_chapter(
+                            title,
+                            ch.number,
+                            source=source or "",
+                            failed_pages=miss,
+                            total_pages=total,
+                            path=str(file_path),
+                            from_backup=from_backup,
+                        )
+                    else:
+                        state.clear_partial_chapter(title, ch.number)
+                        console.print(f"     [green]✅ Saved{src}: {label}[/green]")
+
                 try:
                     # Show source info if from backup
                     source_info = ""
@@ -486,39 +595,30 @@ def cmd_check(args):
                         source_info = f" [yellow](from backup: {ch.source})[/yellow]"
 
                     console.print(f"     [dim]⬇️  Downloading {ch_label}...{source_info}[/dim]")
-                    max_retries = getattr(args, 'retries', 3)
-                    file_path = download_chapter(manga, ch, download_dir, output_format, max_retries=max_retries)
-                    is_image_folder = file_path.is_dir()
 
-                    if is_image_folder:
-                        console.print(f"     [green]✅ Saved: {file_path.parent.name}/{file_path.name}/[/green]")
-                    else:
-                        console.print(f"     [green]✅ Saved: {file_path.name}[/green]")
+                    # Only accept a partial straight away when there's no
+                    # backup to try first — otherwise we prefer a complete
+                    # download from the backup (issue #86 direction).
+                    is_from_backup = isinstance(ch, ChapterWithSource) and ch.is_backup
+                    has_backup = (not is_from_backup) and len(_get_sources_from_manga(manga)) > 1
+                    primary_allow_partial = allow_partial and not has_backup
 
-                    # Email if configured (skip for image folders)
-                    if delivery_mode == "email" and email_cfg.get("kindle_email"):
-                        if is_image_folder:
-                            console.print(f"     [dim]📧 Skipped email (image folders cannot be emailed)[/dim]")
-                        else:
-                            console.print(f"     [dim]📧 Sending to Kindle...[/dim]")
-                            try:
-                                send_to_kindle(
-                                    pdf_path=file_path,
-                                    kindle_email=email_cfg["kindle_email"],
-                                    sender_email=email_cfg["sender_email"],
-                                    smtp_server=email_cfg.get("smtp_server", "smtp.gmail.com"),
-                                    smtp_port=email_cfg.get("smtp_port", 587),
-                                    app_password=get_app_password(config),
-                                )
-                                console.print(f"     [green]📬 Sent to Kindle![/green]")
-
-                                # Delete after send if configured
-                                if config.get("delivery.delete_after_send", False):
-                                    file_path.unlink()
-                                    console.print(f"     [dim]🗑️  Deleted local copy[/dim]")
-
-                            except EmailError as e:
-                                console.print(f"     [red]📧 Email failed: {e}[/red]")
+                    partial_info.clear()
+                    file_path = download_chapter(
+                        manga, ch, download_dir, output_format,
+                        max_retries=max_retries,
+                        post_processing=post_processing,
+                        allow_partial=primary_allow_partial,
+                        partial_threshold=partial_threshold,
+                        on_partial=_capture_partial,
+                    )
+                    _announce_saved(
+                        file_path,
+                        from_backup=False,
+                        partial=dict(partial_info),
+                        source=getattr(ch, "source", None) or "unknown",
+                    )
+                    _deliver_email(file_path)
 
                     # Update state
                     state.add_downloaded_chapter(title, ch.number)
@@ -535,39 +635,94 @@ def cmd_check(args):
                     ch_source = ch.source if isinstance(ch, ChapterWithSource) else "unknown"
                     is_from_backup = isinstance(ch, ChapterWithSource) and ch.is_backup
 
-                    # Auto-fallback to backup source when the primary source fails
-                    backup_tried = False
+                    backup_ch = None
                     if not is_from_backup:
                         backup_ch = _find_chapter_on_backup(manga, ch.number)
-                        if backup_ch:
-                            backup_tried = True
-                            console.print(f"     [yellow]⚠️  Primary failed ({e}), trying backup ({backup_ch.source})...[/yellow]")
-                            try:
-                                file_path = download_chapter(manga, backup_ch, download_dir, output_format, max_retries=max_retries)
-                                is_image_folder = file_path.is_dir()
-                                if is_image_folder:
-                                    console.print(f"     [green]✅ Saved from backup: {file_path.parent.name}/{file_path.name}/[/green]")
-                                else:
-                                    console.print(f"     [green]✅ Saved from backup: {file_path.name}[/green]")
-                                state.add_downloaded_chapter(title, ch.number)
-                                state.clear_pending_backup(title, ch.number)
-                                state.clear_failed_chapter(title, ch.number)
-                                total_downloaded += 1
-                            except DownloaderError as backup_e:
-                                console.print(f"     [red]❌ Backup also failed: {backup_e}[/red]")
-                                state.add_failed_chapter(
-                                    title, ch.number,
-                                    f"{ch_source}+{backup_ch.source}",
-                                    f"Primary: {e}; Backup: {backup_e}",
-                                )
-                                total_failed += 1
 
-                    if not backup_tried:
-                        # No backup available (or this chapter was already from backup source)
-                        console.print(f"     [red]❌ Failed: {e}[/red]")
-                        state.add_failed_chapter(title, ch.number, ch_source, str(e))
+                    saved = False
+                    backup_e = None
+
+                    # 1) Try a complete download from the backup source.
+                    if backup_ch:
+                        console.print(f"     [yellow]⚠️  Primary failed ({e}), trying backup ({backup_ch.source})...[/yellow]")
+                        try:
+                            file_path = download_chapter(
+                                manga, backup_ch, download_dir, output_format,
+                                max_retries=max_retries,
+                                post_processing=post_processing,
+                            )
+                            _announce_saved(
+                                file_path,
+                                from_backup=True,
+                                partial=None,
+                                source=getattr(backup_ch, "source", None),
+                            )
+                            _deliver_email(file_path)
+                            state.add_downloaded_chapter(title, ch.number)
+                            state.clear_pending_backup(title, ch.number)
+                            state.clear_failed_chapter(title, ch.number)
+                            total_downloaded += 1
+                            saved = True
+                        except DownloaderError as be:
+                            backup_e = be
+                            console.print(f"     [red]❌ Backup also failed: {be}[/red]")
+
+                    # 2) Both sources failed to deliver a complete chapter.
+                    #    If partial tolerance is on, salvage the best partial
+                    #    (backup first, then primary) within the threshold.
+                    if not saved and allow_partial:
+                        salvage = []
+                        if backup_ch:
+                            salvage.append((backup_ch, True))
+                        # Skip the primary here if we already tried it with
+                        # partial enabled above (no backup case).
+                        if not primary_allow_partial:
+                            salvage.append((ch, False))
+                        for cand, from_backup in salvage:
+                            partial_info.clear()
+                            try:
+                                file_path = download_chapter(
+                                    manga, cand, download_dir, output_format,
+                                    max_retries=max_retries,
+                                    post_processing=post_processing,
+                                    allow_partial=True,
+                                    partial_threshold=partial_threshold,
+                                    on_partial=_capture_partial,
+                                )
+                            except DownloaderError:
+                                continue
+                            _announce_saved(
+                                file_path,
+                                from_backup=from_backup,
+                                partial=dict(partial_info),
+                                source=getattr(cand, "source", None),
+                            )
+                            _deliver_email(file_path)
+                            state.add_downloaded_chapter(title, ch.number)
+                            state.clear_pending_backup(title, ch.number)
+                            state.clear_failed_chapter(title, ch.number)
+                            total_downloaded += 1
+                            saved = True
+                            break
+
+                    # 3) Nothing worked — record the failure.
+                    if not saved:
+                        if backup_ch and backup_e is not None:
+                            console.print(f"     [red]❌ Failed: {e}[/red]")
+                            state.add_failed_chapter(
+                                title, ch.number,
+                                f"{ch_source}+{backup_ch.source}",
+                                f"Primary: {e}; Backup: {backup_e}",
+                                failed_pages=getattr(e, "failed_pages", None),
+                            )
+                        else:
+                            console.print(f"     [red]❌ Failed: {e}[/red]")
+                            state.add_failed_chapter(
+                                title, ch.number, ch_source, str(e),
+                                failed_pages=getattr(e, "failed_pages", None),
+                            )
                         total_failed += 1
-                    
+
         except DownloaderError as e:
             console.print(f"  [red]└─ Error: {e}[/red]")
         except Exception as e:
@@ -613,6 +768,13 @@ def cmd_status(args):
         table.add_row("Kindle email", config.get("email.kindle_email") or "[red]not set[/red]")
         table.add_row("Sender email", config.get("email.sender_email") or "[red]not set[/red]")
     
+    pp_enabled = bool(config.get("delivery.post_processing.enabled"))
+    pp_status = "enabled" if pp_enabled else "disabled"
+    table.add_row(
+        "Post-processing",
+        f"[{'green' if pp_enabled else 'dim'}]{pp_status}[/]",
+    )
+
     cron_status = "enabled" if config.get("cron.enabled") else "disabled"
     cron_time = config.get("cron.time", "06:00")
     table.add_row("Cron", f"[{'green' if cron_status == 'enabled' else 'dim'}]{cron_status}[/] ({cron_time})")
@@ -643,7 +805,27 @@ def cmd_config(args):
         console.print(Panel("[bold]Current Configuration[/bold]", border_style="cyan"))
         console.print(yaml.dump(display, default_flow_style=False))
         return
-    
+
+    # Non-interactive config for partial-chapter tolerance (issue #86).
+    # When any of these flags are given, persist them and return without
+    # dropping into the interactive prompt flow.
+    partial = getattr(args, "partial", None)
+    threshold = getattr(args, "partial_threshold", None)
+    if partial is not None or threshold is not None:
+        if partial is not None:
+            config.set("partial_chapters.enabled", partial == "on")
+        if threshold is not None:
+            # Already validated to [0, 100] by the argparse type.
+            config.set("partial_chapters.threshold_percent", float(threshold))
+        config.save()
+
+        state_str = "enabled" if config.partial_enabled else "disabled"
+        console.print(
+            f"[green]✅ Partial-chapter tolerance {state_str}[/green] "
+            f"[dim](threshold: {config.partial_threshold:g}%)[/dim]"
+        )
+        return
+
     console.print(Panel("[bold]⚙️  Configure MeManga[/bold]", border_style="yellow"))
     console.print()
     
@@ -718,6 +900,69 @@ def cmd_config(args):
     elif fmt_choice == "7":
         config.set("delivery.output_format", "webp")
 
+    # Post-processing hook (optional, disabled by default)
+    pp_enabled = bool(config.get("delivery.post_processing.enabled"))
+    console.print(
+        f"\n[bold]Post-processing[/bold] (current: "
+        f"[cyan]{'enabled' if pp_enabled else 'disabled'}[/cyan])"
+    )
+    console.print(
+        "[dim]Run a command after each chapter is saved. "
+        "Only enable commands you trust.[/dim]"
+    )
+    if Confirm.ask("Enable post-processing command?", default=pp_enabled):
+        console.print(
+            "[dim]Placeholders: {output_path} {title} {chapter} {source} "
+            "{format} {is_dir} (also as MEMANGA_* env vars).[/dim]"
+        )
+        console.print(
+            "[dim]Commands run directly, without a shell. Invoke a shell "
+            "explicitly for pipes, redirects, or globbing. Scripts should "
+            "prefer MEMANGA_* env vars.[/dim]"
+        )
+        pp_command = Prompt.ask(
+            "Command",
+            default=config.get("delivery.post_processing.command", "")
+        )
+        pp_fail = Confirm.ask(
+            "Mark chapter as failed if the command fails?",
+            default=config.get("delivery.post_processing.fail_on_error", False)
+        )
+        config.set("delivery.post_processing.enabled", True)
+        config.set("delivery.post_processing.command", pp_command)
+        config.set("delivery.post_processing.fail_on_error", pp_fail)
+    else:
+        config.set("delivery.post_processing.enabled", False)
+
+    # Partial-chapter tolerance (issue #86)
+    current_partial = config.partial_enabled
+    state_str = "enabled" if current_partial else "disabled"
+    console.print(
+        f"\n[bold]Partial-Chapter Tolerance[/bold] (current: [cyan]{state_str}[/cyan])"
+    )
+    console.print(
+        "[dim]Keep a chapter that is missing a few pages instead of discarding it.[/dim]"
+    )
+    if Confirm.ask("Enable partial-chapter tolerance?", default=current_partial):
+        config.set("partial_chapters.enabled", True)
+        threshold = Prompt.ask(
+            "Max % of pages allowed to fail",
+            default=str(config.partial_threshold),
+        )
+        try:
+            value = float(threshold)
+        except (TypeError, ValueError):
+            console.print("[yellow]⚠️  Invalid number, keeping previous threshold.[/yellow]")
+        else:
+            clamped = max(0.0, min(100.0, value))
+            if clamped != value:
+                console.print(
+                    f"[yellow]⚠️  Threshold must be 0-100; clamped to {clamped:g}%.[/yellow]"
+                )
+            config.set("partial_chapters.threshold_percent", clamped)
+    else:
+        config.set("partial_chapters.enabled", False)
+
     config.save()
     console.print("\n[green]✅ Configuration saved![/green]")
 
@@ -768,8 +1013,7 @@ def _cmd_cron_unix(args):
             console.print("[red]Invalid time format. Use HH:MM[/red]")
             return 1
 
-        cron_cmd = f"cd {project_dir} && {python_path} -m memanga check --auto --quiet"
-        cron_line = f"{minute} {hour} * * * {cron_cmd} >> {project_dir}/memanga.log 2>&1"
+        cron_line = build_cron_line(minute, hour, project_dir, python_path)
 
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         existing = result.stdout if result.returncode == 0 else ""
@@ -1161,48 +1405,41 @@ def cmd_import(args):
     else:
         # Merge mode: skip duplicates, merge chapter lists
         existing_manga = config.get("manga", [])
-        existing_titles = {m["title"].lower() for m in existing_manga}
-        existing_state = state.get("manga", {})
-
+        existing_titles = {
+            m["title"].lower(): m["title"]
+            for m in existing_manga
+        }
+        state_title_aliases = {}
         added = 0
         skipped = 0
         for m in imported_manga:
-            if m["title"].lower() in existing_titles:
+            title = m["title"]
+            title_key = title.lower()
+            existing_title = existing_titles.get(title_key)
+            if existing_title is not None:
+                if title != existing_title:
+                    state_title_aliases[title] = existing_title
                 skipped += 1
                 continue
             existing_manga.append(m)
-            existing_titles.add(m["title"].lower())
+            existing_titles[title_key] = title
             added += 1
-
-        # Merge state (downloaded chapter lists)
-        for title, s in imported_state.items():
-            if title in existing_state:
-                # Merge downloaded lists
-                existing_downloaded = set(existing_state[title].get("downloaded", []))
-                imported_downloaded = set(s.get("downloaded", []))
-                def _sort_key(x):
-                    try:
-                        return float(x)
-                    except (ValueError, TypeError):
-                        return 0.0
-                merged = sorted(
-                    existing_downloaded | imported_downloaded,
-                    key=_sort_key,
-                )
-                existing_state[title]["downloaded"] = merged
-            else:
-                existing_state[title] = s
 
         config.set("manga", existing_manga)
         config.save()
-        state.set("manga", existing_state)
+        state.merge_missing_manga_state(
+            imported_state,
+            merge_existing_downloaded=True,
+            title_aliases=state_title_aliases,
+        )
 
         console.print(f"[green]Imported: {added} added, {skipped} skipped (duplicate)[/green]")
 
 
 def cmd_failed(args):
-    """List and manage chapters that failed to download."""
+    """List and manage chapters that failed or were accepted as partial."""
     all_failed = state.get_all_failed_chapters()
+    all_partials = state.get_all_partial_chapters()
 
     # Filter by title if requested
     if args.title:
@@ -1210,36 +1447,59 @@ def cmd_failed(args):
             t: chapters for t, chapters in all_failed.items()
             if args.title.lower() in t.lower()
         }
+        all_partials = {
+            t: chapters for t, chapters in all_partials.items()
+            if args.title.lower() in t.lower()
+        }
 
-    if not all_failed:
-        console.print("[dim]No failed chapters recorded.[/dim]")
+    retryable = {}
+    for manga_title, chapters in all_failed.items():
+        retryable.setdefault(manga_title, {}).update(chapters)
+    for manga_title, chapters in all_partials.items():
+        bucket = retryable.setdefault(manga_title, {})
+        for chapter_num, info in chapters.items():
+            if chapter_num in bucket:
+                continue
+            bucket[chapter_num] = {
+                **info,
+                "partial": True,
+                "error": "Accepted partial download",
+            }
+
+    if not retryable:
+        console.print("[dim]No failed or partial chapters recorded.[/dim]")
         return
 
     table = Table(
-        title="⚠️  Failed Chapter Downloads",
+        title="⚠️  Retryable Chapter Downloads",
         box=box.ROUNDED,
         show_lines=True,
     )
     table.add_column("Manga", style="cyan bold")
     table.add_column("Chapter", style="yellow", justify="center")
-    table.add_column("Failed At", style="dim")
+    table.add_column("Status", justify="center")
+    table.add_column("Recorded At", style="dim")
     table.add_column("Source", style="green")
-    table.add_column("Pages Failed", justify="center")
+    table.add_column("Pages Missing", justify="center")
     table.add_column("Attempts", justify="center")
-    table.add_column("Error", style="red", no_wrap=False, max_width=40)
+    table.add_column("Reason", style="red", no_wrap=False, max_width=40)
 
-    for manga_title, chapters in sorted(all_failed.items()):
+    for manga_title, chapters in sorted(retryable.items()):
         for chapter_num, info in sorted(chapters.items(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else 0):
-            failed_at = info.get("failed_at", "")[:16].replace("T", " ")
+            is_partial = bool(info.get("partial")) or "accepted_at" in info
+            recorded_at = (
+                info.get("accepted_at") if is_partial else info.get("failed_at", "")
+            )[:16].replace("T", " ")
             pages = info.get("failed_pages", [])
             pages_str = str(pages) if pages else "—"
             table.add_row(
                 manga_title,
                 chapter_num,
-                failed_at,
+                "partial" if is_partial else "failed",
+                recorded_at,
                 info.get("source", "?"),
                 pages_str,
-                str(info.get("attempts", 1)),
+                "—" if is_partial else str(info.get("attempts", 1)),
                 info.get("error", ""),
             )
 
@@ -1250,7 +1510,10 @@ def cmd_failed(args):
         for manga_title, chapters in all_failed.items():
             for chapter_num in list(chapters):
                 state.clear_failed_chapter(manga_title, chapter_num)
-        console.print("[green]✅ Cleared all failure records.[/green]")
+        for manga_title, chapters in all_partials.items():
+            for chapter_num in list(chapters):
+                state.clear_partial_chapter(manga_title, chapter_num)
+        console.print("[green]✅ Cleared all failure and partial records.[/green]")
         return
 
     if args.retry:
@@ -1260,10 +1523,11 @@ def cmd_failed(args):
         download_dir = config.download_dir
         output_format = config.output_format
         email_cfg = config.get("email", {})
+        post_processing = config.get("delivery.post_processing")
         retried = 0
         succeeded = 0
 
-        for manga_title, chapters in all_failed.items():
+        for manga_title, chapters in retryable.items():
             manga = manga_by_title.get(manga_title)
             if not manga:
                 console.print(f"  [yellow]⚠️  Manga not found in config: {manga_title}[/yellow]")
@@ -1297,7 +1561,7 @@ def cmd_failed(args):
                 console.print(f"  [dim]⬇️  Retrying {manga_title} Chapter {chapter_num}...[/dim]")
                 retried += 1
                 try:
-                    file_path = download_chapter(manga, ch_obj, download_dir, output_format)
+                    file_path = download_chapter(manga, ch_obj, download_dir, output_format, post_processing=post_processing)
                     is_image_folder = file_path.is_dir()
                     if is_image_folder:
                         console.print(f"  [green]✅ Saved: {file_path.parent.name}/{file_path.name}/[/green]")
@@ -1320,6 +1584,7 @@ def cmd_failed(args):
 
                     state.add_downloaded_chapter(manga_title, chapter_num)
                     state.clear_failed_chapter(manga_title, chapter_num)
+                    state.clear_partial_chapter(manga_title, chapter_num)
                     succeeded += 1
                 except DownloaderError as retry_e:
                     # Try backup if available
@@ -1327,9 +1592,10 @@ def cmd_failed(args):
                     if backup_ch:
                         console.print(f"  [yellow]⚠️  Primary failed, trying backup ({backup_ch.source})...[/yellow]")
                         try:
-                            file_path = download_chapter(manga, backup_ch, download_dir, output_format)
+                            file_path = download_chapter(manga, backup_ch, download_dir, output_format, post_processing=post_processing)
                             state.add_downloaded_chapter(manga_title, chapter_num)
                             state.clear_failed_chapter(manga_title, chapter_num)
+                            state.clear_partial_chapter(manga_title, chapter_num)
                             label = f"{file_path.parent.name}/{file_path.name}/" if file_path.is_dir() else file_path.name
                             console.print(f"  [green]✅ Saved from backup: {label}[/green]")
                             succeeded += 1
@@ -1488,10 +1754,7 @@ def cmd_tui(args):
 # ============================================================================
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="📖 MeManga - Automatic manga downloader",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+    _epilog = """
 Examples:
   memanga list                          # Show tracked manga
   memanga add -i                        # Add manga interactively
@@ -1501,7 +1764,18 @@ Examples:
   memanga check --auto                  # Auto-download new chapters
   memanga cron install                  # Set up daily checks
   memanga config                        # Configure settings
-        """,
+"""
+
+    parser = argparse.ArgumentParser(
+        description="📖 MeManga - Automatic manga downloader",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=_epilog,
+    )
+    # GUI is not part of this CLI build; hide the flag and reject it clearly.
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
 
     subparsers = parser.add_subparsers(dest="command", title="commands")
@@ -1552,6 +1826,12 @@ Examples:
     p_check.add_argument("--force-suspicious", action="store_true", help="Accept a chapter batch even if it was flagged as suspicious")
     p_check.add_argument("--format", choices=["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"], help="Output format (overrides config)")
     p_check.add_argument("--retries", type=int, default=3, metavar="N", help="Retry failed page downloads N times (default: 3, 0 to disable)")
+    # Partial-chapter tolerance (issue #86) — config is the source of truth;
+    # these override it for a single run.
+    partial_grp = p_check.add_mutually_exclusive_group()
+    partial_grp.add_argument("--allow-partial", action="store_true", help="Keep a chapter with a few missing pages instead of discarding it (issue #86)")
+    partial_grp.add_argument("--no-partial", action="store_true", help="Force-discard any chapter with missing pages, even if partial tolerance is enabled in config")
+    p_check.add_argument("--partial-threshold", type=_partial_threshold_arg, metavar="PCT", help="Max %% of pages allowed to fail before a partial is refused, 0-100 (default: config value)")
     p_check.set_defaults(func=cmd_check)
     
     # status
@@ -1561,6 +1841,16 @@ Examples:
     # config
     p_config = subparsers.add_parser("config", help="Configure settings")
     p_config.add_argument("--show", action="store_true", help="Show current config")
+    # Non-interactive partial-chapter tolerance controls (issue #86). When
+    # omitted, `config` stays interactive.
+    p_config.add_argument(
+        "--partial", choices=["on", "off"],
+        help="Enable/disable partial-chapter tolerance without prompting",
+    )
+    p_config.add_argument(
+        "--partial-threshold", type=_partial_threshold_arg, metavar="PCT",
+        help="Persist the max %% of pages allowed to fail (0-100)",
+    )
     p_config.set_defaults(func=cmd_config)
     
     # cron
@@ -1607,6 +1897,12 @@ Examples:
     p_tui.set_defaults(func=cmd_tui)
     
     args = parser.parse_args()
+
+    if args.gui:
+        sys.stderr.write(
+            "error: --gui is not available in this installation (CLI build)\n"
+        )
+        sys.exit(1)
 
     if args.command is None:
         # Default to TUI

@@ -8,7 +8,7 @@ endpoints to an SPA under /title/hid-slug backed by a JSON API:
 - GET /api/titles/{hid}/chapters?language=en&limit=100&page=N  (chapter list)
 - GET /api/chapters/{chapter_id}                               (page image URLs)
 
-All work with plain HTTP (no browser handshake needed).
+All work with plain HTTP (no VRF token or browser needed).
 
 Image descrambling based on:
 - https://github.com/f4rh4d-4hmed/MangaFire-API
@@ -182,7 +182,18 @@ class VRFGenerator:
         self._initialized = True
 
     def _ensure_browser_in_thread(self):
-        """Ensure the thread-local Firefox is running. Executor-thread only."""
+        """Ensure the thread-local Firefox is running. Executor-thread only.
+
+        Atomic, mirroring ``PlaywrightScraper._get_browser_in_thread``: a
+        failed ``firefox.launch()`` must not leave ``_vrf_thread_local``
+        with ``playwright`` set but no ``page``. The old code set
+        ``_vrf_thread_local.playwright`` first, so a launch failure left a
+        half-initialised thread-local — and the next call skipped the init
+        block and raised ``AttributeError`` on ``_vrf_thread_local.page``,
+        masking the real launch error (this is the "'thread_local'"
+        download failure in the frozen build). Build everything in locals,
+        roll the Playwright start back on failure, and commit at once.
+        """
         if not PLAYWRIGHT_AVAILABLE:
             raise RuntimeError("Playwright not available")
 
@@ -192,6 +203,8 @@ class VRFGenerator:
                 and hasattr(_vrf_thread_local, 'page')):
             return _vrf_thread_local.page
 
+        # Drop any half-initialised state from a previous failed attempt
+        # so sync_playwright().start() doesn't raise "already started".
         self._close_in_thread()
 
         print("[MangaFire] Starting Firefox browser (bypasses bot detection)...")
@@ -204,6 +217,8 @@ class VRFGenerator:
             )
             page = context.new_page()
         except Exception:
+            # Roll back so the next call retries cleanly and surfaces the
+            # real error instead of a masking AttributeError.
             try:
                 pw.stop()
             except Exception:

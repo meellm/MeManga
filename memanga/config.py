@@ -8,6 +8,8 @@ import threading
 import yaml
 from pathlib import Path
 
+from .perf import timed
+
 
 class Config:
     """Manages configuration file.
@@ -32,7 +34,9 @@ class Config:
     def _load(self):
         """Load config from file."""
         if self.config_path.exists():
-            with open(self.config_path, "r") as f:
+            # Explicit UTF-8: titles are arbitrary Unicode and the
+            # platform default encoding may not represent them.
+            with open(self.config_path, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
             # Merge with defaults to ensure new fields exist
             defaults = self._default_config()
@@ -59,6 +63,14 @@ class Config:
                 "delete_after_send": False,  # Delete file after sending to Kindle
                 "output_format": "pdf",  # "pdf", "epub", "cbz", "zip", "jpg", "png", or "webp"
                 "naming_template": "{title} - Chapter {chapter}",  # File naming pattern
+                "post_processing": {
+                    # Optional command run after each chapter's output
+                    # file/folder is created. Disabled by default. See docs
+                    # for available placeholders/env vars.
+                    "enabled": False,
+                    "command": "",
+                    "fail_on_error": False,  # True marks the chapter failed
+                },
             },
             "email": {
                 "kindle_email": "",
@@ -75,6 +87,25 @@ class Config:
                 "sort_by": "title",
                 "auto_check": True,
                 "auto_check_interval": 3600,
+                # Reader prefetch (issue #107). Off by default: while
+                # reading a manual-mode manga, the reader quietly queues
+                # the immediate next available chapter in the background.
+                "reader_prefetch_next": False,
+            },
+            # Built-in reader behaviour (issue #104). Kept separate from
+            # delivery.delete_after_send, which is tied to email delivery —
+            # this is reader-driven local cleanup. Off by default: a chapter
+            # stays on disk after it is read unless the user opts in.
+            "reader": {
+                "remove_after_read": False,
+            },
+            # Partial-chapter tolerance (issue #86). Off by default: any
+            # missing page still aborts the chapter and discards output.
+            # When enabled, a chapter whose failure rate is within
+            # threshold_percent is kept with only the pages that succeeded.
+            "partial_chapters": {
+                "enabled": False,
+                "threshold_percent": 5,  # max % of pages allowed to fail
             },
         }
     
@@ -110,6 +141,7 @@ class Config:
             data = data[k]
         data[keys[-1]] = value
     
+    @timed("config.save")
     def save(self):
         """Save config to file atomically. Thread-safe.
 
@@ -124,7 +156,7 @@ class Config:
 
         fd, tmp_path = tempfile.mkstemp(dir=self.config_dir, suffix=".tmp")
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(payload)
             os.replace(tmp_path, self.config_path)
         except Exception:
@@ -171,11 +203,35 @@ class Config:
     
     @property
     def email_enabled(self):
-        return self.delivery_mode == "email" and self.get("email.kindle_email")
+        # bool() matters: `and` would otherwise leak the kindle_email
+        # string, which Qt setters like setChecked() reject (issue #55).
+        return self.delivery_mode == "email" and bool(self.get("email.kindle_email"))
     
     @property
     def output_format(self):
         return self.get("delivery.output_format", "pdf")
+
+    @property
+    def partial_enabled(self):
+        """Whether partial-chapter tolerance is turned on (issue #86)."""
+        return bool(self.get("partial_chapters.enabled", False))
+
+    @property
+    def partial_threshold(self):
+        """Max share of pages allowed to fail before a partial is refused,
+        as a percentage clamped to [0, 100]. Falls back to 5 for garbage or
+        out-of-range values persisted by an older/hand-edited config."""
+        try:
+            value = float(self.get("partial_chapters.threshold_percent", 5))
+        except (TypeError, ValueError):
+            return 5.0
+        return max(0.0, min(100.0, value))
+
+    @property
+    def reader_prefetch_enabled(self):
+        """Whether the reader prefetches the next manual-mode chapter
+        while reading (issue #107)."""
+        return bool(self.get("gui.reader_prefetch_next", False))
 
 
 _KEYRING_SERVICE = "memanga"

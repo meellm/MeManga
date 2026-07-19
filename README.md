@@ -29,8 +29,10 @@ engine and a cron-friendly CLI.
 - **Power-user CLI** — scriptable, cron-friendly, works on headless servers
 - **Library tracking** — read/unread state survives reboots
 - **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
-- **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output
+- **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output (CBZ includes ComicInfo.xml)
 - **E-Reader delivery** — auto-send chapters by email after download
+- **Post-processing hooks** — run a custom command after each chapter download
+- **Partial chapter tolerance** — keep and retry chapters with a few missing pages
 - **Backup sources** — fall back to a second source if the primary stops updating
 - **Offline-aware** — gracefully fails on network actions when offline
 - **No telemetry, no accounts, no cloud** — everything stays on your machine
@@ -74,8 +76,8 @@ docker build -t memanga:cli .
 docker run --rm memanga:cli --help
 ```
 
-Official prebuilt images are published to Docker Hub and GitHub
-Container Registry from release tags on the `main` branch:
+Official release images are published to Docker Hub and GitHub Container
+Registry when a release tag is pushed:
 
 ```bash
 docker pull meellm/memanga:latest
@@ -87,9 +89,8 @@ docker run --rm ghcr.io/meellm/memanga:latest --help
 
 Stable releases are published to both registries with `X.Y.Z`, `X.Y`,
 and `latest` tags; pin to a specific `X.Y.Z` tag for reproducible runs.
-The `cli` branch does not publish images; for local testing or
-unreleased changes from this branch, build the image locally as shown
-above.
+Use a local `docker build` when testing unreleased code from the
+repository.
 
 Persist MeManga's config/state and downloads with two mounts:
 
