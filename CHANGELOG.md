@@ -6,6 +6,56 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-19
+
+### Added
+- #88 Official Docker images are now supported for headless servers, NAS boxes,
+  Raspberry Pi systems, and cron-style automation. Release tags publish a
+  CLI-only image to Docker Hub and GitHub Container Registry, while local
+  `docker build` and Compose workflows remain available for testing.
+- #89 Downloads can now run a configurable post-processing command after a
+  chapter finishes, making it easier to plug MeManga into local conversion,
+  sync, or automation pipelines.
+- #90 CBZ downloads now include ComicInfo.xml metadata so compatible comic
+  readers can show series, chapter, and title details.
+- #104 Reader settings can remove chapters after they are marked read, helping
+  users keep local storage under control.
+- #107 The reader can prefetch the next manual-mode chapter, reducing wait time
+  when moving through a series.
+- #117 Accepted partial downloads are now tracked so missing pages can be
+  retried without discarding pages that were already saved.
+
+### Changed
+- #108 GUI click responsiveness and shared backend performance were improved,
+  especially around library refreshes and repeated user actions.
+- #106 The reader now resumes the last viewed page when reopening a chapter.
+- #102 Manual backlog checks now use a trusted chapter catalogue baseline so
+  suspicious-batch protection does not incorrectly reject intentional backlog
+  downloads.
+
+### Fixed
+- #109 Unix cron setup now quotes scheduled-check paths, so installs work when
+  the repository path contains spaces or shell-sensitive characters.
+- #110 State mutations are consistently synchronized to avoid races between GUI,
+  background, and persistence paths.
+- #111 The reader can locate downloaded chapters even when title or chapter
+  labels were normalized on disk.
+- #112 Download-from-chapter actions no longer crash when history contains
+  non-numeric or part-style chapter labels.
+- #113 Kindle attachment-size errors now report the correct limit and recovery
+  guidance.
+- #114 Backup imports no longer append duplicate titles from the same file.
+- #115 Backup imports now preserve existing manga state while merging incoming
+  records.
+- #116 The Settings email test now reports results through the GUI thread instead
+  of updating Qt widgets from a background thread.
+- #118 Auto-mode new-chapter badges now remain stable until the active download
+  batch finishes.
+
+### Security
+- Mail credential handling and download path handling were hardened to reduce
+  the risk of unsafe paths or credential exposure during local workflows.
+
 ## [0.3.3] - 2026-07-12
 
 ### Fixed
