@@ -335,7 +335,7 @@ aggregators (popularity order):
 |---|---|---|
 | mangadex.org | API | Largest fan-translation library |
 | mangapill.com | Requests | Fast, no Cloudflare |
-| mangafire.to | Playwright | VRF bypass + image descrambling |
+| mangafire.to | Playwright | VRF-signed API + image descrambling |
 | mangabuddy.com | Playwright | Popular aggregator |
 | weebcentral.com | Playwright | 1000+ series |
 | mangakatana.com | Playwright | General library |

@@ -69,6 +69,11 @@ PARSING_PROBES = {
     # chapters, so probe a title that is actually hosted there.
     "mangadex.org": ProbeSpec("API client", query="chainsaw man"),
     "mangapill.com": ProbeSpec("Simple HTTP aggregator", query="one piece"),
+    # Signs every API call with a vrf token minted in a headless browser
+    # (issue #142). This probe is what catches MangaFire changing that
+    # scheme again — without a valid token every stage 403s at once.
+    "mangafire.to": ProbeSpec("MangaFire (vrf-signed JSON API)",
+                                query="one piece"),
     "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),
     "tcbonepiecechapters.com": ProbeSpec("TCB Scans (project list)",
                                            query="one piece"),

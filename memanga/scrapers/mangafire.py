@@ -8,20 +8,21 @@ endpoints to an SPA under /title/hid-slug backed by a JSON API:
 - GET /api/titles/{hid}/chapters?language=en&limit=100&page=N  (chapter list)
 - GET /api/chapters/{chapter_id}                               (page image URLs)
 
-All work with plain HTTP (no VRF token or browser needed).
+All three are token-protected: a tokenless call is answered with HTTP 403
+``{"message": "Missing token."}``. Every request has to carry a ``vrf``
+query parameter minted by ``VRFGenerator`` below.
 
 Image descrambling based on:
 - https://github.com/f4rh4d-4hmed/MangaFire-API
 """
 
 import re
-import json
 import threading
 import time
 from io import BytesIO
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Sequence, Tuple
 from pathlib import Path
-from urllib.parse import quote, urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
@@ -46,6 +47,14 @@ except ImportError:
     CLOUDSCRAPER_AVAILABLE = False
 
 import requests
+
+
+BASE_URL = "https://mangafire.to"
+
+# The SPA's axios client is created with baseURL "/api", so the path it
+# signs is relative to that prefix: /api/titles/dkw/chapters is signed as
+# /titles/dkw/chapters. Strip the prefix before minting a token.
+API_PREFIX = "/api"
 
 
 class MangaFireError(RuntimeError):
@@ -142,13 +151,48 @@ class ImageDescrambler:
 _vrf_thread_local = threading.local()
 
 
+# Asks the site's own generator to sign one API call. Returns a wrapper
+# object rather than the bare token so a thrown JS error crosses back as
+# data instead of a Playwright evaluation failure — and so a genuinely
+# unprotected endpoint (null) stays distinguishable from a failure.
+_TOKEN_SCRIPT = """
+([path, pairs]) => {
+    const generate = window.getProtectionToken;
+    if (typeof generate !== 'function') {
+        return {error: 'window.getProtectionToken is not available'};
+    }
+    const params = {};
+    for (const [key, value] of pairs) { params[key] = value; }
+    return Promise.resolve()
+        .then(() => generate(path, params))
+        .then(token => ({token: token == null ? null : String(token)}))
+        .catch(err => ({error: String(err)}));
+}
+"""
+
+
 # ==================== VRF Token Generator ====================
 class VRFGenerator:
     """
-    Generates VRF tokens by capturing them from actual page requests.
+    Mints the ``vrf`` tokens MangaFire's JSON API requires.
 
-    MangaFire uses VRF tokens to protect AJAX endpoints. This class uses
-    Playwright to load pages and intercept the VRF tokens from requests.
+    MangaFire signs every protected API call with a ``vrf`` query
+    parameter derived from that call's own path and parameters, so tokens
+    are single-purpose: replaying the token minted for
+    ``/titles?keyword=one piece`` against ``keyword=naruto`` is answered
+    with HTTP 403 ``{"message": "Invalid token."}``.
+
+    The signing routine ships inside MangaFire's VM-obfuscated bundle,
+    which exposes it as ``window.getProtectionToken(path, params)``. We
+    call that function in a headless page instead of reimplementing the
+    cipher in Python: both the algorithm and the per-response key blob the
+    site hands its SPA can be rotated at any time, and a reimplementation
+    would then mint rejected tokens with no obvious cause.
+
+    The browser stays on the *token* path only. Minted tokens are plain
+    strings that replay fine over the normal ``requests`` session with no
+    browser cookies, so chapter listing, page extraction and image
+    downloads all keep running on ordinary HTTP.
 
     Uses ThreadPoolExecutor to run Playwright in a separate thread,
     avoiding conflicts with asyncio event loops (e.g., from rich library).
@@ -178,7 +222,9 @@ class VRFGenerator:
         if self._initialized:
             return
 
-        self._pages_data_cache: Dict[str, dict] = {}
+        # Tokens are a pure function of path + params, so the same lookup
+        # never needs a second browser round-trip within a run.
+        self._token_cache: Dict[Tuple, Optional[str]] = {}
         self._initialized = True
 
     def _ensure_browser_in_thread(self):
@@ -207,7 +253,7 @@ class VRFGenerator:
         # so sync_playwright().start() doesn't raise "already started".
         self._close_in_thread()
 
-        print("[MangaFire] Starting Firefox browser (bypasses bot detection)...")
+        print("[MangaFire] Starting the browser used to mint API tokens...")
         pw = sync_playwright().start()
         try:
             browser = pw.firefox.launch(headless=True)
@@ -231,91 +277,92 @@ class VRFGenerator:
         _vrf_thread_local.page = page
         return _vrf_thread_local.page
 
-    def _get_chapter_pages_in_thread(self, chapter_url: str) -> Tuple[List[str], List[int]]:
-        """Get page URLs and scramble offsets - runs in executor thread."""
-        page = self._ensure_browser_in_thread()
+    def _ensure_token_page_in_thread(self):
+        """Ensure the browser page has MangaFire's token generator loaded.
 
-        image_urls = []
-        offsets = []
-        captured_images = []
-
-        def handle_route(route):
-            """Intercept AJAX requests and capture image data."""
-            nonlocal captured_images
-            response = route.fetch()
-            url = route.request.url
-
-            if 'mangafire.to' in url and 'ajax/read' in url:
-                if '/chapter/' in url or '/volume/' in url:
-                    try:
-                        body = response.body().decode('utf-8')
-                        data = json.loads(body)
-                        if isinstance(data.get('result'), dict) and 'images' in data['result']:
-                            captured_images = data['result']['images']
-                            print(f"[MangaFire] Captured {len(captured_images)} images from AJAX")
-                    except Exception as e:
-                        print(f"[MangaFire] AJAX parse error: {e}")
-
-            route.fulfill(response=response)
-
-        # Set up route interception
-        page.route('**/ajax/**', handle_route)
-
-        try:
-            print(f"[MangaFire] Loading chapter page: {chapter_url}")
-            page.goto(chapter_url, wait_until='domcontentloaded', timeout=60000)
-
-            # Wait for AJAX to complete
-            print("[MangaFire] Waiting for AJAX response...")
-            page.wait_for_timeout(15000)  # 15 seconds for AJAX
-
-            if captured_images:
-                for img_data in captured_images:
-                    if isinstance(img_data, list) and len(img_data) >= 1:
-                        url = img_data[0]
-                        # Offset is typically the 3rd element (index 2)
-                        offset = img_data[2] if len(img_data) > 2 else 0
-                        if not isinstance(offset, int):
-                            offset = 0
-
-                        image_urls.append(url)
-                        offsets.append(offset)
-
-                # Cache the result
-                self._pages_data_cache[chapter_url] = {
-                    'urls': image_urls,
-                    'offsets': offsets
-                }
-
-                print(f"[MangaFire] Found {len(image_urls)} pages")
-            else:
-                print("[MangaFire] No page data captured from browser")
-
-        except Exception as e:
-            print(f"[MangaFire] Browser error: {e}")
-        finally:
-            # Remove route handler
-            page.unroute('**/ajax/**')
-
-        return image_urls, offsets
-
-    def get_chapter_pages(self, chapter_url: str) -> Tuple[List[str], List[int]]:
+        The generator is installed by the site's own bundle, so the page
+        has to sit on a MangaFire document. One load serves every
+        subsequent mint — after that a token costs a single evaluate().
         """
-        Get page URLs and scramble offsets for a chapter.
+        page = self._ensure_browser_in_thread()
+        if getattr(_vrf_thread_local, 'token_page_ready', False):
+            return page
+
+        print("[MangaFire] Loading the site's token generator...")
+        page.goto(BASE_URL, wait_until='domcontentloaded', timeout=60000)
+        page.wait_for_function(
+            "() => typeof window.getProtectionToken === 'function'",
+            timeout=60000,
+        )
+        _vrf_thread_local.token_page_ready = True
+        return page
+
+    def _mint_token_in_thread(self, api_path: str,
+                              params: List[Tuple[str, str]]) -> Optional[str]:
+        """Sign one API call - runs in executor thread."""
+        page = self._ensure_token_page_in_thread()
+        result = page.evaluate(_TOKEN_SCRIPT, [api_path, [list(p) for p in params]])
+
+        detail = None
+        if not isinstance(result, dict):
+            detail = f"unexpected generator result: {result!r}"
+        elif result.get('error'):
+            detail = result['error']
+        if detail:
+            raise MangaFireError(
+                f"MangaFire token generation failed for {api_path}: {detail}"
+            )
+        return result.get('token')
+
+    def get_token(self, api_path: str,
+                  params: Sequence[Tuple[str, str]] = ()) -> Optional[str]:
+        """
+        Return the ``vrf`` token for one API call.
+
+        ``api_path`` is relative to the API prefix (``/titles``, not
+        ``/api/titles``) and ``params`` are the call's other query
+        parameters, decoded. ``None`` means MangaFire does not protect
+        that endpoint - its generator returns null for those (``/me``,
+        ``/top-titles``) and the request must then be sent unsigned.
 
         Dispatches to executor thread to avoid asyncio conflicts.
         """
+        key = (api_path, tuple(params))
         # Check cache first (no thread needed)
-        if chapter_url in self._pages_data_cache:
-            cached = self._pages_data_cache[chapter_url]
-            return cached['urls'], cached['offsets']
+        if key in self._token_cache:
+            return self._token_cache[key]
 
-        return self._run_serialized(
-            self._get_chapter_pages_in_thread, chapter_url, timeout=120,
+        token = self._run_serialized(
+            self._mint_token_in_thread, api_path, list(params), timeout=120,
         )
+        self._token_cache[key] = token
+        return token
+
+    def invalidate(self):
+        """Drop cached tokens and reload the generator before the next mint.
+
+        MangaFire keys the generator off a config blob handed out with
+        each document, so a page left open long enough can start minting
+        tokens the server no longer accepts. A rejected token is the only
+        signal we get, so treat it as "reload the page and re-mint".
+        """
+        self._token_cache.clear()
+        try:
+            self._run_serialized(self._reset_token_page_in_thread, timeout=10)
+        except Exception:
+            pass
+
+    def _reset_token_page_in_thread(self):
+        """Force the next mint to reload the page - executor-thread only."""
+        if hasattr(_vrf_thread_local, 'token_page_ready'):
+            del _vrf_thread_local.token_page_ready
 
     def _close_in_thread(self):
         """Clean up browser resources - runs in executor thread."""
+        # The generator lives in the page being torn down, so the next
+        # mint has to load it again.
+        self._reset_token_page_in_thread()
+
         try:
             if hasattr(_vrf_thread_local, 'page'):
                 _vrf_thread_local.page.close()
@@ -352,7 +399,7 @@ class VRFGenerator:
             pass
 
         # Clear cache to free memory
-        self._pages_data_cache.clear()
+        self._token_cache.clear()
 
     def restart(self):
         """Restart browser (close and clear state so next call re-opens)."""
@@ -377,20 +424,20 @@ class MangaFireScraper(BaseScraper):
     Scraper for MangaFire.to
 
     Features:
-    - Direct AJAX API access (faster, no browser needed for most operations)
-    - VRF bypass via Playwright (fallback for protected endpoints)
+    - JSON API access, signed with a per-request VRF token
     - Image descrambling for protected images
     - Multi-language support (en, es, fr, ja, pt, etc.)
     """
 
     name = "mangafire"
-    base_url = "https://mangafire.to"
+    base_url = BASE_URL
 
     # Supported languages
     LANGUAGES = ['en', 'es', 'es-la', 'fr', 'ja', 'pt', 'pt-br']
 
-    # Search uses the JSON API directly (see search() below).
-    # Chapter-pages route through VRFGenerator's own _run_serialized.
+    # Every API call is signed in _api_get_json(). Token minting routes
+    # through VRFGenerator's own _run_serialized; image downloads and the
+    # API fetches themselves stay on the plain session.
 
     def __init__(self):
         super().__init__()
@@ -436,19 +483,114 @@ class MangaFireScraper(BaseScraper):
             return str(int(value))
         return str(value).strip()
 
-    def _api_get_json(self, url: str) -> dict:
-        """Fetch a MangaFire API endpoint and raise useful scraper errors."""
+    def _split_api_url(self, url: str) -> Tuple[str, List[Tuple[str, str]]]:
+        """Split a MangaFire API URL into the path and params to sign.
+
+        The path is returned relative to ``API_PREFIX`` because that is
+        what the site's generator signs. Any ``vrf`` already on the URL is
+        dropped: a token covers the request's *other* parameters, so
+        signing over a previous token could never validate.
+        """
+        parsed = urlparse(url)
+        path = parsed.path
+        if path.startswith(API_PREFIX):
+            path = path[len(API_PREFIX):]
+        params = [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if key != 'vrf'
+        ]
+        return path, params
+
+    def _signed_api_url(self, api_path: str, params: List[Tuple[str, str]],
+                        token: Optional[str]) -> str:
+        """Rebuild the request URL with its ``vrf`` token appended."""
+        query = list(params)
+        if token:
+            query.append(('vrf', token))
+        suffix = f"?{urlencode(query)}" if query else ''
+        return f"{self.base_url}{API_PREFIX}{api_path}{suffix}"
+
+    def _vrf_token(self, api_path: str, params: List[Tuple[str, str]]
+                   ) -> Tuple[Optional[str], Optional[str]]:
+        """Mint the token for one API call, returning ``(token, error)``.
+
+        A missing token is not fatal on its own - MangaFire leaves some
+        endpoints unprotected and its generator returns null for those -
+        so the failure is carried alongside instead of raised. If the
+        server then answers 403, the error explains that token generation,
+        not the request itself, is what actually broke.
+        """
         try:
-            response = self.session.get(url, timeout=30)
-        except requests.RequestException as e:
-            raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
+            return get_vrf_generator().get_token(api_path, params), None
         except Exception as e:
-            raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
+            return None, str(e)
+
+    def _api_error_message(self, url: str, status: int, token: Optional[str],
+                           token_error: Optional[str]) -> str:
+        """Explain an API failure, naming the token step when it's to blame."""
+        message = f"MangaFire returned HTTP {status} for {url}"
+        if status != 403:
+            return message
+        if token_error:
+            return f"{message} (VRF token generation failed: {token_error})"
+        if not token:
+            return (f"{message} (endpoint is token-protected but MangaFire's "
+                    f"generator issued no VRF token)")
+        return f"{message} (MangaFire rejected the VRF token)"
+
+    def _is_token_403(self, response) -> bool:
+        """Decide whether a 403 blames the token rather than the caller.
+
+        MangaFire answers a bad token with ``{"message": "Invalid
+        token."}`` or ``{"message": "Missing token."}``, but a 403 can
+        also mean something a reload will never fix. Only the former is
+        worth a browser round-trip. A body we cannot read counts as
+        token-related: Cloudflare interstitials arrive that way, and one
+        wasted reload beats giving up on a recoverable failure.
+        """
+        try:
+            payload = response.json()
+        except Exception:
+            return True
+        if not isinstance(payload, dict):
+            return True
+        message = str(payload.get('message') or payload.get('error') or '')
+        if not message:
+            return True
+        return 'token' in message.lower()
+
+    def _api_get_json(self, url: str) -> dict:
+        """Fetch a MangaFire API endpoint and raise useful scraper errors.
+
+        Signs the call with a ``vrf`` token; a tokenless request is
+        answered with HTTP 403 ``{"message": "Missing token."}``. A
+        rejected token buys one retry against a freshly reloaded
+        generator, which is what recovers when MangaFire rotates the
+        config keying it mid-run.
+        """
+        api_path, params = self._split_api_url(url)
+
+        token, token_error = self._vrf_token(api_path, params)
+        response = self._api_get(url, api_path, params, token)
+
+        if (response.status_code == 403 and token_error is None
+                and self._is_token_403(response)):
+            # The generator answered, and the server still refused over
+            # the token. That is what a rotated config looks like from
+            # here - both for a token that was minted and refused, and
+            # for a stale generator that claimed the endpoint was
+            # unprotected (null token) when it is not. Reload it and
+            # sign the call once more before giving up. A generator that
+            # failed outright (token_error) gets no retry: the browser
+            # step is broken, so a second mint would fail the same way.
+            get_vrf_generator().invalidate()
+            token, token_error = self._vrf_token(api_path, params)
+            response = self._api_get(url, api_path, params, token)
 
         if response.status_code != 200:
-            raise MangaFireError(
-                f"MangaFire returned HTTP {response.status_code} for {url}"
-            )
+            raise MangaFireError(self._api_error_message(
+                url, response.status_code, token, token_error))
 
         try:
             return response.json()
@@ -456,6 +598,17 @@ class MangaFireScraper(BaseScraper):
             raise MangaFireError(
                 f"MangaFire returned a non-JSON response for {url}: {e}"
             ) from e
+
+    def _api_get(self, url: str, api_path: str,
+                 params: List[Tuple[str, str]], token: Optional[str]):
+        """Issue one signed API request, mapping transport errors."""
+        try:
+            return self.session.get(
+                self._signed_api_url(api_path, params, token), timeout=30)
+        except requests.RequestException as e:
+            raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
+        except Exception as e:
+            raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
 
     def _parse_chapter_url(self, chapter_url: str) -> Tuple[str, str, str]:
         """
@@ -507,7 +660,8 @@ class MangaFireScraper(BaseScraper):
         The browse page renders results client-side, but the SPA's own
         /api/titles endpoint returns the search payload directly.
         """
-        api_url = f"{self.base_url}/api/titles?keyword={quote(query, safe='')}"
+        api_url = (f"{self.base_url}/api/titles"
+                   f"?{urlencode({'keyword': query})}")
         data = self._api_get_json(api_url)
         items = data.get('items')
         if not isinstance(items, list):
@@ -620,55 +774,6 @@ class MangaFireScraper(BaseScraper):
                 return chapter.url
 
         raise MangaFireError(f"MangaFire chapter {wanted} not found for {manga_id}")
-
-    def _try_direct_ajax(self, manga_id: str, lang: str, chap_num: str) -> Tuple[List[str], List[int]]:
-        """
-        Try to fetch pages directly via AJAX (without VRF).
-
-        Some endpoints work without VRF, especially for older chapters.
-        """
-        image_urls = []
-        offsets = []
-
-        # Try different URL formats
-        url_formats = [
-            f"{self.base_url}/ajax/read/{manga_id}/chapter/{lang}/{chap_num}",
-            f"{self.base_url}/ajax/read/{manga_id}/{lang}/{chap_num}",
-        ]
-
-        for url in url_formats:
-            try:
-                print(f"[MangaFire] Trying direct AJAX: {url}")
-                response = self.session.get(url, timeout=30)
-
-                if response.status_code != 200:
-                    continue
-
-                data = response.json()
-
-                if data.get('status') == 200 and 'result' in data:
-                    result = data['result']
-                    images = result.get('images', [])
-
-                    for img_data in images:
-                        if isinstance(img_data, list) and len(img_data) >= 1:
-                            img_url = img_data[0]
-                            offset = img_data[2] if len(img_data) > 2 else 0
-                            if not isinstance(offset, int):
-                                offset = 0
-
-                            image_urls.append(img_url)
-                            offsets.append(offset)
-
-                    if image_urls:
-                        print(f"[MangaFire] Direct AJAX success! Found {len(image_urls)} pages")
-                        return image_urls, offsets
-
-            except Exception as e:
-                print(f"[MangaFire] Direct AJAX failed for {url}: {e}")
-                continue
-
-        return [], []
 
     def get_pages(self, chapter_url: str) -> List[str]:
         """

@@ -6,6 +6,10 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- #142 MangaFire now signs each JSON API call with a per-request token, so
+  search, chapter listing, and page fetches no longer fail with HTTP 403.
+
 ## [0.4.0] - 2026-07-19
 
 ### Added
