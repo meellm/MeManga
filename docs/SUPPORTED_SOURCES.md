@@ -20,7 +20,7 @@ Large sites with extensive manga libraries.
 |--------|------|-------|
 | mangadex.org | API | Largest fan translation library |
 | weebcentral.com | Playwright | 1000+ series, fast search |
-| mangafire.to | Playwright | VRF bypass + image descrambling |
+| mangafire.to | Playwright | VRF-signed API + image descrambling |
 | mangapill.com | Requests | Fast, no Cloudflare |
 | bato.to, batoto.to | Requests | Community-driven |
 | comick.io, comick.dev | Requests | Clean API |

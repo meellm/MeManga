@@ -193,8 +193,11 @@ class TestMangaFireSearchUsesJsonApi:
     `.info a[href*="/manga/"]` result links. The browse page the search
     bar redirects to renders results client-side under /title/hid-slug
     links, so that selector matched nothing and every search returned 0
-    results. search() must hit GET /api/titles?keyword=... over plain HTTP
-    instead - no browser involved at all.
+    results. search() must hit GET /api/titles?keyword=... instead.
+
+    Issue #142 added a `vrf` token to that call, so the browser is back -
+    but only to mint the token. The result set still comes from one JSON
+    request, never from scraped HTML.
     """
 
     class _FakeResponse:
@@ -215,8 +218,20 @@ class TestMangaFireSearchUsesJsonApi:
             self.urls.append(url)
             return TestMangaFireSearchUsesJsonApi._FakeResponse(self._payload)
 
-    def test_search_hits_titles_api_with_encoded_keyword(self):
+    class _StubVRF:
+        def __init__(self, token="TOKEN"):
+            self._token = token
+
+        def get_token(self, api_path, params=()):
+            return self._token
+
+        def invalidate(self):
+            pass
+
+    def test_search_hits_titles_api_with_encoded_keyword(self, monkeypatch):
         from memanga.scrapers import mangafire as mf
+
+        monkeypatch.setattr(mf, "get_vrf_generator", lambda: self._StubVRF())
 
         scraper = mf.MangaFireScraper()
         scraper.session = self._FakeSession({
@@ -230,14 +245,18 @@ class TestMangaFireSearchUsesJsonApi:
 
         results = scraper.search("blue lock/2")
 
+        # One JSON call, keyword still escaped so the slash can't break
+        # out into the path, now signed with the vrf token.
         assert scraper.session.urls == [
-            "https://mangafire.to/api/titles?keyword=blue%20lock%2F2",
+            "https://mangafire.to/api/titles?keyword=blue+lock%2F2&vrf=TOKEN",
         ]
         assert results and results[0].url == "https://mangafire.to/title/abc-blue-lock"
 
-    def test_search_does_not_launch_firefox(self, monkeypatch):
-        """Hard guard: calling MangaFireScraper.search() must NOT start
-        Playwright at all - search works over plain HTTP.
+    def test_search_only_touches_the_browser_to_mint_a_token(self, monkeypatch):
+        """Hard guard: the browser is a token source, not the search
+        transport. With an unprotected endpoint (MangaFire's generator
+        returns null) the whole path stays browser-free, and results
+        never come from a rendered page.
         """
         from memanga.scrapers import mangafire as mf
 
@@ -258,11 +277,15 @@ class TestMangaFireSearchUsesJsonApi:
 
         import playwright.sync_api as pwapi
         monkeypatch.setattr(pwapi, "sync_playwright", lambda: _BoomPW())
+        monkeypatch.setattr(mf, "get_vrf_generator",
+                            lambda: self._StubVRF(token=None))
 
         scraper = mf.MangaFireScraper()
         scraper.session = self._FakeSession({"items": [], "meta": {}})
         scraper.search("x")
+
         assert called["n"] == 0, "search must stay browser-free"
+        assert scraper.session.urls == ["https://mangafire.to/api/titles?keyword=x"]
 
 
 class TestWeebCentralSearchHitsDataEndpoint:
