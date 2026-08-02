@@ -944,9 +944,13 @@ class BackgroundWorker:
             count = -1
             # Try once + retry deltas defined above. Each attempt does
             # a full scraper.get_chapters() — for plain-requests
-            # sources that's ~1 s, for Playwright AJAX endpoints
-            # (MangaFire/Comick/...) usually <1 s, for Playwright
-            # browser-driven sources (WeebCentral/MangaKatana) 3-10 s.
+            # sources that's ~1 s, for JSON-API sources (Comick/...)
+            # usually <1 s, for Playwright browser-driven sources
+            # (WeebCentral/MangaKatana) 3-10 s. MangaFire is the odd
+            # one out: its API is plain HTTP but each call carries a
+            # vrf token minted in a browser, so the first call in a
+            # process pays a one-off browser start and later ones are
+            # back under a second.
             for i, delay in enumerate((0.0,) + self._COUNT_RETRY_DELAYS):
                 if delay > 0:
                     import time as _t
