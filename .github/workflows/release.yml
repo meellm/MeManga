@@ -16,9 +16,18 @@ jobs:
           - os: windows-latest
             artifact_name: MeManga.exe
             asset_name: MeManga-windows-x64.exe
+          # macos-latest is an Apple Silicon (arm64) runner.
           - os: macos-latest
             artifact_name: MeManga
             asset_name: MeManga-macos-arm64
+            target_arch: arm64
+          # macos-26-intel is GitHub's current standard x64 macOS runner
+          # image, so the x86_64 slice is built natively rather than
+          # cross-compiled from Apple Silicon.
+          - os: macos-26-intel
+            artifact_name: MeManga
+            asset_name: MeManga-macos-x64
+            target_arch: x86_64
           - os: ubuntu-latest
             artifact_name: MeManga
             asset_name: MeManga-linux-x64
@@ -62,7 +71,29 @@ jobs:
         # build_app.py produces a single-file binary under `release/`
         # (release/MeManga.exe on Windows, release/MeManga elsewhere)
         # and sweeps the build/ + dist/ scratch dirs afterwards.
+        #
+        # MEMANGA_TARGET_ARCH pins the macOS CPU slice (see
+        # packaging/memanga-release.spec). It is empty on Windows/Linux,
+        # where the spec ignores it and follows the build host.
+        env:
+          MEMANGA_TARGET_ARCH: ${{ matrix.target_arch }}
         run: python build_app.py
+
+      - name: Verify macOS artifact architecture
+        # Guard against the release silently shipping the wrong slice
+        # (issue #146). `lipo -archs` reports the Mach-O bootloader's
+        # architecture; it must equal the arch this matrix leg targets
+        # before the binary is renamed and uploaded.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          bin="release/${{ matrix.artifact_name }}"
+          archs=$(lipo -archs "$bin")
+          echo "lipo -archs $bin -> $archs"
+          if [ "$archs" != "${{ matrix.target_arch }}" ]; then
+            echo "::error::Expected ${{ matrix.target_arch }} slice but built binary reports '$archs'"
+            exit 1
+          fi
 
       - name: Verify Playwright works inside the built executable (Windows)
         # Release gate for issue #28: run the actual artifact on the

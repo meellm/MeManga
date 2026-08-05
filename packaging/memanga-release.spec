@@ -169,6 +169,20 @@ if _sys.platform == "darwin":
 else:
     _icon = os.path.join(project_root, "packaging", "icon.ico")
 
+# Target CPU architecture for the macOS build. PyInstaller only honours
+# `target_arch` on macOS ("x86_64", "arm64", or "universal2"); it is
+# ignored on Windows / Linux. Left unset it follows the build host,
+# which silently ships an Apple-Silicon-only binary whenever the runner
+# happens to be arm64 - leaving Intel Mac users with nothing to run
+# (issue #146). The release workflow pins it per-runner via the
+# MEMANGA_TARGET_ARCH env var so Intel and Apple Silicon each get an
+# explicit, verifiable slice. We deliberately do NOT default to
+# universal2: one non-universal wheel in the PySide6 + Playwright stack
+# would turn that into a fragile, silently-broken bundle.
+_target_arch = None
+if _sys.platform == "darwin":
+    _target_arch = os.environ.get("MEMANGA_TARGET_ARCH") or None
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -190,7 +204,7 @@ exe = EXE(
     icon=_icon,
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,
+    target_arch=_target_arch,
     codesign_identity=None,
     entitlements_file=None,
 )
