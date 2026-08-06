@@ -390,7 +390,7 @@ SCRAPERS = {
     "readhellsing.com": ZazaMangaScraper,
     "readoverlord.com": ZazaMangaScraper,
 
-    # MangaBall - Multi-language aggregator (Playwright, limited search)
+    # MangaBall - Multi-language aggregator (HTTP JSON API)
     "mangaball.net": MangaBallScraper,
 
     # MangaClash - Manga aggregator (Playwright + Madara + CF)
