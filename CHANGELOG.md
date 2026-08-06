@@ -11,6 +11,11 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-06
+
+### Changed
+- Version metadata synchronized for the v0.4.2 release.
+
 ## [0.4.1] - 2026-08-02
 
 ### Fixed
