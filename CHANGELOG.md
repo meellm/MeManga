@@ -6,6 +6,11 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-06
+
+### Added
+- #147 macOS releases now publish separate Apple Silicon and Intel assets.
+
 ## [0.4.1] - 2026-08-02
 
 ### Fixed
