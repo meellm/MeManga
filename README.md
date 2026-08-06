@@ -43,6 +43,7 @@ The fastest path is the release binary. Just double-click and you're in.
 |---|---|
 | Windows | [`MeManga-windows-x64.exe`](https://github.com/meellm/MeManga/releases/latest) |
 | macOS (Apple Silicon) | [`MeManga-macos-arm64`](https://github.com/meellm/MeManga/releases/latest) |
+| macOS (Intel) | [`MeManga-macos-x64`](https://github.com/meellm/MeManga/releases/latest) |
 | Linux (x86_64) | [`MeManga-linux-x64`](https://github.com/meellm/MeManga/releases/latest) |
 
 > **First launch downloads Firefox** (~80 MB download, one-time.)
