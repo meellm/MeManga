@@ -81,6 +81,10 @@ PARSING_PROBES = {
     "manganato.com": ProbeSpec("Manganato", query="naruto"),
     "mangahub.io": ProbeSpec("MangaHub", query="one piece"),
     "comix.to": ProbeSpec("Comix.to", query="kubera"),
+    # Pages come from a JSON API keyed by the chapter id in the URL
+    # (issue #152) - this probe catches that endpoint/host changing.
+    "mangataro.org": ProbeSpec("MangaTaro (JSON page API)",
+                                query="koi to yobu"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),
