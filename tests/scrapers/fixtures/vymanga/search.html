@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="row book-list">
+    <div class="col-lg-2 col-md-3 col-4">
+      <div class="comic-item">
+        <a href="/manga/naruto-bc8">
+          <div class="comic-image">
+            <img alt="Naruto" class="image lozad" data-src="https://cdnxyz.xyz/web/cover/841/thumbnail.png" src="/web/img/blank.gif" title="Naruto">
+            <span class="tray-item">Chapter 700.5 : Uzumaki Naruto</span>
+          </div>
+          <div class="comic-title">Naruto</div>
+        </a>
+      </div>
+    </div>
+
+    <!-- duplicate href: must be de-duped -->
+    <div class="col-lg-2 col-md-3 col-4">
+      <div class="comic-item">
+        <a href="/manga/naruto-bc8">
+          <div class="comic-image">
+            <img class="image lozad" data-src="https://cdnxyz.xyz/web/cover/841/thumbnail.png" src="/web/img/blank.gif">
+          </div>
+          <div class="comic-title">Naruto</div>
+        </a>
+      </div>
+    </div>
+
+    <!-- absolute href + title only via img alt (no .comic-title) -->
+    <div class="col-lg-2 col-md-3 col-4">
+      <div class="comic-item">
+        <a href="https://mangavyvy.net/manga/boruto-naruto-next-generations-2f">
+          <div class="comic-image">
+            <img class="image lozad" alt="Boruto: Naruto Next Generations" data-src="https://cdnxyz.xyz/web/cover/22508/thumbnail.png" src="/web/img/blank.gif">
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

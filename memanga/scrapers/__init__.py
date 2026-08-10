@@ -161,6 +161,7 @@ from .bakirahen import BakiRahenScraper
 from .blamemanga import BlameMangaScraper
 from .jjkmanga import JJKMangaScraper
 from .kagane import KaganeScraper
+from .vymanga import VyMangaScraper
 
 # ── Scrapers kept as individual files (unique domain mappings) ──
 
@@ -617,6 +618,10 @@ SCRAPERS = {
     # Kagane - Multi-manga REST API + Playwright for DRM-protected images
     "kagane.org": KaganeScraper,
     "www.kagane.org": KaganeScraper,
+
+    # VyManga - General aggregator (chapter links via ad-redirect -> Blogger CDN)
+    "mangavyvy.net": VyMangaScraper,
+    "vymanga.net": VyMangaScraper,
 }
 
 # Merge template-based scrapers into SCRAPERS dict
