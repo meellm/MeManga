@@ -17,6 +17,7 @@ Working sources:
 - Manganato (manganato.com) - Same network as Kakalot
 - Mangago (mangago.me) - Large yaoi/shoujo collection
 - MangaTaro (mangataro.org) - ComicK replacement, popular aggregator
+- Mangadot (mangadot.net) - Multi-language aggregator (SSR + JSON API)
 - MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
 - Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
 """
@@ -41,6 +42,7 @@ from .mangakakalot import MangakakalotScraper
 from .manganato import ManganatoScraper
 from .mangago import MangagoScraper
 from .mangataro import MangaTaroScraper
+from .mangadot import MangadotScraper
 from .flamecomics import FlameComicsScraper
 from .luminousscans import LuminousScansScraper
 from .mangahere import MangaHereScraper
@@ -222,6 +224,9 @@ SCRAPERS = {
 
     # MangaTaro (ComicK replacement)
     "mangataro.org": MangaTaroScraper,
+
+    # Mangadot - Multi-language aggregator (React Router SSR + JSON API)
+    "mangadot.net": MangadotScraper,
 
     # FlameComics
     "flamecomics.xyz": FlameComicsScraper,
