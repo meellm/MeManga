@@ -620,8 +620,12 @@ SCRAPERS = {
     "www.kagane.org": KaganeScraper,
 
     # VyManga - General aggregator (chapter links via ad-redirect -> Blogger CDN)
+    # Legacy hosts (vymanga.net / vyvymanga.net) 403 on their own /manga/ pages
+    # but the scraper canonicalises them to mangavyvy.net; register them so
+    # saved/manual entries resolve to a scraper before canonicalisation runs.
     "mangavyvy.net": VyMangaScraper,
     "vymanga.net": VyMangaScraper,
+    "vyvymanga.net": VyMangaScraper,
 }
 
 # Merge template-based scrapers into SCRAPERS dict
