@@ -6,9 +6,11 @@ PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP, and optionally email
 them to your Kindle.
 
 > This guide covers the CLI flow only. For the desktop app, grab the
-> latest `MeManga.exe` / `MeManga` from the
-> [GitHub releases page](https://github.com/meellm/MeManga/releases)
-> and double-click — there's nothing to configure up front.
+> latest build from the
+> [GitHub releases page](https://github.com/meellm/MeManga/releases) —
+> double-click on Windows/macOS, or on Linux extract the `.tar.gz` and
+> run the binary. See the [README download section](../README.md#download)
+> for the file to pick and how to launch it. Nothing to configure up front.
 
 ---
 

@@ -134,15 +134,54 @@ jobs:
             exit 1
           }
 
-      - name: Rename artifact for upload
+      - name: Package artifact for upload
+        # Windows and macOS upload the raw binary as-is; only the Linux
+        # asset is repackaged. A GitHub release asset is raw bytes with
+        # no Unix mode, and browsers save the download without the
+        # executable bit, so a raw Linux ELF lands as `-rw-r--r--` and
+        # dies with "Permission denied" before the app starts
+        # (issue #167). Wrapping the Linux binary in a gzip tarball — the
+        # format Linux users already reach for — records the +x bit
+        # *inside* the archive, so `tar xzf` restores a runnable file.
+        id: package
         shell: bash
-        run: mv "release/${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"
+        run: |
+          bin="release/${{ matrix.artifact_name }}"
+          asset="${{ matrix.asset_name }}"
+          mv "$bin" "$asset"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            chmod +x "$asset"
+            tar -czf "${asset}.tar.gz" "$asset"
+            echo "upload_path=${asset}.tar.gz" >> "$GITHUB_OUTPUT"
+          else
+            echo "upload_path=${asset}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify Linux archive preserves the executable bit
+        # Release gate for issue #167: prove the tarball actually restores
+        # a runnable binary before it can reach the release page. Extract
+        # into a scratch dir and assert the extracted file is executable;
+        # a dropped +x bit fails the build instead of shipping a download
+        # users cannot launch.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          asset="${{ matrix.asset_name }}"
+          workdir="$(mktemp -d)"
+          tar -xzf "${asset}.tar.gz" -C "$workdir"
+          extracted="$workdir/$asset"
+          ls -l "$extracted"
+          if [ ! -x "$extracted" ]; then
+            echo "::error::Extracted Linux binary is not executable — release would ship an unlaunchable file"
+            exit 1
+          fi
+          echo "OK: extracted binary is executable"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}
+          path: ${{ steps.package.outputs.upload_path }}
           retention-days: 7
 
   release:

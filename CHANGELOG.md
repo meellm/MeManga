@@ -6,6 +6,13 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- #167 Linux release downloads now ship as `MeManga-linux-x64.tar.gz` so
+  the executable bit survives download and extraction. A raw ELF asset
+  saved through a browser lost its `+x` bit and failed to launch with
+  "Permission denied"; the tarball records the executable bit inside the
+  archive, so `tar xzf` restores a runnable binary.
+
 ## [0.4.2] - 2026-08-06
 
 ### Added
