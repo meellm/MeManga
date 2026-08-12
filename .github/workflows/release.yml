@@ -16,17 +16,20 @@ jobs:
           - os: windows-latest
             artifact_name: MeManga.exe
             asset_name: MeManga-windows-x64.exe
-          # macos-latest is an Apple Silicon (arm64) runner.
+          # macos-latest is an Apple Silicon (arm64) runner. The built
+          # binary ships wrapped in MeManga.app inside a .zip (issue #163)
+          # so the download is a normal double-clickable app, not a raw
+          # extensionless Mach-O that opens in TextEdit.
           - os: macos-latest
             artifact_name: MeManga
-            asset_name: MeManga-macos-arm64
+            asset_name: MeManga-macos-arm64.zip
             target_arch: arm64
           # macos-26-intel is GitHub's current standard x64 macOS runner
           # image, so the x86_64 slice is built natively rather than
           # cross-compiled from Apple Silicon.
           - os: macos-26-intel
             artifact_name: MeManga
-            asset_name: MeManga-macos-x64
+            asset_name: MeManga-macos-x64.zip
             target_arch: x86_64
           - os: ubuntu-latest
             artifact_name: MeManga
@@ -134,7 +137,40 @@ jobs:
             exit 1
           }
 
+      - name: Package macOS app bundle (MeManga.app in .zip)
+        # Root-cause fix for issue #163. GitHub serves the raw one-file
+        # Mach-O as application/octet-stream, so a browser download lands
+        # as an extensionless document (opens in TextEdit) and loses its
+        # executable bit (mode 0644). Wrap the just-verified binary in a
+        # minimal MeManga.app and archive it with `ditto`, which preserves
+        # the exec bit and bundle layout, so users get a normal app to
+        # double-click. `ditto --keepParent` keeps MeManga.app as the
+        # top-level folder inside the zip.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python packaging/macos_app.py build \
+            --exe "release/${{ matrix.artifact_name }}" \
+            --dest release \
+            --icon packaging/icon.icns
+          ditto -c -k --keepParent "release/MeManga.app" "${{ matrix.asset_name }}"
+
+      - name: Validate packaged macOS app bundle
+        # Release gate: the uploaded .zip must contain a launchable
+        # MeManga.app/Contents/MacOS/MeManga (exec bit set), a valid
+        # Info.plist, and the CPU slice this matrix leg targets — not just
+        # a raw Mach-O. Fails the release before anything reaches the page.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          python packaging/macos_app.py validate \
+            --path "${{ matrix.asset_name }}" \
+            --arch "${{ matrix.target_arch }}"
+
       - name: Rename artifact for upload
+        # Windows/Linux ship the raw one-file exe directly; macOS already
+        # produced its .zip asset in the packaging step above.
+        if: runner.os != 'macOS'
         shell: bash
         run: mv "release/${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"
 
