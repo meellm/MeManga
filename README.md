@@ -37,14 +37,16 @@ Works offline once chapters are downloaded.
 
 ## Download
 
-The fastest path is the release binary. On Windows and macOS, just double-click and you're in.
+The fastest path is the release download for your platform.
 
 | OS | File |
 |---|---|
 | Windows | [`MeManga-windows-x64.exe`](https://github.com/meellm/MeManga/releases/latest) |
-| macOS (Apple Silicon) | [`MeManga-macos-arm64`](https://github.com/meellm/MeManga/releases/latest) |
-| macOS (Intel) | [`MeManga-macos-x64`](https://github.com/meellm/MeManga/releases/latest) |
+| macOS (Apple Silicon) | [`MeManga-macos-arm64.zip`](https://github.com/meellm/MeManga/releases/latest) |
+| macOS (Intel) | [`MeManga-macos-x64.zip`](https://github.com/meellm/MeManga/releases/latest) |
 | Linux (x86_64) | [`MeManga-linux-x64.tar.gz`](https://github.com/meellm/MeManga/releases/latest) |
+
+On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double-click.
 
 > **First launch downloads Firefox** (~80 MB download, one-time.)
 > Playwright uses it under the hood to scrape JS-heavy sources like MangaFire and WeebCentral.

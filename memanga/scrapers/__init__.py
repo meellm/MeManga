@@ -17,6 +17,7 @@ Working sources:
 - Manganato (manganato.com) - Same network as Kakalot
 - Mangago (mangago.me) - Large yaoi/shoujo collection
 - MangaTaro (mangataro.org) - ComicK replacement, popular aggregator
+- Mangadot (mangadot.net) - Multi-language aggregator (SSR + JSON API)
 - MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
 - Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
 """
@@ -41,6 +42,7 @@ from .mangakakalot import MangakakalotScraper
 from .manganato import ManganatoScraper
 from .mangago import MangagoScraper
 from .mangataro import MangaTaroScraper
+from .mangadot import MangadotScraper
 from .flamecomics import FlameComicsScraper
 from .luminousscans import LuminousScansScraper
 from .mangahere import MangaHereScraper
@@ -76,6 +78,7 @@ from .mangayy import MangaYYScraper
 from .manga4life import Manga4LifeScraper
 from .zazamanga import ZazaMangaScraper
 from .mangaball import MangaBallScraper
+from .atsumaru import AtsumaruScraper
 from .manytoon import ManyToonScraper
 from .pururin import PururinScraper
 from .hentairead import HentaiReadScraper
@@ -161,6 +164,7 @@ from .bakirahen import BakiRahenScraper
 from .blamemanga import BlameMangaScraper
 from .jjkmanga import JJKMangaScraper
 from .kagane import KaganeScraper
+from .vymanga import VyMangaScraper
 
 # ── Scrapers kept as individual files (unique domain mappings) ──
 
@@ -222,6 +226,9 @@ SCRAPERS = {
 
     # MangaTaro (ComicK replacement)
     "mangataro.org": MangaTaroScraper,
+
+    # Mangadot - Multi-language aggregator (React Router SSR + JSON API)
+    "mangadot.net": MangadotScraper,
 
     # FlameComics
     "flamecomics.xyz": FlameComicsScraper,
@@ -392,6 +399,9 @@ SCRAPERS = {
 
     # MangaBall - Multi-language aggregator (HTTP JSON API)
     "mangaball.net": MangaBallScraper,
+
+    # Atsumaru - Manga aggregator (Typesense search + REST API)
+    "atsu.moe": AtsumaruScraper,
 
     # MangaClash - Manga aggregator (Playwright + Madara + CF)
     "mangaclash.com": MangaClashScraper,
@@ -617,6 +627,14 @@ SCRAPERS = {
     # Kagane - Multi-manga REST API + Playwright for DRM-protected images
     "kagane.org": KaganeScraper,
     "www.kagane.org": KaganeScraper,
+
+    # VyManga - General aggregator (chapter links via ad-redirect -> Blogger CDN)
+    # Legacy hosts (vymanga.net / vyvymanga.net) 403 on their own /manga/ pages
+    # but the scraper canonicalises them to mangavyvy.net; register them so
+    # saved/manual entries resolve to a scraper before canonicalisation runs.
+    "mangavyvy.net": VyMangaScraper,
+    "vymanga.net": VyMangaScraper,
+    "vyvymanga.net": VyMangaScraper,
 }
 
 # Merge template-based scrapers into SCRAPERS dict
