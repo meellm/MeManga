@@ -155,7 +155,6 @@ PLAYWRIGHT_DOMAINS = [
     "isekaiscan.com",
     "zinmanga.com",
     "zazamanga.com",
-    "mangaball.net",
     "mangaclash.com",
     "kunmanga.com",
     "manytoon.com",

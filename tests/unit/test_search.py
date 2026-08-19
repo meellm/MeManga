@@ -191,6 +191,15 @@ class TestComputeSearchSources:
         assert "mangasee123.com" not in sources
         assert "manganato.com" not in sources
 
+    def test_region_blocked_mangago_excluded(self):
+        # mangago.me is reachable globally but DNS/SNI-blocked in some
+        # regions, where every request stalls in connect() and hangs the
+        # sweep slot (issue #151). Both aliases must stay out of the sweep;
+        # the www one used to win the canonical de-dup and get probed.
+        sources = compute_search_sources(FakeConfig())
+        assert "mangago.me" not in sources
+        assert "www.mangago.me" not in sources
+
     def test_disabled_sources_removed(self):
         sources = compute_search_sources(FakeConfig({
             "sources.disabled": ["mangadex.org"],

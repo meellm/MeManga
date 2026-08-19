@@ -11,6 +11,25 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-19
+
+### Added
+- #153 Atsumaru is now available as a supported CLI source through the site's
+  Typesense and reader APIs.
+- #156 VyManga is now available as a supported CLI source, including legacy
+  host canonicalization for saved or manually added entries.
+- #157 Mangadot is now available as a supported CLI source through its rendered
+  search pages and JSON chapter/image APIs.
+
+### Changed
+- Version metadata synchronized for the v0.4.3 release.
+
+### Fixed
+- #150 MangaBall search and reader extraction now use the current API flow.
+- #151 Mangago connection failures now fail quickly on blocked networks
+  instead of hanging the multi-source search sweep.
+- #152 MangaTaro page extraction now uses the current reader/API flow again.
+
 ## [0.4.2] - 2026-08-06
 
 ### Changed

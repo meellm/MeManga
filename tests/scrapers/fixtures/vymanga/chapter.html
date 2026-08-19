@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="col-lg-8 col-md-12">
+    <div class="carousel slide" id="carousel">
+      <div class="vview carousel-inner">
+        <div class="carousel-item active">
+          <img class="d-block w-100 lozad" data-src="https://2.bp.blogspot.com/drive-storage/PAGE-001=w700" src="https://mangavyvy.net/web/img/loading.gif">
+        </div>
+        <div class="carousel-item">
+          <img class="d-block w-100 lozad" data-src="https://2.bp.blogspot.com/drive-storage/PAGE-002=w700" src="https://mangavyvy.net/web/img/loading.gif">
+        </div>
+        <div class="carousel-item">
+          <img class="d-block w-100 lozad" data-src="https://2.bp.blogspot.com/drive-storage/PAGE-003=w700" src="https://mangavyvy.net/web/img/loading.gif">
+        </div>
+
+        <!-- "Same author" recommendation table embedded INSIDE the carousel
+             (this is how the live reader ships it). The cover thumbnails are
+             nested in a table, not direct slide children, and carry the
+             img-recommend class: they must NOT be scraped as pages. -->
+        <div class="carousel-item">
+          <div class="p-5"><div class="mt-2"><div class="table table-same_author info-area">
+            <table class="table-responsive-md same-author"><tbody>
+              <tr>
+                <td><a href="/manga/other-1"><div class="div-hover-zoom-outer img-md img-same-author">
+                  <img class="img-recommend lozad" data-src="https://cdnxyz.xyz/web/cover/19394/thumbnail.png" src="https://mangavyvy.net/web/img/loading.gif">
+                </div></a></td>
+                <td><a href="/manga/other-2"><div class="div-hover-zoom-outer img-md img-same-author">
+                  <img class="img-recommend lozad" data-src="https://cdnxyz.xyz/storage/collections/8616-1657985705.jpg" src="https://mangavyvy.net/web/img/loading.gif">
+                </div></a></td>
+              </tr>
+            </tbody></table>
+          </div></div></div>
+        </div>
+
+        <!-- Defense-in-depth: a recommendation cover promoted to a direct
+             slide child is still excluded by its img-recommend class. -->
+        <div class="carousel-item">
+          <img class="img-recommend lozad" data-src="https://cdnxyz.xyz/web/cover/66281/thumbnail.png" src="https://mangavyvy.net/web/img/loading.gif">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Related manga block OUTSIDE the reader carousel: must NOT be scraped. -->
+  <div class="row book-list">
+    <div class="comic-item">
+      <img class="image lozad" data-src="https://cdnxyz.xyz/storage/collections/8616-1657985705.jpg">
+    </div>
+  </div>
+</body>
+</html>

@@ -3,12 +3,22 @@ MangaTaro scraper
 https://mangataro.org
 
 Popular ComicK replacement. Simple requests-based scraper - no protection.
-CDN images at bx1.mangapeak.me
+
+The reader is JS-driven: its static HTML carries only the first page, and
+the ordered page list comes from a JSON endpoint keyed by the numeric
+chapter id embedded in the reader URL (``.../chN-<id>``):
+
+    GET /auth/chapter-content?chapter_id=<id>  -> {"images": [<cdn url>, ...]}
+
+Page images are served from a rotating CDN host (currently
+``mangataro.yachts``); we always use whatever host that endpoint returns
+instead of assuming a fixed CDN.
 """
 
 import re
-from typing import List
+from typing import List, Optional
 from pathlib import Path
+from urllib.parse import urlparse
 from .base import BaseScraper, Chapter, Manga
 
 
@@ -17,8 +27,23 @@ class MangaTaroScraper(BaseScraper):
     
     name = "mangataro"
     base_url = "https://mangataro.org"
-    cdn_base = "https://bx1.mangapeak.me"
-    
+
+    # Reader URLs end in the numeric chapter id: /read/<slug>/ch<n>-<id>.
+    # The <n> part may itself contain dashes (e.g. ch56-5 for chapter 56.5),
+    # so match lazily up to the final "-<id>" of the chapter segment.
+    _CHAPTER_ID_RE = re.compile(r"/ch[^/]*?-(\d+)(?:[/?#]|$)")
+
+    # The chapter *number* part sits between "ch" and that final "-<id>".
+    # It may be dotted (ch10.5-<id>) or - as the live site encodes it -
+    # dashed (ch7-5-<id> meaning chapter 7.5).
+    _CHAPTER_NUM_RE = re.compile(r"/ch([\d.-]+?)-\d+(?:[/?#]|$)")
+
+    # CDN page images: <host>/storage/chapters/<hash>/<zero-padded page>.<ext>
+    _PAGE_IMG_RE = re.compile(
+        r"https?://[^\s\"'<>\\]+/storage/chapters/[a-f0-9]+/\d+\.(?:webp|jpe?g|png)",
+        re.I,
+    )
+
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title.
         
@@ -115,16 +140,9 @@ class MangaTaroScraper(BaseScraper):
                         
                         chapter_url = href if href.startswith("http") else f"{self.base_url}{href}"
                         chapter_text = option.get_text(strip=True)
-                        
-                        # Extract chapter number from URL: /read/manga/ch1-8788
-                        match = re.search(r'/ch(\d+\.?\d*)-(\d+)', href)
-                        if match:
-                            chapter_num = match.group(1)
-                        else:
-                            # Extract from text: "Ch. 1" or "Chapter 1"
-                            text_match = re.search(r'(?:ch\.?|chapter)\s*(\d+\.?\d*)', chapter_text, re.I)
-                            chapter_num = text_match.group(1) if text_match else "0"
-                        
+
+                        chapter_num = self._parse_chapter_number(href, chapter_text)
+
                         if chapter_url not in [c.url for c in chapters]:
                             chapters.append(Chapter(
                                 number=chapter_num,
@@ -144,14 +162,14 @@ class MangaTaroScraper(BaseScraper):
                     continue
                 
                 chapter_url = href if href.startswith("http") else f"{self.base_url}{href}"
-                
-                match = re.search(r'/ch(\d+\.?\d*)-(\d+)', href)
-                chapter_num = match.group(1) if match else "0"
-                
+
+                link_text = link.get_text(strip=True)
+                chapter_num = self._parse_chapter_number(href, link_text)
+
                 if chapter_url not in [c.url for c in chapters]:
                     chapters.append(Chapter(
                         number=chapter_num,
-                        title=link.get_text(strip=True) or None,
+                        title=link_text or None,
                         url=chapter_url,
                         date=None,
                     ))
@@ -159,51 +177,134 @@ class MangaTaroScraper(BaseScraper):
         return sorted(chapters, key=lambda x: x.numeric)
     
     def get_pages(self, chapter_url: str) -> List[str]:
-        """Get all page image URLs for a chapter."""
+        """Get all page image URLs for a chapter.
+
+        The reader loads its pages from a JSON endpoint keyed by the
+        numeric chapter id in the URL, so we call that directly - the
+        static reader HTML only carries the first page. If the id or
+        endpoint ever changes shape we fall back to scraping whatever CDN
+        image URLs the reader HTML does contain.
+        """
+        chapter_id = self._extract_chapter_id(chapter_url)
+        if chapter_id:
+            pages = self._pages_from_api(chapter_id)
+            if pages:
+                return pages
+
+        # Fallback: recover the id from the page markup if the URL shape
+        # changed, retry the API, then scrape inline image URLs.
         html = self._get_html(chapter_url)
-        
-        # Extract CDN image URLs from the page
-        # Pattern: https://bx1.mangapeak.me/storage/chapters/{hash}/{page}.webp
-        cdn_pattern = r'https?://[^\s"\'<>\\]+mangapeak\.me/storage/chapters/[a-f0-9]+/\d+\.webp'
-        cdn_urls = re.findall(cdn_pattern, html)
-        
-        if not cdn_urls:
-            # Try alternate pattern for mangataro.org URLs
-            alt_pattern = r'https?://[^\s"\'<>\\]+/storage/chapters/[a-f0-9]+/\d+\.webp'
-            cdn_urls = re.findall(alt_pattern, html)
-        
-        if not cdn_urls:
+        if not chapter_id:
+            chapter_id = self._chapter_id_from_html(html)
+            if chapter_id:
+                pages = self._pages_from_api(chapter_id)
+                if pages:
+                    return pages
+        return self._pages_from_html(html)
+
+    @classmethod
+    def _extract_chapter_id(cls, url: str) -> Optional[str]:
+        """Pull the numeric chapter id out of a reader URL."""
+        match = cls._CHAPTER_ID_RE.search(url or "")
+        return match.group(1) if match else None
+
+    @classmethod
+    def _chapter_number_from_url(cls, url: str) -> Optional[str]:
+        """Parse the chapter number from a reader URL's ``ch<n>-<id>`` shape.
+
+        Handles plain (``ch1-547229`` -> "1"), dotted
+        (``ch10.5-999888`` -> "10.5") and dashed-decimal
+        (``ch7-5-547254`` -> "7.5") numbers - the live site writes the
+        decimal point as a dash. Returns None if there's no chapter segment.
+        """
+        match = cls._CHAPTER_NUM_RE.search(url or "")
+        if not match:
+            return None
+        return match.group(1).replace("-", ".")
+
+    @classmethod
+    def _parse_chapter_number(cls, url: str, text: str = "") -> str:
+        """Derive a chapter number for a reader link.
+
+        Prefers a clear decimal in the visible text (e.g. "Ch. 7.5"), then
+        falls back to the URL shape (see ``_chapter_number_from_url``, which
+        understands the dashed-decimal ``ch7-5-<id>`` form). Returns "0" when
+        neither yields a number.
+        """
+        text_match = re.search(
+            r'(?:ch\.?|chapter)\s*(\d+(?:\.\d+)?)', text or "", re.I)
+        if text_match:
+            return text_match.group(1)
+        from_url = cls._chapter_number_from_url(url)
+        return from_url if from_url is not None else "0"
+
+    @staticmethod
+    def _chapter_id_from_html(html: str) -> Optional[str]:
+        """Recover the chapter id from the reader page's body markup."""
+        match = re.search(r'data-chapter-id=["\'](\d+)["\']', html)
+        return match.group(1) if match else None
+
+    def _pages_from_api(self, chapter_id: str) -> List[str]:
+        """Fetch the ordered page image URLs from the chapter-content API.
+
+        Returns the absolute CDN URLs exactly as the site serves them, so
+        no host rewriting is needed.
+        """
+        url = f"{self.base_url}/auth/chapter-content?chapter_id={chapter_id}"
+        try:
+            data = self._get_json(url, headers={
+                "Referer": f"{self.base_url}/",
+                "X-Requested-With": "XMLHttpRequest",
+            })
+        except Exception:
             return []
-        
-        # Get the base URL (chapter hash) from first image
-        first_url = cdn_urls[0]
-        base_url = first_url.rsplit('/', 1)[0]
-        
-        # Use CDN domain for better reliability
-        if 'mangapeak.me' not in base_url:
-            hash_part = base_url.split('/storage/chapters/')[-1]
-            base_url = f"{self.cdn_base}/storage/chapters/{hash_part}"
-        
-        # Enumerate pages by checking which ones exist
+        return self._pages_from_api_payload(data)
+
+    @staticmethod
+    def _pages_from_api_payload(data) -> List[str]:
+        """Parse a chapter-content JSON response into ordered page URLs.
+
+        Returns [] on any error or for chapters with no image list
+        (e.g. text/novel chapters). URLs are kept exactly as served.
+        """
+        if not isinstance(data, dict) or not data.get("success"):
+            return []
+        images = data.get("images")
+        if not isinstance(images, list):
+            return []
+
         pages = []
-        for i in range(1, 200):  # Max 200 pages
-            page_url = f"{base_url}/{str(i).zfill(3)}.webp"
-            try:
-                resp = self.session.head(page_url, timeout=5)
-                if resp.status_code == 200:
+        for img in images:
+            if isinstance(img, str) and img.strip():
+                page_url = img.strip()
+                if page_url not in pages:
                     pages.append(page_url)
-                else:
-                    # Check without zero padding
-                    page_url2 = f"{base_url}/{i}.webp"
-                    resp2 = self.session.head(page_url2, timeout=5)
-                    if resp2.status_code == 200:
-                        pages.append(page_url2)
-                    else:
-                        break  # No more pages
-            except:
-                break
-        
         return pages
+
+    def _pages_from_html(self, html: str) -> List[str]:
+        """Fallback: scrape CDN page-image URLs from the reader HTML.
+
+        Uses whatever host the page references (never rewrites it), and
+        when the same page number appears on both the site's own domain
+        and a CDN host, prefers the CDN one - the on-site /storage path
+        404s. Ordered by page number.
+        """
+        base_host = urlparse(self.base_url).netloc
+        by_page = {}
+        for match in self._PAGE_IMG_RE.findall(html):
+            num = self._page_number(match)
+            if num not in by_page:
+                by_page[num] = match
+            elif (urlparse(by_page[num]).netloc == base_host
+                    and urlparse(match).netloc != base_host):
+                by_page[num] = match
+        return [by_page[num] for num in sorted(by_page)]
+
+    @staticmethod
+    def _page_number(url: str) -> int:
+        """Sort key: the zero-padded page number in a CDN image URL."""
+        match = re.search(r'/(\d+)\.(?:webp|jpe?g|png)(?:[?#]|$)', url, re.I)
+        return int(match.group(1)) if match else 0
     
     def download_image(self, url: str, path) -> bool:
         """Download image with proper headers."""

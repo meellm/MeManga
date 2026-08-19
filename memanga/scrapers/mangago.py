@@ -6,17 +6,62 @@ Large yaoi/shoujo collection, general manga too.
 """
 
 import re
+import time
 from typing import List
 from pathlib import Path
-from .base import BaseScraper, Chapter, Manga
+
+import requests
+
+from .base import BaseScraper, Chapter, Manga, _retry
 
 
 class MangagoScraper(BaseScraper):
     """Scraper for Mangago.me"""
-    
+
     name = "mangago"
     base_url = "https://www.mangago.me"
-    
+
+    # mangago.me is periodically DNS-poisoned and SNI-filtered in some
+    # regions (hence its place in search.BROKEN_SEARCH_SOURCES). On such a
+    # network every connect() stalls without an RST, so BaseScraper's 30s
+    # timeout x 3 retries makes a direct search()/get_chapters() call hang
+    # ~90-180s. Bound the connect wait and skip retries for connection
+    # failures -- a blocked host won't recover inside a retry window -- so
+    # direct calls fail in seconds. Only transient ReadTimeout / HTTPError
+    # responses (i.e. we did connect) keep the full read budget + retries.
+    _CONNECT_TIMEOUT = 8    # seconds to establish TCP + TLS
+    _READ_TIMEOUT = 30      # seconds to receive the response body
+
+    def _request(self, url: str, **kwargs) -> requests.Response:
+        """Rate-limited GET with a bounded connect timeout.
+
+        Overrides BaseScraper._request so a region-blocked mangago.me
+        fails fast instead of hanging: connection errors propagate on the
+        first attempt, while transient read/HTTP errors still get retried.
+        """
+        kwargs.setdefault("timeout", (self._CONNECT_TIMEOUT, self._READ_TIMEOUT))
+
+        def _do_request():
+            with self._rate_lock:
+                elapsed = time.time() - self._last_request
+                if elapsed < self._rate_limit:
+                    time.sleep(self._rate_limit - elapsed)
+                self._last_request = time.time()
+            response = self.session.get(url, **kwargs)
+            response.raise_for_status()
+            return response
+
+        # ConnectionError / ConnectTimeout mean the host is unreachable
+        # from here; retrying only multiplies the wait, so let them raise
+        # on the first attempt. Only post-connect hiccups are retried.
+        return _retry(
+            _do_request,
+            max_attempts=3,
+            base_delay=1.0,
+            exceptions=(requests.exceptions.ReadTimeout,
+                        requests.exceptions.HTTPError),
+        )
+
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title."""
         from bs4 import BeautifulSoup
@@ -126,7 +171,9 @@ class MangagoScraper(BaseScraper):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": f"{self.base_url}/",
             }
-            response = self.session.get(url, headers=headers, timeout=30)
+            response = self.session.get(
+                url, headers=headers,
+                timeout=(self._CONNECT_TIMEOUT, self._READ_TIMEOUT))
             response.raise_for_status()
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_bytes(response.content)
