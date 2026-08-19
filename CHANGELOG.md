@@ -6,6 +6,8 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-08-19
+
 ### Fixed
 - #167 Linux release downloads now ship as `MeManga-linux-x64.tar.gz` so
   the executable bit survives download and extraction. A raw ELF asset
