@@ -78,6 +78,7 @@ from .mangayy import MangaYYScraper
 from .manga4life import Manga4LifeScraper
 from .zazamanga import ZazaMangaScraper
 from .mangaball import MangaBallScraper
+from .atsumaru import AtsumaruScraper
 from .manytoon import ManyToonScraper
 from .pururin import PururinScraper
 from .hentairead import HentaiReadScraper
@@ -398,6 +399,9 @@ SCRAPERS = {
 
     # MangaBall - Multi-language aggregator (HTTP JSON API)
     "mangaball.net": MangaBallScraper,
+
+    # Atsumaru - Manga aggregator (Typesense search + REST API)
+    "atsu.moe": AtsumaruScraper,
 
     # MangaClash - Manga aggregator (Playwright + Madara + CF)
     "mangaclash.com": MangaClashScraper,
