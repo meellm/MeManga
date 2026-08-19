@@ -44,7 +44,7 @@ The fastest path is the release download for your platform.
 | Windows | [`MeManga-windows-x64.exe`](https://github.com/meellm/MeManga/releases/latest) |
 | macOS (Apple Silicon) | [`MeManga-macos-arm64.zip`](https://github.com/meellm/MeManga/releases/latest) |
 | macOS (Intel) | [`MeManga-macos-x64.zip`](https://github.com/meellm/MeManga/releases/latest) |
-| Linux (x86_64) | [`MeManga-linux-x64`](https://github.com/meellm/MeManga/releases/latest) |
+| Linux (x86_64) | [`MeManga-linux-x64.tar.gz`](https://github.com/meellm/MeManga/releases/latest) |
 
 On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double-click.
 
@@ -55,6 +55,17 @@ On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double
 > The app is not yet code-signed.
 >
 > **macOS Gatekeeper** — right-click → Open the first time; future launches are normal.
+>
+> **Linux** ships as a `.tar.gz` so the executable bit survives the download —
+> a bare binary saves as non-executable and won't launch. Extract, then run:
+>
+> ```bash
+> tar xzf MeManga-linux-x64.tar.gz
+> ./MeManga-linux-x64
+> ```
+>
+> If a file manager still clears the permission, restore it with
+> `chmod +x MeManga-linux-x64`.
 
 You can also build from the source following [Build from source](#-build-from-source) below.
 

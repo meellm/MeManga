@@ -167,18 +167,50 @@ jobs:
             --path "${{ matrix.asset_name }}" \
             --arch "${{ matrix.target_arch }}"
 
-      - name: Rename artifact for upload
-        # Windows/Linux ship the raw one-file exe directly; macOS already
-        # produced its .zip asset in the packaging step above.
-        if: runner.os != 'macOS'
+      - name: Package artifact for upload
+        id: package
         shell: bash
-        run: mv "release/${{ matrix.artifact_name }}" "${{ matrix.asset_name }}"
+        run: |
+          asset="${{ matrix.asset_name }}"
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            echo "upload_path=$asset" >> "$GITHUB_OUTPUT"
+          else
+            bin="release/${{ matrix.artifact_name }}"
+            mv "$bin" "$asset"
+            if [ "${{ runner.os }}" = "Linux" ]; then
+              chmod +x "$asset"
+              tar -czf "${asset}.tar.gz" "$asset"
+              echo "upload_path=${asset}.tar.gz" >> "$GITHUB_OUTPUT"
+            else
+              echo "upload_path=$asset" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Verify Linux archive preserves the executable bit
+        # Release gate for issue #167: prove the tarball actually restores
+        # a runnable binary before it can reach the release page. Extract
+        # into a scratch dir and assert the extracted file is executable;
+        # a dropped +x bit fails the build instead of shipping a download
+        # users cannot launch.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          asset="${{ matrix.asset_name }}"
+          workdir="$(mktemp -d)"
+          tar -xzf "${asset}.tar.gz" -C "$workdir"
+          extracted="$workdir/$asset"
+          ls -l "$extracted"
+          if [ ! -x "$extracted" ]; then
+            echo "::error::Extracted Linux binary is not executable — release would ship an unlaunchable file"
+            exit 1
+          fi
+          echo "OK: extracted binary is executable"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}
+          path: ${{ steps.package.outputs.upload_path }}
           retention-days: 7
 
   release:
