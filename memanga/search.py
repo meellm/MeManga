@@ -111,6 +111,11 @@ BROKEN_SEARCH_SOURCES = {
     "manhwa18.cc",
     "mangafreak.me", "mangafreak.ws", "ww2.mangafreak.me",
     "bato.to", "batoto.to",
+    # region-blocked (DNS poison + SNI filter) on some networks, where
+    # connect() stalls and the 30s-timeout x 3-retry sweep slot hangs
+    # ~90s+, so drop it from the sweep. Reachable elsewhere, so it stays
+    # usable by direct URL.
+    "mangago.me", "www.mangago.me",
     # NEEDS_JS_API — static HTML returns 0 hits, real search is client-side
     "asuracomic.net", "asurascans.com", "asuratoon.com",
     "mgeko.cc",
