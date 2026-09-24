@@ -90,6 +90,12 @@ PARSING_PROBES = {
     # This probe catches any of those three endpoints changing shape.
     "atsu.moe": ProbeSpec("Atsumaru (Typesense search + REST API)",
                            query="one piece"),
+    # Asura hosts manhwa only, so probe a title it actually carries
+    # (issue #177). Search goes through api.asurascans.com/api/series
+    # with ?search=; ?name= is accepted but ignored, which is how the
+    # old scraper silently returned nothing.
+    "asurascans.com": ProbeSpec("Asura Scans (JSON API)",
+                                 query="nano machine"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),

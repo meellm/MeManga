@@ -4,7 +4,7 @@ MeManga Scrapers
 Working sources:
 - TCBScans (tcbonepiecechapters.com) - Jump manga: One Piece, JJK, MHA
 - WeebCentral (weebcentral.com) - Large library, 1000+ manga
-- Asura Scans (asuracomic.net) - Manhwa specialist
+- Asura Scans (asurascans.com) - Manhwa specialist (JSON API)
 - Mangakatana (mangakatana.com) - General library
 - MangaDex (mangadex.org) - Community uploads (skip Shueisha)
 - Mangapill (mangapill.com) - Large library, no Cloudflare
@@ -177,9 +177,11 @@ SCRAPERS = {
     # WeebCentral - Large library (hybrid: cloudscraper + Playwright)
     "weebcentral.com": WeebCentralScraper,
 
-    # Asura Scans - Manhwa (Playwright/Firefox)
-    "asuracomic.net": AsuraScansScraper,
+    # Asura Scans - Manhwa (api.asurascans.com JSON API).
+    # asuracomic.net / asuratoon.com are retired aliases kept so
+    # library entries saved against them still resolve.
     "asurascans.com": AsuraScansScraper,
+    "asuracomic.net": AsuraScansScraper,
     "asuratoon.com": AsuraScansScraper,
 
     # Mangakatana - General (Playwright/Firefox)
@@ -697,6 +699,7 @@ POPULAR_SOURCES = [
     "mangabuddy.com",
     "weebcentral.com",
     "mangakatana.com",
+    "asurascans.com",
     "comix.to",
     "comick.io",
     "mangahub.io",
@@ -716,6 +719,8 @@ POPULAR_SOURCES = [
     "mangayy.org",
 ]
 
-# Fresh installs ship with the top 15 ticked on the Sources page.
-# Everything else is in `sources.disabled` by default.
-DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:15]
+# Fresh installs ship with the top 16 ticked on the Sources page.
+# Everything else is in `sources.disabled` by default. Only canonical
+# domains belong here — retired aliases (asuracomic.net, asuratoon.com)
+# stay out so the sweep doesn't probe the same scraper twice.
+DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:16]
