@@ -12,6 +12,24 @@ All notable changes are recorded here. Format loosely follows
   unrelated titles. Titles the site doesn't host (licensed series served
   only on a sister domain) are left out, and chapter lists no longer pick
   up other series' chapters or hidden placeholder links.
+- #177 Asura Scans search works again and is no longer skipped in the
+  multi-source search sweep. The scraper now reads the site's JSON API
+  instead of driving a headless browser at the retired asuracomic.net
+  domain, which redirected to the homepage and dropped the query.
+  Chapter listing, page extraction, and covers use the same API, and
+  entries saved against the old domains keep resolving, including the
+  older `/manga/<slug>/` paths. Asura is also back in the curated
+  default source set, so fresh installs search it out of the box, and
+  a one-shot repair re-ticks it for installs that were seeded while it
+  was broken.
+- #177 Asura early-access chapters are no longer listed as downloadable.
+  They appeared in the chapter list but served zero pages until their
+  paywall window closed.
+- #174 MangaHere page downloads now fetch the real CDN images through the
+  reader's `chapterfun.ashx` endpoint instead of falling back to reader
+  page URLs, so chapters no longer download as HTML saved with an image
+  extension. Chapter listings also skip the sidebar links to other series,
+  and a hotlink-blocked response is rejected rather than written to disk.
 
 ## [0.4.3] - 2026-08-19
 

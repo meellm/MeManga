@@ -37,7 +37,7 @@ Official scanlation team releases.
 | Domain | Type | Notes |
 |--------|------|-------|
 | tcbscans.com, tcbscans.me | Requests | Jump manga (One Piece, JJK) |
-| asuracomic.net, asuratoon.com | Playwright | Manhwa/Webtoons |
+| asurascans.com | API | Manhwa/Webtoons (asuracomic.net, asuratoon.com are retired aliases) |
 | omegascans.org | Playwright | Manhwa translations |
 | flamecomics.xyz | Requests | Manhwa translations |
 | luminousscans.com | Requests | Manhwa translations |

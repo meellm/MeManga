@@ -30,6 +30,10 @@ class MeMangaApp(QMainWindow):
         # Shared state
         self.config = Config()
         self.app_state = State()
+        # Order matters: the repair only applies to configs that were
+        # already seeded on an earlier launch, so it has to read the
+        # flag before seeding sets it.
+        self._recurate_fixed_sources()
         self._seed_default_sources_if_first_launch()
         self.events = EventBus()
         self.worker = BackgroundWorker(self.events)
@@ -548,8 +552,43 @@ class MeMangaApp(QMainWindow):
 
     # ---- First-launch source seeding ----
 
+    # Sources that were curated back in after shipping disabled. Adding
+    # a domain to DEFAULT_ENABLED_SOURCES only helps fresh installs:
+    # everyone seeded on an earlier launch already has it written into
+    # `sources.disabled`, so it stays unticked forever without a repair.
+    # Asura Scans was skipped while its search was broken and curated
+    # again once it was fixed (issue #177).
+    _RECURATED_SOURCES = ("asurascans.com",)
+
+    # Bump the suffix if another source ever needs the same treatment;
+    # the old key stays set so an earlier repair never runs twice.
+    _RECURATION_FLAG = "sources.recurated_asura"
+
+    def _recurate_fixed_sources(self):
+        """Drop newly re-curated sources from an existing config's
+        `sources.disabled` list, once.
+
+        Runs only for configs already marked `sources.first_run_seeded`
+        — a fresh install gets the current curated set from seeding and
+        needs no repair. Guarded by its own durable key so a user who
+        deliberately unticks the source again keeps it unticked.
+        """
+        if self.config.get(self._RECURATION_FLAG):
+            return
+
+        if self.config.get("sources.first_run_seeded"):
+            disabled = self.config.get("sources.disabled", []) or []
+            kept = [d for d in disabled if d not in self._RECURATED_SOURCES]
+            if len(kept) != len(disabled):
+                self.config.set("sources.disabled", kept)
+
+        # Set the flag even when there was nothing to remove, so the
+        # repair is genuinely one-shot.
+        self.config.set(self._RECURATION_FLAG, True)
+        self.config.save()
+
     def _seed_default_sources_if_first_launch(self):
-        """Pre-tick only the 15 most popular working sources on a
+        """Pre-tick only the curated `DEFAULT_ENABLED_SOURCES` set on a
         fresh install.
 
         Without this, a brand-new user opens the app and every supported

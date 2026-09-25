@@ -1158,7 +1158,7 @@ def cmd_sources(args):
     
     table.add_row("[bold]tcbonepiecechapters.com[/bold]", "Requests", "Jump manga (One Piece, JJK, MHA)")
     table.add_row("[bold]weebcentral.com[/bold]", "Hybrid", "Large library (1000+ series)")
-    table.add_row("[bold]asuracomic.net[/bold]", "Playwright", "Manhwa / Webtoons")
+    table.add_row("[bold]asurascans.com[/bold]", "API", "Manhwa / Webtoons")
     table.add_row("[bold]mangakatana.com[/bold]", "Playwright", "General manga library")
     table.add_row("[bold]mangadex.org[/bold]", "API", "Fan translations (skip Shueisha)")
     
