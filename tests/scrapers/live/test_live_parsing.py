@@ -80,6 +80,11 @@ PARSING_PROBES = {
     "mangakakalot.com": ProbeSpec("Mangakakalot", query="naruto"),
     "manganato.com": ProbeSpec("Manganato", query="naruto"),
     "mangahub.io": ProbeSpec("MangaHub", query="one piece"),
+    # dm5 reader: page URLs are only reachable through chapterfun.ashx,
+    # and the CDN hotlink-checks the Referer (issue #174). This probe
+    # catches either side changing - the image stage is what fails when
+    # the reader starts handing back HTML again.
+    "mangahere.cc": ProbeSpec("MangaHere (dm5 reader)", query="one piece"),
     "comix.to": ProbeSpec("Comix.to", query="kubera"),
     # Pages come from a JSON API keyed by the chapter id in the URL
     # (issue #152) - this probe catches that endpoint/host changing.
