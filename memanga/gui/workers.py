@@ -23,6 +23,12 @@ from ..search import (  # noqa: E402
 )
 from ..scrapers import POPULAR_SOURCES as SOURCE_POPULARITY  # noqa: E402,F401
 
+# Same body sniffing the scrapers use before writing an image to disk:
+# caching a non-image body (an HTML block page served with 200) would
+# leave the cover permanently blank — the disk cache file exists, so
+# the URL is never refetched.
+from ..scrapers.base import looks_like_image  # noqa: E402,F401
+
 
 # ─────────────────────────────────────────────────────────────────────
 # Cover fetch helpers — some cover CDNs hotlink-protect their images:
@@ -40,6 +46,12 @@ from ..scrapers import POPULAR_SOURCES as SOURCE_POPULARITY  # noqa: E402,F401
 _COVER_REFERERS = (
     ("/file/mangapill/", "https://mangapill.com/"),
     ("mangapill.com", "https://mangapill.com/"),
+    # MangaHere hotlink-checks its cover CDN: fmcdn.mangahere.com
+    # answers a refererless request with a 403 HTML page, so the cover
+    # never renders (issue #174). Matched on the CDN host, not on
+    # "mangahere", so mangahere.onl (a different site on mghcdn) is
+    # unaffected.
+    ("fmcdn.mangahere.com", "https://www.mangahere.cc/"),
 )
 
 _COVER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -54,34 +66,6 @@ def cover_request_headers(url: str) -> Dict[str, str]:
             headers["Referer"] = referer
             break
     return headers
-
-
-_IMAGE_MAGIC_PREFIXES = (
-    b"\xff\xd8\xff",        # JPEG
-    b"\x89PNG\r\n\x1a\n",   # PNG
-    b"GIF87a",              # GIF
-    b"GIF89a",
-    b"BM",                  # BMP
-)
-
-
-def looks_like_image(content: bytes, content_type: str = "") -> bool:
-    """True when a response body is plausibly an image.
-
-    Caching a non-image body (an HTML block page served with 200)
-    would leave the cover permanently blank — the disk cache file
-    exists, so the URL is never refetched. Magic bytes first; the
-    Content-Type header is only a fallback for formats we don't
-    sniff (AVIF, SVG, …).
-    """
-    if not content:
-        return False
-    if content.startswith(_IMAGE_MAGIC_PREFIXES):
-        return True
-    if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
-        return True
-    ctype = (content_type or "").split(";")[0].strip().lower()
-    return ctype.startswith("image/")
 
 
 class BackgroundWorker:

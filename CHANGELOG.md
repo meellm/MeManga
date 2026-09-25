@@ -6,6 +6,13 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- #174 MangaHere page downloads now fetch the real CDN images through the
+  reader's `chapterfun.ashx` endpoint instead of falling back to reader
+  page URLs, so chapters no longer download as HTML saved with an image
+  extension. Chapter listings also skip the sidebar links to other series,
+  and a hotlink-blocked response is rejected rather than written to disk.
+
 ## [0.4.3] - 2026-08-19
 
 ### Added

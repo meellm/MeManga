@@ -645,6 +645,17 @@ class TestCoverFetch:
         assert "Referer" not in headers
         assert "User-Agent" in headers
 
+    def test_mangahere_cdn_url_gets_referer(self):
+        # Issue #174: fmcdn.mangahere.com answers a refererless request
+        # with a 403 HTML page, so the cover stayed blank.
+        from memanga.gui.workers import cover_request_headers
+        headers = cover_request_headers(
+            "https://fmcdn.mangahere.com/store/manga/8602/cover.jpg")
+        assert headers["Referer"] == "https://www.mangahere.cc/"
+
+    # looks_like_image now lives in memanga.scrapers.base and is pinned
+    # down there (tests/scrapers/test_base_helpers.py). These only check
+    # that the workers re-export still behaves for the cover fetch.
     def test_looks_like_image_accepts_magic_bytes(self):
         from memanga.gui.workers import looks_like_image
         assert looks_like_image(b"\xff\xd8\xff" + b"\x00" * 16)          # JPEG
@@ -653,8 +664,9 @@ class TestCoverFetch:
 
     def test_looks_like_image_content_type_fallback(self):
         from memanga.gui.workers import looks_like_image
-        # Format we don't sniff — trust the Content-Type header.
-        assert looks_like_image(b"\x00\x00\x00 ftypavif", "image/avif")
+        # SVG has no magic number — trust the Content-Type header.
+        assert looks_like_image(b"<svg xmlns='http://www.w3.org/2000/svg'/>",
+                                "image/svg+xml")
 
     def test_looks_like_image_rejects_html_and_empty(self):
         from memanga.gui.workers import looks_like_image
