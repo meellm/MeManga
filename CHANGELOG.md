@@ -6,6 +6,13 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- #175 MangaHere.onl search now queries the site's catalogue API instead of
+  scraping the home page, so results match the query instead of listing
+  unrelated titles. Titles the site doesn't host (licensed series served
+  only on a sister domain) are left out, and chapter lists no longer pick
+  up other series' chapters or hidden placeholder links.
+
 ## [0.4.3] - 2026-08-19
 
 ### Added
