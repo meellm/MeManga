@@ -199,9 +199,9 @@ def _verify_playwright() -> int:
     pipeline: after building the windowed executable, CI runs it with
     this flag on a pristine runner — the same "fresh machine, first
     session" conditions issue #28 kept reproducing under. The test
-    installs Firefox through the bundled driver (exactly like the
-    first-launch dialog), launches it through the regular Playwright
-    transport, and loads a page. A release cannot ship unless this
+    installs Firefox and Chromium through the bundled driver (exactly
+    like the first-launch dialog), launches each through the regular
+    Playwright transport, and loads a page. A release cannot ship unless this
     passes, which turns "the windowed exe can drive Playwright" from a
     claim into a release invariant.
 
@@ -221,9 +221,11 @@ def _verify_playwright() -> int:
             compute_driver_executable, get_driver_env,
         )
         node, cli = compute_driver_executable()
-        print(f"[Verify] installing firefox via bundled driver…", flush=True)
+        from . import _REQUIRED_BROWSERS
+        names = " + ".join(_REQUIRED_BROWSERS)
+        print(f"[Verify] installing {names} via bundled driver…", flush=True)
         result = subprocess.run(
-            [str(node), str(cli), "install", "firefox"],
+            [str(node), str(cli), "install", *_REQUIRED_BROWSERS],
             env=get_driver_env(), capture_output=True, text=True,
             timeout=900,
         )
@@ -235,18 +237,21 @@ def _verify_playwright() -> int:
 
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:
-            print(f"[Verify] firefox expected at: {pw.firefox.executable_path}",
-                  flush=True)
-            browser = pw.firefox.launch(headless=True)
-            page = browser.new_page()
-            page.goto("data:text/html,<title>memanga-verify</title>",
-                      wait_until="domcontentloaded")
-            title = page.title()
-            browser.close()
-        if title != "memanga-verify":
-            print(f"[Verify] FAIL: unexpected page title {title!r}", flush=True)
-            return 1
-        print("[Verify] PASS: driver started, firefox launched, page loaded",
+            for name in _REQUIRED_BROWSERS:
+                browser_type = getattr(pw, name)
+                print(f"[Verify] {name} expected at: "
+                      f"{browser_type.executable_path}", flush=True)
+                browser = browser_type.launch(headless=True)
+                page = browser.new_page()
+                page.goto("data:text/html,<title>memanga-verify</title>",
+                          wait_until="domcontentloaded")
+                title = page.title()
+                browser.close()
+                if title != "memanga-verify":
+                    print(f"[Verify] FAIL: {name}: unexpected page title "
+                          f"{title!r}", flush=True)
+                    return 1
+        print(f"[Verify] PASS: driver started, {names} launched, pages loaded",
               flush=True)
         return 0
     except Exception:

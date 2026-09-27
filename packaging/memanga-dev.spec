@@ -9,7 +9,7 @@ the repo root. Includes:
   - SSL certs from certifi
   - playwright-stealth JS payloads
   - The playwright driver data tree so the first-launch
-    `playwright install firefox` works without a separate
+    `playwright install firefox chromium` works without a separate
     pip install of playwright on the user's machine
 
 This build keeps `console=True` so any traceback prints to a
@@ -92,7 +92,7 @@ datas = [
     ),
 ]
 # Playwright's driver tree (node binary + cli.js) — needed at runtime
-# for `playwright install firefox` on first launch.
+# for `playwright install firefox chromium` on first launch.
 datas += collect_data_files("playwright", include_py_files=False)
 
 

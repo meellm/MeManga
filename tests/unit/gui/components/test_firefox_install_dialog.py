@@ -244,6 +244,7 @@ class TestCheckPlaywrightBrowsers:
 
         class _FakePW:
             firefox = _FakeFirefox()
+            chromium = _FakeFirefox()
             def __enter__(self): return self
             def __exit__(self, *a): return False
 
@@ -263,12 +264,35 @@ class TestCheckPlaywrightBrowsers:
 
         class _FakePW:
             firefox = _FakeFirefox()
+            chromium = _FakeFirefox()
             def __enter__(self): return self
             def __exit__(self, *a): return False
 
         import playwright.sync_api as pwapi
         monkeypatch.setattr(pwapi, "sync_playwright", lambda: _FakePW())
         assert gui_pkg._check_playwright_browsers() is True
+
+    def test_returns_false_when_chromium_missing(self, monkeypatch, tmp_path):
+        """MangaPark needs Chromium, so a Firefox-only install (every
+        install before Chromium was required) must re-trigger setup."""
+        from memanga import gui as gui_pkg
+
+        firefox_bin = tmp_path / "firefox-1234" / "firefox.exe"
+        firefox_bin.parent.mkdir(parents=True)
+        firefox_bin.write_bytes(b"\x00")
+
+        class _FakeBrowser:
+            def __init__(self, path): self.executable_path = str(path)
+
+        class _FakePW:
+            firefox = _FakeBrowser(firefox_bin)
+            chromium = _FakeBrowser(tmp_path / "chromium-9999" / "chrome")
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: _FakePW())
+        assert gui_pkg._check_playwright_browsers() is False
 
     def test_returns_false_when_playwright_import_fails(self, monkeypatch):
         """If `playwright` can't be imported at all (corrupt install,
@@ -286,3 +310,17 @@ class TestCheckPlaywrightBrowsers:
 
         monkeypatch.setattr(builtins, "__import__", boom)
         assert gui_pkg._check_playwright_browsers() is False
+
+
+class TestResolveInstallStrategies:
+    def test_every_strategy_installs_firefox_and_chromium(self):
+        from memanga import gui as gui_pkg
+
+        strategies = [
+            (label, argv) for label, argv in gui_pkg._resolve_install_strategies()
+            if not isinstance(argv, gui_pkg._ImportError)
+        ]
+        assert strategies
+        for label, argv in strategies:
+            idx = argv.index("install")
+            assert argv[idx + 1:] == ["firefox", "chromium"], label

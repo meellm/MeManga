@@ -9,9 +9,15 @@ def _is_frozen():
     return getattr(sys, 'frozen', False)
 
 
+# Playwright browsers the scrapers launch. Firefox drives most
+# Playwright sources; Chromium is needed by MangaPark, whose Cloudflare
+# check blocks Firefox. Both are installed and verified together.
+_REQUIRED_BROWSERS = ("firefox", "chromium")
+
+
 def _check_playwright_browsers():
-    """True only when a Firefox build matching the *bundled* Playwright
-    package's expected revision is installed on disk.
+    """True only when every required browser build matching the *bundled*
+    Playwright package's expected revision is installed on disk.
 
     A "is there ANY firefox-* directory under ms-playwright?" check is
     too lenient — an older Firefox build from a previous Playwright
@@ -21,8 +27,8 @@ def _check_playwright_browsers():
     AJAX-only paths like MangaFire's chapter list keep working, which
     produces a confusing "some sources work, others don't" pattern.
 
-    Ask Playwright itself where it expects Firefox to live and check
-    that exact path. Slightly slower at startup (~200 ms for the
+    Ask Playwright itself where it expects each browser to live and
+    check those exact paths. Slightly slower at startup (~200 ms for the
     Playwright import) but correctness over speed.
     """
     try:
@@ -30,18 +36,19 @@ def _check_playwright_browsers():
     except Exception:
         return False
     try:
+        from pathlib import Path
         with sync_playwright() as pw:
-            try:
-                expected = pw.firefox.executable_path
-            except Exception:
-                # `executable_path` is a property on BrowserType that
-                # raises if the binary is missing on older Playwright
-                # versions — treat that as "not installed".
-                return False
-            if not expected:
-                return False
-            from pathlib import Path
-            return Path(expected).exists()
+            for name in _REQUIRED_BROWSERS:
+                try:
+                    expected = getattr(pw, name).executable_path
+                except Exception:
+                    # `executable_path` is a property on BrowserType that
+                    # raises if the binary is missing on older Playwright
+                    # versions — treat that as "not installed".
+                    return False
+                if not expected or not Path(expected).exists():
+                    return False
+            return True
     except Exception:
         return False
 
@@ -56,6 +63,8 @@ def _resolve_install_strategies():
     """
     import shutil
 
+    browsers = list(_REQUIRED_BROWSERS)
+
     # Strategy 1: bundled driver (node + cli.js). compute_driver_executable
     # returns a (node_path, cli_js_path) tuple on playwright >= 1.40; the
     # tuple must be unpacked into argv, not stringified, or the spawn
@@ -65,21 +74,21 @@ def _resolve_install_strategies():
         driver = compute_driver_executable()
         if isinstance(driver, tuple) and len(driver) == 2:
             node_path, cli_path = driver
-            yield "bundled driver", [node_path, cli_path, "install", "firefox"]
+            yield "bundled driver", [node_path, cli_path, "install", *browsers]
         else:
             # Back-compat for older Playwright (single string).
-            yield "bundled driver", [str(driver), "install", "firefox"]
+            yield "bundled driver", [str(driver), "install", *browsers]
     except Exception as e:  # pragma: no cover - import-time guard
         yield "bundled driver", _ImportError(f"import failed: {e}")
 
     # Strategy 2: system-installed `playwright` CLI (dev machines).
     playwright_bin = shutil.which("playwright")
     if playwright_bin:
-        yield "system cli", [playwright_bin, "install", "firefox"]
+        yield "system cli", [playwright_bin, "install", *browsers]
 
     # Strategy 3: python -m playwright install (source-only, not frozen).
     if not _is_frozen():
-        yield "python -m", [sys.executable, "-m", "playwright", "install", "firefox"]
+        yield "python -m", [sys.executable, "-m", "playwright", "install", *browsers]
 
 
 class _ImportError:
@@ -224,7 +233,7 @@ def _install_playwright_browsers_stream(on_line, cancelled):
 
 
 def _ensure_browsers():
-    """Ensure Playwright Firefox is installed.
+    """Ensure the Playwright browsers (Firefox and Chromium) are installed.
 
     Drives the install via the streaming progress dialog
     (:class:`FirefoxInstallDialog`). If the install fails, the dialog
@@ -240,8 +249,9 @@ def _ensure_browsers():
     while True:
         confirm = QMessageBox.question(
             None, "MeManga — Browser Required",
-            "MeManga needs Firefox browser components to scrape manga.\n\n"
-            "Download now? (~90 MB, requires internet)",
+            "MeManga needs Firefox and Chromium browser components to "
+            "scrape manga.\n\n"
+            "Download now? (~250 MB, requires internet)",
         )
         if confirm != QMessageBox.StandardButton.Yes:
             quit_answer = QMessageBox.question(
@@ -265,7 +275,7 @@ def _ensure_browsers():
             "Browser installation failed.\n\n"
             "Check your internet connection and try again.\n\n"
             "You can also install manually with:\n"
-            "    playwright install firefox\n\n"
+            "    playwright install firefox chromium\n\n"
             f"--- details ---\n{detail}",
         )
         if retry != QMessageBox.StandardButton.Yes:
