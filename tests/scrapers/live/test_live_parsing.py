@@ -74,6 +74,9 @@ PARSING_PROBES = {
     # scheme again — without a valid token every stage 403s at once.
     "mangafire.to": ProbeSpec("MangaFire (vrf-signed JSON API)",
                                 query="one piece"),
+    # Behind a Cloudflare 403 since issue #172 and parked in
+    # BROKEN_SEARCH_SOURCES. Expected to fail until the site opens up
+    # again - a pass here is the signal to re-curate it.
     "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),
     "tcbonepiecechapters.com": ProbeSpec("TCB Scans (project list)",
                                            query="one piece"),

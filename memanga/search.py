@@ -141,6 +141,10 @@ BROKEN_SEARCH_SOURCES = {
     # user can still add manga from these by URL.
     "manhuafast.com",
     "manhuaus.org",
+    # Every request, starting with /filter search, 403s behind
+    # Cloudflare (issue #172). Also dropped from the curated defaults;
+    # the scraper stays registered for library entries saved on it.
+    "mangapark1.com",
     # Manganato.gg also serves the Cloudflare "Just a moment..." page
     # to plain requests + Playwright without a deep wait. Its existing
     # Playwright scraper times out at the 60s mark in practice.

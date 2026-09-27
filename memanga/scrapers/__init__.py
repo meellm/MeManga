@@ -1,14 +1,14 @@
 """
 MeManga Scrapers
 
-Working sources:
+Sources (not all currently reachable; see notes):
 - TCBScans (tcbonepiecechapters.com) - Jump manga: One Piece, JJK, MHA
 - WeebCentral (weebcentral.com) - Large library, 1000+ manga
 - Asura Scans (asurascans.com) - Manhwa specialist (JSON API)
 - Mangakatana (mangakatana.com) - General library
 - MangaDex (mangadex.org) - Community uploads (skip Shueisha)
 - Mangapill (mangapill.com) - Large library, no Cloudflare
-- MangaPark (mangapark1.com) - Large library, simple requests
+- MangaPark (mangapark1.com) - Large library; Cloudflare-blocked, out of search (#172)
 - MangaReader (mangareader.to) - Large library, clean UI
 - MangaSee (mangasee123.com) - High quality scans
 - MangaBuddy (mangabuddy.com) - Popular aggregator
@@ -194,7 +194,7 @@ SCRAPERS = {
     # Mangapill - Large library (no Cloudflare, simple requests)
     "mangapill.com": MangapillScraper,
 
-    # MangaPark - current working domain
+    # MangaPark - Cloudflare 403 since #172; kept registered for saved entries
     "mangapark1.com": MangaParkScraper,
 
     # MangaReader.to
@@ -694,7 +694,6 @@ def list_supported_sources():
 POPULAR_SOURCES = [
     "mangadex.org",
     "mangapill.com",
-    "mangapark1.com",
     "mangafire.to",
     "mangabuddy.com",
     "weebcentral.com",
@@ -719,8 +718,11 @@ POPULAR_SOURCES = [
     "mangayy.org",
 ]
 
-# Fresh installs ship with the top 16 ticked on the Sources page.
+# Fresh installs ship with the top 15 ticked on the Sources page.
 # Everything else is in `sources.disabled` by default. Only canonical
 # domains belong here — retired aliases (asuracomic.net, asuratoon.com)
 # stay out so the sweep doesn't probe the same scraper twice.
-DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:16]
+# mangapark1.com was dropped when its whole site went behind a
+# Cloudflare 403 (issue #172); the slice shrank with it so no
+# unverified source slides into the curated set in its place.
+DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:15]

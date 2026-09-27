@@ -7,6 +7,12 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Fixed
+- #172 MangaPark (mangapark1.com) is out of the curated default source
+  set and skipped by the multi-source search sweep. The whole site now
+  answers with a Cloudflare 403, so every search against it failed. The
+  scraper stays registered, so library entries saved on it are not
+  orphaned, but checks and downloads against it fail until the site is
+  reachable again (at which point it can be re-curated).
 - #175 MangaHere.onl search now queries the site's catalogue API instead of
   scraping the home page, so results match the query instead of listing
   unrelated titles. Titles the site doesn't host (licensed series served

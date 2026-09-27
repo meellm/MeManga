@@ -122,3 +122,62 @@ class TestRegistry:
         from memanga.scrapers import get_scraper
         s = get_scraper("www.mangapark1.com")
         assert isinstance(s, MangaParkScraper)
+
+
+class TestSourceCuration:
+    """Issue #172: mangapark1.com 403s behind Cloudflare, so it must not
+    ship pre-ticked or be probed by the multi-source sweep."""
+
+    def test_not_in_curated_defaults(self):
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES
+        assert "mangapark1.com" not in POPULAR_SOURCES
+        assert "mangapark1.com" not in DEFAULT_ENABLED_SOURCES
+
+    def test_curated_defaults_did_not_backfill(self):
+        # Dropping one entry must not pull the next, unverified source
+        # into the fresh-install set.
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES
+        assert len(DEFAULT_ENABLED_SOURCES) == 15
+        assert DEFAULT_ENABLED_SOURCES == [
+            "mangadex.org",
+            "mangapill.com",
+            "mangafire.to",
+            "mangabuddy.com",
+            "weebcentral.com",
+            "mangakatana.com",
+            "asurascans.com",
+            "comix.to",
+            "comick.io",
+            "mangahub.io",
+            "mangahere.cc",
+            "mangapanda.onl",
+            "mangaclash.com",
+            "mangahere.onl",
+            "mangataro.org",
+        ]
+        assert "luminousscans.com" not in DEFAULT_ENABLED_SOURCES
+
+    def test_skipped_in_search_even_if_enabled(self):
+        # Configs seeded before #172 still have it enabled, and users may
+        # have library entries saved on it; the sweep must skip it
+        # regardless of `sources.disabled` or library membership.
+        from memanga.search import BROKEN_SEARCH_SOURCES, compute_search_sources
+
+        class _Config:
+            _data = {
+                "sources.disabled": [],
+                "manga": [{
+                    "title": "Saved on MangaPark",
+                    "source": "mangapark1.com",
+                    "sources": [
+                        {"source": "mangapark1.com",
+                         "url": "https://mangapark1.com/title/1-example"},
+                    ],
+                }],
+            }
+
+            def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        assert "mangapark1.com" in BROKEN_SEARCH_SOURCES
+        assert "mangapark1.com" not in compute_search_sources(_Config())

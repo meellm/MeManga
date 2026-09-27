@@ -2,10 +2,11 @@
 MangaPark scraper
 https://mangapark1.com
 
-MangaPark's older domains are unreliable from normal requests, while
-mangapark1.com currently serves the catalog without a browser challenge.
-Chapter lists come from the site's JSON endpoint, and page images need a
-Referer header when downloaded from the CDN.
+MangaPark's older domains are unreliable from normal requests, and
+mangapark1.com now returns a Cloudflare 403 to plain requests too, so it
+is kept registered but out of default search (issue #172). Chapter
+lists come from the site's JSON endpoint, and page images need a Referer
+header when downloaded from the CDN.
 """
 
 import re
