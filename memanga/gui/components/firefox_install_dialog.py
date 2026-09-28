@@ -1,6 +1,6 @@
-"""Modal first-run dialog for downloading Playwright's Firefox build.
+"""Modal first-run dialog for downloading Playwright's browser builds.
 
-The Playwright Firefox build is ~90 MB and download time is dominated
+The Playwright Firefox and Chromium builds total ~250 MB and download time is dominated
 by network speed (anywhere from 20 s to several minutes). A blank
 "please wait" message during that window looks like the app is hung.
 This dialog streams the subprocess output, parses the percentage out
@@ -55,7 +55,7 @@ class _InstallSignals(QObject):
 
 
 class FirefoxInstallDialog(QDialog):
-    """Modal dialog that drives Playwright's Firefox install.
+    """Modal dialog that drives Playwright's Firefox + Chromium install.
 
     Construction does not start the install — call :meth:`run_install`
     to spin the dialog (blocking) and run the install in a worker
@@ -91,9 +91,9 @@ class FirefoxInstallDialog(QDialog):
         layout.addWidget(title)
 
         self._subtitle = QLabel(
-            "Downloading Firefox browser components (~90 MB). This runs "
-            "once per machine and is required to scrape sites that need "
-            "a real browser."
+            "Downloading Firefox and Chromium browser components (~250 MB). "
+            "This runs once per machine and is required to scrape sites "
+            "that need a real browser."
         )
         self._subtitle.setWordWrap(True)
         layout.addWidget(self._subtitle)
@@ -167,7 +167,9 @@ class FirefoxInstallDialog(QDialog):
             self._signals.progress.emit(pct)
         low = line.lower()
         if "downloading" in low:
-            self._signals.status.emit("Downloading Firefox…")
+            self._signals.status.emit(
+                "Downloading Chromium…" if "chrom" in low else "Downloading Firefox…"
+            )
         elif "extracting" in low:
             self._signals.status.emit("Extracting…")
         elif "downloaded to" in low or "installed" in low:
@@ -204,9 +206,9 @@ class FirefoxInstallDialog(QDialog):
             "Installation failed — see log for details."
         )
         self._subtitle.setText(
-            "Firefox install failed. Check your internet connection and "
+            "Browser install failed. Check your internet connection and "
             "try again. You can also install manually with:\n"
-            "    playwright install firefox"
+            "    playwright install firefox chromium"
         )
         if self._log.isHidden():
             self._log.show()

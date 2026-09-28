@@ -8,7 +8,7 @@ Working sources:
 - Mangakatana (mangakatana.com) - General library
 - MangaDex (mangadex.org) - Community uploads (skip Shueisha)
 - Mangapill (mangapill.com) - Large library, no Cloudflare
-- MangaPark (mangapark1.com) - Large library, simple requests
+- MangaPark (mangapark1.com) - Large library (Chromium, Cloudflare)
 - MangaReader (mangareader.to) - Large library, clean UI
 - MangaSee (mangasee123.com) - High quality scans
 - MangaBuddy (mangabuddy.com) - Popular aggregator
