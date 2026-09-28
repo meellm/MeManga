@@ -93,7 +93,7 @@ def sort_sources_by_popularity(sources: List[str]) -> List[str]:
 #   - REPLACED:     domain forwards to an unrelated site (mangakakalot →
 #                   spinzywheel.com gambling page)
 #   - NEEDS_JS_API: site has an SPA + client-side search API that the
-#                   plain HTML doesn't expose (mgeko.cc)
+#                   plain HTML doesn't expose (mangabolt.com)
 #   - ALIAS:        retired domain served by the same scraper as a live
 #                   one already in the sweep; skipped so the canonical
 #                   domain is the only one probed, and the aliases never
@@ -126,8 +126,9 @@ BROKEN_SEARCH_SOURCES = {
     # de-dupe and the aliases never show up as their own search
     # source; both still resolve for library entries saved on them.
     "asuracomic.net", "asuratoon.com",
-    # NEEDS_JS_API — static HTML returns 0 hits, real search is client-side
-    "mgeko.cc",
+    # NEEDS_JS_API — static HTML returns 0 hits, real search is client-side.
+    # (mgeko.cc used to be parked here; its plain-HTML search passed the
+    # live full-pipeline probe again, so it is back in the sweep - #178.)
     "mangabolt.com",
     "truemanga.com", "mangamonk.com",
     "mangahub.us",                # search endpoint requires headless JS

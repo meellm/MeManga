@@ -10,6 +10,7 @@ import pytest
 
 from memanga.scrapers import Manga
 from memanga.search import (
+    BROKEN_SEARCH_SOURCES,
     SearchResult,
     compute_search_sources,
     fetch_chapter_count,
@@ -199,6 +200,19 @@ class TestComputeSearchSources:
         sources = compute_search_sources(FakeConfig())
         assert "mangago.me" not in sources
         assert "www.mangago.me" not in sources
+
+    def test_mgeko_back_in_the_sweep(self):
+        # mgeko.cc was parked as NEEDS_JS_API, but its plain-HTML search,
+        # chapters, pages and image download pass the live probe again
+        # (issue #178), so it must reach the sweep when enabled.
+        assert "mgeko.cc" not in BROKEN_SEARCH_SOURCES
+        assert "mgeko.cc" in compute_search_sources(FakeConfig())
+
+    def test_disabled_mgeko_still_removed(self):
+        sources = compute_search_sources(FakeConfig({
+            "sources.disabled": ["mgeko.cc"],
+        }))
+        assert "mgeko.cc" not in sources
 
     def test_disabled_sources_removed(self):
         sources = compute_search_sources(FakeConfig({

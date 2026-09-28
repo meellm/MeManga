@@ -101,6 +101,12 @@ PARSING_PROBES = {
     # old scraper silently returned nothing.
     "asurascans.com": ProbeSpec("Asura Scans (JSON API)",
                                  query="nano machine"),
+    # Plain-HTML search + /all-chapters/ listing + reader <img> pages.
+    # Re-enabled in the search sweep after passing this pipeline (issue
+    # #178); this probe is what catches it regressing back to 0 hits.
+    # "one piece" currently returns nothing here, so probe a title the
+    # site actually carries.
+    "mgeko.cc": ProbeSpec("MGeko (plain HTML)", query="solo leveling"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),
