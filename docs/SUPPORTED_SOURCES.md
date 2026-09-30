@@ -4,7 +4,7 @@ MeManga supports **224 scrapers** covering **319 domains**. This document lists 
 
 > Some sites listed below are unreachable as of the last audit
 > (mangakakalot.com / mangasee123.com / mangareader.to /
-> manganato.com / mangaclash.com and friends) — they remain in the registry so
+> manganato.com / mangaclash.com / hiperdex.com and friends) — they remain in the registry so
 > existing libraries don't break, but the search sweep skips them.
 > See `memanga/search.py:BROKEN_SEARCH_SOURCES`.
 
@@ -79,7 +79,7 @@ Sites using the Madara manga theme.
 | mangayy.org, likemanga.io | General library |
 | manytoon.com | Webtoons/Manhwa |
 | toonily.me | Manhwa focused |
-| hiperdex.com | General library |
+| hiperdex.com | General library (blocked/unreachable from audit network, skipped by search) |
 | zinmanga.com | General library |
 | kunmanga.com | General library |
 | isekaiscan.com | Isekai focused |

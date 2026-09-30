@@ -113,8 +113,12 @@ PARSING_PROBES = {
     "akiramanga.com": ProbeSpec("OGImageMeta template (single-manga)"),
     "overlord-manga.online": ProbeSpec("LaiondCDN template (single-manga)"),
     "hxhmanga.com": ProbeSpec("Mangosm template (single-manga)"),
-    "hiperdex.com": ProbeSpec("WordPress Madara template (aggregator)",
-                                query="solo leveling"),
+    # hiperdex.com used to be the Madara representative, but from the
+    # audit network it serves a self-signed cert and a regional
+    # access-block page (issue #180), so probe a Madara aggregator that
+    # still answers.
+    "mangaread.org": ProbeSpec("WordPress Madara template (aggregator)",
+                                 query="solo leveling"),
 
     # ── ReadManga base family ──
     # Search-only: chapter listing needs a manga URL slug this site's
