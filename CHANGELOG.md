@@ -6,6 +6,12 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- #183 Olympus Scanlation (olympusxyz.com) is now available as a supported
+  source through the site's catalogue, chapter-list and reader APIs. Search
+  covers comics only; the site's text novels have no page images to
+  download.
+
 ### Fixed
 - #175 MangaHere.onl search now queries the site's catalogue API instead of
   scraping the home page, so results match the query instead of listing

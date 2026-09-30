@@ -107,6 +107,11 @@ PARSING_PROBES = {
     # "one piece" currently returns nothing here, so probe a title the
     # site actually carries.
     "mgeko.cc": ProbeSpec("MGeko (plain HTML)", query="solo leveling"),
+    # Search filters the /api/series/list catalogue client-side, chapters
+    # come from the panel host's paginated list, and pages from the
+    # /api/capitulo reader payload (issue #183).
+    "olympusxyz.com": ProbeSpec("Olympus Scanlation (Nuxt JSON API)",
+                                 query="solo swordmaster"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),
