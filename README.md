@@ -120,9 +120,9 @@ Click any downloaded chapter on the Detail page to open it in the built-in reade
 ## Search
 
 Search hits **only the 15 most popular working aggregators by default** —
-MangaDex, MangaPill, MangaFire, MangaBuddy, WeebCentral, MangaKatana,
-Comick, MangaHub, MangaHere, MangaPanda, MangaClash, MangaHere.onl,
-MangaTaro, LuminousScans, TCBScans. You can always flip more on in the 
+MangaDex, MangaPill, MangaPark, MangaFire, MangaBuddy, WeebCentral,
+MangaKatana, Asura Scans, Comix, Comick, MangaHub, MangaHere, MangaPanda,
+MangaHere.onl, MangaTaro. You can always flip more on in the
 **Sources** tab if you want a wider net (the long-tail aggregators are
 usually slower or have stale catalogs).
 
@@ -349,19 +349,19 @@ aggregators (popularity order):
 |---|---|---|
 | mangadex.org | API | Largest fan-translation library |
 | mangapill.com | Requests | Fast, no Cloudflare |
+| mangapark1.com | Playwright | Large library (Chromium, Cloudflare) |
 | mangafire.to | Playwright | VRF-signed API + image descrambling |
 | mangabuddy.com | Playwright | Popular aggregator |
 | weebcentral.com | Playwright | 1000+ series |
 | mangakatana.com | Playwright | General library |
+| asurascans.com | API | Manhwa specialist |
+| comix.to | Playwright | React SPA aggregator |
 | comick.io | Playwright | Clean API |
 | mangahub.io | Requests | Huge library |
 | mangahere.cc | Requests | Reliable mirror |
 | mangapanda.onl | Requests | MangaHub network |
-| mangaclash.com | Playwright | Manhwa-heavy |
 | mangahere.onl | Playwright | Alternate mirror |
 | mangataro.org | Requests | ComicK replacement |
-| luminousscans.com | Requests | Scanlation focus |
-| tcbonepiecechapters.com | Requests | Jump titles (One Piece, JJK, MHA) |
 
 200+ more aggregators are in the registry — toggle them on in the
 **Sources** tab or via `python -m memanga sources`. See the
