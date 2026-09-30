@@ -102,6 +102,53 @@ class TestGetPages:
         # Ordering preserved + dedup
         assert pages == list(dict.fromkeys(pages))
 
+    def test_extracts_mangayi_cdn_pages_after_redirect(self, patch_request, load_fixture):
+        # dddmanga.com/chapter/N/ now resolves to mangayi.com, which serves
+        # pages from a different CDN host than ASSETS_URL.
+        s = _make_scraper()
+        patch_request(s, text=load_fixture("nuxt_ssr", "chapter_pages_mangayi.html"))
+        pages = s.get_pages("https://dddmanga.com/chapter/5/")
+        assert pages == [
+            "https://scp.keterfoundation.com/image/dandadan/chapter-5/1.jpeg",
+            "https://scp.keterfoundation.com/image/dandadan/chapter-5/2.jpeg",
+            "https://scp.keterfoundation.com/image/dandadan/chapter-5/10.jpeg",
+        ]
+
+    def test_mangayi_cdn_slug_may_differ_from_assets_slug(self, patch_request):
+        s = _make_scraper(
+            BASE_URL="https://jjkaisen.com",
+            ASSETS_URL="https://assets.jjkaisen.com/jjkaisen",
+        )
+        patch_request(s, text=(
+            '<img src="https://scp.keterfoundation.com/image/jujutsu-kaisen/chapter-3/thumb.webp">'
+            '<img src="https://scp.keterfoundation.com/image/jujutsu-kaisen/chapter-3/1.jpg">'
+            '<img src="https://scp.keterfoundation.com/image/jujutsu-kaisen/chapter-3/2.jpg">'
+        ))
+        pages = s.get_pages("https://jjkaisen.com/chapter/3/")
+        assert pages == [
+            "https://scp.keterfoundation.com/image/jujutsu-kaisen/chapter-3/1.jpg",
+            "https://scp.keterfoundation.com/image/jujutsu-kaisen/chapter-3/2.jpg",
+        ]
+
+    def test_mangayi_fallback_ignores_same_chapter_images_outside_image_slug(self, patch_request):
+        s = _make_scraper()
+        patch_request(s, text=(
+            '<img src="https://ads.example.com/banners/chapter-7/1.jpg">'
+            '<img src="https://scp.keterfoundation.com/chapter-7/2.jpg">'
+            '<img src="https://scp.keterfoundation.com/image/dandadan/chapter-7/1.jpeg">'
+        ))
+        pages = s.get_pages("https://dddmanga.com/chapter/7/")
+        assert pages == ["https://scp.keterfoundation.com/image/dandadan/chapter-7/1.jpeg"]
+
+    def test_assets_cdn_pages_take_precedence_over_mangayi_cdn(self, patch_request):
+        s = _make_scraper()
+        patch_request(s, text=(
+            '<img src="https://scp.keterfoundation.com/image/dandadan/chapter-7/1.jpeg">'
+            '<img src="https://assets.dddmanga.com/dandadan/chapter-7/1.jpg">'
+        ))
+        pages = s.get_pages("https://dddmanga.com/chapter/7/")
+        assert pages == ["https://assets.dddmanga.com/dandadan/chapter-7/1.jpg"]
+
     def test_fallback_grabs_any_asset_image(self, patch_request, load_fixture):
         s = _make_scraper()
         patch_request(s, text=load_fixture("nuxt_ssr", "chapter_fallback_pages.html"))
