@@ -6,9 +6,11 @@ Popular manga aggregator. Uses Playwright for chapter pages (JS-loaded images)
 and HTTP for search/chapter listing.
 """
 
+import json
 import re
 from typing import List
 from pathlib import Path
+from urllib.parse import quote_plus
 from .playwright_base import PlaywrightScraper
 from .base import Chapter, Manga
 
@@ -20,14 +22,22 @@ class MangaBuddyScraper(PlaywrightScraper):
     base_url = "https://mangabuddy.com"
 
     def search(self, query: str) -> List[Manga]:
-        """Search for manga by title."""
+        """Search for manga by title.
+
+        mangabuddy.com now redirects to comizy.io, a Next.js site that
+        ships search results in ``#__NEXT_DATA__`` (``pageProps.ssrItems``).
+        The legacy ``.book-item`` card markup is kept as a fallback.
+        """
         from bs4 import BeautifulSoup
 
-        url = f"{self.base_url}/search?q={query.replace(' ', '+')}"
+        url = f"{self.base_url}/search?q={quote_plus(query)}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
 
-        results = []
+        results = self._parse_next_search(soup)
+        if results:
+            return results[:10]
+
         for item in soup.select(".book-item, .manga-item, .list-item"):
             link = item.find("a")
             if not link:
@@ -57,6 +67,43 @@ class MangaBuddyScraper(PlaywrightScraper):
                 results.append(Manga(title=title, url=manga_url, cover_url=cover_url))
 
         return results[:10]
+
+    @staticmethod
+    def _next_page_props(soup) -> dict:
+        """Return ``props.pageProps`` from the Next.js data blob, or {}."""
+        script = soup.find("script", id="__NEXT_DATA__")
+        if not script or not script.string:
+            return {}
+        try:
+            data = json.loads(script.string)
+        except ValueError:
+            return {}
+        props = data.get("props") if isinstance(data, dict) else None
+        page_props = props.get("pageProps") if isinstance(props, dict) else None
+        return page_props if isinstance(page_props, dict) else {}
+
+    def _parse_next_search(self, soup) -> List[Manga]:
+        """Parse Comizy search results from ``pageProps.ssrItems``."""
+        items = self._next_page_props(soup).get("ssrItems")
+        if not isinstance(items, list):
+            return []
+
+        results = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            title = (item.get("name") or "").strip()
+            href = item.get("url") or (f"/{item['slug']}" if item.get("slug") else "")
+            if not title or not href:
+                continue
+            manga_url = href if href.startswith("http") else f"{self.base_url}{href}"
+            results.append(Manga(
+                title=title,
+                url=manga_url,
+                cover_url=item.get("cover") or None,
+                description=item.get("summary") or None,
+            ))
+        return results
 
     def get_chapters(self, manga_url: str) -> List[Chapter]:
         """Get all chapters for a manga."""
@@ -97,6 +144,36 @@ class MangaBuddyScraper(PlaywrightScraper):
 
         return sorted(unique, key=lambda x: x.numeric)
 
+    def _parse_next_pages(self, html: str) -> List[str]:
+        """Parse Comizy chapter images from ``pageProps.initialChapter``.
+
+        Reads ``initialChapter.images`` (list of URLs) and falls back to
+        ``initialChapter.pages[*].url``. Returns [] when neither is present.
+        """
+        from bs4 import BeautifulSoup
+
+        chapter = self._next_page_props(BeautifulSoup(html, "html.parser")).get("initialChapter")
+        if not isinstance(chapter, dict):
+            return []
+
+        for key in ("images", "pages"):
+            entries = chapter.get(key)
+            if not isinstance(entries, list):
+                continue
+            urls = []
+            for entry in entries:
+                src = entry.get("url") if isinstance(entry, dict) else entry
+                if not isinstance(src, str) or not src.strip():
+                    continue
+                src = src.strip()
+                if src.startswith("//"):
+                    src = f"https:{src}"
+                if src.startswith("http") and src not in urls:
+                    urls.append(src)
+            if urls:
+                return urls
+        return []
+
     def _get_pages_in_thread(self, chapter_url: str) -> List[str]:
         """Fetch page images using Playwright - runs in executor thread.
 
@@ -112,6 +189,13 @@ class MangaBuddyScraper(PlaywrightScraper):
             Stealth().apply_stealth_sync(page)
 
             page.goto(chapter_url, wait_until='domcontentloaded', timeout=45000)
+
+            # mangabuddy.com redirects to comizy.io, which embeds the page
+            # image URLs in #__NEXT_DATA__ -- no scrolling needed.
+            next_pages = self._parse_next_pages(page.content())
+            if next_pages:
+                return next_pages
+
             page.wait_for_timeout(3000)
 
             # Scroll down to trigger lazy loading of all images
@@ -175,17 +259,24 @@ class MangaBuddyScraper(PlaywrightScraper):
         return self._run_serialized(self._get_pages_in_thread, chapter_url, timeout=120)
 
     def download_image(self, url: str, path) -> bool:
-        """Download image with proper headers."""
-        try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": f"{self.base_url}/",
-            }
-            response = self.session.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-            Path(path).write_bytes(response.content)
-            return True
-        except Exception as e:
-            print(f"Failed to download {url}: {e}")
-            return False
+        """Download image with proper headers.
+
+        Tries the MangaBuddy referer first, then the Comizy one (the
+        site now redirects there and serves images from its CDN).
+        """
+        error = None
+        for referer in (f"{self.base_url}/", "https://comizy.io/"):
+            try:
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": referer,
+                }
+                response = self.session.get(url, headers=headers, timeout=30)
+                response.raise_for_status()
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+                Path(path).write_bytes(response.content)
+                return True
+            except Exception as e:
+                error = e
+        print(f"Failed to download {url}: {error}")
+        return False
