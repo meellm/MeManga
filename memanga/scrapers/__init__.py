@@ -405,7 +405,9 @@ SCRAPERS = {
     # Atsumaru - Manga aggregator (Typesense search + REST API)
     "atsu.moe": AtsumaruScraper,
 
-    # MangaClash - Manga aggregator (Playwright + Madara + CF)
+    # MangaClash - Manga aggregator (Playwright + Madara + CF).
+    # Site unreachable (#179); kept so saved library entries still
+    # resolve, but skipped by the search sweep.
     "mangaclash.com": MangaClashScraper,
 
     # KunManga - Manga aggregator (Playwright + Madara + CF)
@@ -705,7 +707,6 @@ POPULAR_SOURCES = [
     "mangahub.io",
     "mangahere.cc",
     "mangapanda.onl",
-    "mangaclash.com",
     "mangahere.onl",
     "mangataro.org",
     "luminousscans.com",
@@ -719,8 +720,8 @@ POPULAR_SOURCES = [
     "mangayy.org",
 ]
 
-# Fresh installs ship with the top 16 ticked on the Sources page.
+# Fresh installs ship with the top 15 ticked on the Sources page.
 # Everything else is in `sources.disabled` by default. Only canonical
 # domains belong here — retired aliases (asuracomic.net, asuratoon.com)
 # stay out so the sweep doesn't probe the same scraper twice.
-DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:16]
+DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:15]

@@ -111,6 +111,12 @@ BROKEN_SEARCH_SOURCES = {
     "mangakakalot.to",
     "manga4life.com",             # ex-mangasee mirror, also dead
     "mangalife.us",
+    # mangaclash.com fails TLS verification (unknown issuer), and plain
+    # HTTP no longer serves MangaClash - requests may be dropped, and a
+    # browser lands on an unrelated shopping page. www. has no DNS. No
+    # verified replacement - the .org lookalike is an unrelated
+    # WordPress shell (issue #179).
+    "mangaclash.com",
     # REPLACED / regional block / chronic timeout
     "mangatown.com", "www.mangatown.com",
     "manhwa18.cc",

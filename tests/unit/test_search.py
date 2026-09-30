@@ -214,6 +214,36 @@ class TestComputeSearchSources:
         }))
         assert "mgeko.cc" not in sources
 
+    def test_unreachable_mangaclash_excluded(self):
+        # mangaclash.com fails TLS and its plain-HTTP site is no longer
+        # MangaClash, with no verified replacement domain (issue #179).
+        # It stays registered so saved entries resolve, but must never
+        # reach the sweep - not even when it's already in the user's
+        # library.
+        assert "mangaclash.com" in BROKEN_SEARCH_SOURCES
+        assert "mangaclash.com" not in compute_search_sources(FakeConfig())
+        assert "mangaclash.com" not in compute_search_sources(FakeConfig({
+            "manga": [{"title": "X", "source": "mangaclash.com"}],
+        }))
+
+    def test_mangaclash_not_a_default_source(self):
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES
+        assert "mangaclash.com" not in POPULAR_SOURCES
+        assert "mangaclash.com" not in DEFAULT_ENABLED_SOURCES
+
+    def test_default_enabled_sources_pinned(self):
+        # Pinned so a curation change is deliberate and the README's
+        # default-source list gets updated with it. Dropping MangaClash
+        # (#179) did not promote luminousscans.com into the defaults.
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES
+        assert DEFAULT_ENABLED_SOURCES == [
+            "mangadex.org", "mangapill.com", "mangapark1.com",
+            "mangafire.to", "mangabuddy.com", "weebcentral.com",
+            "mangakatana.com", "asurascans.com", "comix.to",
+            "comick.io", "mangahub.io", "mangahere.cc",
+            "mangapanda.onl", "mangahere.onl", "mangataro.org",
+        ]
+
     def test_disabled_sources_removed(self):
         sources = compute_search_sources(FakeConfig({
             "sources.disabled": ["mangadex.org"],
