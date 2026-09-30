@@ -122,6 +122,14 @@ BROKEN_SEARCH_SOURCES = {
     "manhwa18.cc",
     "mangafreak.me", "mangafreak.ws", "ww2.mangafreak.me",
     "bato.to", "batoto.to",
+    # hiperdex.com is blocked/unreachable from the audit network: verified
+    # HTTPS sees a self-signed localhost.localdomain cert, and unverified
+    # HTTPS / plain HTTP return a regional access-block page. It may still
+    # work elsewhere, but no verified replacement domain with live manga
+    # downloads was found - .co is parked for sale, .info is a parking
+    # redirect, and .top -> hiperdex.tv is a different tRPC app, not the
+    # Madara site this scraper targets (issue #180).
+    "hiperdex.com",
     # region-blocked (DNS poison + SNI filter) on some networks, where
     # connect() stalls and the 30s-timeout x 3-retry sweep slot hangs
     # ~90s+, so drop it from the sweep. Reachable elsewhere, so it stays

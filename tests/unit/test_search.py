@@ -231,6 +231,20 @@ class TestComputeSearchSources:
         assert "mangaclash.com" not in POPULAR_SOURCES
         assert "mangaclash.com" not in DEFAULT_ENABLED_SOURCES
 
+    def test_unreachable_hiperdex_excluded(self):
+        # hiperdex.com is blocked/unreachable from the audit network
+        # (self-signed cert, regional access-block page), with no verified
+        # replacement domain (issue #180). It stays registered so saved
+        # entries resolve, but must never reach the sweep - not even when
+        # it's in the library.
+        from memanga.scrapers import get_scraper
+        assert "hiperdex.com" in BROKEN_SEARCH_SOURCES
+        assert get_scraper("hiperdex.com") is not None
+        assert "hiperdex.com" not in compute_search_sources(FakeConfig())
+        assert "hiperdex.com" not in compute_search_sources(FakeConfig({
+            "manga": [{"title": "X", "source": "hiperdex.com"}],
+        }))
+
     def test_default_enabled_sources_pinned(self):
         # Pinned so a curation change is deliberate and the README's
         # default-source list gets updated with it. Dropping MangaClash
