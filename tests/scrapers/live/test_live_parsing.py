@@ -112,6 +112,11 @@ PARSING_PROBES = {
     # /api/capitulo reader payload (issue #183).
     "olympusxyz.com": ProbeSpec("Olympus Scanlation (Nuxt JSON API)",
                                  query="solo swordmaster"),
+    # Search parses /biblioteca result cards, chapters come from the
+    # li.upload-link rows on the series page, and pages from the reader's
+    # <img> tags under storage.zonatmo.org/chapters/<upload_id>/ (issue #184).
+    "zonatmo.org": ProbeSpec("ZonaTMO (Laravel SSR HTML)",
+                              query="solo leveling"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),

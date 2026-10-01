@@ -7,6 +7,9 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #184 ZonaTMO (zonatmo.org) is now available as a supported source.
+  Search, chapter lists and reader pages are read from the site's HTML;
+  text novels are skipped since they have no page images to download.
 - #183 Olympus Scanlation (olympusxyz.com) is now available as a supported
   source through the site's catalogue, chapter-list and reader APIs. Search
   covers comics only; the site's text novels have no page images to
