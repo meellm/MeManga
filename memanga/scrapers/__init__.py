@@ -18,6 +18,7 @@ Working sources:
 - Mangago (mangago.me) - Large yaoi/shoujo collection
 - MangaTaro (mangataro.org) - ComicK replacement, popular aggregator
 - Mangadot (mangadot.net) - Multi-language aggregator (SSR + JSON API)
+- Olympus Scanlation (olympusxyz.com) - Spanish manhwa scans (JSON API)
 - MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
 - Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
 """
@@ -43,6 +44,7 @@ from .manganato import ManganatoScraper
 from .mangago import MangagoScraper
 from .mangataro import MangaTaroScraper
 from .mangadot import MangadotScraper
+from .olympus import OlympusScraper
 from .flamecomics import FlameComicsScraper
 from .luminousscans import LuminousScansScraper
 from .mangahere import MangaHereScraper
@@ -231,6 +233,9 @@ SCRAPERS = {
 
     # Mangadot - Multi-language aggregator (React Router SSR + JSON API)
     "mangadot.net": MangadotScraper,
+
+    # Olympus Scanlation - Spanish manhwa scans (Nuxt JSON API + panel chapter list)
+    "olympusxyz.com": OlympusScraper,
 
     # FlameComics
     "flamecomics.xyz": FlameComicsScraper,

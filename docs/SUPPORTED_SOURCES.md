@@ -213,6 +213,7 @@ Sites dedicated to specific manga series.
 | centuriya.com | General library |
 | galaxxias.com | General library |
 | mangaball.net | Multi-language |
+| olympusxyz.com | Spanish manhwa scans (Olympus Scanlation) |
 
 ## Adult/NSFW Sources
 
