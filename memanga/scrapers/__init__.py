@@ -20,6 +20,7 @@ Working sources:
 - Mangadot (mangadot.net) - Multi-language aggregator (SSR + JSON API)
 - Olympus Scanlation (olympusxyz.com) - Spanish manhwa scans (JSON API)
 - ZonaTMO (zonatmo.org) - Spanish manga/manhwa library (plain HTML)
+- Lector Manga (lector-mangas.lat) - Spanish manga/manhwa reader (static HTML)
 - MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
 - Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
 """
@@ -47,6 +48,7 @@ from .mangataro import MangaTaroScraper
 from .mangadot import MangadotScraper
 from .olympus import OlympusScraper
 from .zonatmo import ZonaTMOScraper
+from .lectormanga import LectorMangaScraper
 from .flamecomics import FlameComicsScraper
 from .luminousscans import LuminousScansScraper
 from .mangahere import MangaHereScraper
@@ -241,6 +243,12 @@ SCRAPERS = {
 
     # ZonaTMO - Spanish manga/manhwa library (Laravel SSR HTML)
     "zonatmo.org": ZonaTMOScraper,
+
+    # Lector Manga - Spanish manga/manhwa reader (static Astro HTML).
+    # lectormangass.net 301-redirects to lector-mangas.lat and is kept
+    # so URLs saved or discovered on the old host still resolve.
+    "lector-mangas.lat": LectorMangaScraper,
+    "lectormangass.net": LectorMangaScraper,
 
     # FlameComics
     "flamecomics.xyz": FlameComicsScraper,

@@ -117,6 +117,11 @@ PARSING_PROBES = {
     # <img> tags under storage.zonatmo.org/chapters/<upload_id>/ (issue #184).
     "zonatmo.org": ProbeSpec("ZonaTMO (Laravel SSR HTML)",
                               query="solo leveling"),
+    # Search reads the cdn.zerocomics.net fragment the site's live search
+    # fetches (the advertised /comics?q= URL ignores the query); chapters
+    # and pages are server-rendered on the series/reader pages (issue #186).
+    "lector-mangas.lat": ProbeSpec("Lector Manga (static Astro HTML)",
+                                    query="jinx"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),
