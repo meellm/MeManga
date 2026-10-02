@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga supports **224 scrapers** covering **319 domains**. This document lists all supported sources.
+MeManga supports **225 scrapers** covering **320 domains**. This document lists all supported sources.
 
 > Some sites listed below are unreachable as of the last audit
 > (mangakakalot.com / mangasee123.com / mangareader.to /
@@ -215,6 +215,7 @@ Sites dedicated to specific manga series.
 | mangaball.net | Multi-language |
 | olympusxyz.com | Spanish manhwa scans (Olympus Scanlation) |
 | zonatmo.org | Spanish manga/manhwa library (ZonaTMO) |
+| lector-mangas.lat | Spanish manga/manhwa reader (Lector Manga; lectormangass.net redirects here) |
 | en-thunderscans.com | English manhwa scans (Thunder Scans EN) |
 
 ## Adult/NSFW Sources

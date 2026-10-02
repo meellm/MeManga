@@ -140,6 +140,9 @@ BROKEN_SEARCH_SOURCES = {
     # de-dupe and the aliases never show up as their own search
     # source; both still resolve for library entries saved on them.
     "asuracomic.net", "asuratoon.com",
+    # ALIAS — old Lector Manga host, 301-redirects to lector-mangas.lat
+    # (issue #186). Same scraper, so only the current host is searched.
+    "lectormangass.net",
     # NEEDS_JS_API — static HTML returns 0 hits, real search is client-side.
     # (mgeko.cc used to be parked here; its plain-HTML search passed the
     # live full-pipeline probe again, so it is back in the sweep - #178.)

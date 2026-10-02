@@ -245,6 +245,20 @@ class TestComputeSearchSources:
             "manga": [{"title": "X", "source": "hiperdex.com"}],
         }))
 
+    def test_lector_manga_old_host_is_an_alias(self):
+        # lectormangass.net 301-redirects to lector-mangas.lat (issue #186).
+        # Both resolve to the same scraper, but only the current host is
+        # searched - even when the library still points at the old one.
+        from memanga.scrapers import get_scraper
+        from memanga.scrapers.lectormanga import LectorMangaScraper
+        assert isinstance(get_scraper("lectormangass.net"), LectorMangaScraper)
+        assert "lectormangass.net" in BROKEN_SEARCH_SOURCES
+        sources = compute_search_sources(FakeConfig({
+            "manga": [{"title": "X", "source": "lectormangass.net"}],
+        }))
+        assert "lector-mangas.lat" in sources
+        assert "lectormangass.net" not in sources
+
     def test_default_enabled_sources_pinned(self):
         # Pinned so a curation change is deliberate and the README's
         # default-source list gets updated with it. Dropping MangaClash
