@@ -20,6 +20,7 @@ Working sources:
 - Mangadot (mangadot.net) - Multi-language aggregator (SSR + JSON API)
 - Olympus Scanlation (olympusxyz.com) - Spanish manhwa scans (JSON API)
 - ZonaTMO (zonatmo.org) - Spanish manga/manhwa library (plain HTML)
+- Thunder Scans EN (en-thunderscans.com) - English manhwa scans (MangaThemesia HTML)
 - MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
 - Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
 """
@@ -47,6 +48,7 @@ from .mangataro import MangaTaroScraper
 from .mangadot import MangadotScraper
 from .olympus import OlympusScraper
 from .zonatmo import ZonaTMOScraper
+from .thunderscans import ThunderScansScraper
 from .flamecomics import FlameComicsScraper
 from .luminousscans import LuminousScansScraper
 from .mangahere import MangaHereScraper
@@ -241,6 +243,9 @@ SCRAPERS = {
 
     # ZonaTMO - Spanish manga/manhwa library (Laravel SSR HTML)
     "zonatmo.org": ZonaTMOScraper,
+
+    # Thunder Scans EN - English manhwa scans (MangaThemesia WordPress theme)
+    "en-thunderscans.com": ThunderScansScraper,
 
     # FlameComics
     "flamecomics.xyz": FlameComicsScraper,
