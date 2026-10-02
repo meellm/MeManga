@@ -127,6 +127,10 @@ PARSING_PROBES = {
     # skipped), and the reader's ts_reader.run() image list (issue #185).
     "en-thunderscans.com": ProbeSpec("Thunder Scans EN (MangaThemesia HTML)",
                                       query="solo swordmaster"),
+    # Next.js SSR HTML: /semua-komik?q= result cards (the /api/comics
+    # endpoint ignores the query), the series page's a.chap-cell grid, and
+    # the reader's div.reader-page Blogger images (issue #187).
+    "wurmz.net": ProbeSpec("Wurmz (Next.js SSR HTML)", query="solo"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),

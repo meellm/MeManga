@@ -22,6 +22,7 @@ Working sources:
 - ZonaTMO (zonatmo.org) - Spanish manga/manhwa library (plain HTML)
 - Lector Manga (lector-mangas.lat) - Spanish manga/manhwa reader (static HTML)
 - Thunder Scans EN (en-thunderscans.com) - English manhwa scans (MangaThemesia HTML)
+- Wurmz (wurmz.net) - Indonesian manga/manhwa/manhua reader (Next.js SSR HTML)
 - MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
 - Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
 """
@@ -51,6 +52,7 @@ from .olympus import OlympusScraper
 from .zonatmo import ZonaTMOScraper
 from .lectormanga import LectorMangaScraper
 from .thunderscans import ThunderScansScraper
+from .wurmz import WurmzScraper
 from .flamecomics import FlameComicsScraper
 from .luminousscans import LuminousScansScraper
 from .mangahere import MangaHereScraper
@@ -254,6 +256,9 @@ SCRAPERS = {
 
     # Thunder Scans EN - English manhwa scans (MangaThemesia WordPress theme)
     "en-thunderscans.com": ThunderScansScraper,
+
+    # Wurmz - Indonesian manga/manhwa/manhua reader (Next.js SSR HTML)
+    "wurmz.net": WurmzScraper,
 
     # FlameComics
     "flamecomics.xyz": FlameComicsScraper,

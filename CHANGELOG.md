@@ -23,6 +23,9 @@ All notable changes are recorded here. Format loosely follows
   source with search, chapter listing and page downloads. Links on the
   old lectormangass.net host, which now redirects to the new one, keep
   resolving to the same scraper.
+- #187 Wurmz (wurmz.net) is now available as a supported source with
+  search, chapter lists and page downloads for its Indonesian manga,
+  manhwa and manhua translations.
 
 ### Fixed
 - #175 MangaHere.onl search now queries the site's catalogue API instead of
