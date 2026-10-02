@@ -215,6 +215,7 @@ Sites dedicated to specific manga series.
 | mangaball.net | Multi-language |
 | olympusxyz.com | Spanish manhwa scans (Olympus Scanlation) |
 | zonatmo.org | Spanish manga/manhwa library (ZonaTMO) |
+| en-thunderscans.com | English manhwa scans (Thunder Scans EN) |
 
 ## Adult/NSFW Sources
 
