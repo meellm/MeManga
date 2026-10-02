@@ -122,6 +122,11 @@ PARSING_PROBES = {
     # and pages are server-rendered on the series/reader pages (issue #186).
     "lector-mangas.lat": ProbeSpec("Lector Manga (static Astro HTML)",
                                     query="jinx"),
+    # MangaThemesia WordPress theme (not Madara): ?s= search cards, the
+    # series page's #chapterlist (coin-locked rows have no href and are
+    # skipped), and the reader's ts_reader.run() image list (issue #185).
+    "en-thunderscans.com": ProbeSpec("Thunder Scans EN (MangaThemesia HTML)",
+                                      query="solo swordmaster"),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),

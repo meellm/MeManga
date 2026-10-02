@@ -7,6 +7,11 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #185 Thunder Scans EN (en-thunderscans.com) is now available as a
+  supported source with search, chapter lists and page downloads.
+  Coin-locked early-access chapters are left out of the chapter list, and
+  saved series links keep working when the site rotates its numeric slug
+  prefixes.
 - #184 ZonaTMO (zonatmo.org) is now available as a supported source.
   Search, chapter lists and reader pages are read from the site's HTML;
   text novels are skipped since they have no page images to download.

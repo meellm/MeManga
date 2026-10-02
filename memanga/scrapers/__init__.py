@@ -21,6 +21,7 @@ Working sources:
 - Olympus Scanlation (olympusxyz.com) - Spanish manhwa scans (JSON API)
 - ZonaTMO (zonatmo.org) - Spanish manga/manhwa library (plain HTML)
 - Lector Manga (lector-mangas.lat) - Spanish manga/manhwa reader (static HTML)
+- Thunder Scans EN (en-thunderscans.com) - English manhwa scans (MangaThemesia HTML)
 - MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
 - Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
 """
@@ -49,6 +50,7 @@ from .mangadot import MangadotScraper
 from .olympus import OlympusScraper
 from .zonatmo import ZonaTMOScraper
 from .lectormanga import LectorMangaScraper
+from .thunderscans import ThunderScansScraper
 from .flamecomics import FlameComicsScraper
 from .luminousscans import LuminousScansScraper
 from .mangahere import MangaHereScraper
@@ -249,6 +251,9 @@ SCRAPERS = {
     # so URLs saved or discovered on the old host still resolve.
     "lector-mangas.lat": LectorMangaScraper,
     "lectormangass.net": LectorMangaScraper,
+
+    # Thunder Scans EN - English manhwa scans (MangaThemesia WordPress theme)
+    "en-thunderscans.com": ThunderScansScraper,
 
     # FlameComics
     "flamecomics.xyz": FlameComicsScraper,
