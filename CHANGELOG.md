@@ -6,6 +6,8 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-03
+
 ### Added
 - #185 Thunder Scans EN (en-thunderscans.com) is now available as a
   supported source with search, chapter lists and page downloads.
@@ -26,6 +28,12 @@ All notable changes are recorded here. Format loosely follows
 - #187 Wurmz (wurmz.net) is now available as a supported source with
   search, chapter lists and page downloads for its Indonesian manga,
   manhwa and manhua translations.
+
+### Changed
+- Docker image publishing now builds and runs a local smoke-test image
+  before the multi-platform release images are published, so broken
+  container entrypoints fail before they reach Docker Hub or GHCR.
+- Version metadata synchronized for the v0.4.4 release.
 
 ### Fixed
 - #163 macOS release builds can optionally be signed and notarized. When
