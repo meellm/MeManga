@@ -656,9 +656,12 @@ SCRAPERS = {
     # JJKManga - Jujutsu Kaisen dedicated (cloudscraper + pic.readkakegurui.com CDN)
     "jjkmanga.net": JJKMangaScraper,
 
-    # Kagane - Multi-manga REST API + Playwright for DRM-protected images
+    # Kagane - Multi-manga REST API + Playwright for DRM-protected images.
+    # kagane.org now redirects to kagane.to; both sit behind a Cloudflare
+    # challenge, so Kagane is skipped by search (see BROKEN_SEARCH_SOURCES).
     "kagane.org": KaganeScraper,
     "www.kagane.org": KaganeScraper,
+    "kagane.to": KaganeScraper,
 
     # VyManga - General aggregator (chapter links via ad-redirect -> Blogger CDN)
     # Legacy hosts (vymanga.net / vyvymanga.net) 403 on their own /manga/ pages

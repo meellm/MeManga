@@ -28,6 +28,12 @@ All notable changes are recorded here. Format loosely follows
   manhwa and manhua translations.
 
 ### Fixed
+- #182 Kagane is skipped by the multi-source search sweep. kagane.org now
+  redirects to kagane.to, and both sit behind a Cloudflare challenge that
+  answers searches with a 403. Links on either domain still resolve to
+  the Kagane scraper so saved entries stay in the library, but searches,
+  chapter lists and page downloads will not work until a reliable way
+  past the challenge is found.
 - #181 ComicK search and chapter lists work again. The scraper now reads
   the site's JSON API instead of the browser-rendered pages, which sit
   behind Cloudflare's headless verification and returned no results.

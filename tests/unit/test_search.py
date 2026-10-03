@@ -259,6 +259,27 @@ class TestComputeSearchSources:
         assert "lector-mangas.lat" in sources
         assert "lectormangass.net" not in sources
 
+    def test_challenged_kagane_excluded(self):
+        # kagane.org redirects to kagane.to and both answer with a
+        # Cloudflare 403/challenge (issue #182). Every host resolves to the
+        # same scraper so saved entries keep working, but none of them may
+        # reach the sweep - not even when the library still points there.
+        from memanga.scrapers import get_scraper
+        from memanga.scrapers.kagane import KaganeScraper
+        hosts = ("kagane.org", "www.kagane.org", "kagane.to")
+        for host in hosts:
+            assert isinstance(get_scraper(host), KaganeScraper)
+            assert host in BROKEN_SEARCH_SOURCES
+        sources = compute_search_sources(FakeConfig({
+            "manga": [
+                {"title": "X", "source": "kagane.org"},
+                {"title": "Y", "sources": [
+                    {"url": "https://kagane.to/series/abc"},
+                ]},
+            ],
+        }))
+        assert not set(hosts) & set(sources)
+
     def test_default_enabled_sources_pinned(self):
         # Pinned so a curation change is deliberate and the README's
         # default-source list gets updated with it. Dropping MangaClash
