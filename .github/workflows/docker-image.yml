@@ -72,6 +72,20 @@ jobs:
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
             type=sha,prefix=sha-
 
+      - name: Build smoke test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: memanga:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test image
+        run: docker run --rm memanga:smoke --help
+
       - name: Build image without publishing
         if: github.event_name == 'workflow_dispatch' && !inputs.push
         uses: docker/build-push-action@v6
