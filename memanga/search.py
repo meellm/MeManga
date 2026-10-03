@@ -163,6 +163,13 @@ BROKEN_SEARCH_SOURCES = {
     # to plain requests + Playwright without a deep wait. Its existing
     # Playwright scraper times out at the 60s mark in practice.
     "manganato.gg",
+    # kagane.org redirects to kagane.to, and both the site and the
+    # yuzuki.kagane.org search API answer plain requests, cloudscraper
+    # and headless Firefox with a Cloudflare 403/challenge. The reader's
+    # images also need a per-session page token. No challenge-safe path
+    # yet, so Kagane stays registered for saved entries but is never
+    # swept (issue #182).
+    "kagane.org", "www.kagane.org", "kagane.to",
 }
 
 

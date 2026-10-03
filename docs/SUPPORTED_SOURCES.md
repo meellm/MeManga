@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga supports **226 scrapers** covering **321 domains**. This document lists all supported sources.
+MeManga supports **234 scrapers** covering **333 domains**. This document lists all supported sources.
 
 > Some sites listed below are unreachable as of the last audit
 > (mangakakalot.com / mangasee123.com / mangareader.to /
@@ -218,6 +218,7 @@ Sites dedicated to specific manga series.
 | lector-mangas.lat | Spanish manga/manhwa reader (Lector Manga; lectormangass.net redirects here) |
 | en-thunderscans.com | English manhwa scans (Thunder Scans EN) |
 | wurmz.net | Indonesian manga/manhwa/manhua reader (Wurmz) |
+| kagane.to, kagane.org | General library (behind a Cloudflare challenge, skipped by search; downloads not currently working) |
 
 ## Adult/NSFW Sources
 
