@@ -151,6 +151,17 @@ def test_workflow_verifies_architecture_before_upload():
     assert ARCH_EXPR in run
 
 
+def test_macos_pdf_system_dependency_is_installed_before_pip_deps():
+    """macos-26-intel can fall back to building pikepdf from source, which
+    needs qpdf headers before requirements.txt is installed."""
+    step = _step_named("Install macOS system libraries for PDF dependencies")
+    assert step is not None, "macOS qpdf dependency step missing"
+    assert step.get("if") == "runner.os == 'macOS'"
+    assert "brew install qpdf" in step.get("run", "")
+    assert _step_index("Install macOS system libraries for PDF dependencies") \
+        < _step_index("Install dependencies")
+
+
 # ── Linux archive packaging (issue #167) ──────────────────────────────
 
 def _build_steps():
