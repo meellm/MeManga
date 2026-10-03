@@ -10,7 +10,13 @@ two distinct macOS assets.
 #163: those assets shipped as raw extensionless Mach-O executables, which
 GitHub serves as application/octet-stream — a browser download opens them
 in TextEdit and drops the exec bit. The fix wraps the binary in a
-`MeManga.app` bundle inside a `.zip` via `packaging/macos_app.py`.
+`MeManga.app` bundle inside a `.zip` via `packaging/macos_app.py`. The
+zipped app can still fail Gatekeeper ("MeManga is damaged") because it is
+not Developer ID signed or notarized. That needs paid Apple credentials, so
+it is optional: when all signing secrets are set the macOS legs sign the
+build with a Developer ID identity + hardened runtime, notarize it with
+`notarytool`, staple the ticket and gate the upload on `spctl`; otherwise
+they warn and still ship a validated, unsigned app zip.
 
 #167: a GitHub release asset is raw bytes with no Unix mode, and browsers
 save the download without the executable bit, so a bare Linux ELF lands as
@@ -20,9 +26,10 @@ so `tar xzf` restores a runnable binary, and the workflow gates the release
 on that bit surviving extraction.
 
 The workflow/spec assertions are cheap text/YAML checks because the real
-build only runs on CI runners. The macOS helper is pure stdlib and fully
-exercised here; the Linux round-trip test proves the archive format itself
-preserves the executable bit.
+build only runs on CI runners; Gatekeeper acceptance itself can only be
+proven by the macOS workflow gates these tests pin in place. The macOS
+helper is pure stdlib and fully exercised here; the Linux round-trip test
+proves the archive format itself preserves the executable bit.
 """
 
 from __future__ import annotations
@@ -40,6 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC = REPO_ROOT / "packaging" / "memanga-release.spec"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 README = REPO_ROOT / "README.md"
+CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 MACOS_APP = REPO_ROOT / "packaging" / "macos_app.py"
 
 # The GitHub Actions expression the workflow uses to thread the matrix
@@ -269,27 +277,28 @@ def test_readme_documents_linux_targz_launch_path():
 
 # ── issue #163: macOS assets ship as launchable .app packages ───────────
 def test_workflow_packages_macos_app_bundle():
-    """A macOS-gated step must build the .app via the helper and archive it
-    into the .zip asset with `ditto` (preserves the exec bit + layout)."""
+    """A macOS-gated step must build the .app via the helper. It is archived
+    only after signing + stapling (see the notarization tests below)."""
     step = _step_named("Package macOS app bundle")
     assert step is not None, "macOS .app packaging step missing"
     assert step.get("if") == "runner.os == 'macOS'"
     run = step.get("run", "")
     assert "packaging/macos_app.py build" in run
-    assert "ditto -c -k --keepParent" in run
-    # The archived asset is the matrix's .zip asset_name.
-    assert '"${{ matrix.asset_name }}"' in run
+    # Zipping here would ship the bundle before it is signed and stapled.
+    assert "ditto -c" not in run
 
 
 def test_workflow_validates_packaged_macos_app():
     """A macOS-gated gate must validate the packaged .zip (launchable bundle
-    + expected arch) before it can be uploaded."""
+    + expected arch) before it can be uploaded — on unsigned builds too, so
+    it must not demand a signature or ticket."""
     step = _step_named("Validate packaged macOS app bundle")
     assert step is not None, "macOS app validation gate missing"
     assert step.get("if") == "runner.os == 'macOS'"
     run = step.get("run", "")
     assert "packaging/macos_app.py validate" in run
     assert ARCH_EXPR in run
+    assert "--require-signed" not in run and "--require-stapled" not in run
 
 
 def test_package_step_handles_macos_without_renaming():
@@ -423,3 +432,445 @@ def test_validate_rejects_raw_binary(tmp_path):
     raw.write_bytes(_fake_macho("x86_64"))
     problems = macos_app.validate_app_bundle(raw)
     assert problems  # non-empty == rejected
+
+
+# ── issue #163: Developer ID signing + notarization (Gatekeeper) ────────
+ENTITLEMENTS = REPO_ROOT / "packaging" / "macos-entitlements.plist"
+SIGNING_SECRETS = (
+    "MACOS_CERTIFICATE_BASE64",
+    "MACOS_CERTIFICATE_PASSWORD",
+    "MACOS_CODESIGN_IDENTITY",
+    "APPLE_ID",
+    "APPLE_TEAM_ID",
+    "APPLE_APP_SPECIFIC_PASSWORD",
+)
+MACOS_ONLY = "runner.os == 'macOS'"
+NOTARIZED = "steps.notarization.outputs.macos_notarization == 'enabled'"
+SIGNED_ONLY_STEPS = (
+    "Import Developer ID signing certificate",
+    "Sign macOS app bundle",
+    "Notarize and staple macOS app bundle",
+    "Verify Gatekeeper accepts the macOS app",
+    "Verify Playwright works inside the signed macOS app",
+    "Verify release zip is signed, stapled and notarized",
+)
+# The free, unsigned path must keep every one of these gates.
+UNSIGNED_PATH_STEPS = (
+    "Verify macOS artifact architecture",
+    "Verify Playwright works inside the built executable (macOS)",
+    "Package macOS app bundle",
+    "Archive macOS app bundle",
+    "Validate packaged macOS app bundle",
+)
+
+
+def _secret_expr(name):
+    return "${{ secrets." + name + " }}"
+
+
+def test_workflow_detects_optional_notarization_secrets():
+    """Notarization needs paid Apple credentials, so a missing secret must
+    switch the build to the unsigned path with a warning, not fail it. One
+    early step exposes the decision as a step output."""
+    step = _step_named("Detect macOS notarization credentials")
+    assert step is not None, "notarization detection step missing"
+    assert step.get("id") == "notarization"
+    assert step.get("if") == MACOS_ONLY
+    env = step.get("env", {})
+    run = step.get("run", "")
+    for name in SIGNING_SECRETS:
+        assert env.get(name) == _secret_expr(name), f"{name} not wired in"
+        assert name in run, f"{name} not checked"
+    assert 'echo "macos_notarization=enabled" >> "$GITHUB_OUTPUT"' in run
+    assert 'echo "macos_notarization=disabled" >> "$GITHUB_OUTPUT"' in run
+    # Missing secrets are a warning that names the Gatekeeper limitation,
+    # never an error or a failing exit.
+    assert "::warning::" in run
+    assert "unsigned" in run and "Gatekeeper" in run and "unnotarized" in run
+    assert "::error::" not in run
+    assert "exit" not in run
+    # Decided before the slow installs so later steps can branch on it.
+    assert _step_index("Detect macOS notarization") < _step_index("Setup Python")
+
+
+def test_no_step_fails_on_missing_signing_secrets():
+    """The old mandatory gate is gone: nothing outside the notarized path
+    reads the signing secrets."""
+    assert _step_named("Check macOS signing and notarization secrets") is None
+    for step in _build_steps():
+        name = step.get("name", "")
+        if name in ("Detect macOS notarization credentials",
+                    "Build release executable"):
+            continue
+        uses_secret = any("secrets." in str(v)
+                          for v in step.get("env", {}).values())
+        if uses_secret:
+            assert step.get("if") == NOTARIZED, name
+
+
+def test_signed_only_steps_are_gated_on_notarization_output():
+    for name in SIGNED_ONLY_STEPS:
+        step = _step_named(name)
+        assert step is not None, name
+        assert step.get("if") == NOTARIZED, name
+
+
+def test_unsigned_path_keeps_app_package_gates():
+    """Without credentials the leg still builds, self-tests, wraps, zips
+    and validates MeManga.app — only the paid-signing steps are skipped."""
+    for name in UNSIGNED_PATH_STEPS:
+        step = _step_named(name)
+        assert step is not None, name
+        assert step.get("if") == MACOS_ONLY, name
+    validate = _step_named("Validate packaged macOS app bundle").get("run", "")
+    assert "packaging/macos_app.py validate" in validate
+    assert ARCH_EXPR in validate
+
+
+def test_workflow_imports_developer_id_certificate():
+    step = _step_named("Import Developer ID signing certificate")
+    assert step is not None, "certificate import step missing"
+    assert step.get("if") == NOTARIZED
+    run = step.get("run", "")
+    assert "base64 --decode" in run
+    assert "security create-keychain" in run
+    assert "security import" in run and "-T /usr/bin/codesign" in run
+    assert "security set-key-partition-list" in run
+    assert "security list-keychains" in run
+    # The identity must resolve to a Developer ID Application certificate.
+    assert "security find-identity -v -p codesigning" in run
+    assert "Developer ID Application" in run
+
+
+def test_build_step_threads_signing_identity_and_entitlements():
+    """PyInstaller can only sign a one-file build's embedded binaries at
+    build time, so the identity + entitlements must reach the spec — and
+    only when notarization is enabled; unsigned builds get no identity."""
+    env = _step_named("Build release executable").get("env", {})
+    identity = env.get("MEMANGA_CODESIGN_IDENTITY", "")
+    assert NOTARIZED in identity
+    assert "secrets.MACOS_CODESIGN_IDENTITY" in identity
+    assert identity.rstrip("} ").endswith("|| ''")
+    entitlements = env.get("MEMANGA_ENTITLEMENTS_FILE", "")
+    assert MACOS_ONLY in entitlements
+    assert "packaging/macos-entitlements.plist" in entitlements
+
+
+def test_spec_parameterizes_codesign_identity_from_env():
+    text = SPEC.read_text(encoding="utf-8")
+    assert "MEMANGA_CODESIGN_IDENTITY" in text
+    assert "MEMANGA_ENTITLEMENTS_FILE" in text
+    assert "macos-entitlements.plist" in text
+    assert "codesign_identity=_codesign_identity" in text
+    assert "entitlements_file=_entitlements_file" in text
+    assert "codesign_identity=None" not in text
+    # UPX would invalidate the Mach-O signatures.
+    assert 'upx=_sys.platform != "darwin"' in text
+
+
+def test_entitlements_are_minimal_for_hardened_runtime():
+    """Only two conservative PyInstaller/PySide6 runtime exceptions; no
+    sandbox, no allow-jit, no debug entitlement (notarization rejects
+    get-task-allow)."""
+    ents = plistlib.loads(ENTITLEMENTS.read_bytes())
+    assert ents == {
+        "com.apple.security.cs.allow-unsigned-executable-memory": True,
+        "com.apple.security.cs.disable-library-validation": True,
+    }
+    # The comment must not overclaim: these are defensive exceptions, not
+    # proven hard requirements of a specific dependency.
+    text = ENTITLEMENTS.read_text(encoding="utf-8")
+    assert "conservative" in text
+    assert "needs:" not in text
+
+
+def test_workflow_signs_app_bundle_with_hardened_runtime():
+    step = _step_named("Sign macOS app bundle")
+    assert step is not None, "app bundle signing step missing"
+    assert step.get("if") == NOTARIZED
+    run = step.get("run", "")
+    assert "codesign --force --options runtime --timestamp" in run
+    assert "--entitlements packaging/macos-entitlements.plist" in run
+    assert '--sign "$MACOS_CODESIGN_IDENTITY"' in run
+    assert "codesign --verify --deep --strict" in run
+    assert "Authority=Developer ID Application" in run
+    assert "TeamIdentifier=$APPLE_TEAM_ID" in run
+    assert "runtime" in run and "::error::" in run
+
+
+def test_workflow_notarizes_and_staples_app_bundle():
+    step = _step_named("Notarize and staple macOS app bundle")
+    assert step is not None, "notarization step missing"
+    assert step.get("if") == NOTARIZED
+    env = step.get("env", {})
+    for name in ("APPLE_ID", "APPLE_TEAM_ID", "APPLE_APP_SPECIFIC_PASSWORD"):
+        assert env.get(name) == _secret_expr(name)
+    run = step.get("run", "")
+    assert "ditto -c -k --keepParent" in run
+    assert "xcrun notarytool submit" in run and "--wait" in run
+    # Anything but Accepted must fail the release (and print the log).
+    assert '"Accepted"' in run
+    assert "xcrun notarytool log" in run
+    assert "exit 1" in run
+    assert 'xcrun stapler staple "release/MeManga.app"' in run
+    assert 'xcrun stapler validate "release/MeManga.app"' in run
+
+
+def _assert_gatekeeper_enabled_before_assess(run):
+    """Runners may have Gatekeeper off, which makes spctl answer
+    "accepted (override=security disabled)"; it must be enabled, its status
+    logged and proven before the assessment."""
+    assert "spctl --status" in run
+    assert "sudo spctl --global-enable" in run
+    assert "sudo spctl --master-enable" in run  # older macOS fallback
+    assert "assessments enabled" in run
+    assert run.index("--global-enable") < run.index("spctl --assess")
+    assert run.rindex("spctl --status") < run.index("spctl --assess")
+
+
+def test_workflow_runs_gatekeeper_assessment():
+    step = _step_named("Verify Gatekeeper accepts the macOS app")
+    assert step is not None, "spctl Gatekeeper gate missing"
+    assert step.get("if") == NOTARIZED
+    run = step.get("run", "")
+    assert "spctl --assess --type execute" in run
+    assert "source=Notarized Developer ID" in run
+    assert "::error::" in run
+    _assert_gatekeeper_enabled_before_assess(run)
+
+
+def test_workflow_launches_final_signed_app():
+    """The bundle re-sign rewrites the launcher's signature, so the final
+    stapled MeManga.app launcher must itself pass the Playwright self-test
+    under the hardened runtime before it is zipped."""
+    step = _step_named("Verify Playwright works inside the signed macOS app")
+    assert step is not None, "post-staple app self-test missing"
+    assert step.get("if") == NOTARIZED
+    run = step.get("run", "")
+    assert '"release/MeManga.app/Contents/MacOS/MeManga" --verify-playwright' in run
+    assert "runtime.log" in run and "exit 1" in run
+    assert (_step_index("Notarize and staple macOS app bundle")
+            < _step_index("Verify Playwright works inside the signed macOS app")
+            < _step_index("Archive macOS app bundle"))
+    # The earlier raw-binary gate is kept as well.
+    assert _step_named(
+        "Verify Playwright works inside the built executable (macOS)") is not None
+
+
+def test_workflow_zips_stapled_app_for_release():
+    """The release .zip is built after stapling (when enabled) and on the
+    unsigned path alike."""
+    step = _step_named("Archive macOS app bundle")
+    assert step is not None, "post-staple archive step missing"
+    assert (_step_index("Notarize and staple macOS app bundle")
+            < _step_index("Archive macOS app bundle"))
+    assert step.get("if") == MACOS_ONLY
+    run = step.get("run", "")
+    assert "ditto -c -k --keepParent" in run
+    assert '"${{ matrix.asset_name }}"' in run
+
+
+def test_workflow_validates_signed_stapled_zip_after_notarization():
+    """When notarization is enabled the uploaded zip itself must pass the
+    signed/stapled shape check and, once extracted, codesign + stapler +
+    Gatekeeper."""
+    step = _step_named("Verify release zip is signed, stapled and notarized")
+    assert step is not None, "signed zip gate missing"
+    assert step.get("if") == NOTARIZED
+    run = step.get("run", "")
+    assert "packaging/macos_app.py validate" in run and ARCH_EXPR in run
+    assert "--require-signed" in run and "--require-stapled" in run
+    assert "ditto -x -k" in run
+    assert 'codesign --verify --deep --strict --verbose=2 "$extracted"' in run
+    assert 'xcrun stapler validate "$extracted"' in run
+    assert 'spctl --assess --type execute --verbose=4 "$extracted"' in run
+    assert "source=Notarized Developer ID" in run
+    _assert_gatekeeper_enabled_before_assess(run)
+
+
+def test_macos_signing_steps_are_ordered_before_upload():
+    order = [
+        "Detect macOS notarization credentials",
+        "Install dependencies",
+        "Import Developer ID signing certificate",
+        "Build release executable",
+        "Verify Playwright works inside the built executable (macOS)",
+        "Package macOS app bundle",
+        "Sign macOS app bundle",
+        "Notarize and staple macOS app bundle",
+        "Verify Gatekeeper accepts the macOS app",
+        "Verify Playwright works inside the signed macOS app",
+        "Archive macOS app bundle",
+        "Validate packaged macOS app bundle",
+        "Verify release zip is signed, stapled and notarized",
+        "Package artifact for upload",
+        "Upload artifact",
+    ]
+    idx = [_step_index(name) for name in order]
+    assert -1 not in idx, dict(zip(order, idx))
+    assert idx == sorted(idx), dict(zip(order, idx))
+
+
+def test_signing_steps_leave_windows_and_linux_alone():
+    """Every signing/notarization step is macOS-only (the detection step
+    only runs on macOS, so its output is empty elsewhere), and the Windows
+    and Linux gates are still in place."""
+    assert _step_named("Detect macOS notarization credentials").get("if") \
+        == MACOS_ONLY
+    for name in SIGNED_ONLY_STEPS:
+        assert _step_named(name).get("if") == NOTARIZED, name
+    win = _step_named("Verify Playwright works inside the built executable (Windows)")
+    assert win is not None and win.get("if") == "runner.os == 'Windows'"
+    linux = _step_named("Verify Linux archive preserves the executable bit")
+    assert linux is not None and linux.get("if") == "runner.os == 'Linux'"
+    by_asset = {e["asset_name"]: e for e in _build_matrix()}
+    assert "MeManga-windows-x64.exe" in by_asset
+    assert by_asset["MeManga-windows-x64.exe"]["os"] == "windows-latest"
+
+
+def test_workflow_removes_signing_keychain():
+    step = _step_named("Remove macOS signing keychain")
+    assert step is not None
+    assert step.get("if") == f"always() && {NOTARIZED}"
+    assert "security delete-keychain" in step.get("run", "")
+    assert _step_index("Remove macOS signing keychain") > _step_index("Upload artifact")
+
+
+def test_readme_describes_unsigned_mac_app_workaround():
+    """Notarization is optional and the published app may be unsigned, so
+    the README must not promise a notarized app and must keep the fix for
+    the "damaged" dialog."""
+    text = README.read_text(encoding="utf-8")
+    assert "not code-signed or notarized" in text
+    assert "paid Apple Developer account" in text
+    assert "starting with the next release" not in text
+    assert "The Mac app is signed with a Developer ID" not in text
+    assert "is damaged and can't be opened" in text
+    assert "xattr -dr com.apple.quarantine" in text
+    # The old Gatekeeper bypass doesn't clear the "damaged" dialog.
+    assert "right-click → Open the first time" not in text
+
+
+def test_changelog_163_entry_describes_optional_notarization():
+    """The entry must say notarization is optional and paid, that unsigned
+    zips still publish, and must not claim the free path fixes the
+    "damaged" dialog."""
+    text = CHANGELOG.read_text(encoding="utf-8")
+    unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
+    entry = unreleased.split("- #163", 1)[1].split("\n- #", 1)[0]
+    assert "optionally" in entry and "paid" in entry
+    assert "unsigned" in entry and "xattr" in entry
+    assert "so Gatekeeper opens\n  them normally" not in entry
+    assert "no longer fail" not in entry
+    assert "self-test" in entry
+
+
+def test_contributing_documents_optional_notarization():
+    text = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    section = text.split("### macOS signing and notarization", 1)[1]
+    section = section.split("\n### ", 1)[0]
+    assert "optional" in section and "paid Apple Developer" in section
+    for name in SIGNING_SECRETS:
+        assert f"`{name}`" in section
+    assert "still\npublishes unsigned" in section
+    assert "fails if any of these repository secrets is\nmissing" not in section
+
+
+# ── issue #163: signed / stapled shape checks in macos_app.py ───────────
+def _fake_signed_macho(arch: str) -> bytes:
+    """64-bit little-endian Mach-O header with a single LC_CODE_SIGNATURE
+    load command (cmd 0x1D, cmdsize 16)."""
+    cpu = {"x86_64": macos_app._CPU_TYPE_X86_64,
+           "arm64": macos_app._CPU_TYPE_ARM64}[arch]
+    header = struct.pack("<IIIIIIII", 0xFEEDFACF, cpu, 0, 2, 1, 16, 0, 0)
+    lc = struct.pack("<IIII", 0x1D, 16, 0, 0)
+    return header + lc + b"\x00" * 32
+
+
+def _signed_app(tmp_path, arch="arm64", *, stapled=True):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_signed_macho(arch))
+    app = macos_app.build_app_bundle(exe, tmp_path / "out", version="1.0.0")
+    seal = app / macos_app.SIGNATURE_SEAL_REL
+    seal.parent.mkdir(parents=True)
+    seal.write_bytes(b"<plist/>")
+    if stapled:
+        (app / macos_app.STAPLED_TICKET_REL).write_bytes(b"ticket")
+    return app
+
+
+def test_has_code_signature_reads_load_commands():
+    assert macos_app.has_code_signature(_fake_signed_macho("arm64"))
+    assert macos_app.has_code_signature(_fake_signed_macho("x86_64"))
+    # The plain fake header has ncmds == 0: no signature.
+    assert not macos_app.has_code_signature(_fake_macho("arm64"))
+    assert not macos_app.has_code_signature(b"not a mach-o at all")
+    assert not macos_app.has_code_signature(b"")
+
+
+def test_has_code_signature_reads_first_fat_slice():
+    thin = _fake_signed_macho("arm64")
+    offset = 64
+    fat = struct.pack(">II", 0xCAFEBABE, 1)
+    fat += struct.pack(">IIIII", macos_app._CPU_TYPE_ARM64, 0, offset,
+                       len(thin), 14)
+    fat = fat.ljust(offset, b"\x00") + thin
+    assert macos_app.has_code_signature(fat)
+
+
+def test_unsigned_bundle_fails_require_signed(tmp_path):
+    """The exact v0.4.3 shape (no _CodeSignature, no ticket) must be
+    rejected once signing is required — it passed the old gate."""
+    app, zip_path = _build_and_zip(tmp_path, "arm64")
+    for path in (app, zip_path):
+        assert macos_app.validate_app_bundle(path, expected_arch="arm64") == []
+        problems = macos_app.validate_app_bundle(
+            path, expected_arch="arm64",
+            require_signed=True, require_stapled=True)
+        assert any("not code-signed" in p for p in problems), problems
+        assert any("no embedded code signature" in p for p in problems), problems
+        assert any("notarization ticket" in p for p in problems), problems
+
+
+def test_signed_stapled_bundle_passes_dir_and_zip(tmp_path):
+    app = _signed_app(tmp_path, "x86_64")
+    zip_path = macos_app.zip_app_bundle(app, tmp_path / "signed.zip")
+    for path in (app, zip_path):
+        assert macos_app.validate_app_bundle(
+            path, expected_arch="x86_64",
+            require_signed=True, require_stapled=True) == []
+
+
+def test_signed_but_unstapled_bundle_fails_require_stapled(tmp_path):
+    app = _signed_app(tmp_path, "arm64", stapled=False)
+    zip_path = macos_app.zip_app_bundle(app, tmp_path / "unstapled.zip")
+    for path in (app, zip_path):
+        assert macos_app.validate_app_bundle(
+            path, expected_arch="arm64", require_signed=True) == []
+        problems = macos_app.validate_app_bundle(
+            path, expected_arch="arm64",
+            require_signed=True, require_stapled=True)
+        assert problems and all("notarization ticket" in p for p in problems)
+
+
+def test_sealed_bundle_with_unsigned_binary_fails(tmp_path):
+    app = _signed_app(tmp_path, "arm64")
+    (app / "Contents" / "MacOS" / "MeManga").write_bytes(_fake_macho("arm64"))
+    problems = macos_app.validate_app_bundle(app, require_signed=True)
+    assert any("no embedded code signature" in p for p in problems), problems
+
+
+def test_validate_cli_require_flags(tmp_path, capsys):
+    unsigned_dir = tmp_path / "unsigned"
+    unsigned_dir.mkdir()
+    _, unsigned_zip = _build_and_zip(unsigned_dir, "arm64")
+    args = ["validate", "--path", str(unsigned_zip), "--arch", "arm64",
+            "--require-signed", "--require-stapled"]
+    assert macos_app.main(args) == 1
+    assert "INVALID" in capsys.readouterr().out
+
+    signed = _signed_app(tmp_path, "arm64")
+    signed_zip = macos_app.zip_app_bundle(signed, tmp_path / "ok.zip")
+    args[2] = str(signed_zip)
+    assert macos_app.main(args) == 0
+    assert "signed, stapled" in capsys.readouterr().out

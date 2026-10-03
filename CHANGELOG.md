@@ -28,6 +28,14 @@ All notable changes are recorded here. Format loosely follows
   manhwa and manhua translations.
 
 ### Fixed
+- #163 macOS release builds can optionally be signed and notarized. When
+  paid Apple Developer ID credentials are configured as repository
+  secrets, the release workflow signs the Apple Silicon and Intel apps with
+  the hardened runtime, notarizes them with Apple, staples the ticket and
+  stops before upload if signing, notarization, the Gatekeeper check or
+  the final app self-test fails. Without those credentials releases still
+  publish unsigned `MeManga.app` zips, which macOS may still report as
+  "damaged"; the README documents the `xattr` workaround for that case.
 - #182 Kagane is skipped by the multi-source search sweep. kagane.org now
   redirects to kagane.to, and both sit behind a Cloudflare challenge that
   answers searches with a 403. Links on either domain still resolve to

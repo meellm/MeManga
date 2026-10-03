@@ -52,9 +52,13 @@ On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double
 > Playwright uses it under the hood to scrape JS-heavy sources like MangaFire and WeebCentral.
 >
 > **Windows SmartScreen** may warn the first time. You are not being hacked... Click "More info → Run anyway".
-> The app is not yet code-signed.
+> The Windows build is not yet code-signed.
 >
-> **macOS Gatekeeper** — right-click → Open the first time; future launches are normal.
+> **macOS Gatekeeper** — the Mac app is not code-signed or notarized by Apple (that needs
+> a paid Apple Developer account), so macOS may refuse to open it after download.
+> If macOS says "MeManga is damaged and can't be opened" or that it can't verify the
+> developer, move `MeManga.app` to Applications and run
+> `xattr -dr com.apple.quarantine /Applications/MeManga.app` once in Terminal.
 >
 > **Linux** ships as a `.tar.gz` so the executable bit survives the download —
 > a bare binary saves as non-executable and won't launch. Extract, then run:
