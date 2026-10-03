@@ -756,8 +756,11 @@ def test_changelog_163_entry_describes_optional_notarization():
     zips still publish, and must not claim the free path fixes the
     "damaged" dialog."""
     text = CHANGELOG.read_text(encoding="utf-8")
-    unreleased = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
-    entry = unreleased.split("- #163", 1)[1].split("\n- #", 1)[0]
+    if "- #163" in text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]:
+        section = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
+    else:
+        section = text.split("\n## [", 2)[2].split("\n## [", 1)[0]
+    entry = section.split("- #163", 1)[1].split("\n- #", 1)[0]
     assert "optionally" in entry and "paid" in entry
     assert "unsigned" in entry and "xattr" in entry
     assert "so Gatekeeper opens\n  them normally" not in entry
