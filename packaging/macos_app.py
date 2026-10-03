@@ -35,10 +35,24 @@ shelling out to `lipo`. On the macOS release leg the workflow archives the
 bundle with Apple's `ditto` (bulletproof permission/layout fidelity) and
 then runs `validate` on the real `.zip` as a release gate.
 
+Downloaded apps that are not Developer ID signed and notarized may be
+reported by Gatekeeper as "damaged". When the optional Apple credentials
+are configured, the release workflow signs the bundle with `codesign`,
+notarizes it with `notarytool`, staples the ticket with `stapler`, and
+assesses it with `spctl` — those Apple tools are the real trust check.
+`validate --require-signed --require-stapled` adds a platform-independent
+shape check on top for those builds: the bundle must carry its code
+signature seal and stapled ticket, and the launcher must embed a Mach-O
+code signature, so a notarized build cannot upload an unsigned or
+unstapled zip. Without the credentials the zip is validated without the
+`--require-*` flags and ships unsigned.
+
 CLI:
     python packaging/macos_app.py build    --exe release/MeManga --dest release
     python packaging/macos_app.py zip      --app release/MeManga.app --out out.zip
     python packaging/macos_app.py validate --path out.zip --arch x86_64
+    python packaging/macos_app.py validate --path out.zip --arch arm64 \
+        --require-signed --require-stapled
 """
 
 from __future__ import annotations
@@ -53,9 +67,14 @@ import zipfile
 from pathlib import Path
 
 APP_NAME = "MeManga"
-# Reverse-DNS bundle id. The app is unsigned, so this is cosmetic (shown in
-# Finder "Get Info"); it only needs to be stable and unique.
+# Reverse-DNS bundle id. `codesign` uses it as the signing identifier and
+# notarization records it, so it must stay stable across releases.
 BUNDLE_IDENTIFIER = "com.memanga.MeManga"
+
+# Written by `codesign` when it seals the bundle (hashes of every file in
+# Contents/), and by `stapler` when it attaches the notarization ticket.
+SIGNATURE_SEAL_REL = "Contents/_CodeSignature/CodeResources"
+STAPLED_TICKET_REL = "Contents/CodeResources"
 
 # ── Mach-O architecture detection ───────────────────────────────────────
 # Parsing the header ourselves keeps the arch check identical on the Linux
@@ -71,6 +90,7 @@ _FAT_CIGAM = 0xBEBAFECA
 
 _CPU_TYPE_X86_64 = 0x01000007
 _CPU_TYPE_ARM64 = 0x0100000C
+_LC_CODE_SIGNATURE = 0x1D
 _CPU_NAMES = {_CPU_TYPE_X86_64: "x86_64", _CPU_TYPE_ARM64: "arm64"}
 
 
@@ -92,6 +112,43 @@ def read_macho_arch(header: bytes) -> str | None:
     else:
         return None
     return _CPU_NAMES.get(cputype)
+
+
+def has_code_signature(data: bytes) -> bool:
+    """True when the Mach-O `data` carries an LC_CODE_SIGNATURE load command
+    (for a universal binary: its first slice). This proves a signature is
+    embedded, not that it is a valid Developer ID one — `codesign --verify`
+    and `spctl` in the release workflow check that."""
+    if len(data) < 8:
+        return False
+    magic = struct.unpack(">I", data[:4])[0]
+    if magic in (_FAT_MAGIC, _FAT_CIGAM):
+        # fat_header and fat_arch entries are always big-endian.
+        if len(data) < 28 or not struct.unpack(">I", data[4:8])[0]:
+            return False
+        offset = struct.unpack(">I", data[16:20])[0]
+        return has_code_signature(data[offset:])
+    if magic in (_MH_MAGIC, _MH_MAGIC_64):
+        endian = ">"
+    elif magic in (_MH_CIGAM, _MH_CIGAM_64):
+        endian = "<"
+    else:
+        return False
+    header_size = 32 if magic in (_MH_MAGIC_64, _MH_CIGAM_64) else 28
+    if len(data) < header_size:
+        return False
+    ncmds = struct.unpack(endian + "I", data[16:20])[0]
+    pos = header_size
+    for _ in range(ncmds):
+        if pos + 8 > len(data):
+            return False
+        cmd, cmdsize = struct.unpack(endian + "II", data[pos:pos + 8])
+        if cmd == _LC_CODE_SIGNATURE:
+            return True
+        if cmdsize < 8:
+            return False
+        pos += cmdsize
+    return False
 
 
 # ── Building the .app bundle ────────────────────────────────────────────
@@ -255,10 +312,30 @@ def _check_plist(data: bytes | None, app_name: str) -> list[str]:
     return problems
 
 
-def _validate_dir(app: Path, app_name: str, expected_arch) -> list[str]:
+def _check_signed_shape(exe_data: bytes | None, present, app_name: str, *,
+                        require_signed: bool,
+                        require_stapled: bool) -> list[str]:
+    """`present(rel)` reports whether `<app_name>.app/<rel>` exists."""
+    problems = []
+    if require_signed:
+        if not present(SIGNATURE_SEAL_REL):
+            problems.append(f"missing {app_name}.app/{SIGNATURE_SEAL_REL} "
+                            "— the bundle is not code-signed")
+        if exe_data is not None and not has_code_signature(exe_data):
+            problems.append(f"{app_name}.app/Contents/MacOS/{app_name} has "
+                            "no embedded code signature")
+    if require_stapled and not present(STAPLED_TICKET_REL):
+        problems.append(f"missing {app_name}.app/{STAPLED_TICKET_REL} "
+                        "— no notarization ticket is stapled")
+    return problems
+
+
+def _validate_dir(app: Path, app_name: str, expected_arch, *,
+                  require_signed=False, require_stapled=False) -> list[str]:
     problems: list[str] = []
     exe = app / "Contents" / "MacOS" / app_name
     plist = app / "Contents" / "Info.plist"
+    exe_data = None
 
     if not exe.is_file():
         problems.append(f"missing {app_name}.app/Contents/MacOS/{app_name}")
@@ -266,17 +343,23 @@ def _validate_dir(app: Path, app_name: str, expected_arch) -> list[str]:
         if not (exe.stat().st_mode & stat.S_IXUSR):
             problems.append(
                 f"{app_name}.app/Contents/MacOS/{app_name} is not executable")
-        problems += _check_arch(exe.read_bytes()[:8], expected_arch)
+        exe_data = exe.read_bytes()
+        problems += _check_arch(exe_data[:8], expected_arch)
 
     problems += _check_plist(plist.read_bytes() if plist.is_file() else None,
                              app_name)
+    problems += _check_signed_shape(
+        exe_data, lambda rel: (app / rel).is_file(), app_name,
+        require_signed=require_signed, require_stapled=require_stapled)
     return problems
 
 
-def _validate_zip(zip_path: Path, app_name: str, expected_arch) -> list[str]:
+def _validate_zip(zip_path: Path, app_name: str, expected_arch, *,
+                  require_signed=False, require_stapled=False) -> list[str]:
     exe_rel = f"{app_name}.app/Contents/MacOS/{app_name}"
     plist_rel = f"{app_name}.app/Contents/Info.plist"
     problems: list[str] = []
+    exe_data = None
     with zipfile.ZipFile(zip_path) as zf:
         by_name = {zi.filename: zi for zi in zf.infolist()}
 
@@ -290,29 +373,43 @@ def _validate_zip(zip_path: Path, app_name: str, expected_arch) -> list[str]:
             if not (mode & stat.S_IXUSR):
                 problems.append(
                     f"{exe_rel} is not executable (mode {mode:04o})")
-            problems += _check_arch(zf.read(exe_rel)[:8], expected_arch)
+            exe_data = zf.read(exe_rel)
+            problems += _check_arch(exe_data[:8], expected_arch)
 
         if plist_rel not in by_name:
             problems.append(f"missing {plist_rel}")
         else:
             problems += _check_plist(zf.read(plist_rel), app_name)
+    problems += _check_signed_shape(
+        exe_data, lambda rel: f"{app_name}.app/{rel}" in by_name, app_name,
+        require_signed=require_signed, require_stapled=require_stapled)
     return problems
 
 
 def validate_app_bundle(path, *, app_name: str = APP_NAME,
-                        expected_arch: str | None = None) -> list[str]:
+                        expected_arch: str | None = None,
+                        require_signed: bool = False,
+                        require_stapled: bool = False) -> list[str]:
     """Return a list of problems (empty == a launchable app package) for a
     `.app` directory or a `.zip` archive of one. Checks the launcher binary
     exists with its exec bit, the Info.plist names it, and — when
-    `expected_arch` is given — the Mach-O architecture matches."""
+    `expected_arch` is given — the Mach-O architecture matches.
+
+    `require_signed` also demands the bundle's code signature seal and an
+    embedded Mach-O signature on the launcher; `require_stapled` demands a
+    stapled notarization ticket. These are shape checks only: whether
+    Gatekeeper accepts the signature is proven by `codesign`/`spctl` on
+    macOS."""
     path = Path(path)
+    opts = dict(require_signed=require_signed,
+                require_stapled=require_stapled)
     if path.is_dir():
         app = path if path.suffix == ".app" else path / f"{app_name}.app"
         if not app.is_dir():
             return [f"{path} contains no {app_name}.app"]
-        return _validate_dir(app, app_name, expected_arch)
+        return _validate_dir(app, app_name, expected_arch, **opts)
     if zipfile.is_zipfile(path):
-        return _validate_zip(path, app_name, expected_arch)
+        return _validate_zip(path, app_name, expected_arch, **opts)
     return [f"{path} is neither a {app_name}.app bundle nor a zip archive"]
 
 
@@ -334,13 +431,19 @@ def _cmd_zip(args) -> int:
 
 
 def _cmd_validate(args) -> int:
-    problems = validate_app_bundle(args.path, expected_arch=args.arch)
+    problems = validate_app_bundle(args.path, expected_arch=args.arch,
+                                   require_signed=args.require_signed,
+                                   require_stapled=args.require_stapled)
     if problems:
         print(f"INVALID macOS app package: {args.path}")
         for p in problems:
             print(f"  - {p}")
         return 1
     suffix = f" ({args.arch})" if args.arch else ""
+    if args.require_signed:
+        suffix += ", signed"
+    if args.require_stapled:
+        suffix += ", stapled"
     print(f"OK: {args.path} is a launchable {APP_NAME}.app{suffix}")
     return 0
 
@@ -366,6 +469,10 @@ def main(argv=None) -> int:
     v = sub.add_parser("validate", help="check a .app or .zip is launchable")
     v.add_argument("--path", required=True)
     v.add_argument("--arch", help="required Mach-O arch, e.g. x86_64 / arm64")
+    v.add_argument("--require-signed", action="store_true",
+                   help="require a code signature seal + embedded signature")
+    v.add_argument("--require-stapled", action="store_true",
+                   help="require a stapled notarization ticket")
     v.set_defaults(func=_cmd_validate)
 
     args = parser.parse_args(argv)
