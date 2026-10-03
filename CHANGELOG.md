@@ -28,6 +28,13 @@ All notable changes are recorded here. Format loosely follows
   manhwa and manhua translations.
 
 ### Fixed
+- #163 macOS release builds are set up to stop the "MeManga is damaged and
+  can't be opened" error. The release workflow now signs the Apple Silicon
+  and Intel apps with a Developer ID certificate and the hardened runtime,
+  notarizes them with Apple and staples the ticket, which should let
+  Gatekeeper open them normally after download from the next tagged
+  release. The build stops before upload if signing, notarization, the
+  Gatekeeper check or the final app self-test fails.
 - #182 Kagane is skipped by the multi-source search sweep. kagane.org now
   redirects to kagane.to, and both sit behind a Cloudflare challenge that
   answers searches with a 403. Links on either domain still resolve to
