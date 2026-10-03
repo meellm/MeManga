@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the Developer ID signed macOS release
+  (issue #163). Passed to PyInstaller (MEMANGA_ENTITLEMENTS_FILE) and to the
+  final `codesign` of MeManga.app in .github/workflows/release.yml.
+
+  Two conservative hardened-runtime exceptions, commonly used for
+  PyInstaller / PySide6 one-file apps. Neither is proven strictly required
+  for MeManga; they are kept so the hardened runtime does not break the
+  one-file launch path:
+
+  - allow-unsigned-executable-memory: tolerates writable+executable memory
+    such as ctypes / cffi callback trampolines in bundled extensions.
+  - disable-library-validation: the one-file bootloader unpacks the bundled
+    Python runtime and extension modules into a temporary directory and
+    loads them from there; this avoids launch failures if any of those
+    binaries is not signed with the release Team ID.
+
+  Deliberately absent: app sandbox, get-task-allow (a debug entitlement
+  that notarization rejects), allow-jit, and every hardware/data access
+  capability. Playwright's Firefox runs as its own process and needs
+  nothing from this file. The release workflow runs the Playwright
+  self-test in the final signed app to catch an entitlement regression.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+</dict>
+</plist>

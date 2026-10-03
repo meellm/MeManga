@@ -19,7 +19,13 @@ jobs:
           # macos-latest is an Apple Silicon (arm64) runner. The built
           # binary ships wrapped in MeManga.app inside a .zip (issue #163)
           # so the download is a normal double-clickable app, not a raw
-          # extensionless Mach-O that opens in TextEdit.
+          # extensionless Mach-O that opens in TextEdit. Both macOS legs
+          # are Developer ID signed, notarized and stapled, which needs
+          # these repository secrets: MACOS_CERTIFICATE_BASE64 (base64 of
+          # the Developer ID Application .p12), MACOS_CERTIFICATE_PASSWORD,
+          # MACOS_CODESIGN_IDENTITY ("Developer ID Application: Name
+          # (TEAMID)"), APPLE_ID, APPLE_TEAM_ID and
+          # APPLE_APP_SPECIFIC_PASSWORD.
           - os: macos-latest
             artifact_name: MeManga
             asset_name: MeManga-macos-arm64.zip
@@ -40,6 +46,33 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Check macOS signing and notarization secrets
+        # Issue #163: current macOS reports a downloaded app that is not
+        # Developer ID signed and notarized as "damaged", so a tag build
+        # without these credentials stops here instead of shipping an app
+        # Gatekeeper rejects. It runs before any install so a missing
+        # secret fails in seconds.
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          missing=0
+          for name in MACOS_CERTIFICATE_BASE64 MACOS_CERTIFICATE_PASSWORD \
+                      MACOS_CODESIGN_IDENTITY APPLE_ID APPLE_TEAM_ID \
+                      APPLE_APP_SPECIFIC_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing repository secret $name (required to sign and notarize the macOS app)"
+              missing=1
+            fi
+          done
+          exit $missing
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -70,6 +103,38 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Import Developer ID signing certificate
+        # Decode the Developer ID Application .p12 into a throwaway
+        # keychain on the runner so PyInstaller and codesign can use it.
+        # The keychain password is random per run; nothing is persisted.
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          keychain="$RUNNER_TEMP/memanga-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 32)"
+          cert="$RUNNER_TEMP/developer-id.p12"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$cert"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$cert" -k "$keychain" -f pkcs12 \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          rm -f "$cert"
+          if ! security find-identity -v -p codesigning "$keychain" \
+               | grep -F "$MACOS_CODESIGN_IDENTITY" \
+               | grep -q "Developer ID Application"; then
+            echo "::error::MACOS_CODESIGN_IDENTITY does not name a Developer ID Application identity in the imported certificate"
+            exit 1
+          fi
+
       - name: Build release executable
         # build_app.py produces a single-file binary under `release/`
         # (release/MeManga.exe on Windows, release/MeManga elsewhere)
@@ -78,8 +143,15 @@ jobs:
         # MEMANGA_TARGET_ARCH pins the macOS CPU slice (see
         # packaging/memanga-release.spec). It is empty on Windows/Linux,
         # where the spec ignores it and follows the build host.
+        #
+        # On macOS MEMANGA_CODESIGN_IDENTITY / MEMANGA_ENTITLEMENTS_FILE make
+        # PyInstaller sign every embedded binary and the executable with the
+        # Developer ID identity and hardened runtime (issue #163). Both are
+        # empty on Windows/Linux.
         env:
           MEMANGA_TARGET_ARCH: ${{ matrix.target_arch }}
+          MEMANGA_CODESIGN_IDENTITY: ${{ runner.os == 'macOS' && secrets.MACOS_CODESIGN_IDENTITY || '' }}
+          MEMANGA_ENTITLEMENTS_FILE: ${{ runner.os == 'macOS' && 'packaging/macos-entitlements.plist' || '' }}
         run: python build_app.py
 
       - name: Verify macOS artifact architecture
@@ -137,15 +209,14 @@ jobs:
             exit 1
           }
 
-      - name: Package macOS app bundle (MeManga.app in .zip)
+      - name: Package macOS app bundle (MeManga.app)
         # Root-cause fix for issue #163. GitHub serves the raw one-file
         # Mach-O as application/octet-stream, so a browser download lands
         # as an extensionless document (opens in TextEdit) and loses its
         # executable bit (mode 0644). Wrap the just-verified binary in a
-        # minimal MeManga.app and archive it with `ditto`, which preserves
-        # the exec bit and bundle layout, so users get a normal app to
-        # double-click. `ditto --keepParent` keeps MeManga.app as the
-        # top-level folder inside the zip.
+        # minimal MeManga.app so users get a normal app to double-click.
+        # The bundle is signed, notarized and stapled below before it is
+        # archived into the release .zip.
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -153,19 +224,165 @@ jobs:
             --exe "release/${{ matrix.artifact_name }}" \
             --dest release \
             --icon packaging/icon.icns
+
+      - name: Sign macOS app bundle
+        # PyInstaller already signed the one-file executable and every
+        # binary embedded in it. The hand-built MeManga.app wrapper still
+        # needs its own seal over Info.plist and Resources, so the bundle
+        # is signed with the same Developer ID identity, hardened runtime,
+        # secure timestamp and entitlements, then verified strictly.
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          app="release/MeManga.app"
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos-entitlements.plist \
+            --sign "$MACOS_CODESIGN_IDENTITY" "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          details="$(codesign --display --verbose=4 "$app" 2>&1)"
+          echo "$details"
+          if ! echo "$details" | grep -q "^Authority=Developer ID Application"; then
+            echo "::error::MeManga.app is not signed with a Developer ID Application certificate"
+            exit 1
+          fi
+          if ! echo "$details" | grep -q "^TeamIdentifier=$APPLE_TEAM_ID$"; then
+            echo "::error::MeManga.app signature Team ID does not match APPLE_TEAM_ID"
+            exit 1
+          fi
+          if ! echo "$details" | grep -Eq "^CodeDirectory .*flags=.*runtime"; then
+            echo "::error::MeManga.app signature does not enable the hardened runtime"
+            exit 1
+          fi
+
+      - name: Notarize and staple macOS app bundle
+        # Apple notarizes a container, so the signed bundle is zipped with
+        # `ditto` just for submission. `notarytool --wait` blocks until
+        # Apple's verdict; anything but Accepted prints the notary log and
+        # fails the release. The ticket is then stapled to MeManga.app so
+        # Gatekeeper can verify it offline on first launch.
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          submission="$RUNNER_TEMP/MeManga-notarize.zip"
+          result="$RUNNER_TEMP/notarization.json"
+          read_field='import json, sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))'
+          ditto -c -k --keepParent "release/MeManga.app" "$submission"
+          xcrun notarytool submit "$submission" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+            --wait --timeout 1h --output-format json > "$result" || true
+          cat "$result"
+          status="$(python -c "$read_field" "$result" status 2>/dev/null || true)"
+          if [ "$status" != "Accepted" ]; then
+            submission_id="$(python -c "$read_field" "$result" id 2>/dev/null || true)"
+            if [ -n "$submission_id" ]; then
+              xcrun notarytool log "$submission_id" \
+                --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+                --password "$APPLE_APP_SPECIFIC_PASSWORD" || true
+            fi
+            echo "::error::Apple notarization did not accept MeManga.app (status: '$status')"
+            exit 1
+          fi
+          xcrun stapler staple "release/MeManga.app"
+          xcrun stapler validate "release/MeManga.app"
+
+      - name: Verify Gatekeeper accepts the macOS app
+        # The check a user's Mac runs on first launch: `spctl` must accept
+        # the stapled bundle as notarized Developer ID software. A
+        # rejection here is the "MeManga is damaged" dialog from #163.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # GitHub macOS runners may ship with Gatekeeper disabled, in which
+          # case spctl reports "accepted (override=security disabled)"
+          # instead of judging the notarization. Turn it on and prove it.
+          echo "spctl --status before: $(spctl --status 2>&1 || true)"
+          sudo spctl --global-enable 2>/dev/null || sudo spctl --master-enable
+          gk_status="$(spctl --status 2>&1 || true)"
+          echo "spctl --status after: $gk_status"
+          if ! echo "$gk_status" | grep -q "assessments enabled"; then
+            echo "::error::Could not enable Gatekeeper assessments on the runner"
+            exit 1
+          fi
+          if ! assessment="$(spctl --assess --type execute --verbose=4 "release/MeManga.app" 2>&1)"; then
+            echo "$assessment"
+            echo "::error::Gatekeeper rejected MeManga.app"
+            exit 1
+          fi
+          echo "$assessment"
+          if ! echo "$assessment" | grep -q "source=Notarized Developer ID"; then
+            echo "::error::Gatekeeper did not assess MeManga.app as notarized Developer ID software"
+            exit 1
+          fi
+
+      - name: Verify Playwright works inside the signed macOS app
+        # The bundle re-sign above rewrites the launcher's signature, so
+        # run the final stapled MeManga.app launcher itself under the
+        # hardened runtime and entitlements before it is zipped. A
+        # missing entitlement shows up here as a launch failure.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          "release/MeManga.app/Contents/MacOS/MeManga" --verify-playwright || {
+            echo "::error::Playwright self-test failed in the signed MeManga.app"
+            echo "----- runtime.log -----"
+            cat "$HOME/.config/memanga/runtime.log" 2>/dev/null || true
+            exit 1
+          }
+
+      - name: Archive stapled macOS app bundle (.zip)
+        # Zip the stapled bundle for the release. `ditto` preserves the
+        # exec bit, bundle layout and code signature; `--keepParent` keeps
+        # MeManga.app as the top-level folder inside the zip.
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
           ditto -c -k --keepParent "release/MeManga.app" "${{ matrix.asset_name }}"
 
       - name: Validate packaged macOS app bundle
-        # Release gate: the uploaded .zip must contain a launchable
-        # MeManga.app/Contents/MacOS/MeManga (exec bit set), a valid
-        # Info.plist, and the CPU slice this matrix leg targets — not just
-        # a raw Mach-O. Fails the release before anything reaches the page.
+        # Release gate on the exact .zip that gets uploaded: it must hold a
+        # launchable MeManga.app/Contents/MacOS/MeManga (exec bit set), a
+        # valid Info.plist, the CPU slice this matrix leg targets, a code
+        # signature and a stapled notarization ticket. The archive is then
+        # extracted as a user would and re-checked with codesign, stapler
+        # and spctl so the shipped bytes, not just the build tree, pass
+        # Gatekeeper.
         if: runner.os == 'macOS'
         shell: bash
         run: |
           python packaging/macos_app.py validate \
             --path "${{ matrix.asset_name }}" \
-            --arch "${{ matrix.target_arch }}"
+            --arch "${{ matrix.target_arch }}" \
+            --require-signed --require-stapled
+          workdir="$(mktemp -d)"
+          ditto -x -k "${{ matrix.asset_name }}" "$workdir"
+          extracted="$workdir/MeManga.app"
+          codesign --verify --deep --strict --verbose=2 "$extracted"
+          xcrun stapler validate "$extracted"
+          # GitHub macOS runners may ship with Gatekeeper disabled, in which
+          # case spctl reports "accepted (override=security disabled)"
+          # instead of judging the notarization. Turn it on and prove it.
+          echo "spctl --status before: $(spctl --status 2>&1 || true)"
+          sudo spctl --global-enable 2>/dev/null || sudo spctl --master-enable
+          gk_status="$(spctl --status 2>&1 || true)"
+          echo "spctl --status after: $gk_status"
+          if ! echo "$gk_status" | grep -q "assessments enabled"; then
+            echo "::error::Could not enable Gatekeeper assessments on the runner"
+            exit 1
+          fi
+          assessment="$(spctl --assess --type execute --verbose=4 "$extracted" 2>&1)" || true
+          echo "$assessment"
+          if ! echo "$assessment" | grep -q "source=Notarized Developer ID"; then
+            echo "::error::Extracted MeManga.app from the release zip is not accepted by Gatekeeper"
+            exit 1
+          fi
 
       - name: Package artifact for upload
         id: package
@@ -212,6 +429,11 @@ jobs:
           name: ${{ matrix.asset_name }}
           path: ${{ steps.package.outputs.upload_path }}
           retention-days: 7
+
+      - name: Remove macOS signing keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/memanga-signing.keychain-db" || true
 
   release:
     needs: build

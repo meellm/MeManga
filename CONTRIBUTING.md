@@ -128,6 +128,26 @@ python build_app.py    # Single-file release exe, no console (MeManga.exe)
 Both scripts move the final binary to the repo root and sweep the
 `build/` + `dist/` scratch directories.
 
+### macOS signing and notarization
+
+Tag builds sign the macOS apps with a Developer ID Application
+certificate, notarize them with Apple and staple the ticket before
+upload; the release job fails if any of these repository secrets is
+missing:
+
+| Secret | Value |
+|---|---|
+| `MACOS_CERTIFICATE_BASE64` | Base64 of the Developer ID Application `.p12` export |
+| `MACOS_CERTIFICATE_PASSWORD` | Password of that `.p12` |
+| `MACOS_CODESIGN_IDENTITY` | Identity name, e.g. `Developer ID Application: Name (TEAMID)` |
+| `APPLE_ID` | Apple ID used for notarization |
+| `APPLE_TEAM_ID` | Ten-character Apple Developer Team ID |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for that Apple ID |
+
+Local `python build_app.py` runs on a Mac stay unsigned (ad-hoc) unless
+`MEMANGA_CODESIGN_IDENTITY` is set; hardened-runtime entitlements live in
+`packaging/macos-entitlements.plist`.
+
 ### Dependency pinning for release builds
 
 The dev build (`build.py`) installs from `requirements.txt`

@@ -183,6 +183,28 @@ _target_arch = None
 if _sys.platform == "darwin":
     _target_arch = os.environ.get("MEMANGA_TARGET_ARCH") or None
 
+# Developer ID signing for the macOS release (issue #163). Downloaded apps
+# must be Developer ID signed with the hardened runtime and notarized or
+# Gatekeeper reports them as "damaged". A one-file build embeds its
+# libraries inside the executable, so they can only be signed here, before
+# PyInstaller packs them; with an identity set PyInstaller signs every
+# collected binary plus the bootloader with `--options=runtime
+# --timestamp`. The release workflow exports MEMANGA_CODESIGN_IDENTITY
+# from its signing secrets. Left unset (local builds, Windows, Linux) both
+# values stay None and PyInstaller falls back to its default ad-hoc
+# signature on macOS, exactly as before.
+_codesign_identity = None
+_entitlements_file = None
+if _sys.platform == "darwin":
+    _codesign_identity = os.environ.get("MEMANGA_CODESIGN_IDENTITY") or None
+    if _codesign_identity:
+        _entitlements_file = (
+            os.environ.get("MEMANGA_ENTITLEMENTS_FILE")
+            or os.path.join("packaging", "macos-entitlements.plist")
+        )
+        if not os.path.isabs(_entitlements_file):
+            _entitlements_file = os.path.join(project_root, _entitlements_file)
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -194,7 +216,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX-packed Mach-O binaries invalidate their code signature, so
+    # compression stays off on macOS.
+    upx=_sys.platform != "darwin",
     upx_exclude=[],
     runtime_tmpdir=None,
     # No terminal — release exes shouldn't flash a black box at the
@@ -205,6 +229,6 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=_target_arch,
-    codesign_identity=None,
-    entitlements_file=None,
+    codesign_identity=_codesign_identity,
+    entitlements_file=_entitlements_file,
 )
