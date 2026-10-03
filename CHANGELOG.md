@@ -28,6 +28,13 @@ All notable changes are recorded here. Format loosely follows
   manhwa and manhua translations.
 
 ### Fixed
+- #181 ComicK search and chapter lists work again. The scraper now reads
+  the site's JSON API instead of the browser-rendered pages, which sit
+  behind Cloudflare's headless verification and returned no results.
+  When several groups upload the same chapter, scan-group uploads are
+  preferred over official ones. Official/external chapters that only link
+  out to the publisher have no hosted images, so they still download no
+  pages rather than faking a download.
 - #175 MangaHere.onl search now queries the site's catalogue API instead of
   scraping the home page, so results match the query instead of listing
   unrelated titles. Titles the site doesn't host (licensed series served

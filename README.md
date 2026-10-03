@@ -356,7 +356,7 @@ aggregators (popularity order):
 | mangakatana.com | Playwright | General library |
 | asurascans.com | API | Manhwa specialist |
 | comix.to | Playwright | React SPA aggregator |
-| comick.io | Playwright | Clean API |
+| comick.io | Requests | Clean API |
 | mangahub.io | Requests | Huge library |
 | mangahere.cc | Requests | Reliable mirror |
 | mangapanda.onl | Requests | MangaHub network |

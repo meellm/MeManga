@@ -47,7 +47,7 @@ class PlaywrightScraper(BaseScraper):
 
     # NOTE: do NOT define `_executor`/`_executor_lock` on this base class.
     # `__init_subclass__` below gives every subclass its OWN dedicated pair
-    # so WeebCentral, Comick, MangaKatana, MangaClash, MangaHere etc.
+    # so WeebCentral, MangaKatana, MangaClash, MangaHere etc.
     # can run their search/get_chapters/get_pages calls in PARALLEL inside
     # the search worker's 8-slot pool.
     #
