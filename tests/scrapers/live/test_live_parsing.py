@@ -80,6 +80,11 @@ PARSING_PROBES = {
     "mangakakalot.com": ProbeSpec("Mangakakalot", query="naruto"),
     "manganato.com": ProbeSpec("Manganato", query="naruto"),
     "mangahub.io": ProbeSpec("MangaHub", query="one piece"),
+    # dm5 reader: page URLs are only reachable through chapterfun.ashx,
+    # and the CDN hotlink-checks the Referer (issue #174). This probe
+    # catches either side changing - the image stage is what fails when
+    # the reader starts handing back HTML again.
+    "mangahere.cc": ProbeSpec("MangaHere (dm5 reader)", query="one piece"),
     "comix.to": ProbeSpec("Comix.to", query="kubera"),
     # Pages come from a JSON API keyed by the chapter id in the URL
     # (issue #152) - this probe catches that endpoint/host changing.
@@ -90,14 +95,61 @@ PARSING_PROBES = {
     # This probe catches any of those three endpoints changing shape.
     "atsu.moe": ProbeSpec("Atsumaru (Typesense search + REST API)",
                            query="one piece"),
+    # Asura hosts manhwa only, so probe a title it actually carries
+    # (issue #177). Search goes through api.asurascans.com/api/series
+    # with ?search=; ?name= is accepted but ignored, which is how the
+    # old scraper silently returned nothing.
+    "asurascans.com": ProbeSpec("Asura Scans (JSON API)",
+                                 query="nano machine"),
+    # Plain-HTML search + /all-chapters/ listing + reader <img> pages.
+    # Re-enabled in the search sweep after passing this pipeline (issue
+    # #178); this probe is what catches it regressing back to 0 hits.
+    # "one piece" currently returns nothing here, so probe a title the
+    # site actually carries.
+    "mgeko.cc": ProbeSpec("MGeko (plain HTML)", query="solo leveling"),
+    # Search filters the /api/series/list catalogue client-side, chapters
+    # come from the panel host's paginated list, and pages from the
+    # /api/capitulo reader payload (issue #183).
+    "olympusxyz.com": ProbeSpec("Olympus Scanlation (Nuxt JSON API)",
+                                 query="solo swordmaster"),
+    # Search parses /biblioteca result cards, chapters come from the
+    # li.upload-link rows on the series page, and pages from the reader's
+    # <img> tags under storage.zonatmo.org/chapters/<upload_id>/ (issue #184).
+    "zonatmo.org": ProbeSpec("ZonaTMO (Laravel SSR HTML)",
+                              query="solo leveling"),
+    # Search reads the cdn.zerocomics.net fragment the site's live search
+    # fetches (the advertised /comics?q= URL ignores the query); chapters
+    # and pages are server-rendered on the series/reader pages (issue #186).
+    "lector-mangas.lat": ProbeSpec("Lector Manga (static Astro HTML)",
+                                    query="jinx"),
+    # MangaThemesia WordPress theme (not Madara): ?s= search cards, the
+    # series page's #chapterlist (coin-locked rows have no href and are
+    # skipped), and the reader's ts_reader.run() image list (issue #185).
+    "en-thunderscans.com": ProbeSpec("Thunder Scans EN (MangaThemesia HTML)",
+                                      query="solo swordmaster"),
+    # Next.js SSR HTML: /semua-komik?q= result cards (the /api/comics
+    # endpoint ignores the query), the series page's a.chap-cell grid, and
+    # the reader's div.reader-page Blogger images (issue #187).
+    "wurmz.net": ProbeSpec("Wurmz (Next.js SSR HTML)", query="solo"),
+    # Search and chapters come from api.comick.dev; the web pages are
+    # Cloudflare-gated (issue #181). Many popular ComicK chapters are
+    # official/external links with no hosted images, so this probe only
+    # guards search + chapter API drift; pages were proven manually on a
+    # hosted chapter.
+    "comick.io": ProbeSpec("ComicK (JSON API)", query="one piece",
+                            check_pages=False),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),
     "akiramanga.com": ProbeSpec("OGImageMeta template (single-manga)"),
     "overlord-manga.online": ProbeSpec("LaiondCDN template (single-manga)"),
     "hxhmanga.com": ProbeSpec("Mangosm template (single-manga)"),
-    "hiperdex.com": ProbeSpec("WordPress Madara template (aggregator)",
-                                query="solo leveling"),
+    # hiperdex.com used to be the Madara representative, but from the
+    # audit network it serves a self-signed cert and a regional
+    # access-block page (issue #180), so probe a Madara aggregator that
+    # still answers.
+    "mangaread.org": ProbeSpec("WordPress Madara template (aggregator)",
+                                 query="solo leveling"),
 
     # ── ReadManga base family ──
     # Search-only: chapter listing needs a manga URL slug this site's

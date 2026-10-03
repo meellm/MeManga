@@ -36,6 +36,91 @@ class TestSearch:
         assert scraper.search("nothing") == []
 
 
+class TestSearchDirectFallback:
+    """Issue #172: /filter is Cloudflare-blocked, /manga/<slug> is not."""
+
+    CHALLENGE = "<html><head><title>Just a moment...</title></head></html>"
+
+    def test_blocked_filter_falls_back_to_slug(
+            self, scraper, patch_html, load_fixture):
+        fetched = []
+
+        def fake(url):
+            fetched.append(url)
+            if "/filter" in url:
+                raise RuntimeError("Cloudflare challenge not cleared")
+            return load_fixture("mangapark", "manga_direct.html")
+
+        patch_html(scraper, fake)
+        results = scraper.search("One Piece!")
+        assert fetched[-1] == "https://mangapark1.com/manga/one-piece"
+        assert len(results) == 1
+        assert results[0].title == "One Piece"
+        assert results[0].url == "https://mangapark1.com/manga/one-piece"
+        # The comic's own poster, not the og:image banner or a related card
+        assert results[0].cover_url == \
+            "https://cdn2.holdingyouclose.xyz/thumb/one-piece.webp"
+
+    def test_unparseable_filter_page_falls_back(
+            self, scraper, patch_html, load_fixture):
+        patch_html(scraper, {
+            "/filter": self.CHALLENGE,
+            "/manga/one-piece": load_fixture("mangapark", "manga_direct.html"),
+        })
+        results = scraper.search("one piece")
+        assert [r.url for r in results] == \
+            ["https://mangapark1.com/manga/one-piece"]
+
+    def test_filter_results_skip_direct_lookup(
+            self, scraper, patch_html, load_fixture):
+        fetched = []
+
+        def fake(url):
+            fetched.append(url)
+            return load_fixture("mangapark", "search.html")
+
+        patch_html(scraper, fake)
+        assert len(scraper.search("one piece")) == 3
+        assert len(fetched) == 1 and "/filter" in fetched[0]
+
+    def test_missing_page_returns_nothing(self, scraper, patch_html):
+        def fake(url):
+            if "/filter" in url:
+                raise RuntimeError("Cloudflare challenge not cleared")
+            raise RuntimeError(f"HTTP 404 for {url}")
+
+        patch_html(scraper, fake)
+        assert scraper.search("does not exist xyz") == []
+
+    def test_page_for_other_slug_rejected(
+            self, scraper, patch_html, load_fixture):
+        # A redirect/soft-404 that lands on some other comic's page
+        patch_html(scraper, {
+            "/filter": self.CHALLENGE,
+            "/manga/": load_fixture("mangapark", "manga_direct.html"),
+        })
+        assert scraper.search("naruto") == []
+
+    def test_challenge_or_non_manga_page_rejected(self, scraper, patch_html):
+        patch_html(scraper, {
+            "/filter": self.CHALLENGE,
+            "/manga/": "<html><head><title>Page not found</title></head>"
+                       "<body><h1>404</h1></body></html>",
+        })
+        assert scraper.search("one piece") == []
+
+    def test_blank_query_makes_no_direct_fetch(self, scraper, patch_html):
+        fetched = []
+
+        def fake(url):
+            fetched.append(url)
+            return self.CHALLENGE
+
+        patch_html(scraper, fake)
+        assert scraper.search("  ?! ") == []
+        assert all("/manga/" not in u for u in fetched)
+
+
 class TestGetChapters:
     def test_uses_json_endpoint(self, scraper, patch_json, load_json_fixture):
         patch_json(scraper, load_json_fixture("mangapark", "chapter_list.json"))

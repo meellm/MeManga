@@ -32,11 +32,13 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 class _FakeResponse:
     def __init__(self, text: str = "", *, status: int = 200,
-                 content: bytes | None = None, json_data=None):
+                 content: bytes | None = None, json_data=None,
+                 headers: dict | None = None):
         self._text = text
         self.status_code = status
         self._content = content if content is not None else text.encode("utf-8")
         self._json = json_data
+        self.headers = headers if headers is not None else dict()
 
     @property
     def text(self) -> str:
@@ -113,9 +115,11 @@ def _patch_json(monkeypatch, scraper, json_map):
     monkeypatch.setattr(scraper, "_get_json", _fake)
 
 
-def _patch_request(monkeypatch, scraper, *, text="", content=None, status=200):
+def _patch_request(monkeypatch, scraper, *, text="", content=None, status=200,
+                    headers=None):
     """Patch scraper._request to return a FakeResponse."""
-    resp = _FakeResponse(text=text, content=content, status=status)
+    resp = _FakeResponse(text=text, content=content, status=status,
+                          headers=headers)
     monkeypatch.setattr(scraper, "_request", lambda *a, **k: resp)
     return resp
 
@@ -159,7 +163,7 @@ def patch_json(monkeypatch):
 
 @pytest.fixture
 def patch_request(monkeypatch):
-    def _bind(scraper, *, text="", content=None, status=200):
-        return _patch_request(monkeypatch, scraper,
-                                text=text, content=content, status=status)
+    def _bind(scraper, *, text="", content=None, status=200, headers=None):
+        return _patch_request(monkeypatch, scraper, text=text, content=content,
+                                status=status, headers=headers)
     return _bind

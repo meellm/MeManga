@@ -2,7 +2,8 @@
 
 These cover the bits of memanga.scrapers.base that aren't tied to
 any one site — the dataclasses, rate-limit logic, get_cover_url
-fallback, and get_new_chapters filtering.
+fallback, get_new_chapters filtering, and the looks_like_image body
+sniffer shared with the GUI cover fetch.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import time
 import pytest
 
 from memanga.scrapers.base import (
-    BaseScraper, Chapter, Manga, _retry,
+    BaseScraper, Chapter, Manga, _retry, looks_like_image,
 )
 
 
@@ -176,3 +177,52 @@ class TestDownloadImage:
             raise IOError()
         monkeypatch.setattr(s, "_request", boom)
         assert s.download_image("https://x", tmp_path / "p.jpg") is False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# looks_like_image — shared body sniffer (issue #174)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestLooksLikeImage:
+    """Canonical tests for the helper that keeps HTML block pages from
+    being written where image bytes belong. memanga.gui.workers re-exports
+    it for the cover fetch; this is where its behaviour is pinned down.
+    """
+
+    @pytest.mark.parametrize("name,body", [
+        ("jpeg", b"\xff\xd8\xff\xe0" + b"\x00" * 16),
+        ("png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 16),
+        ("gif87a", b"GIF87a" + b"\x00" * 16),
+        ("gif89a", b"GIF89a" + b"\x00" * 16),
+        ("bmp", b"BM" + b"\x00" * 16),
+        ("webp", b"RIFF\x24\x00\x00\x00WEBPVP8 " + b"\x00" * 16),
+        ("avif", b"\x00\x00\x00 ftypavifmif1" + b"\x00" * 8),
+        ("heic", b"\x00\x00\x00 ftypheicmif1" + b"\x00" * 8),
+    ])
+    def test_magic_bytes_pass_without_a_content_type(self, name, body):
+        # No header at all: the bytes alone have to carry the decision,
+        # since some CDNs serve images as application/octet-stream.
+        assert looks_like_image(body) is True
+
+    def test_content_type_rescues_a_format_we_do_not_sniff(self):
+        # SVG is XML — no magic number to match, so only the header can
+        # tell it apart from a block page.
+        svg = b'<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>'
+        assert looks_like_image(svg, "image/svg+xml") is True
+
+    def test_content_type_parameters_and_case_are_ignored(self):
+        svg = b"<svg xmlns='http://www.w3.org/2000/svg'/>"
+        assert looks_like_image(svg, "Image/SVG+XML; charset=utf-8") is True
+
+    @pytest.mark.parametrize("body,ctype", [
+        (b"<!DOCTYPE html><html><body>Forbidden</body></html>",
+         "text/html; charset=UTF-8"),
+        (b"<html>blocked</html>", ""),
+        (b"", "image/jpeg"),          # empty body is never an image
+        (b"", ""),
+        (b"RIFF\x24\x00\x00\x00AVI LIST", ""),   # RIFF, but not WEBP
+        (b"\x00\x00\x00 ftypmp42", ""),           # ISO-BMFF, but video
+    ])
+    def test_rejects_non_images(self, body, ctype):
+        assert looks_like_image(body, ctype) is False

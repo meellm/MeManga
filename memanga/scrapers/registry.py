@@ -415,6 +415,8 @@ _cfg_dandadannet = {
     "image_cdn_filters": ["img.spoilerhat.com", "mangafox"],
 }
 
+# Blocked/unreachable from the audit network (#180); kept so saved library
+# entries still resolve, but skipped by the search sweep.
 _cfg_hiperdex = {
     "base_url": "https://hiperdex.com",
     "uses_ajax": True,

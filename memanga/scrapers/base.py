@@ -15,6 +15,36 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+_IMAGE_MAGIC_PREFIXES = (
+    b"\xff\xd8\xff",        # JPEG
+    b"\x89PNG\r\n\x1a\n",   # PNG
+    b"GIF87a",              # GIF
+    b"GIF89a",
+    b"BM",                  # BMP
+)
+
+
+def looks_like_image(content: bytes, content_type: str = "") -> bool:
+    """True when a response body is plausibly an image.
+
+    Hotlink-protected CDNs answer a request that lacks the right
+    Referer with an HTML block page, so a naive save writes markup
+    where image bytes belong (issue #174). Magic bytes first; the
+    Content-Type header is only a fallback for formats we don't
+    sniff (SVG, ...).
+    """
+    if not content:
+        return False
+    if content.startswith(_IMAGE_MAGIC_PREFIXES):
+        return True
+    if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+        return True
+    if content[4:12] in (b"ftypavif", b"ftypheic"):
+        return True
+    ctype = (content_type or "").split(";")[0].strip().lower()
+    return ctype.startswith("image/")
+
+
 def _retry(func, max_attempts=3, base_delay=1.0, exceptions=(Exception,)):
     """Retry an operation with exponential backoff.
 

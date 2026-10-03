@@ -10,6 +10,7 @@ import pytest
 
 from memanga.scrapers import Manga
 from memanga.search import (
+    BROKEN_SEARCH_SOURCES,
     SearchResult,
     compute_search_sources,
     fetch_chapter_count,
@@ -199,6 +200,98 @@ class TestComputeSearchSources:
         sources = compute_search_sources(FakeConfig())
         assert "mangago.me" not in sources
         assert "www.mangago.me" not in sources
+
+    def test_mgeko_back_in_the_sweep(self):
+        # mgeko.cc was parked as NEEDS_JS_API, but its plain-HTML search,
+        # chapters, pages and image download pass the live probe again
+        # (issue #178), so it must reach the sweep when enabled.
+        assert "mgeko.cc" not in BROKEN_SEARCH_SOURCES
+        assert "mgeko.cc" in compute_search_sources(FakeConfig())
+
+    def test_disabled_mgeko_still_removed(self):
+        sources = compute_search_sources(FakeConfig({
+            "sources.disabled": ["mgeko.cc"],
+        }))
+        assert "mgeko.cc" not in sources
+
+    def test_unreachable_mangaclash_excluded(self):
+        # mangaclash.com fails TLS and its plain-HTTP site is no longer
+        # MangaClash, with no verified replacement domain (issue #179).
+        # It stays registered so saved entries resolve, but must never
+        # reach the sweep - not even when it's already in the user's
+        # library.
+        assert "mangaclash.com" in BROKEN_SEARCH_SOURCES
+        assert "mangaclash.com" not in compute_search_sources(FakeConfig())
+        assert "mangaclash.com" not in compute_search_sources(FakeConfig({
+            "manga": [{"title": "X", "source": "mangaclash.com"}],
+        }))
+
+    def test_mangaclash_not_a_default_source(self):
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES
+        assert "mangaclash.com" not in POPULAR_SOURCES
+        assert "mangaclash.com" not in DEFAULT_ENABLED_SOURCES
+
+    def test_unreachable_hiperdex_excluded(self):
+        # hiperdex.com is blocked/unreachable from the audit network
+        # (self-signed cert, regional access-block page), with no verified
+        # replacement domain (issue #180). It stays registered so saved
+        # entries resolve, but must never reach the sweep - not even when
+        # it's in the library.
+        from memanga.scrapers import get_scraper
+        assert "hiperdex.com" in BROKEN_SEARCH_SOURCES
+        assert get_scraper("hiperdex.com") is not None
+        assert "hiperdex.com" not in compute_search_sources(FakeConfig())
+        assert "hiperdex.com" not in compute_search_sources(FakeConfig({
+            "manga": [{"title": "X", "source": "hiperdex.com"}],
+        }))
+
+    def test_lector_manga_old_host_is_an_alias(self):
+        # lectormangass.net 301-redirects to lector-mangas.lat (issue #186).
+        # Both resolve to the same scraper, but only the current host is
+        # searched - even when the library still points at the old one.
+        from memanga.scrapers import get_scraper
+        from memanga.scrapers.lectormanga import LectorMangaScraper
+        assert isinstance(get_scraper("lectormangass.net"), LectorMangaScraper)
+        assert "lectormangass.net" in BROKEN_SEARCH_SOURCES
+        sources = compute_search_sources(FakeConfig({
+            "manga": [{"title": "X", "source": "lectormangass.net"}],
+        }))
+        assert "lector-mangas.lat" in sources
+        assert "lectormangass.net" not in sources
+
+    def test_challenged_kagane_excluded(self):
+        # kagane.org redirects to kagane.to and both answer with a
+        # Cloudflare 403/challenge (issue #182). Every host resolves to the
+        # same scraper so saved entries keep working, but none of them may
+        # reach the sweep - not even when the library still points there.
+        from memanga.scrapers import get_scraper
+        from memanga.scrapers.kagane import KaganeScraper
+        hosts = ("kagane.org", "www.kagane.org", "kagane.to")
+        for host in hosts:
+            assert isinstance(get_scraper(host), KaganeScraper)
+            assert host in BROKEN_SEARCH_SOURCES
+        sources = compute_search_sources(FakeConfig({
+            "manga": [
+                {"title": "X", "source": "kagane.org"},
+                {"title": "Y", "sources": [
+                    {"url": "https://kagane.to/series/abc"},
+                ]},
+            ],
+        }))
+        assert not set(hosts) & set(sources)
+
+    def test_default_enabled_sources_pinned(self):
+        # Pinned so a curation change is deliberate and the README's
+        # default-source list gets updated with it. Dropping MangaClash
+        # (#179) did not promote luminousscans.com into the defaults.
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES
+        assert DEFAULT_ENABLED_SOURCES == [
+            "mangadex.org", "mangapill.com", "mangapark1.com",
+            "mangafire.to", "mangabuddy.com", "weebcentral.com",
+            "mangakatana.com", "asurascans.com", "comix.to",
+            "comick.io", "mangahub.io", "mangahere.cc",
+            "mangapanda.onl", "mangahere.onl", "mangataro.org",
+        ]
 
     def test_disabled_sources_removed(self):
         sources = compute_search_sources(FakeConfig({

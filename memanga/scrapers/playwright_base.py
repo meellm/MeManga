@@ -47,7 +47,7 @@ class PlaywrightScraper(BaseScraper):
 
     # NOTE: do NOT define `_executor`/`_executor_lock` on this base class.
     # `__init_subclass__` below gives every subclass its OWN dedicated pair
-    # so WeebCentral, Comick, MangaKatana, MangaClash, MangaHere etc.
+    # so WeebCentral, MangaKatana, MangaClash, MangaHere etc.
     # can run their search/get_chapters/get_pages calls in PARALLEL inside
     # the search worker's 8-slot pool.
     #
@@ -110,11 +110,7 @@ class PlaywrightScraper(BaseScraper):
         from playwright.sync_api import sync_playwright
         pw = sync_playwright().start()
         try:
-            browser = pw.firefox.launch(headless=True)
-            context = browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-            )
+            browser, context = self._launch_browser(pw)
         except Exception:
             # Roll back the Playwright start so the next call can retry
             # cleanly instead of inheriting half-broken state.
@@ -128,6 +124,21 @@ class PlaywrightScraper(BaseScraper):
         _thread_local.playwright = pw
         _thread_local.browser = browser
         _thread_local.context = context
+        return browser, context
+
+    def _launch_browser(self, pw):
+        """Launch this scraper's browser and context from a started Playwright.
+
+        Stealth Firefox by default. Override for sites that need a
+        different engine (e.g. MangaPark, whose Cloudflare challenge only
+        lets Chromium through). Runs inside the executor thread, and
+        ``_get_browser_in_thread`` rolls Playwright back if this raises.
+        """
+        browser = pw.firefox.launch(headless=True)
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        )
         return browser, context
 
     def _fetch_page_content(self, url: str, wait_time: int = 2000, cookies: list = None) -> str:

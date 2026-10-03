@@ -14,6 +14,13 @@ image URLs from network requests.
 
 Based on keiyoushi/extensions-source Tachiyomi extension
 and Yui007/kagane-downloader.
+
+Status (issue #182): kagane.org now redirects to kagane.to, and both the
+site and the yuzuki.kagane.org API answer with a Cloudflare 403/challenge
+that cloudscraper and headless browsers do not clear. The scraper stays
+registered (kagane.org and kagane.to) so saved entries resolve, but it is
+excluded from the search sweep and is not expected to work until a
+challenge-safe path exists.
 """
 
 import re

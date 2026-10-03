@@ -1,19 +1,32 @@
-"""Shared pytest fixtures for the MeManga test suite (CLI variant).
+"""
+Shared pytest fixtures for the MeManga test suite.
 
-Everything every CLI-facing test needs lives here:
-- An isolated temp HOME so config/state never touch the real
-  ``~/.config/memanga``
-- Helpers to build a mock manga + a mock scraper that never hits the
-  network
+Everything every test needs lives here:
+- A single QApplication for the whole session (PySide6 forbids multiple)
+- An isolated temp HOME so config/state never touch the user's real
+  ~/.config/memanga
+- A clean QSettings instance per test
+- Helpers to build mock manga + mock scrapers
 """
 
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
+import threading
 from pathlib import Path
-from typing import Iterator  # noqa: F401 — re-exported for downstream tests
+from typing import Iterator
 
 import pytest
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Process-level environment — must run before any Qt imports
+# ─────────────────────────────────────────────────────────────────────────
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Force the Geist warning off — clutters every test run.
+os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.*=false")
 
 
 # Make `memanga` importable when pytest is invoked from the repo root.
@@ -42,6 +55,62 @@ def isolated_home(monkeypatch, tmp_path) -> Path:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     (tmp_path / ".config" / "memanga").mkdir(parents=True, exist_ok=True)
     return tmp_path
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Qt: one QApplication for the whole session
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(scope="session")
+def qapp_session():
+    """Single QApplication shared across the suite — PySide6 only allows
+    one QApplication per process and tearing it down between tests is
+    flaky on macOS, so we hold one for the session."""
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+        app.setStyle("Fusion")
+    yield app
+    # Don't call app.quit() — pytest-qt does its own shutdown.
+
+
+@pytest.fixture
+def qapp(qapp_session, isolated_home):
+    """Per-test alias that pulls in HOME isolation automatically."""
+    return qapp_session
+
+
+@pytest.fixture
+def fresh_settings(monkeypatch, isolated_home):
+    """Reset QSettings so theme persistence and other QSettings-backed
+    state start clean each test."""
+    from PySide6.QtCore import QSettings
+    # QSettings writes under HOME/Library on macOS, HOME/.config on
+    # Linux — both are inside our isolated_home tmpdir already.
+    s = QSettings("MeManga", "desktop-test")
+    s.clear()
+    s.sync()
+    yield s
+    s.clear()
+    s.sync()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Theme: reload tokens fresh each test so persisted theme doesn't leak
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def theme(qapp, fresh_settings):
+    """Import the theme package + reset _current so tests pick the
+    default dark theme. Returns the module so tests can call
+    `theme.set_theme()`, `theme.tokens()` etc."""
+    from memanga.gui import theme as T
+    T._current = None
+    T.apply(qapp)
+    return T
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -156,15 +225,39 @@ def patch_get_scraper(monkeypatch, mock_scraper):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# MainWindow construction — slow, gated behind a fixture
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def app_window(qapp, theme, isolated_home):
+    """Fully-constructed MeMangaApp window. Use sparingly — each
+    construction registers every page and starts a few QTimers."""
+    from memanga.gui.app import MeMangaApp
+    w = MeMangaApp()
+    yield w
+    try:
+        w.worker.shutdown()
+    except Exception:
+        pass
+    w.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Misc helpers
 # ─────────────────────────────────────────────────────────────────────────
 
 
 @pytest.fixture
+def event_bus():
+    from memanga.gui.events import EventBus
+    return EventBus()
+
+
+@pytest.fixture
 def make_cbz(tmp_path):
     """Factory: build a CBZ at the given path with N JPEG pages."""
-    import io
-    import zipfile
+    import io, zipfile
     from PIL import Image
 
     def _make(pages: int = 3, name: str = "test.cbz") -> Path:
