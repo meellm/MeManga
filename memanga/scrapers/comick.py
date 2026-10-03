@@ -1,240 +1,219 @@
 """
 ComicK scraper - Popular manga aggregator (comick.io / comick.dev)
-Uses Playwright with stealth for Cloudflare bypass.
+Uses the site's own JSON API (api.comick.dev) - no HTML scraping needed.
 
-ComicK is a Next.js SPA that loads search results via API. We use Playwright
-to load the page and wait for the search results to appear, then parse them.
+The comick.io / comick.dev web pages sit behind Cloudflare's headless
+verification, but the API the SPA calls answers plain requests:
+
+- search:         /v1.0/search?type=comic&q=...
+- comic by slug:  /comic/{slug}/          -> {"comic": {"hid": ...}}
+- chapter list:   /v1.0/comic/{hid}/chapters?lang=en&limit=&page=
+- chapter detail: /chapter/{chapter_hid}  -> {"chapter": {"md_images": [...]}}
+
+Hosted pages are served from meo.comick.pictures/{b2key}. Chapters that
+only link to an external/official site have no md_images and yield [].
 """
 
 import re
-import json
 from typing import List, Optional
-from urllib.parse import urljoin, quote
 
-from bs4 import BeautifulSoup
-
-from .playwright_base import PlaywrightScraper
-from .base import Chapter, Manga
+from .base import BaseScraper, Chapter, Manga
 
 
-class ComickScraper(PlaywrightScraper):
-    """Scraper for ComicK (comick.io / comick.dev)."""
-    
+class ComickScraper(BaseScraper):
+    """Scraper for ComicK using its public JSON API."""
+
     name = "comick"
     base_url = "https://comick.io"  # Redirects to comick.dev
-    
-    def _extract_next_data(self, soup: BeautifulSoup) -> dict:
-        """Extract __NEXT_DATA__ JSON from page."""
-        script = soup.find('script', id='__NEXT_DATA__')
-        if script and script.string:
-            try:
-                return json.loads(script.string)
-            except json.JSONDecodeError:
-                pass
-        return {}
-    
+    api_url = "https://api.comick.dev"
+    image_cdn = "https://meo.comick.pictures"
+
+    _CHAPTERS_PAGE_SIZE = 300
+    _MAX_CHAPTER_PAGES = 50
+
+    def __init__(self):
+        super().__init__()
+        self.session.headers.update({
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://comick.io/",
+            "Origin": "https://comick.io",
+        })
+
+    def _extract_slug(self, url: str) -> Optional[str]:
+        """Extract comic slug from a ComicK URL."""
+        match = re.search(r'/comic/([^/?#]+)', url)
+        return match.group(1) if match else None
+
+    def _extract_chapter_hid(self, url: str) -> Optional[str]:
+        """Extract chapter hid from a ComicK chapter URL.
+
+        URL formats:
+        https://comick.io/comic/{slug}/{hid}-chapter-{chap}-{lang}
+        https://comick.io/comic/{slug}/{hid}
+        """
+        match = re.search(r'/comic/[^/?#]+/([^/?#]+)', url)
+        if not match:
+            return None
+        segment = match.group(1)
+        return segment.split('-chapter-', 1)[0] or None
+
+    def _cover_url(self, item: dict) -> Optional[str]:
+        """Build a cover URL from an API comic record."""
+        for cover in item.get("md_covers") or []:
+            b2key = cover.get("b2key") if isinstance(cover, dict) else None
+            if b2key:
+                return f"{self.image_cdn}/{b2key}"
+        return item.get("cover_url") or None
+
     def search(self, query: str) -> List[Manga]:
-        """Search for manga using ComicK search."""
-        # ComicK loads results via client-side API after page load
-        # Wait longer to let JS render
-        search_url = f"https://comick.io/search?q={quote(query)}"
-        
-        html = self._get_page_content(search_url, wait_time=8000)
-        soup = BeautifulSoup(html, "html.parser")
-        
+        """Search for manga by title."""
+        data = self._get_json(
+            f"{self.api_url}/v1.0/search",
+            params={"type": "comic", "page": 1, "limit": 20, "q": query},
+        )
+        if not isinstance(data, list):
+            return []
+
         results = []
-        seen_slugs = set()
-        
-        # Look for comic links in the rendered HTML
-        # ComicK renders results as cards with links to /comic/{slug}
-        for link in soup.select('a[href*="/comic/"]'):
-            href = link.get('href', '')
-            
-            # Skip chapter links and non-comic links
-            if not href or '/chapter' in href.lower():
+        seen = set()
+        for item in data:
+            if not isinstance(item, dict):
                 continue
-            
-            # Extract slug
-            match = re.search(r'/comic/([^/\?]+)', href)
-            if not match:
+            slug = item.get("slug")
+            title = (item.get("title") or "").strip()
+            if not slug or not title or slug in seen:
                 continue
-            
-            slug = match.group(1)
-            if slug in seen_slugs:
-                continue
-            seen_slugs.add(slug)
-            
-            # Get the parent card/container for this link
-            # Usually the title is in a child element
-            title = ''
-            cover_url = None
-            
-            # Find image
-            img = link.select_one('img')
-            if img:
-                cover_url = img.get('src') or img.get('data-src')
-            
-            # Find title - try multiple approaches
-            # 1. Look for text in specific elements
-            for el in link.select('span, p, div, h2, h3, h4'):
-                text = el.get_text(strip=True)
-                # ComicK shows "Title123 chapters • date" format
-                # Extract just the title part
-                cleaned = re.sub(r'\d+\s*chapter.*$', '', text, flags=re.I)
-                cleaned = re.sub(r'(Uploaded|hours?|days?|weeks?|months?|years?|ago).*', '', cleaned, flags=re.I)
-                cleaned = re.sub(r'📗.*', '', cleaned).strip()
-                
-                if cleaned and 3 <= len(cleaned) < 200:
-                    # Prefer shorter, cleaner titles
-                    if not title or len(cleaned) < len(title):
-                        title = cleaned
-            
-            # 2. Fallback to full text
-            if not title:
-                text = link.get_text(strip=True)
-                cleaned = re.sub(r'\d+\s*chapter.*$', '', text, flags=re.I)
-                cleaned = re.sub(r'(Uploaded|hours?|days?|weeks?|months?|years?|ago).*', '', cleaned, flags=re.I)
-                cleaned = re.sub(r'📗.*', '', cleaned).strip()
-                if cleaned and 3 <= len(cleaned) < 200:
-                    title = cleaned
-            
-            if not title:
-                # Use slug as last resort
-                title = slug.replace('-', ' ').title()
-            
+            seen.add(slug)
+
             results.append(Manga(
                 title=title,
-                url=f"https://comick.io/comic/{slug}",
-                cover_url=cover_url,
+                url=f"{self.base_url}/comic/{slug}",
+                cover_url=self._cover_url(item),
+                description=item.get("desc") or None,
             ))
-        
-        return results[:20]
-    
+
+        return results
+
+    def _get_comic(self, slug: str) -> dict:
+        """Fetch the API comic record for a slug."""
+        data = self._get_json(f"{self.api_url}/comic/{slug}/")
+        comic = data.get("comic") if isinstance(data, dict) else None
+        return comic if isinstance(comic, dict) else {}
+
+    def get_cover_url(self, manga_url: str) -> Optional[str]:
+        """Get cover image URL from the API (web pages are Cloudflare-gated)."""
+        slug = self._extract_slug(manga_url)
+        if not slug:
+            return None
+        try:
+            return self._cover_url(self._get_comic(slug))
+        except Exception:
+            return None
+
+    def _fetch_chapter_list(self, hid: str, lang: Optional[str]) -> List[dict]:
+        """Fetch every chapter record for a comic, following pagination."""
+        records: List[dict] = []
+        for page in range(1, self._MAX_CHAPTER_PAGES + 1):
+            params = {"limit": self._CHAPTERS_PAGE_SIZE, "page": page}
+            if lang:
+                params["lang"] = lang
+            data = self._get_json(
+                f"{self.api_url}/v1.0/comic/{hid}/chapters", params=params,
+            )
+            if not isinstance(data, dict):
+                break
+            batch = data.get("chapters") or []
+            if not batch:
+                break
+            records.extend(batch)
+            total = data.get("total") or 0
+            if len(records) >= total or len(batch) < self._CHAPTERS_PAGE_SIZE:
+                break
+        return records
+
+    _OFFICIAL_GROUPS = {"mangaplus", "manga plus", "official"}
+
+    def _is_official(self, ch: dict) -> bool:
+        """True for official/external uploads (MangaPlus etc.), which
+        usually link out to the publisher and have no hosted images."""
+        for link in ch.get("md_chapters_groups") or []:
+            group = link.get("md_groups") if isinstance(link, dict) else None
+            if isinstance(group, dict) and group.get("official"):
+                return True
+        names = ch.get("group_name") or []
+        return any(
+            isinstance(name, str) and name.strip().lower() in self._OFFICIAL_GROUPS
+            for name in names
+        )
+
+    def _upload_rank(self, ch: dict) -> tuple:
+        """Sort key for duplicate uploads: scan groups before official
+        ones, then by votes."""
+        return (not self._is_official(ch), ch.get("up_count") or 0)
+
     def get_chapters(self, manga_url: str) -> List[Chapter]:
-        """Get all chapters for a manga."""
-        html = self._get_page_content(manga_url, wait_time=8000)
-        soup = BeautifulSoup(html, "html.parser")
-        
+        """Get chapters for a manga, preferring English releases."""
+        slug = self._extract_slug(manga_url)
+        if not slug:
+            raise ValueError(f"Could not extract comic slug from: {manga_url}")
+
+        hid = self._get_comic(slug).get("hid")
+        if not hid:
+            return []
+
+        records = self._fetch_chapter_list(hid, "en")
+        if not records:
+            # Non-English-only titles: fall back to every language.
+            records = self._fetch_chapter_list(hid, None)
+
+        # Several groups often upload the same chapter; keep the best
+        # upload per chapter number. Records without a chapter number
+        # (volume-only/oneshot extras) are skipped rather than collapsed
+        # into one fake "Chapter 0".
+        best = {}
+        for ch in records:
+            chapter_hid = ch.get("hid")
+            number = str(ch.get("chap") or "").strip()
+            if not chapter_hid or not number:
+                continue
+            current = best.get(number)
+            if current is None or self._upload_rank(ch) > self._upload_rank(current):
+                best[number] = ch
+
         chapters = []
-        seen = set()
-        
-        # Extract slug from URL for building chapter URLs
-        slug_match = re.search(r'/comic/([^/\?]+)', manga_url)
-        slug = slug_match.group(1) if slug_match else ''
-        
-        # Try __NEXT_DATA__ first (manga page includes chapter list)
-        next_data = self._extract_next_data(soup)
-        if next_data:
-            try:
-                page_props = next_data.get('props', {}).get('pageProps', {})
-                chapter_list = page_props.get('chapters', []) or []
-                
-                for ch in chapter_list:
-                    chap_num = str(ch.get('chap') or ch.get('chapter') or '')
-                    hid = ch.get('hid') or ''
-                    title = ch.get('title') or f"Chapter {chap_num}"
-                    
-                    if not chap_num or chap_num in seen:
-                        continue
-                    seen.add(chap_num)
-                    
-                    # Build chapter URL using hid
-                    chapter_url = f"https://comick.io/comic/{slug}/{hid}"
-                    
-                    chapters.append(Chapter(
-                        number=chap_num,
-                        title=title,
-                        url=chapter_url,
-                    ))
-                
-                if chapters:
-                    return sorted(chapters, key=lambda x: x.numeric)
-            except (KeyError, TypeError):
-                pass
-        
-        # Fallback: Parse HTML for chapter links
-        for link in soup.select('a[href]'):
-            href = link.get('href', '')
-            if not href or href in seen:
-                continue
-            
-            # Match chapter URLs like /comic/slug/hid-chapternum or /comic/slug/some-hid
-            if f'/comic/{slug}/' not in href:
-                continue
-            if href == manga_url or href.rstrip('/') == manga_url.rstrip('/'):
-                continue
-            
-            seen.add(href)
-            full_url = href if href.startswith('http') else f"https://comick.io{href}"
-            
-            text = link.get_text(strip=True)
-            
-            # Try to extract chapter number from text or URL
-            match = re.search(r'ch(?:ap(?:ter)?)?[.\s-]*(\d+\.?\d*)', text, re.I)
-            if not match:
-                match = re.search(r'-(\d+\.?\d*)$', href)
-            if not match:
-                match = re.search(r'(\d+\.?\d*)', text)
-            
-            chapter_num = match.group(1) if match else None
-            if chapter_num and chapter_num not in [c.number for c in chapters]:
-                chapters.append(Chapter(
-                    number=chapter_num,
-                    title=text or f"Chapter {chapter_num}",
-                    url=full_url,
-                ))
-        
+        for number, ch in best.items():
+            lang = ch.get("lang") or "en"
+            title = (ch.get("title") or "").strip() or f"Chapter {number}"
+            date = ch.get("publish_at") or ch.get("created_at")
+            chapters.append(Chapter(
+                number=number,
+                title=title,
+                url=f"{self.base_url}/comic/{slug}/{ch['hid']}-chapter-{number}-{lang}",
+                date=date[:10] if date else None,
+            ))
+
         return sorted(chapters, key=lambda x: x.numeric)
-    
+
     def get_pages(self, chapter_url: str) -> List[str]:
         """Get all page image URLs for a chapter."""
-        html = self._get_page_content(chapter_url, wait_time=8000)
-        soup = BeautifulSoup(html, "html.parser")
-        
+        chapter_hid = self._extract_chapter_hid(chapter_url)
+        if not chapter_hid:
+            raise ValueError(f"Could not extract chapter id from: {chapter_url}")
+
+        data = self._get_json(f"{self.api_url}/chapter/{chapter_hid}")
+        chapter = data.get("chapter") if isinstance(data, dict) else None
+        images = (chapter or {}).get("md_images") or []
+
         pages = []
-        
-        # Try __NEXT_DATA__ first
-        next_data = self._extract_next_data(soup)
-        if next_data:
-            try:
-                page_props = next_data.get('props', {}).get('pageProps', {})
-                chapter_data = page_props.get('chapter', {})
-                images = chapter_data.get('md_images', []) or chapter_data.get('images', [])
-                
-                for img in images:
-                    url = ''
-                    if isinstance(img, dict):
-                        # b2key is the CDN path
-                        b2key = img.get('b2key') or img.get('url') or ''
-                        if b2key:
-                            if not b2key.startswith('http'):
-                                url = f"https://meo.comick.pictures/{b2key}"
-                            else:
-                                url = b2key
-                    elif isinstance(img, str):
-                        url = img
-                    
-                    if url and url not in pages:
-                        pages.append(url)
-                
-                if pages:
-                    return pages
-            except (KeyError, TypeError):
-                pass
-        
-        # Fallback: Parse HTML for images
-        # ComicK uses meo.comick.pictures or similar CDN
-        for img in soup.select('img'):
-            src = img.get('src') or img.get('data-src') or ''
-            if any(cdn in src for cdn in ['meo.comick', 'comick.pictures', 'comick.cc']):
-                if src not in pages:
-                    pages.append(src)
-        
-        # Look in reading containers
-        if not pages:
-            for img in soup.select('.chapter-reader img, .reading-content img, [class*="reader"] img'):
-                src = img.get('src') or img.get('data-src')
-                if src and src not in pages and 'logo' not in src.lower():
-                    pages.append(src)
-        
+        for img in images:
+            url = ""
+            if isinstance(img, dict):
+                key = img.get("b2key") or img.get("url") or ""
+                if key:
+                    url = key if key.startswith("http") else f"{self.image_cdn}/{key}"
+            elif isinstance(img, str):
+                url = img if img.startswith("http") else f"{self.image_cdn}/{img}"
+            if url and url not in pages:
+                pages.append(url)
+
         return pages

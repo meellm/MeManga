@@ -379,7 +379,7 @@ SCRAPERS = {
     "mangafreak.me": MangaFreakScraper,
     "ww2.mangafreak.me": MangaFreakScraper,
 
-    # ComicK - Popular manga aggregator (Playwright + Cloudflare bypass)
+    # ComicK - Popular manga aggregator (public JSON API)
     "comick.io": ComickScraper,
     "comick.dev": ComickScraper,
 

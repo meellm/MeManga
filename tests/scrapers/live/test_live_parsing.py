@@ -131,6 +131,13 @@ PARSING_PROBES = {
     # endpoint ignores the query), the series page's a.chap-cell grid, and
     # the reader's div.reader-page Blogger images (issue #187).
     "wurmz.net": ProbeSpec("Wurmz (Next.js SSR HTML)", query="solo"),
+    # Search and chapters come from api.comick.dev; the web pages are
+    # Cloudflare-gated (issue #181). Many popular ComicK chapters are
+    # official/external links with no hosted images, so this probe only
+    # guards search + chapter API drift; pages were proven manually on a
+    # hosted chapter.
+    "comick.io": ProbeSpec("ComicK (JSON API)", query="one piece",
+                            check_pages=False),
 
     # ── One representative per template family ──
     "dddmanga.com": ProbeSpec("NuxtSSR template (single-manga)"),

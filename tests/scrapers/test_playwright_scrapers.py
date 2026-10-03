@@ -236,7 +236,6 @@ PLAYWRIGHT_DOMAINS = [
     "mangahub.io",
     "mangatown.com",
     "manhuaus.org",
-    "comick.io",
     "comix.to",
     "fanfox.net",
     "toonily.me",
