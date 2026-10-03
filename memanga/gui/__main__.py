@@ -221,7 +221,7 @@ def _verify_playwright() -> int:
             compute_driver_executable, get_driver_env,
         )
         node, cli = compute_driver_executable()
-        from . import _REQUIRED_BROWSERS
+        from memanga.gui import _REQUIRED_BROWSERS
         names = " + ".join(_REQUIRED_BROWSERS)
         print(f"[Verify] installing {names} via bundled driver…", flush=True)
         result = subprocess.run(

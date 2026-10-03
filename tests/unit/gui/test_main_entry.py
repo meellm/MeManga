@@ -28,6 +28,16 @@ def _entry_helpers() -> dict:
     return ns
 
 
+def test_playwright_verifier_uses_absolute_required_browsers_import():
+    src = (Path(memanga.__file__).parent / "gui" / "__main__.py").read_text()
+    verifier = src.split("def _verify_playwright", 1)[1].split(
+        "def main", 1,
+    )[0]
+
+    assert "from memanga.gui import _REQUIRED_BROWSERS" in verifier
+    assert "from . import _REQUIRED_BROWSERS" not in verifier
+
+
 class TestConfigurePlaywrightBrowsers:
     def test_env_pinned_even_when_dir_missing(self, monkeypatch, tmp_path):
         ns = _entry_helpers()
