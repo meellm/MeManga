@@ -14,14 +14,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install CLI-only dependencies and the Playwright Firefox runtime first so
-# this expensive layer stays cached when only application source changes.
+# Install CLI-only dependencies and the Playwright Firefox + Chromium runtimes
+# first so this expensive layer stays cached when only application source
+# changes. Chromium is needed by MangaPark, whose Cloudflare check blocks
+# Firefox.
 # The cli branch's requirements.txt already excludes PySide6 and other
 # GUI-only packages, so the container stays lean and headless.
 COPY requirements.txt ./
 RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt \
-    && python -m playwright install --with-deps firefox \
+    && python -m playwright install --with-deps firefox chromium \
     && useradd --create-home --home-dir /home/memanga --shell /usr/sbin/nologin --uid 1000 memanga \
     && mkdir -p /home/memanga/.config/memanga /home/memanga/Downloads/MeManga \
     && chown -R memanga:memanga /home/memanga

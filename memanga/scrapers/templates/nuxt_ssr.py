@@ -73,7 +73,7 @@ class NuxtSSRScraper(BaseScraper):
         ]
 
     def get_pages(self, chapter_url: str) -> List[str]:
-        """Get page images from assets CDN."""
+        """Get page images from assets CDN (or the Mangayi CDN after redirect)."""
         try:
             resp = self._request(chapter_url)
         except Exception:
@@ -92,6 +92,15 @@ class NuxtSSRScraper(BaseScraper):
             resp.text
         )
 
+        if img_matches:
+            return list(dict.fromkeys(img_matches))
+
+        # Sites now redirect to mangayi.com, which serves pages from a different
+        # CDN host and manga slug: {cdn}/image/{slug}/chapter-N/X.ext
+        img_matches = re.findall(
+            rf'src="(https?://[^/"]+/image/[^/"]+/chapter-{chapter_num}/\d+\.(?:jpeg|jpg|png|webp))"',
+            resp.text
+        )
         if img_matches:
             return list(dict.fromkeys(img_matches))
 

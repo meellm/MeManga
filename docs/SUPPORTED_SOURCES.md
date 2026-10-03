@@ -1,12 +1,12 @@
 # Supported Sources
 
-MeManga supports **224 scrapers** covering **319 domains**. This document lists all supported sources.
+MeManga supports **234 scrapers** covering **333 domains**. This document lists all supported sources.
 
 > Some sites listed below are unreachable as of the last audit
 > (mangakakalot.com / mangasee123.com / mangareader.to /
-> manganato.com and friends) — they remain in the registry so
+> manganato.com / mangaclash.com / hiperdex.com and friends) — they remain in the registry so
 > existing libraries don't break, but the search sweep skips them.
-> See `memanga/gui/pages/search.py:BROKEN_SEARCH_SOURCES`.
+> See `memanga/search.py:BROKEN_SEARCH_SOURCES`.
 
 For basic usage, see the main [README](../README.md).
 
@@ -37,7 +37,7 @@ Official scanlation team releases.
 | Domain | Type | Notes |
 |--------|------|-------|
 | tcbscans.com, tcbscans.me | Requests | Jump manga (One Piece, JJK) |
-| asuracomic.net, asuratoon.com | Playwright | Manhwa/Webtoons |
+| asurascans.com | API | Manhwa/Webtoons (asuracomic.net, asuratoon.com are retired aliases) |
 | omegascans.org | Playwright | Manhwa translations |
 | flamecomics.xyz | Requests | Manhwa translations |
 | luminousscans.com | Requests | Manhwa translations |
@@ -79,12 +79,12 @@ Sites using the Madara manga theme.
 | mangayy.org, likemanga.io | General library |
 | manytoon.com | Webtoons/Manhwa |
 | toonily.me | Manhwa focused |
-| hiperdex.com | General library |
+| hiperdex.com | General library (blocked/unreachable from audit network, skipped by search) |
 | zinmanga.com | General library |
 | kunmanga.com | General library |
 | isekaiscan.com | Isekai focused |
 | coffeemanga.io | General library |
-| mangaclash.com | General library |
+| mangaclash.com | General library (unreachable, skipped by search) |
 | mangadistrict.com | General library |
 | manhuaplus.org, manhuaus.org | Manhua focused |
 
@@ -213,6 +213,12 @@ Sites dedicated to specific manga series.
 | centuriya.com | General library |
 | galaxxias.com | General library |
 | mangaball.net | Multi-language |
+| olympusxyz.com | Spanish manhwa scans (Olympus Scanlation) |
+| zonatmo.org | Spanish manga/manhwa library (ZonaTMO) |
+| lector-mangas.lat | Spanish manga/manhwa reader (Lector Manga; lectormangass.net redirects here) |
+| en-thunderscans.com | English manhwa scans (Thunder Scans EN) |
+| wurmz.net | Indonesian manga/manhwa/manhua reader (Wurmz) |
+| kagane.to, kagane.org | General library (behind a Cloudflare challenge, skipped by search; downloads not currently working) |
 
 ## Adult/NSFW Sources
 

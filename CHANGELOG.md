@@ -11,6 +11,64 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-10-03
+
+### Added
+- #185 Thunder Scans EN (en-thunderscans.com) is now available as a
+  supported CLI source with search, chapter lists and page downloads.
+  Coin-locked early-access chapters are left out of the chapter list, and
+  saved series links keep working when the site rotates its numeric slug
+  prefixes.
+- #184 ZonaTMO (zonatmo.org) is now available as a supported CLI source.
+  Search, chapter lists and reader pages are read from the site's HTML;
+  text novels are skipped since they have no page images to download.
+- #183 Olympus Scanlation (olympusxyz.com) is now available as a supported
+  CLI source through the site's catalogue, chapter-list and reader APIs.
+  Search covers comics only; the site's text novels have no page images to
+  download.
+- #186 Lector Manga (lector-mangas.lat) is now available as a supported
+  CLI source with search, chapter listing and page downloads. Links on the
+  old lectormangass.net host, which now redirects to the new one, keep
+  resolving to the same scraper.
+- #187 Wurmz (wurmz.net) is now available as a supported CLI source with
+  search, chapter lists and page downloads for its Indonesian manga,
+  manhwa and manhua translations.
+
+### Changed
+- Docker images now install Chromium alongside Firefox so MangaPark can keep
+  using its browser-backed path in headless containers.
+- Version metadata synchronized for the v0.4.4 release.
+
+### Fixed
+- #182 Kagane is skipped by the multi-source search sweep. kagane.org now
+  redirects to kagane.to, and both sit behind a Cloudflare challenge that
+  answers searches with a 403. Links on either domain still resolve to
+  the Kagane scraper so saved entries stay in the library, but searches,
+  chapter lists and page downloads will not work until a reliable way
+  past the challenge is found.
+- #181 ComicK search and chapter lists work again. The scraper now reads
+  the site's JSON API instead of the browser-rendered pages, which sit
+  behind Cloudflare's headless verification and returned no results.
+  When several groups upload the same chapter, scan-group uploads are
+  preferred over official ones. Official/external chapters that only link
+  out to the publisher have no hosted images, so they still download no
+  pages rather than faking a download.
+- #175 MangaHere.onl search now queries the site's catalogue API instead of
+  scraping the home page, so results match the query instead of listing
+  unrelated titles. Titles the site doesn't host are left out, and chapter
+  lists no longer pick up other series' chapters or hidden placeholder links.
+- #177 Asura Scans search works again and is no longer skipped in the
+  multi-source search sweep. The scraper now reads the site's JSON API
+  instead of driving a headless browser at the retired asuracomic.net
+  domain, and entries saved against the old domains keep resolving.
+- #177 Asura early-access chapters are no longer listed as downloadable.
+  They appeared in the chapter list but served zero pages until their
+  paywall window closed.
+- #174 MangaHere page downloads now fetch the real CDN images through the
+  reader's `chapterfun.ashx` endpoint instead of falling back to reader
+  page URLs, so chapters no longer download as HTML saved with an image
+  extension. Chapter listings also skip sidebar links to other series.
+
 ## [0.4.3] - 2026-08-19
 
 ### Added
