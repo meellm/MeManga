@@ -10,4 +10,4 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-python setup.py
+python bootstrap.py
