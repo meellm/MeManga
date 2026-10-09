@@ -14,8 +14,6 @@ charset-normalizer==3.4.7
     # via requests
 cloudscraper==1.2.71
     # via -r requirements.txt
-ebooklib==0.20
-    # via -r requirements.txt
 greenlet==3.5.1
     # via playwright
 idna==3.16
@@ -31,9 +29,7 @@ jaraco-functools==4.5.0
 keyring==25.7.0
     # via -r requirements.txt
 lxml==6.1.1
-    # via
-    #   ebooklib
-    #   pikepdf
+    # via pikepdf
 markdown-it-py==4.2.0
     # via rich
 mdurl==0.1.2
@@ -89,8 +85,6 @@ shiboken6==6.11.1
     #   pyside6
     #   pyside6-addons
     #   pyside6-essentials
-six==1.17.0
-    # via ebooklib
 soupsieve==2.8.4
     # via beautifulsoup4
 typing-extensions==4.15.0

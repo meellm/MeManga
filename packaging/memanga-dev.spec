@@ -55,8 +55,6 @@ if os.path.isdir(templates_dir):
 # Stdlib / 3rd-party imports PyInstaller is bad at finding on its own.
 hidden_imports += [
     "PIL",
-    "ebooklib",
-    "ebooklib.epub",
     "img2pdf",
     "pikepdf",
     "cloudscraper",
@@ -113,6 +111,7 @@ a = Analysis(
         # / Qt6Multimedia DLLs.
         "matplotlib", "numpy", "scipy", "pandas",
         "tkinter.test", "unittest", "test", "customtkinter",
+        "ebooklib",
         "PySide6.Qt3DAnimation", "PySide6.Qt3DCore",
         "PySide6.Qt3DExtras", "PySide6.Qt3DInput",
         "PySide6.Qt3DLogic", "PySide6.Qt3DRender",

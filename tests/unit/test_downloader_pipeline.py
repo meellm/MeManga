@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import types
 import zipfile
+import xml.etree.ElementTree as ET
 import pytest
 from pathlib import Path
 
@@ -364,15 +365,114 @@ class TestImagesToPdf:
         assert out.read_bytes()[:4] == b"%PDF"
 
 
+_OCF = "urn:oasis:names:tc:opendocument:xmlns:container"
+_OPF = "http://www.idpf.org/2007/opf"
+_DC = "http://purl.org/dc/elements/1.1/"
+
+
 class TestImagesToEpub:
     def test_creates_valid_epub(self, jpg_paths, tmp_path):
         from memanga.downloader import _images_to_epub
         out = tmp_path / "ch.epub"
         _images_to_epub(jpg_paths, out, title="X", chapter_num="1")
         assert out.exists()
-        # EPUB is a ZIP with a mimetype member.
         with zipfile.ZipFile(out) as zf:
-            assert "mimetype" in zf.namelist()
+            infos = zf.infolist()
+            # OCF: mimetype first, stored uncompressed, exact content.
+            assert infos[0].filename == "mimetype"
+            assert infos[0].compress_type == zipfile.ZIP_STORED
+            assert zf.read("mimetype") == b"application/epub+zip"
+            names = zf.namelist()
+            assert "META-INF/container.xml" in names
+            # Every XML member must be well-formed.
+            for name in names:
+                if name.endswith((".xml", ".opf", ".xhtml", ".ncx")):
+                    ET.fromstring(zf.read(name))
+            container = ET.fromstring(zf.read("META-INF/container.xml"))
+            rootfile = container.find(f".//{{{_OCF}}}rootfile")
+            opf_path = rootfile.get("full-path")
+            opf = ET.fromstring(zf.read(opf_path))
+            base = opf_path.rsplit("/", 1)[0] + "/"
+
+            # Every manifest href resolves to a real ZIP member.
+            manifest = {
+                item.get("id"): item
+                for item in opf.find(f"{{{_OPF}}}manifest")
+            }
+            for item in manifest.values():
+                assert base + item.get("href") in names
+
+            # Cover falls back to the first page; 3 pages after it.
+            spine = [i.get("idref") for i in opf.find(f"{{{_OPF}}}spine")]
+            assert spine == ["cover", "page_000", "page_001", "page_002"]
+            assert manifest["cover-image"].get("properties") == "cover-image"
+            assert any(
+                i.get("properties") == "nav" for i in manifest.values()
+            )
+
+            meta = opf.find(f"{{{_OPF}}}metadata")
+            props = {
+                m.get("property"): m.text
+                for m in meta.findall(f"{{{_OPF}}}meta") if m.get("property")
+            }
+            assert props["rendition:layout"] == "pre-paginated"
+            assert props["rendition:spread"] == "none"
+            assert "dcterms:modified" in props
+            assert any(
+                m.get("name") == "cover" and m.get("content") == "cover-image"
+                for m in meta.findall(f"{{{_OPF}}}meta")
+            )
+            assert meta.find(f"{{{_DC}}}title").text == "X - Chapter 1"
+
+            # Images are JPEG and pages reference them.
+            assert zf.read(base + "images/page_000.jpg")[:2] == b"\xff\xd8"
+            page = zf.read(base + "page_000.xhtml").decode()
+            assert 'src="images/page_000.jpg"' in page
+            assert 'content="width=400, height=600"' in page
+
+    def test_uses_explicit_cover_image(self, jpg_paths, tmp_path):
+        from memanga.downloader import _images_to_epub
+        cover = tmp_path / "cover.png"
+        Image.new("RGBA", (300, 450), (0, 0, 0, 0)).save(cover, "PNG")
+        out = tmp_path / "ch.epub"
+        _images_to_epub(jpg_paths, out, title="X", chapter_num="1",
+                        cover_image_path=cover)
+        with zipfile.ZipFile(out) as zf:
+            data = zf.read("EPUB/images/cover.jpg")
+        with Image.open(io.BytesIO(data)) as img:
+            assert img.format == "JPEG"
+            assert img.size == (300, 450)
+
+    def test_escapes_title_metadata(self, jpg_paths, tmp_path):
+        from memanga.downloader import _images_to_epub
+        out = tmp_path / "ch.epub"
+        title = 'Tom & Jerry <"Special">'
+        _images_to_epub(jpg_paths, out, title=title, chapter_num="1<2>")
+        with zipfile.ZipFile(out) as zf:
+            opf = ET.fromstring(zf.read("EPUB/content.opf"))
+            nav = ET.fromstring(zf.read("EPUB/nav.xhtml"))
+            ET.fromstring(zf.read("EPUB/toc.ncx"))
+        meta = opf.find(f"{{{_OPF}}}metadata")
+        assert meta.find(f"{{{_DC}}}title").text == f"{title} - Chapter 1<2>"
+        assert meta.find(f"{{{_DC}}}creator").text == title
+        assert f"{title} - Chapter 1<2>" in "".join(nav.itertext())
+
+    def test_does_not_import_ebooklib(self):
+        # EbookLib is AGPL; it must not be pulled into distributed builds.
+        import subprocess
+        import sys
+        code = (
+            "import sys, memanga.downloader; "
+            "sys.exit(1 if any(m == 'ebooklib' or m.startswith('ebooklib.') "
+            "for m in sys.modules) else 0)"
+        )
+        assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+    def test_ebooklib_not_a_declared_dependency(self):
+        root = Path(__file__).resolve().parents[2]
+        for name in ("pyproject.toml", "requirements.txt",
+                     "requirements-docker.txt", "requirements-lock.txt"):
+            assert "ebooklib" not in (root / name).read_text().lower(), name
 
 
 class TestImagesToFolder:

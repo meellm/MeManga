@@ -20,15 +20,16 @@ import subprocess
 import tempfile
 import shutil
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Literal, Tuple
+from xml.sax.saxutils import escape as _xml_escape
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import img2pdf
 from PIL import Image
-from ebooklib import epub
 
 from .state import State
 from .scrapers import get_scraper, list_supported_sources
@@ -1067,6 +1068,25 @@ def _image_to_jpeg_bytes(img_path: Path) -> tuple:
         img.close()
 
 
+_EPUB_PAGE_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en" lang="en">
+<head><title>{title}</title>
+<meta name="viewport" content="width={width}, height={height}"/>
+<style>html,body{{margin:0;padding:0;width:100%;height:100%}}
+img{{width:100%;height:auto;display:block}}</style></head>
+<body><img src="{src}" alt="{title}"/></body></html>
+"""
+
+_EPUB_CONTAINER_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="EPUB/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>
+"""
+
+
 def _images_to_epub(
     image_paths: List[Path],
     output_path: Path,
@@ -1076,6 +1096,9 @@ def _images_to_epub(
 ):
     """Convert images to a fixed-layout EPUB compatible with Kindle.
 
+    Written directly with zipfile (EPUB 3 package plus an EPUB 2 NCX for
+    older readers) so no third-party EPUB library is needed.
+
     Args:
         image_paths: Ordered list of page image paths.
         output_path: Where to write the .epub file.
@@ -1083,20 +1106,14 @@ def _images_to_epub(
         chapter_num: Chapter number string.
         cover_image_path: Optional separate cover image. Falls back to first page.
     """
-    book = epub.EpubBook()
-
-    # ── Metadata ──
-    book_id = str(uuid.uuid4())
-    book.set_identifier(book_id)
+    attr = {'"': "&quot;"}
+    book_id = f"urn:uuid:{uuid.uuid4()}"
     full_title = f"{title} - Chapter {chapter_num}"
-    book.set_title(full_title)
-    book.set_language('en')
-    book.add_author(title)
+    modified = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-    # Fixed-layout metadata (required for Kindle to render as image pages)
-    book.add_metadata(None, 'meta', 'pre-paginated', {'property': 'rendition:layout'})
-    book.add_metadata(None, 'meta', 'auto', {'property': 'rendition:orientation'})
-    book.add_metadata(None, 'meta', 'none', {'property': 'rendition:spread'})
+    files: List[Tuple[str, bytes]] = []  # (path inside EPUB/, content)
+    manifest: List[str] = []
+    spine: List[str] = []
 
     # ── Cover image ──
     cover_src = cover_image_path if cover_image_path and cover_image_path.exists() else (
@@ -1104,81 +1121,86 @@ def _images_to_epub(
     )
     if cover_src:
         cover_data, cw, ch = _image_to_jpeg_bytes(cover_src)
-        # Manually add cover item with proper metadata for Kindle
-        cover_item = epub.EpubItem(
-            uid='cover-image',
-            file_name='images/cover.jpg',
-            media_type='image/jpeg',
-            content=cover_data,
-        )
-        book.add_item(cover_item)
-        # Kindle recognises this meta tag to find the cover
-        book.add_metadata('OPF', 'meta', '', {
-            'name': 'cover',
-            'content': 'cover-image',
-        })
-
-        # Cover XHTML page
-        cover_html = epub.EpubHtml(
-            title='Cover',
-            file_name='cover.xhtml',
-            lang='en',
-        )
-        cover_html.content = f'''<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head><title>Cover</title>
-<meta name="viewport" content="width={cw}, height={ch}"/>
-<style>html,body{{margin:0;padding:0;width:100%;height:100%}}
-img{{width:100%;height:auto;display:block}}</style></head>
-<body><img src="images/cover.jpg" alt="Cover"/></body></html>'''.encode('utf-8')
-        book.add_item(cover_html)
+        files.append(("images/cover.jpg", cover_data))
+        manifest.append('<item id="cover-image" href="images/cover.jpg" '
+                        'media-type="image/jpeg" properties="cover-image"/>')
+        files.append(("cover.xhtml", _EPUB_PAGE_TEMPLATE.format(
+            title="Cover", width=cw, height=ch, src="images/cover.jpg",
+        ).encode("utf-8")))
+        manifest.append('<item id="cover" href="cover.xhtml" '
+                        'media-type="application/xhtml+xml"/>')
+        spine.append("cover")
 
     # ── Page images ──
-    spine = []
-    if cover_src:
-        spine.append(cover_html)
-
     for i, img_path in enumerate(image_paths):
         img_data, width, height = _image_to_jpeg_bytes(img_path)
-
         img_name = f"page_{i:03d}.jpg"
-        img_item = epub.EpubItem(
-            uid=f"img_{i}",
-            file_name=f"images/{img_name}",
-            media_type='image/jpeg',
-            content=img_data,
-        )
-        book.add_item(img_item)
+        files.append((f"images/{img_name}", img_data))
+        manifest.append(f'<item id="img_{i}" href="images/{img_name}" media-type="image/jpeg"/>')
+        files.append((f"page_{i:03d}.xhtml", _EPUB_PAGE_TEMPLATE.format(
+            title=f"Page {i + 1}", width=width, height=height, src=f"images/{img_name}",
+        ).encode("utf-8")))
+        manifest.append(f'<item id="page_{i:03d}" href="page_{i:03d}.xhtml" '
+                        'media-type="application/xhtml+xml"/>')
+        spine.append(f"page_{i:03d}")
 
-        page_html = f'''<?xml version="1.0" encoding="UTF-8"?>
+    # ── Navigation (single entry pointing at the first page) ──
+    first_href = f"{spine[0]}.xhtml" if spine else "nav.xhtml"
+    title_text = _xml_escape(full_title)
+    files.append(("nav.xhtml", f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head><title>Page {i + 1}</title>
-<meta name="viewport" content="width={width}, height={height}"/>
-<style>html,body{{margin:0;padding:0;width:100%;height:100%}}
-img{{width:100%;height:auto;display:block}}</style></head>
-<body><img src="images/{img_name}" alt="Page {i + 1}"/></body></html>'''
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en" lang="en">
+<head><title>{title_text}</title></head>
+<body><nav epub:type="toc" id="toc"><ol><li><a href="{first_href}">{title_text}</a></li></ol></nav></body></html>
+""".encode("utf-8")))
+    manifest.append('<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>')
+    files.append(("toc.ncx", f"""<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+<head><meta name="dtb:uid" content="{_xml_escape(book_id, attr)}"/></head>
+<docTitle><text>{title_text}</text></docTitle>
+<navMap><navPoint id="np_1" playOrder="1"><navLabel><text>{title_text}</text></navLabel><content src="{first_href}"/></navPoint></navMap>
+</ncx>
+""".encode("utf-8")))
+    manifest.append('<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>')
+    if not spine:
+        spine.append("nav")
 
-        page = epub.EpubHtml(
-            title=f'Page {i + 1}',
-            file_name=f'page_{i:03d}.xhtml',
-            lang='en',
-        )
-        page.content = page_html.encode('utf-8')
-        book.add_item(page)
-        spine.append(page)
+    # ── Package document ──
+    # Fixed-layout metadata is required for Kindle to render image pages;
+    # the name="cover" meta is how Kindle finds the cover.
+    manifest_xml = "\n    ".join(manifest)
+    spine_xml = "\n    ".join(f'<itemref idref="{idref}"/>' for idref in spine)
+    cover_meta = '\n    <meta name="cover" content="cover-image"/>' if cover_src else ""
+    opf = f"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id" xml:lang="en">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">{_xml_escape(book_id)}</dc:identifier>
+    <dc:title>{title_text}</dc:title>
+    <dc:language>en</dc:language>
+    <dc:creator id="creator">{_xml_escape(title)}</dc:creator>
+    <meta property="dcterms:modified">{modified}</meta>
+    <meta property="rendition:layout">pre-paginated</meta>
+    <meta property="rendition:orientation">auto</meta>
+    <meta property="rendition:spread">none</meta>{cover_meta}
+  </metadata>
+  <manifest>
+    {manifest_xml}
+  </manifest>
+  <spine toc="ncx">
+    {spine_xml}
+  </spine>
+</package>
+"""
 
-    # ── Navigation ──
-    book.toc = []
-    book.add_item(epub.EpubNcx())
-    nav = epub.EpubNav()
-    book.add_item(nav)
-
-    # Spine: nav hidden, then pages in order
-    book.spine = [nav] + spine
-
-    epub.write_epub(str(output_path), book)
+    # mimetype must be the first entry and stored uncompressed.
+    with zipfile.ZipFile(output_path, "w") as zf:
+        zf.writestr(zipfile.ZipInfo("mimetype"), "application/epub+zip",
+                    compress_type=zipfile.ZIP_STORED)
+        zf.writestr("META-INF/container.xml", _EPUB_CONTAINER_XML,
+                    compress_type=zipfile.ZIP_DEFLATED)
+        zf.writestr("EPUB/content.opf", opf, compress_type=zipfile.ZIP_DEFLATED)
+        for name, data in files:
+            zf.writestr(f"EPUB/{name}", data, compress_type=zipfile.ZIP_DEFLATED)
 
 
 def _images_to_pdf(image_paths: List[Path], output_path: Path):

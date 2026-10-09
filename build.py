@@ -86,7 +86,6 @@ def verify_imports() -> bool:
     modules = [
         ("img2pdf", "img2pdf"),
         ("PIL", "Pillow"),
-        ("ebooklib", "ebooklib"),
         ("bs4", "beautifulsoup4"),
         ("cloudscraper", "cloudscraper"),
         ("pikepdf", "pikepdf"),
