@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MeManga Cross-Platform Setup Script
+MeManga Cross-Platform Bootstrap Script
 Works on Windows, macOS, and Linux
 """
 

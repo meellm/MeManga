@@ -7,7 +7,7 @@ if exist "venv\Scripts\python.exe" (
     venv\Scripts\python.exe -m memanga %*
 ) else (
     echo Error: Virtual environment not found.
-    echo Please run: python setup.py
+    echo Please run: python bootstrap.py
     echo         or: scripts\windows\setup.bat
     exit /b 1
 )

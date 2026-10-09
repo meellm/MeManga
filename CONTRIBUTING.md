@@ -28,6 +28,10 @@ python -m memanga.gui
 python -m memanga --help
 ```
 
+Package installs use `pyproject.toml` only. To explicitly run the cross-platform
+environment/bootstrap steps (including browser downloads), use `python bootstrap.py`.
+The bootstrap script is not executed by `pip install .` or editable installs.
+
 The GUI launches in offscreen mode in CI (`QT_QPA_PLATFORM=offscreen`);
 locally it opens the real Qt window.
 
