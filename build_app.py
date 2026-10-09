@@ -115,7 +115,7 @@ def install_dependencies() -> bool:
 def verify_imports() -> bool:
     print("\n=== Verifying imports ===")
     modules = [
-        "img2pdf", "PIL", "ebooklib", "bs4", "cloudscraper", "pikepdf",
+        "img2pdf", "PIL", "bs4", "cloudscraper", "pikepdf",
         "yaml", "PySide6", "certifi", "requests", "rich", "playwright",
         "playwright_stealth",
     ]

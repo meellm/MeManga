@@ -54,8 +54,6 @@ if os.path.isdir(templates_dir):
 
 hidden_imports += [
     "PIL",
-    "ebooklib",
-    "ebooklib.epub",
     "img2pdf",
     "pikepdf",
     "cloudscraper",
@@ -119,6 +117,9 @@ a = Analysis(
         # Stdlib test suites + the legacy CustomTkinter GUI framework
         # we no longer use.
         "tkinter.test", "unittest", "test", "customtkinter",
+        # AGPL EPUB library; EPUB output is written with zipfile now,
+        # so keep a stale build venv from bundling it.
+        "ebooklib",
 
         # ── PySide6 modules we don't import ────────────────────────
         # PyInstaller defaults to bundling every Qt6.dll PySide6 ships,
