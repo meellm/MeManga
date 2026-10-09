@@ -78,3 +78,55 @@ def test_publish_steps_keep_multi_platform_targets():
     platforms = [steps[i]["with"]["platforms"] for i in _publish_build_indices()]
     assert "${{ inputs.platforms }}" in platforms
     assert "${{ inputs.platforms || 'linux/amd64,linux/arm64' }}" in platforms
+
+
+# Issue #380: the image installs and the workflow verifies license notices.
+
+DOCKERFILE = REPO_ROOT / "Dockerfile"
+DOC_DIR = "/usr/share/doc/memanga"
+
+
+def _is_notices_check(step):
+    return "Verify third-party notices" in step.get("name", "")
+
+
+def test_dockerfile_installs_notices_and_license():
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    assert "COPY pyproject.toml README.md LICENSE ./" in text
+    assert "COPY packaging/third_party_notices.py ./packaging/" in text
+    assert "COPY packaging/licenses ./packaging/licenses" in text
+    assert "packaging/third_party_notices.py generate" in text
+    assert "--requirements requirements-docker.txt" in text
+    # pip ships in the image but no requirement reaches it.
+    assert "--package pip" in text
+    assert "--require pip" in text
+    assert '--browsers-dir "$PLAYWRIGHT_BROWSERS_PATH"' in text
+    assert f"--output {DOC_DIR}/THIRD_PARTY_NOTICES.txt" in text
+    assert "packaging/third_party_notices.py check" in text
+    # The build fails unless Chromium and Firefox have complete entries.
+    assert "--require-browser chromium --require-browser firefox" in text
+    assert text.index("playwright install --with-deps firefox chromium") < text.index(
+        "--require-browser chromium")
+    assert f"install -m 0644 LICENSE {DOC_DIR}/LICENSE" in text
+    # Generated as root, before the image drops to the runtime user.
+    assert text.index("third_party_notices.py generate") < text.index("USER memanga")
+
+
+def test_notices_check_runs_on_smoke_image_before_publish():
+    idx = _index(_is_notices_check)
+    assert idx != -1, "notices check missing from the Docker workflow"
+    step = _steps()[idx]
+    assert "if" not in step
+    run = step["run"]
+    assert "--entrypoint sh memanga:smoke" in run
+    assert f"test -s {DOC_DIR}/THIRD_PARTY_NOTICES.txt" in run
+    assert f"test -s {DOC_DIR}/LICENSE" in run
+    assert "MeManga third-party notices" in run
+    # The image keeps the notices tool in /app/packaging; rerun its gate,
+    # including the Playwright browser entries, on the built image.
+    words = " ".join(run.replace("\\\n", " ").split())
+    assert (f"python packaging/third_party_notices.py check {DOC_DIR}/THIRD_PARTY_NOTICES.txt"
+            " --require playwright --require pip"
+            " --require-browser chromium --require-browser firefox") in words
+    assert _index(_is_smoke_build) < idx
+    assert all(idx < i for i in _publish_build_indices())

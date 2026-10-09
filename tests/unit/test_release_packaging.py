@@ -41,6 +41,7 @@ import struct
 import zipfile
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -888,3 +889,169 @@ def test_validate_cli_require_flags(tmp_path, capsys):
     args[2] = str(signed_zip)
     assert macos_app.main(args) == 0
     assert "signed, stapled" in capsys.readouterr().out
+
+
+# ── issue #380: third-party notices ship with every release asset ──────
+
+BUILD_APP = REPO_ROOT / "build_app.py"
+NOTICES_EXPR = "${{ matrix.notices_name }}"
+
+
+def _release_steps():
+    data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    return data["jobs"]["release"]["steps"]
+
+
+def test_spec_bundles_notices_and_license_and_requires_them():
+    text = SPEC.read_text(encoding="utf-8")
+    assert '"release", "THIRD_PARTY_NOTICES.txt"' in text
+    assert "(notices_file, \".\")" in text
+    assert 'os.path.join(project_root, "LICENSE"), "."' in text
+    assert "if not os.path.isfile(notices_file):" in text
+    assert "raise SystemExit" in text
+
+
+def test_build_app_generates_notices_before_pyinstaller():
+    text = BUILD_APP.read_text(encoding="utf-8")
+    assert 'NOTICES = RELEASE_DIR / "THIRD_PARTY_NOTICES.txt"' in text
+    assert '"third_party_notices.py"' in text
+    assert '"--requirements", str(ROOT / "requirements.txt")' in text
+    assert '"--package", "pyinstaller"' in text
+    for name in ("pyside6", "playwright", "pyinstaller"):
+        assert f'"--require", "{name}"' in text
+    main = text[text.index("def main()"):]
+    assert main.index("generate_notices()") < main.index("run_pyinstaller()")
+
+
+def test_every_build_leg_names_its_platform_notices():
+    for leg in _build_matrix():
+        platform = leg["asset_name"].removeprefix("MeManga-")
+        for suffix in (".exe", ".zip"):
+            platform = platform.removesuffix(suffix)
+        assert leg.get("notices_name") == f"THIRD_PARTY_NOTICES-{platform}.txt", leg
+
+
+def test_build_leg_checks_and_uploads_notices():
+    step = _step_named("Verify and stage third-party notices")
+    assert step is not None, "notices gate missing from build legs"
+    assert "if" not in step, "notices gate must run on every platform"
+    run = step["run"]
+    assert "packaging/third_party_notices.py check" in run
+    assert "release/THIRD_PARTY_NOTICES.txt" in run
+    for name in ("pyside6", "playwright", "pyinstaller"):
+        assert f"--require {name}" in run
+    assert NOTICES_EXPR in run
+
+    upload = _step_named("Upload third-party notices")
+    assert upload is not None
+    assert upload["uses"].startswith("actions/upload-artifact@")
+    assert upload["with"]["name"] == NOTICES_EXPR
+    assert upload["with"]["path"] == NOTICES_EXPR
+    assert "if" not in upload
+
+    build = _step_index("Build release executable")
+    gate = _step_index("Verify and stage third-party notices")
+    up = _step_index("Upload third-party notices")
+    assert build < gate < up
+
+
+def test_release_job_gates_on_notices_before_publishing():
+    steps = _release_steps()
+    names = [step.get("name", "") for step in steps]
+    gate = names.index("Verify third-party notices for every platform asset")
+    publish = names.index("Create GitHub Release")
+    assert names.index("Flatten artifact tree") < gate < publish
+    run = steps[gate]["run"]
+    assert "THIRD_PARTY_NOTICES-$platform.txt" in run
+    assert "MeManga third-party notices" in run
+    assert "::error::" in run and "exit 1" in run
+    assert steps[publish]["with"]["files"] == "release/*"
+
+
+NOTICE_FILES = ("THIRD_PARTY_NOTICES.txt", "LICENSE")
+
+
+def test_workflow_puts_notices_in_macos_app_resources():
+    run = _step_named("Package macOS app bundle")["run"]
+    assert "--resource release/THIRD_PARTY_NOTICES.txt" in run
+    assert "--resource LICENSE" in run
+    # Resources must be in place before the bundle is signed and sealed.
+    assert _step_index("Package macOS app bundle") < _step_index("Sign macOS app bundle")
+
+
+def test_macos_zip_gates_require_notice_resources():
+    for name in ("Validate packaged macOS app bundle",
+                 "Verify release zip is signed, stapled and notarized"):
+        run = _step_named(name)["run"]
+        for notice in NOTICE_FILES:
+            assert f"--require-resource {notice}" in run, (name, notice)
+
+
+def test_linux_targz_carries_notices_and_gate_checks_them():
+    run = _step_named("Package artifact for upload")["run"]
+    assert "cp release/THIRD_PARTY_NOTICES.txt THIRD_PARTY_NOTICES.txt" in run
+    assert 'tar -czf "${asset}.tar.gz" "$asset" THIRD_PARTY_NOTICES.txt LICENSE' in run
+    gate = _step_named("Verify Linux archive preserves the executable bit")["run"]
+    assert "for notice in THIRD_PARTY_NOTICES.txt LICENSE" in gate
+    assert '[ ! -s "$workdir/$notice" ]' in gate
+    assert _step_index("Verify and stage third-party notices") \
+        < _step_index("Package artifact for upload")
+
+
+def _notice_sources(tmp_path):
+    src = tmp_path / "notices-src"
+    src.mkdir()
+    paths = []
+    for name in NOTICE_FILES:
+        (src / name).write_text(f"{name} text\n")
+        paths.append(src / name)
+    return paths
+
+
+def test_build_app_bundle_copies_resource_files(tmp_path):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("arm64"))
+    app = macos_app.build_app_bundle(exe, tmp_path / "out",
+                                     resource_files=_notice_sources(tmp_path))
+    for name in NOTICE_FILES:
+        res = app / "Contents" / "Resources" / name
+        assert res.read_text() == f"{name} text\n"
+        assert stat.S_IMODE(res.stat().st_mode) == 0o644
+    zipped = macos_app.zip_app_bundle(app, tmp_path / "app.zip")
+    for path in (app, zipped):
+        assert macos_app.validate_app_bundle(
+            path, expected_arch="arm64", require_resources=NOTICE_FILES) == []
+
+
+def test_validate_flags_missing_notice_resources(tmp_path):
+    app, zipped = _build_and_zip(tmp_path, "arm64")
+    for path in (app, zipped):
+        problems = macos_app.validate_app_bundle(
+            path, expected_arch="arm64", require_resources=NOTICE_FILES)
+        for name in NOTICE_FILES:
+            assert f"missing or empty MeManga.app/Contents/Resources/{name}" in problems
+
+
+def test_build_app_bundle_missing_resource_raises(tmp_path):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("arm64"))
+    with pytest.raises(FileNotFoundError):
+        macos_app.build_app_bundle(exe, tmp_path / "out",
+                                   resource_files=[tmp_path / "nope.txt"])
+
+
+def test_macos_cli_resource_flags(tmp_path, capsys):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("x86_64"))
+    sources = _notice_sources(tmp_path)
+    out_zip = tmp_path / "app.zip"
+    build = ["build", "--exe", str(exe), "--dest", str(tmp_path / "out"),
+             "--zip", str(out_zip)]
+    for src in sources:
+        build += ["--resource", str(src)]
+    assert macos_app.main(build) == 0
+    validate = ["validate", "--path", str(out_zip), "--arch", "x86_64"]
+    for name in NOTICE_FILES:
+        validate += ["--require-resource", name]
+    assert macos_app.main(validate) == 0
+    assert "OK:" in capsys.readouterr().out

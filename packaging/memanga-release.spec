@@ -100,6 +100,21 @@ datas = [
 ]
 datas += collect_data_files("playwright", include_py_files=False)
 
+# Issue #380: ship MeManga's LICENSE and the third-party notices at the
+# root of the bundle (sys._MEIPASS at runtime). build_app.py generates the
+# notices into release/ before PyInstaller runs; refuse to build without
+# them so a release binary can never ship unattributed.
+notices_file = os.path.join(project_root, "release", "THIRD_PARTY_NOTICES.txt")
+if not os.path.isfile(notices_file):
+    raise SystemExit(
+        f"missing {notices_file}; run `python build_app.py`, which generates "
+        "it with packaging/third_party_notices.py"
+    )
+datas += [
+    (notices_file, "."),
+    (os.path.join(project_root, "LICENSE"), "."),
+]
+
 
 a = Analysis(
     [os.path.join(project_root, "memanga", "gui", "__main__.py")],

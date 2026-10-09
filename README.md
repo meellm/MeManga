@@ -459,3 +459,21 @@ For security-sensitive reports, see [SECURITY.md](SECURITY.md).
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Release binaries and the Docker image bundle third-party software under its
+own licenses. The macOS app (`MeManga.app/Contents/Resources/`) and the Linux
+`.tar.gz` include `THIRD_PARTY_NOTICES.txt` and `LICENSE`, each GitHub release
+attaches a `THIRD_PARTY_NOTICES-<platform>.txt` for every platform download
+(for the single-file Windows `.exe`, that is
+`THIRD_PARTY_NOTICES-windows-x64.txt` on the same release page), and the
+Docker image installs its notices at
+`/usr/share/doc/memanga/THIRD_PARTY_NOTICES.txt`.
+
+The Docker image also contains the Playwright Chromium and Firefox builds.
+Their notices entries give each build's install path, license, source
+(Chromium, and Playwright's Firefox patches), Chromium's BSD license text
+and Firefox's MPL-2.0 text. The browsers bundle many third-party components
+whose copyright notices are not copied into the notices file; each browser
+shows them itself, at `chrome://credits` (Chromium) and `about:license`
+(Firefox, stored in `firefox/omni.ja` under
+`chrome/toolkit/content/global/license.html`).

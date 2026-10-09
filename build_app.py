@@ -56,6 +56,13 @@ DIST_TMP = ROOT / "dist"
 # trying to remove what is actually a directory.
 RELEASE_DIR = ROOT / "release"
 
+# Issue #380: third-party license notices for everything the binary
+# bundles. Generated from installed package metadata before PyInstaller
+# runs; the release spec embeds it in the binary and the release workflow
+# attaches it to the GitHub release next to the platform asset.
+NOTICES_TOOL = PACKAGING / "third_party_notices.py"
+NOTICES = RELEASE_DIR / "THIRD_PARTY_NOTICES.txt"
+
 
 def install_dependencies() -> bool:
     """Install deps for the release build.
@@ -133,6 +140,26 @@ def verify_imports() -> bool:
     return True
 
 
+def generate_notices() -> bool:
+    print("\n=== Generating third-party notices ===")
+    steps = [
+        # requirements.txt names the runtime deps; their installed
+        # metadata pulls in every transitive dependency. PyInstaller is
+        # listed on its own because its bootloader ships in the binary.
+        ["generate", "--requirements", str(ROOT / "requirements.txt"),
+         "--package", "pyinstaller", "--output", str(NOTICES)],
+        ["check", str(NOTICES),
+         "--require", "pyside6", "--require", "playwright",
+         "--require", "pyinstaller"],
+    ]
+    for args in steps:
+        r = subprocess.run([sys.executable, str(NOTICES_TOOL), *args])
+        if r.returncode != 0:
+            print(f"  ! third_party_notices.py {args[0]} failed")
+            return False
+    return True
+
+
 def run_pyinstaller() -> bool:
     print("\n=== Building release (PyInstaller, one-file, no console) ===")
     if not SPEC.exists():
@@ -184,6 +211,8 @@ def main() -> int:
         return 1
     if not verify_imports():
         return 1
+    if not generate_notices():
+        return 1
     if not run_pyinstaller():
         print("\n! PyInstaller failed — leaving build/ + dist/ for inspection")
         return 1
@@ -193,7 +222,8 @@ def main() -> int:
     size_mb = artifact.stat().st_size / (1024 * 1024)
     print(f"\n=== Release build complete ===")
     print(f"Output: {artifact}  ({size_mb:.1f} MB)")
-    print("Upload this single file to the GitHub release page.")
+    print(f"Notices: {NOTICES}")
+    print("Upload the binary and the notices file to the GitHub release page.")
     return 0
 
 

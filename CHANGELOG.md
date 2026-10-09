@@ -6,6 +6,35 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- #380 Release binaries and the Docker image now ship third-party license
+  notices. Each desktop build embeds `THIRD_PARTY_NOTICES.txt` and
+  MeManga's `LICENSE`, the macOS app carries both in
+  `MeManga.app/Contents/Resources/`, the Linux `.tar.gz` contains both next
+  to the binary, and every GitHub release attaches a
+  `THIRD_PARTY_NOTICES-<platform>.txt` per platform asset. The Docker image
+  installs both files under `/usr/share/doc/memanga/`. The notices are
+  generated from installed package metadata by
+  `packaging/third_party_notices.py`, and release and Docker builds fail if
+  they are missing. The notices always carry the Python runtime's PSF
+  license text (generation fails without it) and a section covering the Qt
+  libraries, plugins and other native libraries bundled via PySide6. That
+  section points to the exact Qt release in Qt's source archive and bundles
+  a snapshot of Qt's third-party attributions for the Qt release
+  (`packaging/licenses/QT-6.11-THIRD-PARTY-COMPONENTS.txt`, refreshed with
+  `packaging/qt_third_party_snapshot.py`): the copyright notices and license
+  texts of every component in the Qt modules a release bundles, plus Qt's
+  full component list. Generation and the check fail if the snapshot only
+  links to those texts, or if the LGPL-3.0 or GPL-3.0 text is missing.
+  In the Docker image, each Playwright browser build gets its own entry
+  with its install path, license, source, Chromium's vendored BSD license
+  (`packaging/licenses/CHROMIUM-LICENSE.txt`) or Firefox's MPL-2.0 text, and
+  where the browser lists its third-party credits (`chrome://credits`,
+  `about:license`). Those per-component credits are not copied into the
+  notices file. `check --require-browser chromium --require-browser firefox`
+  fails the Docker build and the Docker workflow when either entry is
+  missing or incomplete, e.g. for an empty browsers directory.
+
 ## [0.4.4] - 2026-10-03
 
 ### Added

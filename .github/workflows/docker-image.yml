@@ -86,6 +86,22 @@ jobs:
       - name: Smoke test image
         run: docker run --rm memanga:smoke --help
 
+      - name: Verify third-party notices in image
+        # Issue #380: the image must carry MeManga's LICENSE and the
+        # third-party notices, with complete sections for the Playwright
+        # Chromium and Firefox builds it ships, before any build is published.
+        run: |
+          docker run --rm --entrypoint sh memanga:smoke -c '
+            set -e
+            test -s /usr/share/doc/memanga/LICENSE
+            test -s /usr/share/doc/memanga/THIRD_PARTY_NOTICES.txt
+            grep -q "MeManga third-party notices" /usr/share/doc/memanga/THIRD_PARTY_NOTICES.txt
+            python packaging/third_party_notices.py check \
+              /usr/share/doc/memanga/THIRD_PARTY_NOTICES.txt \
+              --require playwright --require pip \
+              --require-browser chromium --require-browser firefox
+          '
+
       - name: Build image without publishing
         if: github.event_name == 'workflow_dispatch' && !inputs.push
         uses: docker/build-push-action@v6
