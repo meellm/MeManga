@@ -100,3 +100,37 @@ class TestKeyringHelpers:
         # Contract: when nothing stored in keyring AND nothing in config,
         # return the empty string (not None — Config never stores None).
         assert get_app_password(config) == ""
+
+
+class TestInvalidConfigFile:
+    def _write(self, isolated_home, text):
+        path = isolated_home / ".config" / "memanga" / "config.yaml"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_strict_by_default(self, isolated_home):
+        import yaml
+        from memanga.config import Config
+        self._write(isolated_home, "manga: [unclosed\n")
+        with pytest.raises(yaml.YAMLError):
+            Config()
+
+    @pytest.mark.parametrize("text", ["manga: [unclosed\n", "- just\n- a list\n"])
+    def test_tolerant_loads_defaults_and_refuses_save(self, isolated_home, text):
+        from memanga.config import Config, ConfigError
+        path = self._write(isolated_home, text)
+        cfg = Config(tolerate_errors=True)
+        assert cfg.load_error
+        assert cfg.get("manga") == []
+        with pytest.raises(ConfigError):
+            cfg.save()
+        assert path.read_text(encoding="utf-8") == text
+
+    def test_reload_clears_error_once_fixed(self, isolated_home):
+        from memanga.config import Config
+        path = self._write(isolated_home, "manga: [unclosed\n")
+        cfg = Config(tolerate_errors=True)
+        path.write_text("manga: []\n", encoding="utf-8")
+        cfg.reload()
+        assert cfg.load_error is None
+        cfg.save()

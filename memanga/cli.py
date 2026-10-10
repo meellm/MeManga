@@ -27,6 +27,7 @@ from .backup import (
 )
 from .config import Config, get_app_password, set_app_password
 from .cron import build_cron_line
+from . import doctor
 from .state import State
 from .downloader import check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga
 from .scrapers import get_scraper
@@ -34,7 +35,9 @@ from .search import compute_search_sources, probe_chapter_counts, sweep
 from .emailer import send_to_kindle, EmailError
 
 console = Console()
-config = Config()
+# Tolerant so a broken config.yaml can't crash the import before
+# `doctor` runs; main() refuses every other command (issue #250).
+config = Config(tolerate_errors=True)
 state = State()
 
 # ============================================================================
@@ -42,6 +45,16 @@ state = State()
 # ============================================================================
 
 VALID_STATUSES = ["reading", "on-hold", "dropped", "completed"]
+
+# Issue #250: version of the `--json` payloads emitted by list, status,
+# failed and doctor. Bump on incompatible changes (renamed/removed keys
+# or changed types); adding keys is backwards compatible.
+JSON_SCHEMA_VERSION = 1
+
+
+def _print_json(payload):
+    """Write a JSON payload to stdout with nothing else around it."""
+    print(json.dumps(payload, indent=2))
 
 
 def _partial_threshold_arg(value):
@@ -97,8 +110,37 @@ def _get_sources_display(manga: Dict[str, Any]) -> str:
     return manga.get("source", "unknown")
 
 
+def _list_payload() -> Dict[str, Any]:
+    """`list --json` payload: one entry per tracked manga, in list order."""
+    entries = []
+    for i, manga in enumerate(config.get("manga", []), 1):
+        title = manga["title"]
+        sources = [s for s in _get_sources_from_manga(manga) if s.get("url")]
+        primary = sources[0] if sources else {}
+        entries.append({
+            "n": i,
+            "title": title,
+            "status": manga.get("status", "reading"),
+            "source": primary.get("source") or None,
+            "source_display": _get_sources_display(manga),
+            "url": primary.get("url") or None,
+            "sources": sources,
+            "last_chapter": state.get_last_chapter(title),
+            "downloaded_count": len(state.get_downloaded_chapters(title)),
+        })
+    return {
+        "schema_version": JSON_SCHEMA_VERSION,
+        "count": len(entries),
+        "manga": entries,
+    }
+
+
 def cmd_list(args):
     """List all tracked manga."""
+    if getattr(args, "json", False):
+        _print_json(_list_payload())
+        return
+
     manga_list = config.get("manga", [])
     
     if not manga_list:
@@ -746,8 +788,50 @@ def cmd_check(args):
         console.print(f"[yellow]⚠️  {total_failed} chapter(s) failed — run 'memanga failed' for details.[/yellow]")
 
 
+def _status_payload() -> Dict[str, Any]:
+    """`status --json` payload. Never includes the SMTP password."""
+    return {
+        "schema_version": JSON_SCHEMA_VERSION,
+        "paths": {
+            "config_dir": str(config.config_dir),
+            "config": str(config.config_path),
+            "state": str(state.state_path),
+        },
+        "manga_count": len(config.get("manga", [])),
+        "output_format": config.output_format,
+        "delivery": {
+            "mode": config.delivery_mode,
+            "download_dir": str(config.download_dir),
+            "delete_after_send": bool(config.get("delivery.delete_after_send", False)),
+        },
+        "email": {
+            "kindle_email": config.get("email.kindle_email") or None,
+            "sender_email": config.get("email.sender_email") or None,
+            "smtp_server": config.get("email.smtp_server", "smtp.gmail.com"),
+            "smtp_port": config.get("email.smtp_port", 587),
+        },
+        "post_processing": {
+            "enabled": bool(config.get("delivery.post_processing.enabled")),
+            "fail_on_error": bool(config.get("delivery.post_processing.fail_on_error", False)),
+        },
+        "partial_chapters": {
+            "enabled": config.partial_enabled,
+            "threshold_percent": config.partial_threshold,
+        },
+        "cron": {
+            "enabled": bool(config.get("cron.enabled")),
+            "time": config.get("cron.time", "06:00"),
+        },
+        "last_check": state.get("last_check"),
+    }
+
+
 def cmd_status(args):
     """Show current status and configuration."""
+    if getattr(args, "json", False):
+        _print_json(_status_payload())
+        return
+
     console.print(Panel("[bold]📊 MeManga Status[/bold]", border_style="blue"))
     console.print()
     
@@ -1437,20 +1521,32 @@ def cmd_import(args):
         console.print(f"[green]Imported: {added} added, {skipped} skipped (duplicate)[/green]")
 
 
-def cmd_failed(args):
-    """List and manage chapters that failed or were accepted as partial."""
+def _chapter_order(item):
+    """Sort key for (chapter_number, info) pairs; non-numeric labels first."""
+    number = item[0]
+    return float(number) if number.replace('.', '', 1).isdigit() else 0
+
+
+def _collect_retryable(title_filter=None):
+    """Failed and accepted-partial records, optionally filtered by a
+    case-insensitive title substring.
+
+    Returns (all_failed, all_partials, retryable) where `retryable`
+    merges both per manga; a failure record wins over a partial one for
+    the same chapter.
+    """
     all_failed = state.get_all_failed_chapters()
     all_partials = state.get_all_partial_chapters()
 
     # Filter by title if requested
-    if args.title:
+    if title_filter:
         all_failed = {
             t: chapters for t, chapters in all_failed.items()
-            if args.title.lower() in t.lower()
+            if title_filter.lower() in t.lower()
         }
         all_partials = {
             t: chapters for t, chapters in all_partials.items()
-            if args.title.lower() in t.lower()
+            if title_filter.lower() in t.lower()
         }
 
     retryable = {}
@@ -1466,6 +1562,43 @@ def cmd_failed(args):
                 "partial": True,
                 "error": "Accepted partial download",
             }
+    return all_failed, all_partials, retryable
+
+
+def _failed_payload(retryable, title_filter=None) -> Dict[str, Any]:
+    """`failed --json` payload: one flat entry per retryable chapter,
+    sorted by manga title then chapter number."""
+    chapters = []
+    for manga_title, records in sorted(retryable.items()):
+        for chapter_num, info in sorted(records.items(), key=_chapter_order):
+            is_partial = bool(info.get("partial")) or "accepted_at" in info
+            chapters.append({
+                "title": manga_title,
+                "chapter": chapter_num,
+                "status": "partial" if is_partial else "failed",
+                "recorded_at": (info.get("accepted_at") if is_partial else info.get("failed_at")) or None,
+                "source": info.get("source") or None,
+                "failed_pages": list(info.get("failed_pages") or []),
+                "total_pages": (info.get("total_pages") or None) if is_partial else None,
+                "attempts": None if is_partial else info.get("attempts", 1),
+                "error": None if is_partial else (info.get("error") or None),
+            })
+    return {
+        "schema_version": JSON_SCHEMA_VERSION,
+        "title_filter": title_filter or None,
+        "count": len(chapters),
+        "chapters": chapters,
+    }
+
+
+def cmd_failed(args):
+    """List and manage chapters that failed or were accepted as partial."""
+    all_failed, all_partials, retryable = _collect_retryable(args.title)
+
+    if getattr(args, "json", False):
+        # --retry/--clear are rejected with --json at parse time.
+        _print_json(_failed_payload(retryable, args.title))
+        return
 
     if not retryable:
         console.print("[dim]No failed or partial chapters recorded.[/dim]")
@@ -1486,7 +1619,7 @@ def cmd_failed(args):
     table.add_column("Reason", style="red", no_wrap=False, max_width=40)
 
     for manga_title, chapters in sorted(retryable.items()):
-        for chapter_num, info in sorted(chapters.items(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else 0):
+        for chapter_num, info in sorted(chapters.items(), key=_chapter_order):
             is_partial = bool(info.get("partial")) or "accepted_at" in info
             recorded_at = (
                 info.get("accepted_at") if is_partial else info.get("failed_at", "")
@@ -1534,7 +1667,7 @@ def cmd_failed(args):
                 console.print(f"  [yellow]⚠️  Manga not found in config: {manga_title}[/yellow]")
                 continue
 
-            for chapter_num, info in sorted(chapters.items(), key=lambda x: float(x[0]) if x[0].replace('.', '', 1).isdigit() else 0):
+            for chapter_num, info in sorted(chapters.items(), key=_chapter_order):
                 sources = _get_sources_from_manga(manga)
                 if not sources:
                     continue
@@ -1608,6 +1741,62 @@ def cmd_failed(args):
 
         console.print()
         console.print(f"[green]📊 Retry summary: {succeeded}/{retried} chapters recovered[/green]")
+
+
+_DOCTOR_ICONS = {
+    doctor.OK: "[green]✅[/green]",
+    doctor.WARNING: "[yellow]⚠️[/yellow]",
+    doctor.FAIL: "[red]❌[/red]",
+    doctor.SKIP: "[dim]➖[/dim]",
+}
+
+
+def cmd_doctor(args):
+    """Diagnose common setup and runtime problems (issue #250).
+
+    Exit code: 0 when no selected check failed, 1 when one did (or,
+    with --strict, when one warned). Usage errors exit 2 via argparse.
+    """
+    from rich.markup import escape
+
+    only = set(args.check) if args.check else None
+
+    def run():
+        return doctor.run_checks(
+            config, state, only=only,
+            smtp=args.smtp, launch_browsers=args.launch_browsers,
+        )
+
+    if args.json:
+        results = run()
+        _print_json(doctor.build_report(results))
+        return doctor.exit_code(results, strict=args.strict)
+
+    with console.status("[dim]Running checks...[/dim]"):
+        results = run()
+
+    table = Table(title="🩺 MeManga Doctor", box=box.SIMPLE, show_header=False)
+    table.add_column(width=2)
+    table.add_column(style="cyan")
+    table.add_column(no_wrap=False)
+    for r in results:
+        message = escape(r.message)
+        if r.status == doctor.SKIP:
+            message = f"[dim]{message}[/dim]"
+        table.add_row(_DOCTOR_ICONS[r.status], r.name, message)
+    console.print(table)
+
+    report = doctor.build_report(results)
+    counts = report["summary"]
+    summary = (f"{counts['ok']} ok · {counts['warning']} warning · "
+               f"{counts['fail']} failed · {counts['skip']} skipped")
+    if report["status"] == doctor.FAIL:
+        console.print(f"[red]❌ Problems found[/red] [dim]({summary})[/dim]")
+    elif report["status"] == doctor.WARNING:
+        console.print(f"[yellow]⚠️  Healthy with warnings[/yellow] [dim]({summary})[/dim]")
+    else:
+        console.print(f"[green]✅ All checks passed[/green] [dim]({summary})[/dim]")
+    return doctor.exit_code(results, strict=args.strict)
 
 
 def cmd_tui(args):
@@ -1765,6 +1954,7 @@ Examples:
   memanga search "Blue Lock"            # Find a manga across sources
   memanga check                         # Check for new chapters
   memanga check --auto                  # Auto-download new chapters
+  memanga doctor                        # Diagnose setup problems
   memanga cron install                  # Set up daily checks
   memanga config                        # Configure settings
 """
@@ -1788,6 +1978,7 @@ Examples:
     
     # list
     p_list = subparsers.add_parser("list", aliases=["ls"], help="List tracked manga")
+    p_list.add_argument("--json", action="store_true", help="Machine-readable JSON output")
     p_list.set_defaults(func=cmd_list)
     
     # add
@@ -1842,6 +2033,7 @@ Examples:
     
     # status
     p_status = subparsers.add_parser("status", help="Show status and configuration")
+    p_status.add_argument("--json", action="store_true", help="Machine-readable JSON output")
     p_status.set_defaults(func=cmd_status)
     
     # config
@@ -1896,13 +2088,47 @@ Examples:
     p_failed.add_argument("-t", "--title", help="Filter by manga title")
     p_failed.add_argument("--retry", action="store_true", help="Attempt to re-download all listed failed chapters")
     p_failed.add_argument("--clear", action="store_true", help="Clear failure records without retrying")
+    p_failed.add_argument("--json", action="store_true", help="Machine-readable JSON output (listing only)")
     p_failed.set_defaults(func=cmd_failed)
+
+    # doctor (issue #250)
+    p_doctor = subparsers.add_parser(
+        "doctor",
+        help="Diagnose setup problems (paths, browsers, email, scheduler)",
+        description="Run local health checks. Exits 0 when no check fails, "
+                    "1 when any selected check fails.",
+    )
+    p_doctor.add_argument("--json", action="store_true", help="Machine-readable JSON output")
+    p_doctor.add_argument(
+        "--check", action="append", choices=doctor.CHECK_NAMES, metavar="NAME",
+        help="Run only this check; repeatable. One of: " + ", ".join(doctor.CHECK_NAMES),
+    )
+    p_doctor.add_argument("--smtp", action="store_true",
+                          help="Log in to the configured SMTP server (network; skipped by default)")
+    p_doctor.add_argument("--launch-browsers", action="store_true",
+                          help="Launch Firefox and Chromium headless instead of only checking they are installed")
+    p_doctor.add_argument("--strict", action="store_true", help="Also exit non-zero on warnings")
+    p_doctor.set_defaults(func=cmd_doctor)
 
     # tui (default if no command)
     p_tui = subparsers.add_parser("tui", help="Interactive terminal UI")
     p_tui.set_defaults(func=cmd_tui)
     
     args = parser.parse_args()
+
+    # Keep `failed --json` a pure listing contract instead of mixing
+    # retry/clear progress output into machine-readable stdout.
+    if args.command == "failed" and args.json and (args.retry or args.clear):
+        p_failed.error("--json cannot be combined with --retry or --clear")
+
+    # Only doctor may run on fallback defaults; anything else could act
+    # on an empty manga list or overwrite the user's broken config.
+    if config.load_error and args.command != "doctor":
+        sys.stderr.write(
+            f"error: cannot load config file {config.config_path}: {config.load_error}\n"
+            "Fix or move the file, then retry. Run `memanga doctor` for details.\n"
+        )
+        sys.exit(1)
 
     if args.gui:
         if _cli_only:

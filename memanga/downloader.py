@@ -52,8 +52,23 @@ def restart_browsers():
 
 
 def _cleanup_at_exit():
-    """Clean up browser resources on exit."""
-    restart_browsers()
+    """Clean up browser resources on exit.
+
+    Issue #250: close only what was opened, without restart_browsers()'s
+    MangaFire notice, which printed to stdout on every exit and broke
+    `--json` output.
+    """
+    try:
+        from .scrapers.mangafire import cleanup_mangafire
+        cleanup_mangafire()
+    except Exception:
+        pass
+
+    try:
+        from .scrapers.playwright_base import PlaywrightScraper
+        PlaywrightScraper.cleanup()
+    except Exception:
+        pass
 
 
 atexit.register(_cleanup_at_exit)

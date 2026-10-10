@@ -281,14 +281,15 @@ For a host cron job, run Compose from the repository directory:
 
 | Command | Purpose |
 |---|---|
-| `list` (`ls`) | Show every tracked manga with status + chapter counts |
+| `list` (`ls`) [--json] | Show every tracked manga with status + chapter counts |
 | `add` | Add a manga; supports `-t TITLE -u URL [-b BACKUP_URL]` or `-i` interactive |
 | `set TITLE STATUS` | `reading` / `on-hold` / `dropped` / `completed` |
 | `remove TITLE` (`rm`) | Drop a manga from tracking |
 | `update TITLE …` | Edit URL, backup source, or rename |
 | `check [TITLE] [--from N] [--auto] [--safe]` | Look for new chapters, optionally download them |
-| `failed [--retry] [--clear]` | List / re-attempt / clear partially-failed downloads |
-| `status` | Show config dir, download dir, manga count, last check time |
+| `failed [--retry] [--clear] [--json]` | List / re-attempt / clear partially-failed downloads |
+| `status [--json]` | Show config dir, download dir, manga count, last check time |
+| `doctor [--json] [--check NAME] [--smtp] [--launch-browsers]` | Diagnose paths, browsers, email, keyring, scheduler and source health |
 | `config` | Interactive settings editor |
 | `cron install [--time 06:00]` | Schedule a daily `check --auto` job |
 | `cron status` / `cron remove` | Inspect / uninstall the cron job |
@@ -341,6 +342,35 @@ python -m memanga failed --retry
 `failed` is the safety net for the "downloaded but incomplete" class of
 errors - the modern downloader refuses to mark a chapter complete if
 any page failed, and tracks the failure so you can batch-retry later.
+
+### Diagnose setup problems
+
+```bash
+python -m memanga doctor
+```
+
+`doctor` checks the config and state files, download directory,
+email/keyring setup, the cron or Task Scheduler entry, cached source
+health, and that the Playwright Firefox and Chromium builds are
+installed. Nothing touches the network by default; opt in with
+`--smtp` (log in to your SMTP server) and `--launch-browsers` (start
+each browser headless). Use `--check NAME` (repeatable) to run only
+some checks. It exits 0 when no check fails and 1 when one does;
+`--strict` also fails on warnings.
+
+### Scripting
+
+`list`, `status`, `failed`, `search` and `doctor` accept `--json` and
+then print a single JSON document to stdout with no other output.
+`list`, `status`, `failed` and `doctor` payloads carry a
+`schema_version` (currently 1) that changes only when keys are renamed,
+removed or change type. `failed --json` only lists; it cannot be
+combined with `--retry` or `--clear`.
+
+```bash
+python -m memanga failed --json | jq -r '.chapters[] | "\(.title) #\(.chapter)"'
+python -m memanga doctor --json --check browsers --launch-browsers
+```
 
 ---
 

@@ -27,8 +27,9 @@ def run_cli(monkeypatch, isolated_home):
         from memanga import cli
         from memanga.config import Config
         # Always start from a fresh on-disk read so writes from earlier
-        # `run_cli` calls in the same test are visible.
-        cli.config = Config()
+        # `run_cli` calls in the same test are visible. Tolerant, like the
+        # module-level instance.
+        cli.config = Config(tolerate_errors=True)
         try:
             cli.main()
         except SystemExit as exc:
@@ -981,3 +982,232 @@ class TestTuiCommand:
             assert e.code == 0
         out = capsys.readouterr().out.lower()
         assert "tui" in out or "interactive" in out
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# `--json` status output and `doctor` (#250)
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def cli_state(isolated_home, monkeypatch):
+    """Point the CLI's module-level State at the isolated home."""
+    from memanga import cli
+    from memanga.state import State
+    fresh = State()
+    monkeypatch.setattr(cli, "state", fresh)
+    return fresh
+
+
+def _stdout_json(capsys):
+    # json.loads on the whole stdout proves nothing else was printed.
+    return json.loads(capsys.readouterr().out)
+
+
+class TestListJson:
+    def test_empty_library(self, run_cli, cli_state, capsys):
+        assert run_cli("list", "--json") == 0
+        assert _stdout_json(capsys) == {"schema_version": 1, "count": 0, "manga": []}
+
+    def test_entries(self, run_cli, config, cli_state, capsys):
+        config.set("manga", [
+            {"title": "Legacy", "source": "mangadex.org", "url": "https://mangadex.org/t/1"},
+            {"title": "Multi", "status": "on-hold", "sources": [
+                {"source": "mangapill.com", "url": "https://mangapill.com/m/2"},
+                {"source": "mangadex.org", "url": "https://mangadex.org/t/2"},
+            ]},
+        ])
+        config.save()
+        cli_state.add_downloaded_chapter("Multi", "1")
+        cli_state.add_downloaded_chapter("Multi", "2")
+        capsys.readouterr()
+
+        assert run_cli("list", "--json") == 0
+        payload = _stdout_json(capsys)
+        assert payload["count"] == 2
+        legacy, multi = payload["manga"]
+        assert legacy == {
+            "n": 1, "title": "Legacy", "status": "reading",
+            "source": "mangadex.org", "source_display": "mangadex.org",
+            "url": "https://mangadex.org/t/1",
+            "sources": [{"source": "mangadex.org", "url": "https://mangadex.org/t/1"}],
+            "last_chapter": None, "downloaded_count": 0,
+        }
+        assert multi["status"] == "on-hold"
+        assert multi["source"] == "mangapill.com"
+        assert multi["source_display"] == "mangapill.com (+1)"
+        assert len(multi["sources"]) == 2
+        assert multi["last_chapter"] == "2"
+        assert multi["downloaded_count"] == 2
+
+
+class TestStatusJson:
+    def test_payload_has_no_secrets(self, run_cli, config, cli_state, capsys):
+        config.set("delivery.mode", "email")
+        config.set("email.kindle_email", "me@kindle.com")
+        config.set("email.app_password", "secret-pw")
+        config.set("cron.enabled", True)
+        config.set("cron.time", "07:30")
+        config.save()
+        capsys.readouterr()
+
+        assert run_cli("status", "--json") == 0
+        out = capsys.readouterr().out
+        assert "secret-pw" not in out
+        payload = json.loads(out)
+        assert payload["schema_version"] == 1
+        assert payload["manga_count"] == 0
+        assert payload["delivery"]["mode"] == "email"
+        assert payload["email"]["kindle_email"] == "me@kindle.com"
+        assert payload["email"]["sender_email"] is None
+        assert payload["cron"] == {"enabled": True, "time": "07:30"}
+        assert payload["post_processing"]["enabled"] is False
+        assert payload["last_check"] is None
+        assert payload["paths"]["state"] == str(cli_state.state_path)
+
+
+class TestFailedJson:
+    def test_empty(self, run_cli, cli_state, capsys):
+        assert run_cli("failed", "--json") == 0
+        assert _stdout_json(capsys) == {
+            "schema_version": 1, "title_filter": None, "count": 0, "chapters": [],
+        }
+
+    def test_failed_and_partial_entries(self, run_cli, cli_state, capsys):
+        cli_state.add_failed_chapter("Vinland Saga", "10", "mangadex.org", "HTTP 503", failed_pages=[3])
+        cli_state.add_failed_chapter("Vinland Saga", "10", "mangadex.org", "HTTP 503", failed_pages=[3])
+        cli_state.add_partial_chapter("Vinland Saga", "9", source="mangapill.com",
+                                      failed_pages=[7], total_pages=40)
+        cli_state.add_failed_chapter("Berserk", "1", "mangadex.org", "timeout")
+
+        assert run_cli("failed", "--json") == 0
+        payload = _stdout_json(capsys)
+        assert payload["count"] == 3
+        assert [(c["title"], c["chapter"], c["status"]) for c in payload["chapters"]] == [
+            ("Berserk", "1", "failed"),
+            ("Vinland Saga", "9", "partial"),
+            ("Vinland Saga", "10", "failed"),
+        ]
+        partial, failed = payload["chapters"][1:]
+        assert partial["failed_pages"] == [7]
+        assert partial["total_pages"] == 40
+        assert partial["attempts"] is None
+        assert partial["error"] is None
+        assert failed["attempts"] == 2
+        assert failed["error"] == "HTTP 503"
+        assert failed["source"] == "mangadex.org"
+        assert failed["recorded_at"]
+
+    def test_title_filter(self, run_cli, cli_state, capsys):
+        cli_state.add_failed_chapter("Vinland Saga", "10", "mangadex.org", "x")
+        cli_state.add_failed_chapter("Berserk", "1", "mangadex.org", "y")
+        assert run_cli("failed", "--json", "-t", "vinland") == 0
+        payload = _stdout_json(capsys)
+        assert payload["title_filter"] == "vinland"
+        assert [c["title"] for c in payload["chapters"]] == ["Vinland Saga"]
+
+    @pytest.mark.parametrize("flag", ["--retry", "--clear"])
+    def test_json_rejects_mutating_flags(self, run_cli, cli_state, capsys, flag):
+        cli_state.add_failed_chapter("Berserk", "1", "mangadex.org", "y")
+        assert run_cli("failed", "--json", flag) == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "--json cannot be combined" in captured.err
+        assert cli_state.get_failed_chapters("Berserk")
+
+
+class TestDoctorCommand:
+    def test_json_report(self, run_cli, cli_state, capsys):
+        assert run_cli("doctor", "--json", "--check", "config", "--check", "state") == 0
+        payload = _stdout_json(capsys)
+        assert payload["schema_version"] == 1
+        assert payload["status"] == "ok"
+        assert [c["name"] for c in payload["checks"]] == ["config", "state"]
+        for check in payload["checks"]:
+            assert set(check) == {"name", "status", "message", "details"}
+
+    def test_failed_check_exits_1(self, run_cli, cli_state, capsys):
+        cli_state.state_path.write_text("{broken", encoding="utf-8")
+        assert run_cli("doctor", "--json", "--check", "state") == 1
+        payload = _stdout_json(capsys)
+        assert payload["status"] == "fail"
+        assert payload["checks"][0]["status"] == "fail"
+
+    def test_warning_exits_0_unless_strict(self, run_cli, config, cli_state, capsys):
+        config.set("email.app_password", "secret-pw")
+        config.save()
+        assert run_cli("doctor", "--json", "--check", "keyring") == 0
+        assert "secret-pw" not in capsys.readouterr().out
+        assert run_cli("doctor", "--json", "--check", "keyring", "--strict") == 1
+
+    def test_flags_reach_opt_in_checks(self, run_cli, cli_state, monkeypatch, capsys):
+        from memanga import doctor
+        seen = dict()
+
+        def fake_smtp(c, s, live=False):
+            seen["smtp"] = live
+            return doctor.CheckResult("smtp", doctor.SKIP, "stub")
+
+        def fake_browsers(c, s, launch=False):
+            seen["launch"] = launch
+            return doctor.CheckResult("browsers", doctor.OK, "stub")
+
+        monkeypatch.setattr(doctor, "check_smtp", fake_smtp)
+        monkeypatch.setattr(doctor, "check_browsers", fake_browsers)
+        assert run_cli("doctor", "--json", "--check", "smtp", "--check", "browsers") == 0
+        assert seen == dict(smtp=False, launch=False)
+        assert run_cli("doctor", "--json", "--check", "smtp", "--check", "browsers",
+                       "--smtp", "--launch-browsers") == 0
+        assert seen == dict(smtp=True, launch=True)
+
+    def test_human_output(self, run_cli, cli_state, capsys):
+        assert run_cli("doctor", "--check", "config", "--check", "smtp") == 0
+        out = capsys.readouterr().out
+        assert "config" in out
+        assert "smtp" in out
+        assert "All checks passed" in out
+
+    def test_unknown_check_is_usage_error(self, run_cli):
+        assert run_cli("doctor", "--check", "nope") == 2
+
+
+class TestInvalidConfigFile:
+    """A broken config.yaml must not crash `import memanga.cli`: doctor
+    reports it, every other command refuses to run (issue #250)."""
+
+    BROKEN = "manga: [unclosed\n"
+
+    def _write_broken(self, home):
+        path = home / ".config" / "memanga" / "config.yaml"
+        path.write_text(self.BROKEN, encoding="utf-8")
+        return path
+
+    def test_doctor_json_in_real_process(self, isolated_home):
+        import os
+        import subprocess
+        self._write_broken(isolated_home)
+        proc = subprocess.run(
+            [sys.executable, "-m", "memanga", "doctor", "--json", "--check", "config"],
+            capture_output=True, text=True, env=dict(os.environ), timeout=120,
+        )
+        assert proc.returncode == 1, proc.stderr
+        assert "Traceback" not in proc.stderr
+        payload = json.loads(proc.stdout)
+        assert payload["status"] == "fail"
+        assert payload["checks"][0]["name"] == "config"
+        assert payload["checks"][0]["status"] == "fail"
+
+    def test_doctor_human_output(self, run_cli, isolated_home, capsys):
+        self._write_broken(isolated_home)
+        assert run_cli("doctor", "--check", "config") == 1
+        out = capsys.readouterr().out
+        assert "not valid YAML" in out
+        assert "Problems found" in out
+
+    def test_other_commands_refuse_and_keep_file(self, run_cli, isolated_home, capsys):
+        path = self._write_broken(isolated_home)
+        assert run_cli("list") == 1
+        err = capsys.readouterr().err
+        assert "cannot load config file" in err
+        assert "memanga doctor" in err
+        assert path.read_text(encoding="utf-8") == self.BROKEN
