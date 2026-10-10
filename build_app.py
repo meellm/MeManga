@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """
-MeManga RELEASE build — single-file end-user executable.
+MeManga RELEASE build — one-folder end-user app.
 
     python build_app.py
 
 Output:
-    ./MeManga.exe   (Windows)
-    ./MeManga       (macOS / Linux)
+    release/MeManga/MeManga.exe   (Windows; plus _internal/ and licenses/)
+    release/MeManga/MeManga       (Linux; plus _internal/ and licenses/)
+    release/MeManga.app           (macOS)
 
-This produces the binary that ships on the GitHub release page:
+This produces the app that ships on the GitHub release page:
     - No console window (clean double-click on Windows)
     - GUI only — no separate CLI .exe
-    - Single self-extracting file; no `dist/` folder of loose files
+    - One folder, not UPX-compressed: the LGPL components (Qt, PySide6,
+      Shiboken6, img2pdf) stay separate files users can replace, and
+      their notices ship in licenses/ (issue #381). The release workflow
+      archives the folder as a .zip / .tar.gz.
     - On first launch the app downloads Playwright's Firefox driver
       under the user's local %APPDATA% (~80 MB, one-time) so we
       don't have to bundle 200 MB of browser into every download.
@@ -49,12 +53,17 @@ SPEC = PACKAGING / "memanga-release.spec"
 BUILD_TMP = ROOT / "build"
 DIST_TMP = ROOT / "dist"
 
-# Final binary lands here. A dedicated subdirectory avoids the
+# Final app lands here. A dedicated subdirectory avoids the
 # macOS / Windows case-insensitive filesystem trap where a
-# repo-root file called `MeManga` collides with the lowercase
-# `memanga/` source directory and Path.unlink() fails with EPERM
-# trying to remove what is actually a directory.
+# repo-root entry called `MeManga` collides with the lowercase
+# `memanga/` source directory and removing it fails with EPERM
+# trying to remove what is actually the source package.
 RELEASE_DIR = ROOT / "release"
+
+# Writes the bundled license notices (from the spec) and checks the
+# finished app keeps the LGPL components replaceable (issue #381).
+LGPL_TOOL = PACKAGING / "lgpl_compliance.py"
+LICENSES = "licenses"
 
 
 def install_dependencies() -> bool:
@@ -134,7 +143,7 @@ def verify_imports() -> bool:
 
 
 def run_pyinstaller() -> bool:
-    print("\n=== Building release (PyInstaller, one-file, no console) ===")
+    print("\n=== Building release (PyInstaller, one-folder, no console) ===")
     if not SPEC.exists():
         print(f"  ! spec missing: {SPEC}")
         return False
@@ -150,32 +159,48 @@ def run_pyinstaller() -> bool:
     return r.returncode == 0
 
 
-def _exe_name() -> str:
-    return "MeManga.exe" if platform.system() == "Windows" else "MeManga"
+def _app_name() -> str:
+    # macOS: the spec's BUNDLE step wraps the one-folder build in an .app.
+    return "MeManga.app" if platform.system() == "Darwin" else "MeManga"
 
 
 def collect_artifact() -> Path | None:
-    src = DIST_TMP / _exe_name()
-    if not src.exists():
+    src = DIST_TMP / _app_name()
+    if not src.is_dir():
         print(f"\n! Expected output not found: {src}")
         return None
     RELEASE_DIR.mkdir(parents=True, exist_ok=True)
-    dest = RELEASE_DIR / _exe_name()
-    # `unlink(missing_ok=True)` is safe even on case-insensitive
-    # filesystems because `release/MeManga` cannot alias the
-    # `memanga/` package directory: they live at different paths.
-    if dest.exists():
+    dest = RELEASE_DIR / _app_name()
+    # `release/MeManga` cannot alias the `memanga/` package directory
+    # on case-insensitive filesystems: they live at different paths.
+    # A rerun may find the old one-file binary (a plain file) here.
+    if dest.is_dir() and not dest.is_symlink():
+        shutil.rmtree(dest)
+    elif dest.exists() or dest.is_symlink():
         dest.unlink()
     shutil.move(str(src), str(dest))
-    try:
-        dest.chmod(dest.stat().st_mode | 0o755)
-    except Exception:
-        pass
+    if platform.system() != "Darwin":
+        # Put the notices next to the launcher where users see them; the
+        # copy under _internal/ is what the app itself carries. macOS
+        # keeps them in MeManga.app/Contents/Resources/licenses.
+        bundled = dest / "_internal" / LICENSES
+        if not bundled.is_dir():
+            print(f"\n! License notices missing from the build: {bundled}"
+                  "\n  (the release spec bundles them; see issue #381)")
+            return None
+        shutil.copytree(bundled, dest / LICENSES)
     # Sweep PyInstaller scratch dirs — only the release/ output remains.
     for d in (BUILD_TMP, DIST_TMP):
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)
     return dest
+
+
+def check_lgpl(artifact: Path) -> bool:
+    print("\n=== Checking LGPL notices and replaceable libraries ===")
+    r = subprocess.run(
+        [sys.executable, str(LGPL_TOOL), "check", "--path", str(artifact)])
+    return r.returncode == 0
 
 
 def main() -> int:
@@ -190,10 +215,14 @@ def main() -> int:
     artifact = collect_artifact()
     if not artifact:
         return 1
-    size_mb = artifact.stat().st_size / (1024 * 1024)
+    if not check_lgpl(artifact):
+        return 1
+    size = sum(f.stat().st_size for f in artifact.rglob("*")
+               if f.is_file() and not f.is_symlink())
     print(f"\n=== Release build complete ===")
-    print(f"Output: {artifact}  ({size_mb:.1f} MB)")
-    print("Upload this single file to the GitHub release page.")
+    print(f"Output: {artifact}  ({size / (1024 * 1024):.1f} MB)")
+    print("Archive this folder (the release workflow does) and upload it "
+          "to the GitHub release page.")
     return 0
 
 

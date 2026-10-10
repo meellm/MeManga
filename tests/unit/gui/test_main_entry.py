@@ -15,7 +15,11 @@ source for the entire first session on a fresh machine.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 import memanga
 
@@ -86,3 +90,41 @@ class TestConfigurePlaywrightBrowsers:
         d = ns["_playwright_browsers_dir"]()
         assert d.name == "ms-playwright"
         assert d.is_absolute()
+
+
+class TestVerifyGui:
+    """``--verify-gui`` is the release pipeline's frozen GUI smoke test
+    (issue #381). Run it from source in a child process — it owns the
+    QApplication and exits — headless via Qt's offscreen platform."""
+
+    def _run(self, tmp_path):
+        env = dict(os.environ, QT_QPA_PLATFORM="offscreen",
+                   HOME=str(tmp_path), USERPROFILE=str(tmp_path),
+                   APPDATA=str(tmp_path),
+                   XDG_CONFIG_HOME=str(tmp_path / ".config"))
+        return subprocess.run(
+            [sys.executable, "-m", "memanga.gui", "--verify-gui"],
+            capture_output=True, text=True, timeout=120, env=env,
+            cwd=Path(memanga.__file__).resolve().parent.parent,
+        )
+
+    def test_brings_up_the_main_window_and_exits_cleanly(self, tmp_path):
+        pytest.importorskip("PySide6")
+        result = self._run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "[VerifyGUI] PASS: main window 'MeManga v" in result.stdout
+        assert "platform=offscreen" in result.stdout
+
+    def test_never_touches_the_users_config(self, tmp_path):
+        pytest.importorskip("PySide6")
+        result = self._run(tmp_path)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (tmp_path / ".config" / "memanga").exists()
+
+    def test_runs_before_the_normal_gui_launch(self):
+        src = (Path(memanga.__file__).parent / "gui" / "__main__.py").read_text()
+        gate = src.index('if "--verify-gui" in sys.argv:')
+        assert gate < src.index("from memanga.gui import launch_gui")
+        # No first-launch browser install dialog in the smoke test.
+        body = src.split("def _verify_gui", 1)[1].split("\ndef ", 1)[0]
+        assert "_ensure_browsers" not in body

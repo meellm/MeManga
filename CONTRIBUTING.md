@@ -122,11 +122,39 @@ docs: clarify Playwright first-launch download
 
 ```bash
 python build.py        # Single-file dev exe with console (MeManga-Dev.exe)
-python build_app.py    # Single-file release exe, no console (MeManga.exe)
+python build_app.py    # One-folder release app, no console (release/MeManga/)
 ```
 
-Both scripts move the final binary to the repo root and sweep the
-`build/` + `dist/` scratch directories.
+Both scripts sweep the `build/` + `dist/` scratch directories.
+
+The release build is a PyInstaller one-folder app without UPX
+(`release/MeManga/`, or `release/MeManga.app` on macOS) because it
+bundles LGPL components — Qt, PySide6, Shiboken6 and img2pdf — that
+users must be able to replace. The spec writes their notices (plus the
+list of native libraries the build copied from the system) into a
+`licenses/` folder with `packaging/lgpl_compliance.py`, collects the LGPL
+Python packages as plain `.py` files, and drops the Qt modules and
+plugins MeManga does not use — Qt Virtual Keyboard is not available under
+the LGPL at all, and Qt Pdf / QML / Quick only come in with unused
+plugins. `build_app.py` and the release workflow run
+`python packaging/lgpl_compliance.py check --path <app>` to fail the
+build if the notices are incomplete, a library or LGPL Python file is no
+longer a real separate file at its expected path, an LGPL package got
+compiled into the executable, a Qt module or plugin outside the approved
+list in `lgpl_compliance.py` ships, or a binary is UPX-packed. Don't
+switch the release spec back to one-file or turn UPX on, and only add a
+Qt module to the approved list after checking it is available under the
+LGPL.
+
+The workflow also runs `MeManga --verify-gui` (with
+`QT_QPA_PLATFORM=offscreen`) on the built app and on each extracted
+archive: it starts the real Qt GUI, decodes JPEG / SVG through Qt's image
+plugins and shows the main window, using a throwaway home directory.
+Run it locally after a release build:
+
+```bash
+QT_QPA_PLATFORM=offscreen release/MeManga/MeManga --verify-gui
+```
 
 ### macOS signing and notarization
 

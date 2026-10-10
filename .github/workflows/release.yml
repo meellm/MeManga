@@ -12,13 +12,18 @@ jobs:
   build:
     strategy:
       matrix:
+        # Issue #381: every leg ships a one-folder build (no single-file
+        # executable, no UPX) so the bundled LGPL libraries stay
+        # replaceable. `app_dir` is what build_app.py leaves under
+        # release/; `artifact_name` is the launcher inside it.
         include:
           - os: windows-latest
-            artifact_name: MeManga.exe
-            asset_name: MeManga-windows-x64.exe
-          # macos-latest is an Apple Silicon (arm64) runner. The built
-          # binary ships wrapped in MeManga.app inside a .zip (issue #163)
-          # so the download is a normal double-clickable app, not a raw
+            app_dir: MeManga
+            artifact_name: MeManga/MeManga.exe
+            asset_name: MeManga-windows-x64.zip
+          # macos-latest is an Apple Silicon (arm64) runner. The app
+          # ships as MeManga.app inside a .zip (issue #163) so the
+          # download is a normal double-clickable app, not a raw
           # extensionless Mach-O that opens in TextEdit. Developer ID
           # signing and notarization are optional: both macOS legs are
           # signed, notarized and stapled only when all of these repository
@@ -29,19 +34,22 @@ jobs:
           # APPLE_APP_SPECIFIC_PASSWORD. Without them the legs still ship
           # an unsigned MeManga.app zip.
           - os: macos-latest
-            artifact_name: MeManga
+            app_dir: MeManga.app
+            artifact_name: MeManga.app/Contents/MacOS/MeManga
             asset_name: MeManga-macos-arm64.zip
             target_arch: arm64
           # macos-26-intel is GitHub's current standard x64 macOS runner
           # image, so the x86_64 slice is built natively rather than
           # cross-compiled from Apple Silicon.
           - os: macos-26-intel
-            artifact_name: MeManga
+            app_dir: MeManga.app
+            artifact_name: MeManga.app/Contents/MacOS/MeManga
             asset_name: MeManga-macos-x64.zip
             target_arch: x86_64
           - os: ubuntu-latest
-            artifact_name: MeManga
-            asset_name: MeManga-linux-x64
+            app_dir: MeManga
+            artifact_name: MeManga/MeManga
+            asset_name: MeManga-linux-x64.tar.gz
 
     runs-on: ${{ matrix.os }}
 
@@ -153,24 +161,73 @@ jobs:
           fi
 
       - name: Build release executable
-        # build_app.py produces a single-file binary under `release/`
-        # (release/MeManga.exe on Windows, release/MeManga elsewhere)
-        # and sweeps the build/ + dist/ scratch dirs afterwards.
+        # build_app.py produces a one-folder app under `release/`
+        # (release/MeManga/ on Windows and Linux, release/MeManga.app on
+        # macOS), checks it with packaging/lgpl_compliance.py and sweeps
+        # the build/ + dist/ scratch dirs afterwards.
         #
         # MEMANGA_TARGET_ARCH pins the macOS CPU slice (see
         # packaging/memanga-release.spec). It is empty on Windows/Linux,
         # where the spec ignores it and follows the build host.
         #
         # With macOS notarization enabled, MEMANGA_CODESIGN_IDENTITY /
-        # MEMANGA_ENTITLEMENTS_FILE make PyInstaller sign every embedded
-        # binary and the executable with the Developer ID identity and
-        # hardened runtime (issue #163). The identity is empty on unsigned
-        # macOS builds and on Windows/Linux, where the spec ignores both.
+        # MEMANGA_ENTITLEMENTS_FILE make PyInstaller sign every collected
+        # binary, the executable and MeManga.app with the Developer ID
+        # identity and hardened runtime (issue #163). The identity is
+        # empty on unsigned macOS builds and on Windows/Linux, where the
+        # spec ignores both.
         env:
           MEMANGA_TARGET_ARCH: ${{ matrix.target_arch }}
           MEMANGA_CODESIGN_IDENTITY: ${{ steps.notarization.outputs.macos_notarization == 'enabled' && secrets.MACOS_CODESIGN_IDENTITY || '' }}
           MEMANGA_ENTITLEMENTS_FILE: ${{ runner.os == 'macOS' && 'packaging/macos-entitlements.plist' || '' }}
         run: python build_app.py
+
+      - name: Verify LGPL notices and replaceable libraries
+        # Release gate for issue #381: the built app must carry the LGPL
+        # notices (licenses/LGPL-NOTICE.txt plus the LGPL-3.0 / GPL-3.0
+        # texts), keep Qt, PySide6, Shiboken6 and img2pdf as separate,
+        # replaceable files, and contain no UPX-packed binary.
+        shell: bash
+        run: |
+          python packaging/lgpl_compliance.py check \
+            --path "release/${{ matrix.app_dir }}"
+
+      - name: Verify the GUI starts inside the built app (Linux / macOS)
+        # Issue #381: the one-folder build loads Qt, PySide6 and Shiboken6
+        # as separate files and drops unused Qt modules / plugins, so the
+        # frozen app must prove the real GUI still comes up: --verify-gui
+        # builds the QApplication, decodes JPEG / SVG through Qt's image
+        # plugins and shows the full main window, headless via Qt's
+        # offscreen platform plugin.
+        if: runner.os != 'Windows'
+        shell: bash
+        timeout-minutes: 5
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          "./release/${{ matrix.artifact_name }}" --verify-gui || {
+            echo "::error::GUI smoke test failed in the built app"
+            echo "----- runtime.log -----"
+            cat "$HOME/.config/memanga/runtime.log" 2>/dev/null || true
+            exit 1
+          }
+
+      - name: Verify the GUI starts inside the built app (Windows)
+        # Same gate for the windowed exe, started detached like a user
+        # double-click (see the Playwright self-test below).
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath ".\release\${{ matrix.artifact_name }}" `
+                 -ArgumentList "--verify-gui" -PassThru -Wait
+          Write-Host "----- runtime.log -----"
+          Get-Content "$env:USERPROFILE\.config\memanga\runtime.log" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) {
+            Write-Error "GUI smoke test failed in the built executable (exit $($p.ExitCode))"
+            exit 1
+          }
 
       - name: Verify macOS artifact architecture
         # Guard against the release silently shipping the wrong slice
@@ -227,28 +284,11 @@ jobs:
             exit 1
           }
 
-      - name: Package macOS app bundle (MeManga.app)
-        # Root-cause fix for issue #163. GitHub serves the raw one-file
-        # Mach-O as application/octet-stream, so a browser download lands
-        # as an extensionless document (opens in TextEdit) and loses its
-        # executable bit (mode 0644). Wrap the just-verified binary in a
-        # minimal MeManga.app so users get a normal app to double-click.
-        # When notarization is enabled the bundle is signed, notarized and
-        # stapled below before it is archived into the release .zip.
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          python packaging/macos_app.py build \
-            --exe "release/${{ matrix.artifact_name }}" \
-            --dest release \
-            --icon packaging/icon.icns
-
       - name: Sign macOS app bundle
-        # PyInstaller already signed the one-file executable and every
-        # binary embedded in it. The hand-built MeManga.app wrapper still
-        # needs its own seal over Info.plist and Resources, so the bundle
-        # is signed with the same Developer ID identity, hardened runtime,
-        # secure timestamp and entitlements, then verified strictly.
+        # PyInstaller already signed every collected binary and the
+        # MeManga.app it built. Re-seal the bundle with the same Developer
+        # ID identity, hardened runtime, secure timestamp and entitlements
+        # so its signature is the one verified strictly below.
         if: steps.notarization.outputs.macos_notarization == 'enabled'
         shell: bash
         env:
@@ -369,13 +409,20 @@ jobs:
         # Release gate on the exact .zip that gets uploaded, signed or not:
         # it must hold a launchable MeManga.app/Contents/MacOS/MeManga
         # (exec bit set), a valid Info.plist and the CPU slice this matrix
-        # leg targets.
+        # leg targets, and once extracted still pass the LGPL check and
+        # the GUI smoke test (issue #381).
         if: runner.os == 'macOS'
         shell: bash
         run: |
           python packaging/macos_app.py validate \
             --path "${{ matrix.asset_name }}" \
             --arch "${{ matrix.target_arch }}"
+          workdir="$(mktemp -d)"
+          ditto -x -k "${{ matrix.asset_name }}" "$workdir"
+          python packaging/lgpl_compliance.py check \
+            --path "$workdir/MeManga.app"
+          QT_QPA_PLATFORM=offscreen \
+            "$workdir/MeManga.app/Contents/MacOS/MeManga" --verify-gui
 
       - name: Verify release zip is signed, stapled and notarized
         # Notarized builds only: the uploaded .zip must also carry a code
@@ -416,41 +463,65 @@ jobs:
       - name: Package artifact for upload
         id: package
         shell: bash
+        # Windows and Linux ship the whole one-folder app (launcher,
+        # _internal/ libraries, licenses/) in one archive whose top-level
+        # folder is named after the asset (issue #381).
         run: |
           asset="${{ matrix.asset_name }}"
           if [ "${{ runner.os }}" = "macOS" ]; then
             echo "upload_path=$asset" >> "$GITHUB_OUTPUT"
           else
-            bin="release/${{ matrix.artifact_name }}"
-            mv "$bin" "$asset"
+            folder="${asset%.tar.gz}"
+            folder="${folder%.zip}"
+            mv "release/${{ matrix.app_dir }}" "$folder"
             if [ "${{ runner.os }}" = "Linux" ]; then
-              chmod +x "$asset"
-              tar -czf "${asset}.tar.gz" "$asset"
-              echo "upload_path=${asset}.tar.gz" >> "$GITHUB_OUTPUT"
+              chmod +x "$folder/MeManga"
+              tar -czf "$asset" "$folder"
             else
-              echo "upload_path=$asset" >> "$GITHUB_OUTPUT"
+              python -m zipfile -c "$asset" "$folder"
             fi
+            echo "upload_path=$asset" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Verify Linux archive preserves the executable bit
         # Release gate for issue #167: prove the tarball actually restores
         # a runnable binary before it can reach the release page. Extract
-        # into a scratch dir and assert the extracted file is executable;
-        # a dropped +x bit fails the build instead of shipping a download
-        # users cannot launch.
+        # into a scratch dir and assert the extracted launcher is
+        # executable; a dropped +x bit fails the build instead of shipping
+        # a download users cannot launch. The extracted folder must also
+        # still pass the LGPL check and start the GUI (issue #381).
         if: runner.os == 'Linux'
         shell: bash
         run: |
           asset="${{ matrix.asset_name }}"
+          folder="${asset%.tar.gz}"
           workdir="$(mktemp -d)"
-          tar -xzf "${asset}.tar.gz" -C "$workdir"
-          extracted="$workdir/$asset"
+          tar -xzf "$asset" -C "$workdir"
+          extracted="$workdir/$folder/MeManga"
           ls -l "$extracted"
           if [ ! -x "$extracted" ]; then
             echo "::error::Extracted Linux binary is not executable — release would ship an unlaunchable file"
             exit 1
           fi
           echo "OK: extracted binary is executable"
+          python packaging/lgpl_compliance.py check --path "$workdir/$folder"
+          QT_QPA_PLATFORM=offscreen "$extracted" --verify-gui
+
+      - name: Verify Windows archive keeps the LGPL layout
+        # Issue #381: extract the exact .zip that gets uploaded and re-run
+        # the LGPL check and the GUI smoke test on it, so the release
+        # cannot ship an archive that lost the notices, the separate
+        # libraries or a Qt plugin the GUI needs.
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          asset="${{ matrix.asset_name }}"
+          folder="${asset%.zip}"
+          workdir="$(mktemp -d)"
+          python -m zipfile -e "$asset" "$workdir"
+          test -f "$workdir/$folder/MeManga.exe"
+          python packaging/lgpl_compliance.py check --path "$workdir/$folder"
+          QT_QPA_PLATFORM=offscreen "$workdir/$folder/MeManga.exe" --verify-gui
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

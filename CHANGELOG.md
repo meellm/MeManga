@@ -6,6 +6,22 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Fixed
+- #381 Desktop releases now follow the LGPL terms of the bundled Qt,
+  PySide6, Shiboken6 and img2pdf components. The apps ship as a folder
+  instead of a single self-extracting file and are no longer compressed
+  with UPX, so those libraries stay separate files users can replace.
+  Each download includes a `licenses` folder with an LGPL notice
+  (versions, source links, replacement steps and the native libraries
+  copied from the build system) and the LGPL-3.0, GPL-3.0 and LGPL-2.1
+  texts. The unused Qt Virtual Keyboard (not available under the LGPL),
+  Qt Pdf and QML modules and the GPL-only readline library are no longer
+  bundled. Windows now downloads as `MeManga-windows-x64.zip` and the
+  Linux `.tar.gz` extracts to a `MeManga-linux-x64` folder; the release
+  build fails if the notices or the replaceable layout are missing or an
+  unapproved Qt module ships, and a new `--verify-gui` smoke test checks
+  that the packaged GUI starts.
+
 ## [0.4.4] - 2026-10-03
 
 ### Added

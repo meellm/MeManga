@@ -259,6 +259,110 @@ def _verify_playwright() -> int:
         return 1
 
 
+def _verify_gui() -> int:
+    """Headless GUI smoke test. Returns a process exit code.
+
+    Invoked via ``--verify-gui`` by the release pipeline (issue #381).
+    The release ships Qt, PySide6 and Shiboken6 as separate files and
+    drops the Qt modules and plugins MeManga does not use, so the build
+    has to prove the real GUI still comes up from the frozen app: build
+    the QApplication with the app theme and icon, round-trip a JPEG and
+    an SVG through Qt's image plugins, construct and show the full main
+    window, spin the event loop briefly and close it again.
+
+    Nothing here touches the network installers or the user's own
+    config: HOME (and its Windows equivalents) point at a throwaway
+    directory for the run. Run it with ``QT_QPA_PLATFORM=offscreen`` on
+    a machine without a display.
+    """
+    import shutil
+    import tempfile
+    import traceback
+
+    home = tempfile.mkdtemp(prefix="memanga-verify-gui-")
+    for var in ("HOME", "USERPROFILE", "APPDATA"):
+        os.environ[var] = home
+    os.environ["XDG_CONFIG_HOME"] = os.path.join(home, ".config")
+    window = None
+    try:
+        from PySide6 import __version__ as pyside_version
+        from PySide6.QtCore import (
+            QBuffer, QByteArray, QIODevice, QTimer, qVersion,
+        )
+        from PySide6.QtGui import QColor, QImage, QImageReader
+        from PySide6.QtWidgets import QApplication
+
+        from memanga.gui import _load_app_icon
+        from memanga.gui import theme as T
+        from memanga.gui.app import MeMangaApp
+
+        qapp = QApplication.instance() or QApplication([sys.argv[0]])
+        print(f"[VerifyGUI] Qt {qVersion()}, PySide6 {pyside_version}, "
+              f"platform={qapp.platformName()}", flush=True)
+        qapp.setStyle("Fusion")
+        T.apply(qapp)
+        icon = _load_app_icon()
+        if icon is None or icon.isNull():
+            print("[VerifyGUI] FAIL: app icon not found in the bundle",
+                  flush=True)
+            return 1
+        qapp.setWindowIcon(icon)
+
+        # JPEG and SVG decoding go through the qjpeg / qsvg plugins.
+        formats = {bytes(f).decode() for f in
+                   QImageReader.supportedImageFormats()}
+        missing = sorted({"jpg", "png", "svg"} - formats)
+        if missing:
+            print(f"[VerifyGUI] FAIL: image plugins missing: {missing}",
+                  flush=True)
+            return 1
+        image = QImage(16, 16, QImage.Format.Format_RGB32)
+        image.fill(QColor("#3366cc"))
+        buf = QBuffer()
+        buf.open(QIODevice.OpenModeFlag.ReadWrite)
+        decoded = QImage()
+        if not (image.save(buf, "JPG")
+                and decoded.loadFromData(buf.data(), "JPG")):
+            print("[VerifyGUI] FAIL: JPEG round trip failed", flush=True)
+            return 1
+        svg = QByteArray(b'<svg xmlns="http://www.w3.org/2000/svg" '
+                         b'width="8" height="8"><rect width="8" height="8" '
+                         b'fill="red"/></svg>')
+        if QImage.fromData(svg, "SVG").isNull():
+            print("[VerifyGUI] FAIL: SVG decoding failed", flush=True)
+            return 1
+
+        window = MeMangaApp()
+        window.show()
+        # Sample visibility from inside the running event loop: Qt 6's
+        # quit() closes every top-level window on the way out.
+        visible = []
+
+        def _probe():
+            visible.append(window.isVisible())
+            qapp.quit()
+
+        QTimer.singleShot(1000, _probe)
+        qapp.exec()
+        if visible != [True]:
+            print("[VerifyGUI] FAIL: main window did not stay visible",
+                  flush=True)
+            return 1
+        print(f"[VerifyGUI] PASS: main window {window.windowTitle()!r} "
+              "shown and event loop ran", flush=True)
+        return 0
+    except Exception:
+        print(f"[VerifyGUI] FAIL:\n{traceback.format_exc()}", flush=True)
+        return 1
+    finally:
+        if window is not None:
+            try:
+                window.close()
+            except Exception:
+                pass
+        shutil.rmtree(home, ignore_errors=True)
+
+
 if getattr(sys, 'frozen', False):
     # Must run before anything else in the frozen build: a windowed
     # (console=False) exe has null std streams, and Playwright's driver
@@ -315,6 +419,10 @@ else:
 # verdict is pure Playwright, with no Qt/display dependency.
 if "--verify-playwright" in sys.argv:
     sys.exit(_verify_playwright())
+
+# Release-pipeline GUI smoke test (issue #381): real Qt + main window.
+if "--verify-gui" in sys.argv:
+    sys.exit(_verify_gui())
 
 from memanga.gui import launch_gui
 

@@ -1,39 +1,35 @@
 #!/usr/bin/env python3
-"""macOS `.app` packaging for the MeManga RELEASE build (issue #163).
+"""macOS `.app` packaging for the MeManga RELEASE build (issues #163, #381).
 
-`build_app.py` + PyInstaller produce a single-file Mach-O executable
-(`release/MeManga`). GitHub serves that extensionless file as
-`application/octet-stream`, so a browser download lands as a raw document
-that opens in TextEdit instead of a runnable app — and the executable bit
-is lost over the download (mode 0644). This module turns that verified
-binary into a normal, double-clickable macOS app:
+GitHub serves an extensionless Mach-O as `application/octet-stream`, so a
+raw executable download lands as a document that opens in TextEdit and
+loses its executable bit (#163). The macOS release therefore ships a
+normal, double-clickable app inside a zip:
 
-    release/MeManga            (one-file exe from build_app.py)
-      -> release/MeManga.app   (minimal bundle wrapping the exe)
+    packaging/memanga-release.spec  (PyInstaller one-folder + BUNDLE)
+      -> release/MeManga.app        (moved there by build_app.py)
       -> MeManga-macos-<arch>.zip
 
-The bundle is intentionally the smallest thing Launch Services accepts as
-an application:
+PyInstaller builds the bundle itself so the Qt / PySide6 / Shiboken6
+libraries stay separate, replaceable files (#381) laid out the way macOS
+code signing expects:
 
     MeManga.app/
       Contents/
         Info.plist             (CFBundleExecutable = MeManga, APPL)
-        PkgInfo                 ("APPL????")
-        MacOS/MeManga           (the one-file exe, mode 0755)
-        Resources/icon.icns     (optional app icon)
+        MacOS/MeManga          (the launcher, mode 0755)
+        Frameworks/            (Python runtime, Qt and other libraries)
+        Resources/             (icon, data files, licenses/ notices)
 
-We wrap the already-built binary rather than switching the PyInstaller
-spec to a BUNDLE target: the one-file exe is the artifact the release
-already verifies (arch via `lipo`, Playwright self-test), so wrapping it
-keeps the launch behaviour identical and adds nothing that only a real
-macOS run could prove.
+This module supplies the Info.plist settings the spec passes to BUNDLE,
+plus a portable zipper and the validation used as a release gate.
 
 Everything here is pure stdlib and platform-independent so the whole
-`build -> zip -> validate` pipeline is exercised by the unit tests on the
-Linux CI leg — the arch check reads the Mach-O header directly instead of
-shelling out to `lipo`. On the macOS release leg the workflow archives the
-bundle with Apple's `ditto` (bulletproof permission/layout fidelity) and
-then runs `validate` on the real `.zip` as a release gate.
+`zip -> validate` pipeline is exercised by the unit tests on the Linux CI
+leg — the arch check reads the Mach-O header directly instead of shelling
+out to `lipo`. On the macOS release leg the workflow archives the bundle
+with Apple's `ditto` (bulletproof permission/layout fidelity) and then
+runs `validate` on the real `.zip` as a release gate.
 
 Downloaded apps that are not Developer ID signed and notarized may be
 reported by Gatekeeper as "damaged". When the optional Apple credentials
@@ -48,7 +44,6 @@ unstapled zip. Without the credentials the zip is validated without the
 `--require-*` flags and ships unsigned.
 
 CLI:
-    python packaging/macos_app.py build    --exe release/MeManga --dest release
     python packaging/macos_app.py zip      --app release/MeManga.app --out out.zip
     python packaging/macos_app.py validate --path out.zip --arch x86_64
     python packaging/macos_app.py validate --path out.zip --arch arm64 \
@@ -58,8 +53,8 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import os
 import plistlib
-import shutil
 import stat
 import struct
 import sys
@@ -151,8 +146,8 @@ def has_code_signature(data: bytes) -> bool:
     return False
 
 
-# ── Building the .app bundle ────────────────────────────────────────────
-def _source_version() -> str:
+# ── Info.plist settings for PyInstaller's BUNDLE ────────────────────────
+def source_version() -> str:
     """Read `__version__` from memanga/__init__.py — the same string the app
     shows in its title bar — so Finder's "Get Info" matches the release."""
     init = Path(__file__).resolve().parent.parent / "memanga" / "__init__.py"
@@ -165,87 +160,39 @@ def _source_version() -> str:
     return "0.0.0"
 
 
-def _info_plist(app_name: str, version: str, has_icon: bool) -> bytes:
-    info = {
-        "CFBundleName": app_name,
-        "CFBundleDisplayName": app_name,
-        # The launcher runs Contents/MacOS/<CFBundleExecutable>; it must
-        # name the binary we drop in there or the app won't start.
-        "CFBundleExecutable": app_name,
-        "CFBundleIdentifier": BUNDLE_IDENTIFIER,
-        "CFBundlePackageType": "APPL",
-        "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": version,
+def info_plist_overrides(version: str) -> dict:
+    """Keys the release spec merges into the Info.plist PyInstaller writes.
+    BUNDLE already sets CFBundleExecutable, CFBundleIdentifier,
+    CFBundlePackageType, CFBundleShortVersionString and the icon."""
+    return {
         "CFBundleVersion": version,
         "LSMinimumSystemVersion": "10.13.0",
         "NSHighResolutionCapable": True,
         "LSApplicationCategoryType": "public.app-category.utilities",
     }
-    if has_icon:
-        info["CFBundleIconFile"] = "icon.icns"
-    return plistlib.dumps(info)
-
-
-def build_app_bundle(
-    exe_path,
-    dest_dir,
-    *,
-    icon_path=None,
-    version: str | None = None,
-    app_name: str = APP_NAME,
-) -> Path:
-    """Wrap the one-file executable `exe_path` in `<dest_dir>/<app_name>.app`
-    and return the bundle path. The inner binary is written mode 0755 — that
-    executable bit is the whole point of #163."""
-    exe_path = Path(exe_path)
-    dest_dir = Path(dest_dir)
-    if not exe_path.is_file():
-        raise FileNotFoundError(f"executable not found: {exe_path}")
-
-    app = dest_dir / f"{app_name}.app"
-    contents = app / "Contents"
-    macos = contents / "MacOS"
-    resources = contents / "Resources"
-    # Start clean so a rerun never leaves stale files inside the bundle.
-    if app.exists():
-        shutil.rmtree(app)
-    macos.mkdir(parents=True)
-    resources.mkdir(parents=True)
-
-    inner = macos / app_name
-    shutil.copyfile(exe_path, inner)
-    inner.chmod(0o755)  # rwxr-xr-x — launchable
-
-    has_icon = False
-    if icon_path:
-        icon_path = Path(icon_path)
-        if icon_path.is_file():
-            shutil.copyfile(icon_path, resources / "icon.icns")
-            has_icon = True
-
-    (contents / "Info.plist").write_bytes(
-        _info_plist(app_name, version or _source_version(), has_icon)
-    )
-    # Legacy 8-byte type/creator record. Modern macOS reads Info.plist, but
-    # a well-formed bundle still carries it: 'APPL' type, '????' creator.
-    (contents / "PkgInfo").write_bytes(b"APPL????")
-    return app
 
 
 # ── Zipping the bundle ──────────────────────────────────────────────────
 # The release leg archives with `ditto` (canonical macOS tool). This
 # portable zipper produces an equivalent archive for the unit tests and for
-# any host without `ditto`. A one-file wrapper bundle contains no symlinks
-# or resource forks, so a plain zip is a faithful representation — the only
-# thing that must survive is the exec bit, stored in each entry's Unix mode.
+# any host without `ditto`. What must survive is each entry's Unix mode:
+# the exec bit on binaries and the symlinks PyInstaller uses between
+# Contents/Frameworks and Contents/Resources (stored as Unix symlink
+# entries, the way `ditto` and Archive Utility read them).
 _DIR_MODE = 0o755
 _EXEC_MODE = 0o755
 _DATA_MODE = 0o644
+_LINK_MODE = 0o755
 
 
-def _write_entry(zf, arcname, data, mode, *, is_dir=False):
+def _write_entry(zf, arcname, data, mode, *, is_dir=False, is_link=False):
     zi = zipfile.ZipInfo(arcname)
-    type_bits = stat.S_IFDIR if is_dir else stat.S_IFREG
+    if is_dir:
+        type_bits = stat.S_IFDIR
+    elif is_link:
+        type_bits = stat.S_IFLNK
+    else:
+        type_bits = stat.S_IFREG
     # Unix permission bits live in the top 16 bits of external_attr, and
     # extractors only honour them when "version made by" says Unix (3).
     # Without this the unzipped binary is rw-r--r-- and the app can't
@@ -271,10 +218,11 @@ def zip_app_bundle(app_dir, zip_path, *, app_name: str = APP_NAME) -> Path:
         for path in sorted(app_dir.rglob("*")):
             rel = f"{top}/{path.relative_to(app_dir).as_posix()}"
             if path.is_symlink():
-                # A one-file wrapper has no symlinks; refuse to silently
-                # flatten one if the layout ever grows to include them.
-                raise ValueError(f"unexpected symlink in bundle: {path}")
-            if path.is_dir():
+                # Store the link itself (its target as the entry data);
+                # flattening it would duplicate files and break the seal.
+                _write_entry(zf, rel, os.readlink(path).encode(),
+                             _LINK_MODE, is_link=True)
+            elif path.is_dir():
                 _write_entry(zf, rel + "/", b"", _DIR_MODE, is_dir=True)
             else:
                 exec_bit = path.stat().st_mode & stat.S_IXUSR
@@ -414,16 +362,6 @@ def validate_app_bundle(path, *, app_name: str = APP_NAME,
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────
-def _cmd_build(args) -> int:
-    app = build_app_bundle(args.exe, args.dest, icon_path=args.icon,
-                           version=args.version)
-    print(f"built {app}")
-    if args.zip:
-        zip_app_bundle(app, args.zip)
-        print(f"zipped {args.zip}")
-    return 0
-
-
 def _cmd_zip(args) -> int:
     zip_app_bundle(args.app, args.out)
     print(f"zipped {args.out}")
@@ -450,16 +388,8 @@ def _cmd_validate(args) -> int:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        description="Package the MeManga release binary as a macOS .app.")
+        description="Zip and validate the MeManga release macOS .app.")
     sub = parser.add_subparsers(dest="cmd", required=True)
-
-    b = sub.add_parser("build", help="wrap the one-file exe into MeManga.app")
-    b.add_argument("--exe", required=True, help="path to the one-file binary")
-    b.add_argument("--dest", required=True, help="dir to create the .app in")
-    b.add_argument("--icon", help="optional .icns for Contents/Resources")
-    b.add_argument("--version", help="override CFBundleShortVersionString")
-    b.add_argument("--zip", help="also write a .zip of the built bundle here")
-    b.set_defaults(func=_cmd_build)
 
     z = sub.add_parser("zip", help="zip an existing .app, preserving exec bits")
     z.add_argument("--app", required=True)

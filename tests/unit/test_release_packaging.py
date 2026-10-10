@@ -1,4 +1,4 @@
-"""Static guards for the release packaging (issues #146, #163, and #167).
+"""Static guards for the release packaging (issues #146, #163, #167, #381).
 
 #146: The release binary's CPU architecture follows PyInstaller's
 `target_arch` in `packaging/memanga-release.spec`. Left unset it silently
@@ -24,6 +24,11 @@ save the download without the executable bit, so a bare Linux ELF lands as
 fix ships Linux as a `.tar.gz`, which records the +x bit inside the archive
 so `tar xzf` restores a runnable binary, and the workflow gates the release
 on that bit surviving extraction.
+
+#381: the desktop apps now ship as PyInstaller one-folder builds without
+UPX (see tests/unit/test_lgpl_compliance.py), so MeManga.app is built by
+PyInstaller's BUNDLE step instead of being wrapped around a one-file
+binary, and the Linux tarball holds a `MeManga-linux-x64/` folder.
 
 The workflow/spec assertions are cheap text/YAML checks because the real
 build only runs on CI runners; Gatekeeper acceptance itself can only be
@@ -53,6 +58,8 @@ MACOS_APP = REPO_ROOT / "packaging" / "macos_app.py"
 # The GitHub Actions expression the workflow uses to thread the matrix
 # arch into both the build env and the verification step.
 ARCH_EXPR = '${{ matrix.target_arch }}'
+# The folder build_app.py leaves under release/ (#381).
+APP_DIR_EXPR = '${{ matrix.app_dir }}'
 
 
 def _load_macos_app():
@@ -65,6 +72,34 @@ def _load_macos_app():
 
 
 macos_app = _load_macos_app()
+
+
+def _fake_app(dest, exe_bytes, *, version="1.0.0"):
+    """A MeManga.app shaped like PyInstaller's BUNDLE output: launcher in
+    MacOS/, a library in Frameworks/, data in Resources/ and the symlink
+    BUNDLE leaves in Frameworks/ for each relocated data file."""
+    app = Path(dest) / "MeManga.app"
+    contents = app / "Contents"
+    (contents / "MacOS").mkdir(parents=True)
+    (contents / "Frameworks").mkdir()
+    (contents / "Resources").mkdir()
+    exe = contents / "MacOS" / "MeManga"
+    exe.write_bytes(exe_bytes)
+    exe.chmod(0o755)
+    (contents / "Frameworks" / "libpyside6.abi3.6.11.dylib").write_bytes(
+        b"\xcf\xfa\xed\xfe" + b"\x00" * 64)
+    (contents / "Resources" / "img2pdf.py").write_text("# img2pdf\n")
+    (contents / "Frameworks" / "img2pdf.py").symlink_to(
+        "../Resources/img2pdf.py")
+    info = dict(
+        CFBundleExecutable="MeManga",
+        CFBundleIdentifier=macos_app.BUNDLE_IDENTIFIER,
+        CFBundlePackageType="APPL",
+        CFBundleShortVersionString=version,
+        **macos_app.info_plist_overrides(version),
+    )
+    (contents / "Info.plist").write_bytes(plistlib.dumps(info))
+    return app
 
 
 def _fake_macho(arch: str) -> bytes:
@@ -178,24 +213,26 @@ def _step_index(fragment):
 
 def test_workflow_ships_linux_x64_from_ubuntu_runner():
     """The Linux leg must build the x86_64 asset on the Ubuntu runner."""
+    linux = "MeManga-linux-x64.tar.gz"
     by_asset = {e["asset_name"]: e for e in _build_matrix()}
-    assert "MeManga-linux-x64" in by_asset, "Linux x64 asset dropped"
-    assert by_asset["MeManga-linux-x64"]["os"] == "ubuntu-latest"
+    assert linux in by_asset, "Linux x64 asset dropped"
+    assert by_asset[linux]["os"] == "ubuntu-latest"
 
 
 def test_linux_binary_is_packaged_as_targz():
     """Linux must upload a gzip tarball, not a bare ELF. The archive is
     what preserves the executable bit through a GitHub release download
-    (issue #167); the packaging step marks the binary +x and tars it,
-    then exposes the tarball path for the upload step."""
+    (issue #167); the packaging step marks the launcher +x and tars the
+    app folder (issue #381), then exposes the tarball path for the upload
+    step."""
     step = _step_named("Package artifact for upload")
     assert step is not None, "packaging step missing"
     assert step.get("id") == "package", "upload step can't reference the path"
     run = step.get("run", "")
     # Linux-only branch: make it executable, then wrap it in a tarball.
     assert "runner.os" in run and "Linux" in run
-    assert "chmod +x" in run
-    assert "tar -czf" in run
+    assert 'chmod +x "$folder/MeManga"' in run
+    assert 'tar -czf "$asset" "$folder"' in run
     assert ".tar.gz" in run
     # The final upload path is threaded out as a step output so a single
     # upload step serves every OS.
@@ -204,8 +241,8 @@ def test_linux_binary_is_packaged_as_targz():
 
 
 def test_upload_step_uses_packaged_path():
-    """The upload must ship whatever the packaging step produced (the
-    tarball on Linux, the raw binary elsewhere), not a hard-coded name."""
+    """The upload must ship whatever the packaging step produced (an
+    archive on every OS), not a hard-coded name."""
     step = _step_named("Upload artifact")
     assert step is not None
     path = step.get("with", {}).get("path", "")
@@ -242,24 +279,26 @@ def test_package_and_gate_precede_upload():
 def test_targz_roundtrip_preserves_executable_bit(tmp_path):
     """Mechanism check for issue #167: the format the workflow ships
     (`tar czf` / `tar xzf`) records the Unix mode inside the archive, so
-    an executable binary extracts back as executable. This is the whole
-    reason Linux ships as a tarball instead of a bare ELF — a raw release
-    asset carries no mode and downloads as `-rw-r--r--`."""
-    import stat
+    the launcher inside the app folder extracts back as executable. This
+    is the whole reason Linux ships as a tarball instead of a bare ELF — a
+    raw release asset carries no mode and downloads as `-rw-r--r--`."""
     import tarfile
 
-    binary = tmp_path / "MeManga-linux-x64"
+    folder = tmp_path / "MeManga-linux-x64"
+    (folder / "_internal").mkdir(parents=True)
+    binary = folder / "MeManga"
     binary.write_bytes(b"\x7fELF fake binary")
     binary.chmod(0o755)
+    (folder / "_internal" / "img2pdf.py").write_text("# img2pdf\n")
 
     archive = tmp_path / "MeManga-linux-x64.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
-        tar.add(binary, arcname="MeManga-linux-x64")
+        tar.add(folder, arcname="MeManga-linux-x64")
 
     # The archived member itself must carry the owner-execute bit — that
     # is the byte-level guarantee a bare release asset cannot make.
     with tarfile.open(archive, "r:gz") as tar:
-        member = tar.getmember("MeManga-linux-x64")
+        member = tar.getmember("MeManga-linux-x64/MeManga")
         assert member.mode & stat.S_IXUSR, "tar member lost the +x bit"
 
     dest = tmp_path / "out"
@@ -269,9 +308,10 @@ def test_targz_roundtrip_preserves_executable_bit(tmp_path):
         # it keeps an executable file at 0o755, so the +x bit survives.
         tar.extractall(dest, filter="data")
 
-    extracted = dest / "MeManga-linux-x64"
+    extracted = dest / "MeManga-linux-x64" / "MeManga"
     assert extracted.stat().st_mode & stat.S_IXUSR, \
         "extracted binary is not owner-executable"
+    assert (dest / "MeManga-linux-x64" / "_internal" / "img2pdf.py").is_file()
 
 
 def test_readme_documents_linux_targz_launch_path():
@@ -280,23 +320,29 @@ def test_readme_documents_linux_targz_launch_path():
     text = README.read_text(encoding="utf-8")
     # Download table links to the archive, not the bare binary.
     assert "MeManga-linux-x64.tar.gz" in text
-    # Concrete extract + run instructions.
+    # Concrete extract + run instructions for the app folder (#381).
     assert "tar xzf MeManga-linux-x64.tar.gz" in text
-    assert "./MeManga-linux-x64" in text
+    assert "./MeManga-linux-x64/MeManga" in text
     # The chmod fallback for file managers that still strip the bit.
-    assert "chmod +x MeManga-linux-x64" in text
+    assert "chmod +x MeManga-linux-x64/MeManga" in text
 
 # ── issue #163: macOS assets ship as launchable .app packages ───────────
-def test_workflow_packages_macos_app_bundle():
-    """A macOS-gated step must build the .app via the helper. It is archived
-    only after signing + stapling (see the notarization tests below)."""
-    step = _step_named("Package macOS app bundle")
-    assert step is not None, "macOS .app packaging step missing"
-    assert step.get("if") == "runner.os == 'macOS'"
-    run = step.get("run", "")
-    assert "packaging/macos_app.py build" in run
-    # Zipping here would ship the bundle before it is signed and stapled.
-    assert "ditto -c" not in run
+def test_macos_app_is_built_by_pyinstaller_bundle():
+    """Since #381 PyInstaller's BUNDLE step builds MeManga.app from the
+    one-folder build (libraries stay separate files in Frameworks/), so no
+    workflow step wraps a one-file binary any more."""
+    text = SPEC.read_text(encoding="utf-8")
+    assert "BUNDLE(" in text
+    assert "macos_app.BUNDLE_IDENTIFIER" in text
+    assert "macos_app.info_plist_overrides(" in text
+    for step in _build_steps():
+        assert "macos_app.py build" not in step.get("run", ""), step["name"]
+    assert _step_named("Package macOS app bundle") is None
+    # The macOS legs point every gate at the launcher inside the bundle.
+    for leg in _build_matrix():
+        if str(leg.get("os", "")).startswith("macos"):
+            assert leg["app_dir"] == "MeManga.app"
+            assert leg["artifact_name"] == "MeManga.app/Contents/MacOS/MeManga"
 
 
 def test_workflow_validates_packaged_macos_app():
@@ -314,14 +360,15 @@ def test_workflow_validates_packaged_macos_app():
 
 def test_package_step_handles_macos_without_renaming():
     """The unified package step must leave the macOS .zip produced by the
-    app-packaging step in place while still renaming Windows/Linux binaries."""
+    archive step in place while still archiving the Windows/Linux app
+    folders."""
     step = _step_named("Package artifact for upload")
     assert step is not None
     assert step.get("id") == "package"
     run = step.get("run", "")
     assert 'if [ "${{ runner.os }}" = "macOS" ]' in run
     assert 'echo "upload_path=$asset"' in run
-    assert 'mv "$bin" "$asset"' in run
+    assert f'mv "release/{APP_DIR_EXPR}" "$folder"' in run
 
 # ── issue #163: packaging/macos_app.py behaviour (runs off macOS) ────────
 def test_read_macho_arch_identifies_slices():
@@ -335,53 +382,23 @@ def test_read_macho_arch_identifies_slices():
     assert macos_app.read_macho_arch(b"\x00\x00") is None
 
 
-def test_build_app_bundle_layout(tmp_path):
-    exe = tmp_path / "MeManga"
-    exe.write_bytes(_fake_macho("arm64"))
-    icon = tmp_path / "icon.icns"
-    icon.write_bytes(b"icns-bytes")
-
-    app = macos_app.build_app_bundle(exe, tmp_path / "out", icon_path=icon,
-                                     version="9.9.9")
-
-    inner = app / "Contents" / "MacOS" / "MeManga"
-    assert inner.is_file()
-    assert inner.stat().st_mode & stat.S_IXUSR, "inner binary not executable"
-    assert (app / "Contents" / "PkgInfo").read_bytes() == b"APPL????"
-    assert (app / "Contents" / "Resources" / "icon.icns").is_file()
-
-    info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
-    assert info["CFBundleExecutable"] == "MeManga"
-    assert info["CFBundlePackageType"] == "APPL"
-    assert info["CFBundleShortVersionString"] == "9.9.9"
-    assert info["CFBundleIconFile"] == "icon.icns"
-
-
-def test_build_app_bundle_without_icon_omits_icon_key(tmp_path):
-    exe = tmp_path / "MeManga"
-    exe.write_bytes(_fake_macho("x86_64"))
-
-    app = macos_app.build_app_bundle(exe, tmp_path / "out")
-
-    info = plistlib.loads((app / "Contents" / "Info.plist").read_bytes())
-    assert "CFBundleIconFile" not in info
-    assert not (app / "Contents" / "Resources" / "icon.icns").exists()
-    # Default version falls back to the source __version__ (non-empty).
-    assert info["CFBundleShortVersionString"]
-
-
-def test_build_app_bundle_missing_exe_raises(tmp_path):
-    try:
-        macos_app.build_app_bundle(tmp_path / "nope", tmp_path / "out")
-    except FileNotFoundError:
-        return
-    raise AssertionError("expected FileNotFoundError for a missing exe")
+def test_info_plist_overrides_for_bundle():
+    """The keys the spec merges into PyInstaller's Info.plist."""
+    info = macos_app.info_plist_overrides("9.9.9")
+    assert info["CFBundleVersion"] == "9.9.9"
+    assert info["NSHighResolutionCapable"] is True
+    assert info["LSMinimumSystemVersion"]
+    assert info["LSApplicationCategoryType"].startswith("public.app-category.")
+    # BUNDLE owns these; overriding them here would fight PyInstaller.
+    assert "CFBundleExecutable" not in info
+    assert "CFBundleIdentifier" not in info
+    # Default version comes from the source __version__ (non-empty).
+    assert macos_app.source_version()
+    assert macos_app.source_version() != "0.0.0"
 
 
 def _build_and_zip(tmp_path, arch="x86_64"):
-    exe = tmp_path / "MeManga"
-    exe.write_bytes(_fake_macho(arch))
-    app = macos_app.build_app_bundle(exe, tmp_path / "out", version="1.0.0")
+    app = _fake_app(tmp_path / "out", _fake_macho(arch))
     zip_path = tmp_path / f"MeManga-macos-{arch}.zip"
     macos_app.zip_app_bundle(app, zip_path)
     return app, zip_path
@@ -391,6 +408,16 @@ def test_validate_roundtrip_dir_and_zip(tmp_path):
     app, zip_path = _build_and_zip(tmp_path, "x86_64")
     assert macos_app.validate_app_bundle(app, expected_arch="x86_64") == []
     assert macos_app.validate_app_bundle(zip_path, expected_arch="x86_64") == []
+
+
+def test_zip_keeps_bundle_symlinks(tmp_path):
+    """PyInstaller's bundle links Frameworks/ entries to Resources/; the
+    portable zipper must store them as Unix symlinks, not copies."""
+    _, zip_path = _build_and_zip(tmp_path, "arm64")
+    with zipfile.ZipFile(zip_path) as zf:
+        zi = zf.getinfo("MeManga.app/Contents/Frameworks/img2pdf.py")
+        assert stat.S_ISLNK(zi.external_attr >> 16)
+        assert zf.read(zi) == b"../Resources/img2pdf.py"
 
 
 def test_zip_preserves_executable_bit(tmp_path):
@@ -429,9 +456,7 @@ def test_validate_flags_missing_exec_bit(tmp_path):
 def test_validate_flags_non_macho_binary(tmp_path):
     """A wrapper around a non-Mach-O file (e.g. a text doc) is not a
     launchable app and must be flagged."""
-    exe = tmp_path / "MeManga"
-    exe.write_bytes(b"this is not a mach-o binary\n")
-    app = macos_app.build_app_bundle(exe, tmp_path / "out")
+    app = _fake_app(tmp_path / "out", b"this is not a mach-o binary\n")
     problems = macos_app.validate_app_bundle(app, expected_arch="x86_64")
     assert any("Mach-O" in p for p in problems), problems
 
@@ -469,7 +494,6 @@ SIGNED_ONLY_STEPS = (
 UNSIGNED_PATH_STEPS = (
     "Verify macOS artifact architecture",
     "Verify Playwright works inside the built executable (macOS)",
-    "Package macOS app bundle",
     "Archive macOS app bundle",
     "Validate packaged macOS app bundle",
 )
@@ -527,8 +551,8 @@ def test_signed_only_steps_are_gated_on_notarization_output():
 
 
 def test_unsigned_path_keeps_app_package_gates():
-    """Without credentials the leg still builds, self-tests, wraps, zips
-    and validates MeManga.app — only the paid-signing steps are skipped."""
+    """Without credentials the leg still builds, self-tests, zips and
+    validates MeManga.app — only the paid-signing steps are skipped."""
     for name in UNSIGNED_PATH_STEPS:
         step = _step_named(name)
         assert step is not None, name
@@ -554,9 +578,9 @@ def test_workflow_imports_developer_id_certificate():
 
 
 def test_build_step_threads_signing_identity_and_entitlements():
-    """PyInstaller can only sign a one-file build's embedded binaries at
-    build time, so the identity + entitlements must reach the spec — and
-    only when notarization is enabled; unsigned builds get no identity."""
+    """PyInstaller signs the collected binaries and MeManga.app at build
+    time, so the identity + entitlements must reach the spec — and only
+    when notarization is enabled; unsigned builds get no identity."""
     env = _step_named("Build release executable").get("env", {})
     identity = env.get("MEMANGA_CODESIGN_IDENTITY", "")
     assert NOTARIZED in identity
@@ -575,8 +599,9 @@ def test_spec_parameterizes_codesign_identity_from_env():
     assert "codesign_identity=_codesign_identity" in text
     assert "entitlements_file=_entitlements_file" in text
     assert "codesign_identity=None" not in text
-    # UPX would invalidate the Mach-O signatures.
-    assert 'upx=_sys.platform != "darwin"' in text
+    # UPX would invalidate the Mach-O signatures; it is off on every
+    # platform since #381 (see test_lgpl_compliance.py).
+    assert "upx=True" not in text
 
 
 def test_entitlements_are_minimal_for_hardened_runtime():
@@ -706,7 +731,6 @@ def test_macos_signing_steps_are_ordered_before_upload():
         "Import Developer ID signing certificate",
         "Build release executable",
         "Verify Playwright works inside the built executable (macOS)",
-        "Package macOS app bundle",
         "Sign macOS app bundle",
         "Notarize and staple macOS app bundle",
         "Verify Gatekeeper accepts the macOS app",
@@ -735,8 +759,8 @@ def test_signing_steps_leave_windows_and_linux_alone():
     linux = _step_named("Verify Linux archive preserves the executable bit")
     assert linux is not None and linux.get("if") == "runner.os == 'Linux'"
     by_asset = {e["asset_name"]: e for e in _build_matrix()}
-    assert "MeManga-windows-x64.exe" in by_asset
-    assert by_asset["MeManga-windows-x64.exe"]["os"] == "windows-latest"
+    assert "MeManga-windows-x64.zip" in by_asset
+    assert by_asset["MeManga-windows-x64.zip"]["os"] == "windows-latest"
 
 
 def test_workflow_removes_signing_keychain():
@@ -802,9 +826,7 @@ def _fake_signed_macho(arch: str) -> bytes:
 
 
 def _signed_app(tmp_path, arch="arm64", *, stapled=True):
-    exe = tmp_path / "MeManga"
-    exe.write_bytes(_fake_signed_macho(arch))
-    app = macos_app.build_app_bundle(exe, tmp_path / "out", version="1.0.0")
+    app = _fake_app(tmp_path / "out", _fake_signed_macho(arch))
     seal = app / macos_app.SIGNATURE_SEAL_REL
     seal.parent.mkdir(parents=True)
     seal.write_bytes(b"<plist/>")
