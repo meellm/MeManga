@@ -289,7 +289,7 @@ For a host cron job, run Compose from the repository directory:
 | `check [TITLE] [--from N] [--auto] [--safe]` | Look for new chapters, optionally download them |
 | `failed [--retry] [--clear] [--json]` | List / re-attempt / clear partially-failed downloads |
 | `status [--json]` | Show config dir, download dir, manga count, last check time |
-| `doctor [--json] [--check NAME] [--smtp] [--launch-browsers]` | Diagnose paths, browsers, email, keyring, scheduler and source health |
+| `doctor [--json] [--check NAME] [--smtp] [--launch-browsers]` | Diagnose install, paths, browsers, email, keyring, scheduler and source health |
 | `config` | Interactive settings editor |
 | `cron install [--time 06:00]` | Schedule a daily `check --auto` job |
 | `cron status` / `cron remove` | Inspect / uninstall the cron job |
@@ -349,7 +349,8 @@ any page failed, and tracks the failure so you can batch-retry later.
 python -m memanga doctor
 ```
 
-`doctor` checks the config and state files, download directory,
+`doctor` reports the Python and MeManga versions and how MeManga is
+installed, then checks the config and state files, download directory,
 email/keyring setup, the cron or Task Scheduler entry, cached source
 health, and that the Playwright Firefox and Chromium builds are
 installed. Nothing touches the network by default; opt in with

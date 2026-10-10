@@ -4,9 +4,11 @@ Network and browser work is stubbed: SMTP login, crontab and Playwright
 are replaced with fakes so the suite stays offline and deterministic.
 """
 
+import json
 import smtplib
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +17,148 @@ from memanga import doctor
 
 def _run_result(returncode=0, stdout=""):
     return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr="")
+
+
+class _FakeDist:
+    """Stand-in for an ``importlib.metadata`` distribution."""
+
+    def __init__(self, site, version, direct_url=None):
+        self.version = version
+        self._site = Path(site)
+        self._path = self._site / f"memanga-{version}.dist-info"
+        self._direct_url = direct_url
+
+    def read_text(self, name):
+        if name == "direct_url.json" and self._direct_url is not None:
+            return json.dumps(self._direct_url)
+        return None
+
+    def locate_file(self, path):
+        return self._site / path
+
+
+def _use_dist(monkeypatch, dist):
+    from importlib import metadata
+
+    def fake(name):
+        if dist is None:
+            raise metadata.PackageNotFoundError(name)
+        return dist
+    monkeypatch.setattr(metadata, "distribution", fake)
+
+
+class TestRuntime:
+    @pytest.fixture(autouse=True)
+    def _not_frozen(self, monkeypatch):
+        monkeypatch.delattr(sys, "frozen", raising=False)
+
+    def test_source_checkout_without_metadata(self, tmp_path):
+        package_dir = tmp_path / "memanga"
+        package_dir.mkdir()
+        (tmp_path / "pyproject.toml").write_text("[project]\n")
+        assert doctor._install_mode(package_dir, {"version": None}) == "source"
+
+    def test_no_metadata_and_no_checkout_is_unknown(self, tmp_path):
+        package_dir = tmp_path / "memanga"
+        package_dir.mkdir()
+        assert doctor._install_mode(package_dir, {"version": None}) == "unknown"
+
+    def test_frozen_build_wins(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        (tmp_path / "pyproject.toml").write_text("[project]\n")
+        info = {"version": "1.2.3", "matches": True, "editable": True}
+        assert doctor._install_mode(tmp_path / "memanga", info) == "frozen"
+
+    def test_matching_metadata_is_installed(self, monkeypatch, tmp_path):
+        (tmp_path / "memanga").mkdir()
+        _use_dist(monkeypatch, _FakeDist(tmp_path, "1.2.3"))
+        info = doctor._distribution_info(tmp_path / "memanga")
+        assert info["matches"] is True
+        assert info["editable"] is None
+        assert info["location"] and info["metadata_path"]
+        assert doctor._install_mode(tmp_path / "memanga", info) == "installed"
+
+    def test_editable_metadata_points_at_checkout(self, monkeypatch, tmp_path):
+        checkout = tmp_path / "checkout"
+        (checkout / "memanga").mkdir(parents=True)
+        (checkout / "pyproject.toml").write_text("[project]\n")
+        dist = _FakeDist(tmp_path / "site", "1.2.3", direct_url={
+            "url": checkout.as_uri(), "dir_info": {"editable": True}})
+        _use_dist(monkeypatch, dist)
+        info = doctor._distribution_info(checkout / "memanga")
+        assert info["matches"] is True
+        assert info["editable"] is True
+        assert doctor._install_mode(checkout / "memanga", info) == "editable"
+
+    def test_unrelated_metadata_is_ignored(self, monkeypatch, tmp_path):
+        checkout = tmp_path / "checkout"
+        (checkout / "memanga").mkdir(parents=True)
+        (checkout / "pyproject.toml").write_text("[project]\n")
+        (tmp_path / "site" / "memanga").mkdir(parents=True)
+        _use_dist(monkeypatch, _FakeDist(tmp_path / "site", "0.0.1"))
+        info = doctor._distribution_info(checkout / "memanga")
+        assert info["matches"] is False
+        assert doctor._install_mode(checkout / "memanga", info) == "source"
+
+    def test_stale_local_metadata_in_checkout_is_source(self, monkeypatch, tmp_path):
+        # e.g. a leftover memanga.egg-info next to the package in a checkout
+        (tmp_path / "memanga").mkdir()
+        (tmp_path / "pyproject.toml").write_text("[project]\n")
+        _use_dist(monkeypatch, _FakeDist(tmp_path, "1.2.3"))
+        info = doctor._distribution_info(tmp_path / "memanga")
+        assert info["matches"] is True
+        assert doctor._install_mode(tmp_path / "memanga", info) == "source"
+
+    def test_matching_version_mismatch_warns(self, monkeypatch, tmp_path):
+        (tmp_path / "memanga").mkdir()
+        monkeypatch.setattr(doctor, "__file__", str(tmp_path / "memanga" / "doctor.py"))
+        _use_dist(monkeypatch, _FakeDist(tmp_path, "0.0.1"))
+        result = doctor.check_runtime()
+        assert result.status == doctor.WARNING
+        assert "0.0.1" in result.message
+        assert result.details["dist_version"] == "0.0.1"
+        assert result.details["dist_matches"] is True
+        assert result.details["install_mode"] == "installed"
+
+    def test_stale_local_version_mismatch_does_not_warn(self, monkeypatch, tmp_path):
+        (tmp_path / "memanga").mkdir()
+        (tmp_path / "pyproject.toml").write_text("[project]\n")
+        monkeypatch.setattr(doctor, "__file__", str(tmp_path / "memanga" / "doctor.py"))
+        _use_dist(monkeypatch, _FakeDist(tmp_path, "0.0.1"))
+        result = doctor.check_runtime()
+        assert result.status == doctor.OK
+        assert result.details["dist_matches"] is True
+        assert result.details["install_mode"] == "source"
+
+    def test_editable_version_mismatch_warns(self, monkeypatch, tmp_path):
+        checkout = tmp_path / "checkout"
+        (checkout / "memanga").mkdir(parents=True)
+        (checkout / "pyproject.toml").write_text("[project]\n")
+        monkeypatch.setattr(doctor, "__file__", str(checkout / "memanga" / "doctor.py"))
+        _use_dist(monkeypatch, _FakeDist(tmp_path / "site", "0.0.1", direct_url={
+            "url": checkout.as_uri(), "dir_info": {"editable": True}}))
+        result = doctor.check_runtime()
+        assert result.status == doctor.WARNING
+        assert result.details["install_mode"] == "editable"
+
+    def test_unrelated_version_mismatch_does_not_warn(self, monkeypatch, tmp_path):
+        (tmp_path / "memanga").mkdir()
+        _use_dist(monkeypatch, _FakeDist(tmp_path, "0.0.1"))
+        result = doctor.check_runtime()
+        assert result.status == doctor.OK
+        assert result.details["version"] == doctor.__version__
+        assert result.details["dist_version"] == "0.0.1"
+        assert result.details["dist_matches"] is False
+        assert result.details["install_mode"] != "installed"
+
+    def test_no_metadata_reports_imported_code(self, monkeypatch):
+        _use_dist(monkeypatch, None)
+        result = doctor.check_runtime()
+        assert result.status == doctor.OK
+        assert result.details["version"] == doctor.__version__
+        assert result.details["dist_version"] is None
+        assert result.details["python_version"]
+        assert result.details["package_path"]
 
 
 class TestLocalPathChecks:

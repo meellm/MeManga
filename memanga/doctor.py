@@ -24,6 +24,7 @@ import shlex
 import smtplib
 import ssl
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +32,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 
+from . import __version__
 from .config import get_app_password
 
 SCHEMA_VERSION = 1
@@ -42,6 +44,7 @@ SKIP = "skip"
 
 # Stable check names, in report order. `--check` accepts these.
 CHECK_NAMES = (
+    "runtime",
     "config",
     "state",
     "download_dir",
@@ -133,6 +136,109 @@ def _parse_hhmm(value) -> bool:
 # ============================================================================
 # Checks
 # ============================================================================
+
+def _same_path(a, b) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+
+
+def _distribution_info(package_dir: Path) -> Dict[str, Any]:
+    """Installed ``memanga`` distribution metadata, if any.
+
+    ``editable`` comes from the PEP 610 ``direct_url.json`` that pip
+    writes for ``pip install -e``; it is None when that is unknown.
+    ``matches`` says whether the metadata describes the imported package
+    in ``package_dir``: a source checkout can shadow an unrelated
+    site-packages install, and that metadata says nothing about the code
+    actually running.
+    """
+    from importlib import metadata
+    from urllib.parse import urlparse
+    from urllib.request import url2pathname
+
+    try:
+        dist = metadata.distribution("memanga")
+    except metadata.PackageNotFoundError:
+        return {"version": None, "editable": None, "matches": False,
+                "location": None, "metadata_path": None}
+    editable = None
+    source_dir = None
+    try:
+        raw = dist.read_text("direct_url.json")
+        if raw:
+            direct_url = json.loads(raw)
+            editable = bool(direct_url.get("dir_info", {}).get("editable"))
+            url = urlparse(direct_url.get("url") or "")
+            if url.scheme == "file":
+                source_dir = url2pathname(url.path)
+    except (OSError, ValueError, AttributeError):
+        pass
+    try:
+        location = str(dist.locate_file(""))
+        located = dist.locate_file("memanga")
+    except (OSError, TypeError, ValueError):
+        location = located = None
+    # A regular install keeps the package next to its metadata; an
+    # editable one points direct_url.json at the checkout holding it.
+    matches = (located is not None and _same_path(located, package_dir)) or bool(
+        editable and source_dir and _same_path(source_dir, package_dir.parent))
+    metadata_path = getattr(dist, "_path", None)
+    return {
+        "version": dist.version,
+        "editable": editable,
+        "matches": matches,
+        "location": location,
+        "metadata_path": str(metadata_path) if metadata_path else None,
+    }
+
+
+def _install_mode(package_dir: Path, dist: Dict[str, Any]) -> str:
+    """Best-effort guess: frozen, editable, source, installed or unknown.
+
+    Only metadata that matches the imported package counts; unrelated
+    metadata (e.g. an older site-packages install shadowed by a source
+    checkout) is ignored. In a source checkout only editable metadata
+    counts: non-editable metadata there is a stale local
+    egg-info/dist-info left over from a build, not an install.
+    """
+    if getattr(sys, "frozen", False):
+        return "frozen"
+    if dist.get("matches") and dist.get("editable"):
+        return "editable"
+    if (package_dir.parent / "pyproject.toml").is_file():
+        return "source"
+    if dist.get("matches"):
+        return "installed"
+    return "unknown"
+
+
+def check_runtime(config=None, state=None) -> CheckResult:
+    package_dir = Path(__file__).resolve().parent
+    dist = _distribution_info(package_dir)
+    mode = _install_mode(package_dir, dist)
+    details = {
+        "python_version": platform.python_version(),
+        "python_executable": sys.executable,
+        "platform": platform.platform(),
+        "version": __version__,
+        "dist_version": dist["version"],
+        "dist_matches": dist["matches"],
+        "dist_location": dist["location"],
+        "dist_metadata_path": dist["metadata_path"],
+        "package_path": str(package_dir),
+        "install_mode": mode,
+    }
+    python = f"Python {details['python_version']}"
+    # Stale local metadata in a source checkout ("source") is not an install.
+    if (dist["matches"] and mode != "source" and dist["version"]
+            and dist["version"] != __version__):
+        return CheckResult("runtime", WARNING,
+                           f"Installed package metadata is {dist['version']} but the imported "
+                           f"code is {__version__}; reinstall MeManga", details)
+    return CheckResult("runtime", OK, f"MeManga {__version__} ({mode}) on {python}", details)
+
 
 def check_config(config, state=None) -> CheckResult:
     path = Path(config.config_path)
@@ -525,6 +631,7 @@ def run_checks(config, state, only=None, smtp: bool = False,
                launch_browsers: bool = False) -> List[CheckResult]:
     """Run the selected checks (all by default) in `CHECK_NAMES` order."""
     checks = {
+        "runtime": check_runtime,
         "config": check_config,
         "state": check_state,
         "download_dir": check_download_dir,
