@@ -11,6 +11,10 @@ from pathlib import Path
 from .perf import timed
 
 
+class ConfigError(Exception):
+    """The config file exists but cannot be loaded."""
+
+
 class Config:
     """Manages configuration file.
 
@@ -18,9 +22,15 @@ class Config:
     background threads (cover backfill, cover fetch on add) and the YAML
     write itself. Writes are atomic via tempfile + os.replace so a crash
     mid-save can never truncate the user's config.
+
+    With ``tolerate_errors=True`` an unreadable or invalid config file
+    does not raise: defaults are loaded, the problem is kept in
+    ``load_error`` and ``save()`` refuses to write, so the broken file is
+    never overwritten. The CLI uses this so `memanga doctor` can still
+    report the problem.
     """
 
-    def __init__(self, config_dir=None):
+    def __init__(self, config_dir=None, tolerate_errors=False):
         if config_dir:
             self.config_dir = Path(config_dir)
         else:
@@ -29,15 +39,26 @@ class Config:
         self.config_path = self.config_dir / "config.yaml"
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._tolerate_errors = tolerate_errors
+        self.load_error = None
         self._data = self._load()
     
     def _load(self):
         """Load config from file."""
+        self.load_error = None
         if self.config_path.exists():
-            # Explicit UTF-8: titles are arbitrary Unicode and the
-            # platform default encoding may not represent them.
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+            try:
+                # Explicit UTF-8: titles are arbitrary Unicode and the
+                # platform default encoding may not represent them.
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                if not isinstance(data, dict):
+                    raise ConfigError("config file does not contain a YAML mapping")
+            except (OSError, UnicodeDecodeError, yaml.YAMLError, ConfigError) as e:
+                if not self._tolerate_errors:
+                    raise
+                self.load_error = str(e)
+                return self._default_config()
             # Merge with defaults to ensure new fields exist
             defaults = self._default_config()
             for key, value in defaults.items():
@@ -149,6 +170,11 @@ class Config:
         atomically replaces the live file. Concurrent saves serialize on
         the lock instead of fighting over the same file descriptor.
         """
+        if self.load_error:
+            raise ConfigError(
+                f"Refusing to overwrite {self.config_path}, which could not "
+                f"be loaded: {self.load_error}"
+            )
         with self._lock:
             payload = yaml.dump(
                 self._data, default_flow_style=False, allow_unicode=True,

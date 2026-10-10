@@ -6,6 +6,24 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+### Added
+- #250 `memanga doctor` checks the config and state files, download
+  directory, email and keyring setup, the scheduled-check entry, cached
+  source health and the Playwright browser installs in one report. It
+  exits 1 when a check fails (`--strict` also fails on warnings). The
+  SMTP login test (`--smtp`) and headless browser launch
+  (`--launch-browsers`) only run when asked.
+- #250 `list`, `status` and `failed` accept `--json` for scripts. The
+  output is plain JSON with a `schema_version` field, and
+  `status --json` never includes the app password.
+
+### Fixed
+- #250 CLI commands no longer print a MangaFire browser-restart notice
+  to stdout on exit, which broke `search --json` output.
+- #250 An invalid `config.yaml` no longer crashes the CLI with a
+  traceback. `memanga doctor` reports it as a failed `config` check;
+  other commands exit 1 with a short error and leave the file untouched.
+
 ## [0.4.4] - 2026-10-03
 
 ### Added
