@@ -1126,6 +1126,18 @@ class TestDoctorCommand:
         for check in payload["checks"]:
             assert set(check) == {"name", "status", "message", "details"}
 
+    def test_json_runtime_check(self, run_cli, cli_state, monkeypatch, capsys):
+        # Stub the probe: the real result depends on how memanga is installed.
+        from memanga import doctor
+        monkeypatch.setattr(doctor, "check_runtime", lambda c=None, s=None: doctor.CheckResult(
+            "runtime", doctor.OK, "stub", {"install_mode": "source"}))
+        assert run_cli("doctor", "--json", "--check", "runtime") == 0
+        payload = _stdout_json(capsys)
+        assert payload["status"] == "ok"
+        assert [c["name"] for c in payload["checks"]] == ["runtime"]
+        assert payload["checks"][0]["status"] == "ok"
+        assert payload["checks"][0]["details"]["install_mode"] == "source"
+
     def test_failed_check_exits_1(self, run_cli, cli_state, capsys):
         cli_state.state_path.write_text("{broken", encoding="utf-8")
         assert run_cli("doctor", "--json", "--check", "state") == 1

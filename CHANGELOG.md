@@ -13,6 +13,12 @@ All notable changes are recorded here. Format loosely follows
   exits 1 when a check fails (`--strict` also fails on warnings). The
   SMTP login test (`--smtp`) and headless browser launch
   (`--launch-browsers`) only run when asked.
+- #262 `memanga doctor` adds a `runtime` check that reports the Python
+  version and executable, platform, MeManga version, package path and
+  install mode (editable, source, installed, frozen or unknown). It warns when
+  the package metadata for the imported code has a different version;
+  unrelated metadata, such as an older install shadowed by a source
+  checkout, is reported but ignored.
 - #250 `list`, `status` and `failed` accept `--json` for scripts. The
   output is plain JSON with a `schema_version` field, and
   `status --json` never includes the app password.

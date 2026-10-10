@@ -2094,7 +2094,7 @@ Examples:
     # doctor (issue #250)
     p_doctor = subparsers.add_parser(
         "doctor",
-        help="Diagnose setup problems (paths, browsers, email, scheduler)",
+        help="Diagnose setup problems (runtime/install, paths, browsers, email, scheduler)",
         description="Run local health checks. Exits 0 when no check fails, "
                     "1 when any selected check fails.",
     )
