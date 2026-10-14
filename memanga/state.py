@@ -926,7 +926,8 @@ class State:
     # ========================================================================
 
     def add_download_history(self, title: str, chapter: str, fmt: str,
-                             path: str = "", size_mb: float = 0, kindle_sent: bool = False):
+                             path: str = "", size_mb: float = 0, kindle_sent: bool = False,
+                             deleted_after_send: bool = False):
         """Log a completed download."""
         with self._locked() as data:
             if "download_history" not in data:
@@ -938,6 +939,7 @@ class State:
                 "path": path,
                 "size_mb": round(size_mb, 2),
                 "kindle_sent": kindle_sent,
+                "deleted_after_send": deleted_after_send,
                 "timestamp": datetime.now().isoformat(),
             })
             data["download_history"] = data["download_history"][-200:]

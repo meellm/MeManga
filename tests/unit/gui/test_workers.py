@@ -875,3 +875,51 @@ class TestPopularitySort:
         from memanga.gui.workers import source_rank
         assert source_rank("mangadex.org") < source_rank("mangapill.com")
         assert source_rank("anything-unranked.com") == 999
+
+class TestDeleteAfterKindleSend:
+    def test_deletes_only_after_successful_send(self, worker, event_bus, monkeypatch, tmp_path):
+        import time
+        import types
+        from pathlib import Path
+        import memanga.downloader as dl
+        import memanga.emailer as emailer
+
+        sent_paths = []
+        send_attempts = []
+        output_paths = {}
+
+        def fake_download_chapter(**kwargs):
+            path = tmp_path / f"{kwargs['output_format']}.pdf"
+            path.write_text("download")
+            output_paths[kwargs['output_format']] = path
+            return path
+
+        def fake_send(pdf_path, **kwargs):
+            sent_paths.append(Path(pdf_path))
+            send_attempts.append(Path(pdf_path).name)
+            if Path(pdf_path).name == "failed.pdf":
+                raise RuntimeError("delivery failed")
+
+        monkeypatch.setattr(dl, "download_chapter", fake_download_chapter)
+        monkeypatch.setattr(emailer, "send_to_kindle", fake_send)
+
+        for fmt, delete_after_send in (("enabled", True), ("disabled", False), ("failed", True)):
+            worker.download_chapter(
+                {"title": f"Manga {fmt}"}, types.SimpleNamespace(number="1"),
+                str(tmp_path), fmt, None,
+                kindle_cfg={
+                    "kindle_email": "reader@kindle.com",
+                    "sender_email": "sender@example.com",
+                    "app_password": "secret",
+                    "delete_after_send": delete_after_send,
+                },
+            )
+
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and len(send_attempts) < 3:
+            time.sleep(0.02)
+        event_bus.poll()
+
+        assert output_paths["enabled"].exists() is False
+        assert output_paths["disabled"].exists() is True
+        assert output_paths["failed"].exists() is True

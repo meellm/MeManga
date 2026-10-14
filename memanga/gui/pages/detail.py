@@ -1210,6 +1210,7 @@ class DetailPage(BasePage):
             post_processing=post_processing,
             allow_partial=self.app.config.partial_enabled,
             partial_threshold=self.app.config.partial_threshold,
+            delete_after_send=self.app.config.get("delivery.delete_after_send", False),
         )
 
         # Visual feedback: disable the button and relabel until completion

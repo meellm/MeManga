@@ -4,6 +4,7 @@ Wraps ThreadPoolExecutor; publishes events to the EventBus.
 """
 
 import threading
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
@@ -326,7 +327,8 @@ class BackgroundWorker:
     def download_chapter(self, manga, chapter, output_dir, output_format, state,
                          kindle_cfg=None, naming_template=None,
                          post_processing=None, allow_partial=False,
-                         partial_threshold=0.0):
+                         partial_threshold=0.0,
+                         delete_after_send=False):
         """Queue a chapter download.
 
         ``allow_partial``/``partial_threshold`` carry the partial-chapter
@@ -370,6 +372,9 @@ class BackgroundWorker:
                 "output_format": output_format,
                 "state": state,
                 "kindle_cfg": kindle_cfg,
+                "delete_after_send": delete_after_send or bool(
+                    kindle_cfg and kindle_cfg.get("delete_after_send")
+                ),
                 "naming_template": naming_template,
                 "post_processing": post_processing,
                 "cancel": cancel,
@@ -453,6 +458,7 @@ class BackgroundWorker:
             """Deliver to Kindle (if configured) and publish
             download_complete, carrying any accepted partial detail."""
             # Kindle delivery
+            deleted = False
             if item["kindle_cfg"] and path:
                 try:
                     from ..emailer import send_to_kindle
@@ -465,7 +471,13 @@ class BackgroundWorker:
                         smtp_server=item["kindle_cfg"].get("smtp_server", "smtp.gmail.com"),
                         smtp_port=item["kindle_cfg"].get("smtp_port", 587),
                     )
-                    self._events.publish("kindle_sent", {"task_id": task_id, "path": str(path)})
+                    if (item.get("delete_after_send")
+                            and not Path(path).is_dir()):
+                        Path(path).unlink()
+                        deleted = True
+                    self._events.publish("kindle_sent", {
+                        "task_id": task_id, "path": str(path), "deleted": deleted,
+                    })
                 except Exception as e:
                     self._events.publish("kindle_error", {"task_id": task_id, "error": str(e)})
 
@@ -475,6 +487,7 @@ class BackgroundWorker:
                 "title": manga["title"],
                 "chapter": chapter.number,
                 "from_backup": from_backup,
+                "deleted_after_send": deleted,
                 "source": source or getattr(chapter, "source", None) or manga.get("source", "?"),
             }
             if partial_info:

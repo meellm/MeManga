@@ -1513,6 +1513,7 @@ class ReaderPage(BasePage):
             post_processing=cfg.get("delivery.post_processing"),
             allow_partial=cfg.partial_enabled,
             partial_threshold=cfg.partial_threshold,
+            delete_after_send=cfg.get("delivery.delete_after_send", False),
         )
 
     def _maybe_prefetch_fallback(self, title):
