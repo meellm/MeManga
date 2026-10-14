@@ -303,6 +303,7 @@ class MeMangaApp(QMainWindow):
         self.app_state.add_download_history(
             title=title, chapter=str(chapter),
             fmt=self.config.output_format, path=path, size_mb=size_mb,
+            deleted_after_send=bool(data.get("deleted_after_send")),
         )
         self.app_state.add_downloaded_chapter(title, str(chapter))
         self.app_state.clear_failed_chapter(title, str(chapter))
@@ -549,7 +550,9 @@ class MeMangaApp(QMainWindow):
         self.events.publish("check_complete_silent", {})
 
     def _on_kindle_sent(self, data):
-        self.app_state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")
+        filename = data.get("path", "").replace("\\", "/").split("/")[-1]
+        status = " (local copy deleted)" if data.get("deleted") else ""
+        self.app_state.add_notification("kindle", f"Sent to Kindle: {filename}{status}")
         self.events.publish("notification_added", {})
 
     # ---- First-launch source seeding ----
