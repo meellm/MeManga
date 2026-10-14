@@ -248,6 +248,16 @@ class TestDownloadImage:
         monkeypatch.setattr(s, "_request", boom)
         assert s.download_image("https://x", tmp_path / "p.jpg") is False
 
+    def test_rejects_html_response_without_saving_it(self, monkeypatch, tmp_path, fake_response):
+        s = _DummyScraper()
+        path = tmp_path / "p.jpg"
+        monkeypatch.setattr(s, "_request", lambda *a, **k: fake_response(
+            content=b"<html>blocked</html>", headers={"Content-Type": "text/html"}
+        ))
+
+        assert s.download_image("https://x", path) is False
+        assert not path.exists()
+
 
 # ──────────────────────────────────────────────────────────────────────
 # looks_like_image — shared body sniffer (issue #174)
