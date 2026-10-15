@@ -69,7 +69,7 @@ class SettingsPage(BasePage):
         top_row.addWidget(reset_btn)
         h_layout.addLayout(top_row)
 
-        meta = QLabel(f"MeManga v{__version__}  ·  Config: ~/.memanga/config.toml")
+        meta = QLabel(f"MeManga v{__version__}  ·  Config: {self.app.config.config_path}")
         meta.setProperty("role", "meta")
         h_layout.addWidget(meta)
         root.addWidget(header_w)
@@ -1075,6 +1075,7 @@ class SettingsPage(BasePage):
         # root, never into the package install directory.
         cron_cmd = build_cron_line(minute, hour, self.app.config.config_dir,
                                    sys.executable,
+                                   config_dir=self.app.selected_config_dir,
                                    source_root=source_checkout_root())
         try:
             result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
@@ -1108,6 +1109,7 @@ class SettingsPage(BasePage):
         task_name = "MeManga_AutoCheck"
         # Issue #232: the running interpreter, not a checkout-local venv.
         cmd = build_task_command(sys.executable,
+                                 self.app.selected_config_dir,
                                  source_root=source_checkout_root())
         try:
             # no_window_kwargs(): release exe is console=False, so any

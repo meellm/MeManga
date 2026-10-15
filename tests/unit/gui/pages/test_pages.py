@@ -589,7 +589,8 @@ class TestSettingsPage:
 
         page._install_cron_unix("06", "30")
 
-        expected = build_cron_line("30", "06", config_dir, python)
+        expected = build_cron_line("30", "06", config_dir, python,
+                                   config_dir=app_window.selected_config_dir)
         assert expected in submitted["crontab"].splitlines()
         assert f"'{config_dir}/memanga.log'" in submitted["crontab"]
         assert f"'{python}' -m memanga" in submitted["crontab"]
@@ -622,8 +623,11 @@ class TestSettingsPage:
         create, = [c for c in calls if c[1] == "/Create"]
         command = create[create.index("/TR") + 1]
         assert command == build_task_command(
-            python, source_root=settings_mod.source_checkout_root())
-        assert f'"{python}" -m memanga check --auto --quiet' in command
+            python, app_window.selected_config_dir,
+            source_root=settings_mod.source_checkout_root())
+        assert (f'"{python}" -m memanga --config-dir '
+                f'"{app_window.selected_config_dir}" check --auto --quiet'
+                in command)
         assert app_window.config.get("cron.enabled") is True
 
     def test_install_cron_unix_source_checkout_runs_from_checkout(
@@ -683,12 +687,13 @@ class TestSettingsPage:
 
         source_root = source_checkout_root()
         old = build_cron_line("15", "03", config_dir, sys.executable,
-                              source_root=source_root)
+                              config_dir=config_dir, source_root=source_root)
         submitted = self._fake_crontab(
             monkeypatch, f"{old}\n{self._USER_CRONTAB}")
         app_window._pages["settings"]._install_cron_unix("06", "30")
 
         expected = build_cron_line("30", "06", config_dir, sys.executable,
+                                   config_dir=config_dir,
                                    source_root=source_root)
         assert submitted["crontab"] == f"{self._USER_CRONTAB}{expected}\n"
 

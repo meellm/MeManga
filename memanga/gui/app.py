@@ -3,13 +3,14 @@ MeManga GUI Application - PySide6 MainWindow with sidebar + QStackedWidget.
 """
 
 from datetime import datetime
+from pathlib import Path
 
 from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QShortcut, QKeySequence
 
 from .. import __version__
-from ..config import Config
+from ..config import Config, default_config_dir
 from ..state import State
 from .events import EventBus
 from .workers import BackgroundWorker
@@ -24,12 +25,16 @@ from .pages.base import BasePage
 class MeMangaApp(QMainWindow):
     """Main application window."""
 
-    def __init__(self):
+    def __init__(self, config_dir=None):
         super().__init__()
 
-        # Shared state
-        self.config = Config()
-        self.app_state = State()
+        # Shared state. ``selected_config_dir`` is the resolved root, the
+        # default included, so scheduled checks always pin it (issue #259).
+        self.selected_config_dir = (Path(config_dir) if config_dir
+                                    else default_config_dir())
+        config_dir = self.selected_config_dir
+        self.config = Config(config_dir)
+        self.app_state = State(config_dir)
         # Order matters: the repair only applies to configs that were
         # already seeded on an earlier launch, so it has to read the
         # flag before seeding sets it.
@@ -212,8 +217,8 @@ class MeMangaApp(QMainWindow):
             self._sidebar.set_active(name)
 
     def reload_data(self):
-        self.config = Config()
-        self.app_state = State()
+        self.config = Config(self.selected_config_dir)
+        self.app_state = State(self.selected_config_dir)
 
     # ---- Event Handlers ----
 

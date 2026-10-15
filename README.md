@@ -443,11 +443,25 @@ commands, scraper-add walkthroughs, and the lock-refresh flow.
 | `~/.config/memanga/crash.log` | Uncaught exceptions from the windowed release exe |
 | `~/Downloads/MeManga/<title>/` | Default download folder (changeable in Settings) |
 
-The CLI can use another directory for `config.yaml` and `state.json`:
-`memanga --config-dir DIR <command>` (the option goes before the
-command), or set `MEMANGA_CONFIG_DIR=DIR`. The flag wins over the
-variable. `cron install` keeps the selected directory in the scheduled
-check. The GUI always uses `~/.config/memanga/`.
+To keep everything above (except downloads) in another directory, pass
+`memanga --config-dir DIR <command>` or set `MEMANGA_CONFIG_DIR=DIR`.
+The option is global and goes before the command; `memanga --gui
+--config-dir DIR` and the standalone GUI (via the variable) use it too.
+The directory is chosen in this order:
+
+1. `--config-dir DIR`
+2. `MEMANGA_CONFIG_DIR` (an empty value counts as unset)
+3. `~/.config/memanga/`
+
+Relative paths are taken from the current directory and `~` is
+expanded. A missing directory is created; a path that is a file, or a
+directory that cannot be created or written, stops the command (and the
+GUI) with exit code 1 before anything changes. `memanga doctor` still
+runs so it can report the problem. `cron install`
+and the GUI scheduler write the chosen directory (the default one
+included) into the scheduled check as `--config-dir`, so a variable set
+later cannot redirect it; the check also logs to `memanga.log` there. The SMTP App Password in
+the OS keyring is shared by all directories.
 
 Sensitive credentials (SMTP App Password) are stored in the OS keyring
 (Keychain on macOS, Credential Manager on Windows, Secret Service on

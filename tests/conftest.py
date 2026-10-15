@@ -59,6 +59,44 @@ def isolated_home(monkeypatch, tmp_path) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def refuse_writes_in(monkeypatch):
+    """Return ``refuse(directory)``: afterwards creating a temp file in
+    ``directory`` fails like a read-only mount. Works under root, where
+    permission bits do not stop writes."""
+    real = tempfile.mkstemp
+
+    def refuse(directory):
+        target = os.path.abspath(str(directory))
+
+        def _mkstemp(*args, **kwargs):
+            if os.path.abspath(str(kwargs.get("dir"))) == target:
+                raise PermissionError(13, "Permission denied")
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(tempfile, "mkstemp", _mkstemp)
+
+    return refuse
+
+
+@pytest.fixture
+def read_only_dir(tmp_path) -> Iterator[Path]:
+    """An existing directory without write permission (mode 0500).
+
+    Skipped where permission bits do not stop writes: as root, and on
+    Windows. Write access is restored afterwards so tmp_path cleans up.
+    """
+    if sys.platform == "win32" or (hasattr(os, "geteuid") and os.geteuid() == 0):
+        pytest.skip("directory permission bits are not enforced here")
+    path = tmp_path / "read-only"
+    path.mkdir()
+    path.chmod(0o500)
+    try:
+        yield path
+    finally:
+        path.chmod(0o700)
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Qt: one QApplication for the whole session
 # ─────────────────────────────────────────────────────────────────────────

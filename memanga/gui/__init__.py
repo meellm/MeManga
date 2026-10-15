@@ -340,8 +340,24 @@ def _set_windows_app_user_model_id():
         pass
 
 
-def launch_gui():
-    """Launch the MeManga GUI application."""
+def launch_gui(config_dir=None):
+    """Launch the MeManga GUI application.
+
+    ``config_dir`` is the root chosen by `memanga --config-dir`. When
+    None, $MEMANGA_CONFIG_DIR or the default applies (issue #259); the
+    default is passed on as an explicit path so scheduled checks pin it.
+    """
+    from ..config import (ConfigDirError, default_config_dir,
+                          ensure_config_dir, resolve_config_dir)
+
+    try:
+        if config_dir is None:
+            config_dir = resolve_config_dir() or default_config_dir()
+        ensure_config_dir(config_dir)
+    except ConfigDirError as e:
+        sys.stderr.write(f"error: {e}\n")
+        sys.exit(1)
+
     from PySide6.QtWidgets import QApplication
     from .app import MeMangaApp
     from . import theme as T
@@ -367,7 +383,7 @@ def launch_gui():
 
     _ensure_browsers()
 
-    window = MeMangaApp()
+    window = MeMangaApp(config_dir)
     # NOTE: don't subscribe `lambda: T.apply(qapp)` here.
     # `T.set_theme(name, qapp)` already calls `apply(qapp)` BEFORE
     # notifying subscribers, so a re-subscribed apply() would run a

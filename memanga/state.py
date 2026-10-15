@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any, Mapping
 
 from .backup import merge_backup_state
+from .config import default_config_dir
 from .perf import timed
 
 
@@ -67,7 +68,7 @@ class State:
         if config_dir:
             self.config_dir = Path(config_dir)
         else:
-            self.config_dir = Path.home() / ".config" / "memanga"
+            self.config_dir = default_config_dir()
 
         self.state_path = self.config_dir / "state.json"
         self.config_dir.mkdir(parents=True, exist_ok=True)

@@ -7,11 +7,22 @@ Sets up SSL certificates and Playwright browser path for frozen builds.
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 
-def _config_dir() -> Path:
-    """Directory the app uses for state, logs and crash reports."""
-    return Path.home() / ".config" / "memanga"
+def _config_dir() -> Optional[Path]:
+    """Directory the app uses for state, logs and crash reports.
+
+    Honours $MEMANGA_CONFIG_DIR like the rest of the app (issue #259).
+    None when the variable names a file: the default root is not used
+    (or created) in its place, and launch_gui() reports the bad value.
+    """
+    from memanga.config import (ConfigDirError, default_config_dir,
+                                resolve_config_dir)
+    try:
+        return resolve_config_dir() or default_config_dir()
+    except ConfigDirError:
+        return None
 
 
 def _playwright_browsers_dir() -> Path:
@@ -111,6 +122,8 @@ def _ensure_valid_std_streams() -> bool:
         log = None
         try:
             config_dir = _config_dir()
+            if config_dir is None:
+                raise OSError("no usable config directory")
             config_dir.mkdir(parents=True, exist_ok=True)
             # Truncate per launch — this is a "last session" diagnostic
             # log, not an append-forever file that grows unbounded.
@@ -332,15 +345,23 @@ def _install_crash_logger():
     import traceback
     from datetime import datetime
 
+    # Best effort: an unusable config root must not stop startup here;
+    # launch_gui() reports it. Without a root, crashes only go to stderr.
+    log_path = None
     config_dir = _config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    log_path = config_dir / "crash.log"
+    if config_dir is not None:
+        try:
+            config_dir.mkdir(parents=True, exist_ok=True)
+            log_path = config_dir / "crash.log"
+        except OSError:
+            pass
 
     def _hook(exc_type, exc, tb):
         try:
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(f"\n{'=' * 70}\n{datetime.now().isoformat()}\n")
-                traceback.print_exception(exc_type, exc, tb, file=f)
+            if log_path is not None:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(f"\n{'=' * 70}\n{datetime.now().isoformat()}\n")
+                    traceback.print_exception(exc_type, exc, tb, file=f)
         except Exception:
             pass
         # Still also print to stderr — caught by the dev build's

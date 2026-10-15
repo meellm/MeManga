@@ -27,7 +27,9 @@ from .backup import (
     BackupVersionError,
     validate_backup,
 )
-from .config import Config, get_app_password, set_app_password
+from .config import (CONFIG_DIR_ENV, Config, ConfigDirError, default_config_dir,
+                     ensure_config_dir, get_app_password, resolve_config_dir,
+                     set_app_password)
 from .cron import (build_cron_line, build_task_command, managed_lines,
                    read_crontab,
                    remove_managed_lines, replace_managed_line,
@@ -81,17 +83,13 @@ def _error(message: str) -> int:
     err_console.print(message)
     return EXIT_ERROR
 
-# Issue #221: `--config-dir DIR` wins over $MEMANGA_CONFIG_DIR, which
-# wins over the default ~/.config/memanga.
-CONFIG_DIR_ENV = "MEMANGA_CONFIG_DIR"
-
-
 @dataclass
 class CliContext:
     """Config and State for one CLI run, rooted in the same directory."""
     config: Config
     state: State
-    # Explicitly selected root, or None for the default location.
+    # Resolved root (the default included, issue #259), or None only
+    # when a caller built the context without one.
     config_dir: Optional[Path] = None
 
 
@@ -101,14 +99,6 @@ class CliContext:
 _context: Optional[CliContext] = None
 config: Optional[Config] = None
 state: Optional[State] = None
-
-
-def resolve_config_dir(cli_value=None) -> Optional[Path]:
-    """Return the selected config root, or None for the default."""
-    value = cli_value or os.environ.get(CONFIG_DIR_ENV)
-    if not value:
-        return None
-    return Path(value).expanduser().absolute()
 
 
 def build_context(config_dir=None) -> CliContext:
@@ -2230,8 +2220,9 @@ Examples:
     )
     parser.add_argument(
         "--config-dir", metavar="DIR",
-        help=f"Use DIR for config.yaml and state.json (default: ${CONFIG_DIR_ENV} "
-             "or ~/.config/memanga). Goes before the command.",
+        help=f"Use DIR for config, state, logs and the cover cache (default: "
+             f"${CONFIG_DIR_ENV}, else ~/.config/memanga). Goes before the "
+             "command; created if missing.",
     )
     # In CLI-only Docker images (MEMANGA_CLI_ONLY=1) the GUI is not installed;
     # suppress the flag from help and reject it at runtime with a clear message.
@@ -2392,12 +2383,28 @@ Examples:
     if args.command == "failed" and args.json and (args.retry or args.clear):
         p_failed.error("--json cannot be combined with --retry or --clear")
 
-    # The GUI builds its own Config/State under the default root.
-    if args.gui and args.config_dir:
-        parser.error("--config-dir is not supported with --gui")
-    use_context(build_context(
-        None if args.gui else resolve_config_dir(args.config_dir)
-    ))
+    # Issue #259: resolve the root once; the CLI context and the GUI
+    # both use it. Usage errors exit 2, an unusable directory exits 1.
+    if args.config_dir is not None and not args.config_dir.strip():
+        parser.error("--config-dir needs a directory path")
+    # Every command but doctor (which reports it) needs a writable root,
+    # checked here so a save never fails halfway through a command.
+    # The default root is kept as an explicit path too, so a scheduled
+    # check pins it and a later $MEMANGA_CONFIG_DIR cannot redirect it.
+    try:
+        config_dir = resolve_config_dir(args.config_dir) or default_config_dir()
+        if args.command != "doctor":
+            ensure_config_dir(config_dir)
+    except ConfigDirError as e:
+        sys.stderr.write(f"error: {e}\n")
+        sys.exit(EXIT_ERROR)
+    try:
+        use_context(build_context(config_dir))
+    except OSError as e:
+        sys.stderr.write(
+            f"error: cannot use config directory {config_dir}: {e.strerror or e}\n"
+        )
+        sys.exit(EXIT_ERROR)
 
     # Only doctor may run on fallback defaults; anything else could act
     # on an empty manga list or overwrite the user's broken config.
@@ -2415,7 +2422,7 @@ Examples:
             )
             sys.exit(1)
         from .gui import launch_gui
-        launch_gui()
+        launch_gui(config_dir)
         return
 
     if args.command is None:

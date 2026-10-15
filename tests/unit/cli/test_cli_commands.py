@@ -1046,6 +1046,20 @@ def _fake_package_install(monkeypatch, tmp_path):
     return site
 
 
+def _root_used_by(monkeypatch, capsys, pinned_args, env_root):
+    """Root a run with the scheduled command's ``--config-dir`` args
+    uses once $MEMANGA_CONFIG_DIR points at ``env_root`` (#259)."""
+    from memanga import cli
+
+    monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(env_root))
+    monkeypatch.setattr(sys, "argv",
+                        ["memanga", *pinned_args, "status", "--json"])
+    capsys.readouterr()
+    cli.main()
+    assert not env_root.exists()
+    return _stdout_json(capsys)["paths"]["config_dir"]
+
+
 class TestCronCommand:
     def test_cron_status_safe(self, run_cli):
         # Status should never write anything system-wide
@@ -1065,19 +1079,30 @@ class TestCronCommand:
         expected = _expected_cron_line(isolated_home / ".config" / "memanga")
         assert expected in submitted["crontab"].splitlines()
 
-    def test_cron_install_default_dir_omits_config_dir(self, isolated_home,
-                                                       monkeypatch):
-        """#221: with no flag or $MEMANGA_CONFIG_DIR the scheduled check
-        keeps the pre-#221 line, so it follows the default root."""
+    def test_cron_install_default_dir_pins_config_dir(self, isolated_home,
+                                                      monkeypatch, capsys,
+                                                      tmp_path):
+        """#259: with no flag or $MEMANGA_CONFIG_DIR the scheduled check
+        still pins the default root, so a variable set later cannot
+        redirect it away from the root that holds its log."""
         from memanga import cli
 
+        default_root = isolated_home / ".config" / "memanga"
         submitted = _capture_crontab(monkeypatch)
+        monkeypatch.delenv("MEMANGA_CONFIG_DIR", raising=False)
         monkeypatch.setattr(sys, "argv",
                             ["memanga", "cron", "install", "--time", "06:00"])
         cli.main()
 
-        assert _expected_cron_line() in submitted["crontab"].splitlines()
-        assert "--config-dir" not in submitted["crontab"]
+        line, = [l for l in submitted["crontab"].splitlines() if l]
+        assert line == _expected_cron_line(default_root)
+        command = shlex.split(line.split("* * * ", 1)[1], comments=True)
+        i = command.index("memanga")
+        assert command[i + 1:i + 4] == ["--config-dir", str(default_root),
+                                        "check"]
+        assert command[-3:] == [">>", str(default_root / "memanga.log"), "2>&1"]
+        assert _root_used_by(monkeypatch, capsys, command[i + 1:i + 3],
+                             tmp_path / "later-env") == str(default_root)
 
     def test_cron_install_outside_source_checkout(self, isolated_home,
                                                   monkeypatch, tmp_path):
@@ -1189,14 +1214,54 @@ class TestCronCommand:
 
         monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
         monkeypatch.setattr(cli.subprocess, "run", _run)
+        monkeypatch.delenv("MEMANGA_CONFIG_DIR", raising=False)
         monkeypatch.setattr(sys, "argv",
                             ["memanga", "cron", "install", "--time", "06:00"])
         cli.main()
 
+        # #259: the default root is pinned like any other.
+        default_root = isolated_home / ".config" / "memanga"
         create, = [c for c in calls if c[1] == "/create"]
         command = create[create.index("/tr") + 1]
         assert command == (f'cmd /d /c "cd /d "{checkout}" && "{python}" '
-                           '-m memanga check --auto --quiet"')
+                           f'-m memanga --config-dir "{default_root}" '
+                           'check --auto --quiet"')
+
+    def test_cron_install_windows_default_dir_pins_config_dir(
+            self, isolated_home, monkeypatch, capsys, tmp_path):
+        """#259: the Task Scheduler command pins the default root, so a
+        later $MEMANGA_CONFIG_DIR cannot redirect the scheduled run."""
+        from memanga import cli
+        from memanga.cron import build_task_command
+
+        site = _fake_package_install(monkeypatch, tmp_path)
+        python = r"C:\Program Files\Python312\python.exe"
+        monkeypatch.setattr(sys, "executable", python)
+        calls = []
+
+        def _run(argv, *a, **k):
+            calls.append(argv)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        monkeypatch.delenv("MEMANGA_CONFIG_DIR", raising=False)
+        monkeypatch.setattr(sys, "argv",
+                            ["memanga", "cron", "install", "--time", "06:00"])
+        try:
+            cli.main()
+        finally:
+            site.chmod(0o755)
+
+        default_root = isolated_home / ".config" / "memanga"
+        create, = [c for c in calls if c[1] == "/create"]
+        command = create[create.index("/tr") + 1]
+        assert command == build_task_command(python, default_root)
+        assert command == (f'"{python}" -m memanga --config-dir '
+                           f'"{default_root}" check --auto --quiet')
+        assert _root_used_by(monkeypatch, capsys,
+                             ["--config-dir", str(default_root)],
+                             tmp_path / "later-env") == str(default_root)
 
 
 # Issue #231: install/remove/status only touch the marked line.
@@ -1417,7 +1482,8 @@ class TestStatusJson:
 
 
 class TestConfigDir:
-    """Issue #221: the config root is chosen per run, after parsing."""
+    """Issues #221/#259: the config root is chosen per run, after
+    parsing: `--config-dir`, then $MEMANGA_CONFIG_DIR, then the default."""
 
     @staticmethod
     def _status_paths(monkeypatch, capsys, *argv):
@@ -1482,14 +1548,174 @@ class TestConfigDir:
         paths = self._status_paths(monkeypatch, capsys)
         assert paths["config_dir"] == str(isolated_home / ".config" / "memanga")
 
-    def test_rejected_with_gui(self, isolated_home, monkeypatch, tmp_path):
+    @staticmethod
+    def _gui_launches(monkeypatch, *argv):
+        """Run `memanga ... --gui` with launch_gui faked; return its args."""
+        import memanga.gui
         from memanga import cli
+        calls = []
         monkeypatch.delenv("MEMANGA_CLI_ONLY", raising=False)
-        monkeypatch.setattr(sys, "argv", ["memanga", "--config-dir",
-                                          str(tmp_path / "x"), "--gui"])
+        monkeypatch.setattr(memanga.gui, "launch_gui",
+                            lambda *a, **k: calls.append(a))
+        monkeypatch.setattr(sys, "argv", ["memanga", *argv, "--gui"])
+        cli.main()
+        return calls
+
+    def test_gui_uses_flag_dir(self, isolated_home, monkeypatch, tmp_path):
+        """#259: --gui runs on the same resolved root as the CLI."""
+        root = tmp_path / "portable"
+        assert self._gui_launches(monkeypatch, "--config-dir", str(root)) == [(root,)]
+
+    def test_gui_uses_env_dir(self, isolated_home, monkeypatch, tmp_path):
+        root = tmp_path / "from-env"
+        monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(root))
+        assert self._gui_launches(monkeypatch) == [(root,)]
+
+    def test_gui_default_dir(self, isolated_home, monkeypatch):
+        """#259: the default root is passed on as an explicit path."""
+        monkeypatch.delenv("MEMANGA_CONFIG_DIR", raising=False)
+        assert self._gui_launches(monkeypatch) == [
+            (isolated_home / ".config" / "memanga",)]
+
+    def test_flag_after_command_is_rejected(self, isolated_home, monkeypatch,
+                                            capsys, tmp_path):
+        """#259: --config-dir is global and goes before the command; after
+        it the run fails instead of silently using another root."""
+        from memanga import cli
+        root = tmp_path / "late"
+        monkeypatch.setattr(sys, "argv", ["memanga", "status", "--config-dir",
+                                          str(root)])
         with pytest.raises(SystemExit) as exc:
             cli.main()
         assert exc.value.code == 2
+        assert "--config-dir" in capsys.readouterr().err
+        assert not root.exists()
+
+    def test_empty_flag_is_a_usage_error(self, isolated_home, monkeypatch,
+                                         capsys, tmp_path):
+        from memanga import cli
+        monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(tmp_path / "from-env"))
+        monkeypatch.setattr(sys, "argv", ["memanga", "--config-dir", "", "status"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 2
+        assert "--config-dir needs a directory path" in capsys.readouterr().err
+        assert not (tmp_path / "from-env").exists()
+
+    def test_empty_env_var_uses_default(self, isolated_home, monkeypatch, capsys):
+        monkeypatch.setenv("MEMANGA_CONFIG_DIR", "")
+        paths = self._status_paths(monkeypatch, capsys)
+        assert paths["config_dir"] == str(isolated_home / ".config" / "memanga")
+
+    @pytest.mark.parametrize("via_env", [False, True])
+    def test_file_instead_of_dir_is_an_error(self, isolated_home, monkeypatch,
+                                             capsys, tmp_path, via_env):
+        from memanga import cli
+        target = tmp_path / "not-a-dir"
+        target.write_text("")
+        argv = ["memanga", "status"]
+        if via_env:
+            monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(target))
+        else:
+            argv[1:1] = ["--config-dir", str(target)]
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        source = "MEMANGA_CONFIG_DIR" if via_env else "--config-dir"
+        assert err == f"error: {source}: {target} is not a directory\n"
+
+    def test_uncreatable_dir_is_an_error(self, isolated_home, monkeypatch,
+                                         capsys, tmp_path):
+        """A parent that is a file makes mkdir fail; report it cleanly."""
+        from memanga import cli
+        blocker = tmp_path / "blocker"
+        blocker.write_text("")
+        root = blocker / "memanga"
+        monkeypatch.setattr(sys, "argv", ["memanga", "--config-dir", str(root),
+                                          "status"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert err.startswith(f"error: cannot use config directory {root}: ")
+        assert "Traceback" not in err
+
+    @staticmethod
+    def _run_in(monkeypatch, root, *argv):
+        from memanga import cli
+        monkeypatch.setattr(sys, "argv", ["memanga", "--config-dir", str(root),
+                                          *argv])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        return exc.value.code
+
+    def test_unwritable_root_is_refused_before_the_command(
+            self, isolated_home, monkeypatch, capsys, tmp_path,
+            refuse_writes_in):
+        """#259: an existing root that cannot be written fails up front
+        with one line instead of a PermissionError from config.save()."""
+        root = tmp_path / "ro"
+        root.mkdir()
+        refuse_writes_in(root)
+        assert self._run_in(monkeypatch, root, "config", "--partial", "on") == 1
+        assert capsys.readouterr().err == (
+            f"error: cannot use config directory {root}: Permission denied\n")
+        assert list(root.iterdir()) == []
+
+    def test_read_only_root_is_refused(self, isolated_home, monkeypatch,
+                                       capsys, read_only_dir):
+        """Same check against a real 0500 directory (skipped as root)."""
+        assert self._run_in(monkeypatch, read_only_dir,
+                            "config", "--partial", "on") == 1
+        err = capsys.readouterr().err
+        assert err.startswith(f"error: cannot use config directory {read_only_dir}: ")
+        assert "Traceback" not in err
+        assert list(read_only_dir.iterdir()) == []
+
+    def test_doctor_still_reports_unwritable_root(
+            self, isolated_home, monkeypatch, capsys, tmp_path,
+            refuse_writes_in):
+        """doctor is exempt so it can diagnose the root itself."""
+        root = tmp_path / "ro"
+        root.mkdir()
+        refuse_writes_in(root)
+        code = self._run_in(monkeypatch, root, "doctor", "--json",
+                            "--check", "config")
+        assert code == 1
+        out = capsys.readouterr().out
+        assert "Permission denied" in out
+
+    def test_export_import_follow_selected_dirs(self, isolated_home,
+                                                monkeypatch, tmp_path):
+        """#259: export reads from one root and import writes to another;
+        the default root is never touched."""
+        from memanga import cli
+        from memanga.config import Config
+        from memanga.state import State
+        src, dst = tmp_path / "src", tmp_path / "dst"
+        seeded = Config(src)
+        seeded.set("manga", [{"title": "Berserk",
+                              "sources": [{"url": "https://mangadex.org/title/x"}]}])
+        seeded.save()
+        seeded_state = State(src)
+        seeded_state.add_downloaded_chapter("Berserk", "1")
+        seeded_state.flush()
+        default_root = isolated_home / ".config" / "memanga"
+        backup = tmp_path / "backup.json"
+
+        monkeypatch.setattr(sys, "argv", ["memanga", "--config-dir", str(src),
+                                          "export", str(backup)])
+        assert cli.main() is None
+        monkeypatch.setattr(sys, "argv", ["memanga", "--config-dir", str(dst),
+                                          "import", str(backup), "--replace"])
+        assert cli.main() is None
+
+        assert [m["title"] for m in Config(dst).get("manga")] == ["Berserk"]
+        assert State(dst).get_downloaded_chapters("Berserk") == ["1"]
+        assert not (default_root / "config.yaml").exists()
+        assert not (default_root / "state.json").exists()
 
     def test_cron_install_keeps_config_dir(self, isolated_home, monkeypatch,
                                            tmp_path):

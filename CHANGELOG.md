@@ -7,6 +7,17 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #259 `--config-dir DIR` and `MEMANGA_CONFIG_DIR` select the directory
+  for config, state, logs and the cover cache, in that order of
+  precedence, before the default `~/.config/memanga/`. The GUI now
+  follows them too (`memanga --gui --config-dir DIR`, or the variable for
+  the standalone app), including its crash and runtime logs and the
+  scheduled check it installs, which always pins the chosen directory
+  (the default included) with `--config-dir`. An empty `--config-dir` is a usage error,
+  and a path that is a file, cannot be created or is not writable exits 1
+  with a short message before the command runs, instead of a traceback
+  (`doctor` still runs and reports it). The standalone GUI does the same
+  and no longer fails in its crash logger on such a path.
 - #250 `memanga doctor` checks the config and state files, download
   directory, email and keyring setup, the scheduled-check entry, cached
   source health and the Playwright browser installs in one report. It

@@ -60,8 +60,10 @@ def build_cron_line(minute, hour, runtime_dir, python_path, config_dir=None,
     so a stray ``memanga`` module in cron's default working directory
     cannot shadow the installed package.
 
-    ``config_dir`` pins the scheduled run to a non-default config root
-    (issue #221); None keeps the default location.
+    ``config_dir`` pins the scheduled run to a config root (issue #221).
+    MeManga passes the resolved root, the default included, so a later
+    $MEMANGA_CONFIG_DIR cannot redirect the run (issue #259); None
+    leaves the flag out.
     """
     runtime_dir = PurePosixPath(Path(runtime_dir).as_posix())
     work_dir = (PurePosixPath(Path(source_root).as_posix())

@@ -17,6 +17,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
+
 import memanga
 
 
@@ -86,3 +88,70 @@ class TestConfigurePlaywrightBrowsers:
         d = ns["_playwright_browsers_dir"]()
         assert d.name == "ms-playwright"
         assert d.is_absolute()
+
+
+def test_log_dir_follows_config_dir_env(isolated_home, monkeypatch, tmp_path):
+    """#259: runtime.log and crash.log land in the selected root."""
+    root = tmp_path / "portable"
+    monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(root))
+    assert _entry_helpers()["_config_dir"]() == root
+
+
+def test_log_dir_defaults_to_home_config(isolated_home):
+    assert _entry_helpers()["_config_dir"]() == isolated_home / ".config" / "memanga"
+
+
+def test_log_dir_is_none_when_env_is_unusable(isolated_home, monkeypatch,
+                                              tmp_path):
+    """A file in $MEMANGA_CONFIG_DIR must not redirect logs to the default."""
+    target = tmp_path / "not-a-dir"
+    target.write_text("")
+    monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(target))
+    assert _entry_helpers()["_config_dir"]() is None
+
+
+def test_crash_logger_tolerates_uncreatable_root(isolated_home, monkeypatch,
+                                                 tmp_path):
+    """#259: an override beneath a regular file must not break startup."""
+    import sys
+
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(blocker / "memanga"))
+    monkeypatch.setattr(sys, "excepthook", sys.excepthook)
+    # The logger sits below the frozen-only block: exec it on its own.
+    src = (Path(memanga.__file__).parent / "gui" / "__main__.py").read_text()
+    body = "def _install_crash_logger" + src.split(
+        "def _install_crash_logger", 1)[1].split('if __name__ == "__main__"', 1)[0]
+    ns = _entry_helpers()
+    exec(body, ns)
+    ns["_install_crash_logger"]()
+    sys.excepthook(ValueError, ValueError("boom"), None)
+    assert not (isolated_home / ".config" / "memanga" / "crash.log").exists()
+
+
+@pytest.mark.parametrize("beneath_file", [True, False])
+def test_standalone_gui_reports_unusable_root(tmp_path, beneath_file):
+    """#259: `python -m memanga.gui` with a bad $MEMANGA_CONFIG_DIR exits 1
+    with one line, no traceback, and creates no default root."""
+    import subprocess
+    import sys
+
+    home = tmp_path / "home"
+    home.mkdir()
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    target = blocker / "memanga" if beneath_file else blocker
+    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home),
+               MEMANGA_CONFIG_DIR=str(target), QT_QPA_PLATFORM="offscreen")
+    proc = subprocess.run(
+        [sys.executable, "-m", "memanga.gui"],
+        cwd=Path(memanga.__file__).resolve().parent.parent,
+        env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert proc.returncode == 1, proc.stderr
+    assert "Traceback" not in proc.stderr
+    expected = ("cannot use config directory" if beneath_file
+                else "is not a directory")
+    assert proc.stderr.startswith("error: ") and expected in proc.stderr
+    assert not (home / ".config" / "memanga").exists()

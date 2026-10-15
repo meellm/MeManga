@@ -11,8 +11,72 @@ from pathlib import Path
 from .perf import timed
 
 
+# Issue #259: the one place that decides the config root. Precedence,
+# highest first: `--config-dir DIR`, then $MEMANGA_CONFIG_DIR, then
+# ~/.config/memanga on every platform. MeManga has never used another
+# location, so there is no legacy directory to migrate from.
+CONFIG_DIR_ENV = "MEMANGA_CONFIG_DIR"
+
+
 class ConfigError(Exception):
     """The config file exists but cannot be loaded."""
+
+
+class ConfigDirError(ValueError):
+    """A selected config directory cannot be used."""
+
+
+def default_config_dir() -> Path:
+    """The config root used when none is selected."""
+    return Path.home() / ".config" / "memanga"
+
+
+def resolve_config_dir(cli_value=None, environ=None):
+    """Return the selected config root, or None for the default.
+
+    ``cli_value`` is the `--config-dir` value (None when the flag is
+    absent); ``environ`` defaults to ``os.environ``. An empty flag is an
+    error, an empty variable counts as unset. Relative paths are made
+    absolute against the current directory. Nothing is created here.
+    """
+    if cli_value is not None:
+        if not str(cli_value).strip():
+            raise ConfigDirError("--config-dir needs a directory path")
+        value, origin = str(cli_value), "--config-dir"
+    else:
+        env = os.environ if environ is None else environ
+        value = env.get(CONFIG_DIR_ENV) or ""
+        if not value.strip():
+            return None
+        origin = CONFIG_DIR_ENV
+    path = Path(value).expanduser().absolute()
+    if path.exists() and not path.is_dir():
+        raise ConfigDirError(f"{origin}: {path} is not a directory")
+    return path
+
+
+def ensure_config_dir(config_dir=None) -> Path:
+    """Create the config root if needed and prove it is writable.
+
+    ``config_dir`` None means the default. Creates and removes a temp
+    file instead of trusting os.access(), which is wrong for root, ACLs
+    and read-only mounts. Raises ConfigDirError when the directory
+    cannot be created or written; returns it otherwise.
+    """
+    directory = Path(config_dir) if config_dir else default_config_dir()
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        fd, probe = tempfile.mkstemp(dir=directory, prefix=".memanga-probe-")
+    except OSError as e:
+        raise ConfigDirError(
+            f"cannot use config directory {directory}: {e.strerror or e}"
+        ) from e
+    os.close(fd)
+    try:
+        os.unlink(probe)
+    except OSError:
+        pass
+    return directory
 
 
 class Config:
@@ -34,7 +98,7 @@ class Config:
         if config_dir:
             self.config_dir = Path(config_dir)
         else:
-            self.config_dir = Path.home() / ".config" / "memanga"
+            self.config_dir = default_config_dir()
 
         self.config_path = self.config_dir / "config.yaml"
         self.config_dir.mkdir(parents=True, exist_ok=True)
