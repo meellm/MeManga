@@ -5,6 +5,7 @@ Wraps ThreadPoolExecutor; publishes events to the EventBus.
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -452,8 +453,11 @@ class BackgroundWorker:
         def _finish(path, from_backup, source=None):
             """Deliver to Kindle (if configured) and publish
             download_complete, carrying any accepted partial detail."""
-            # Kindle delivery
-            if item["kindle_cfg"] and path:
+            # Kindle delivery. Image-folder formats save a directory,
+            # which cannot be emailed (the CLI skips it too).
+            if item["kindle_cfg"] and path and Path(path).is_dir():
+                self._events.publish("kindle_skipped", {"task_id": task_id, "path": str(path)})
+            elif item["kindle_cfg"] and path:
                 try:
                     from ..emailer import send_to_kindle
                     from ..config import get_app_password

@@ -875,3 +875,54 @@ class TestPopularitySort:
         from memanga.gui.workers import source_rank
         assert source_rank("mangadex.org") < source_rank("mangapill.com")
         assert source_rank("anything-unranked.com") == 999
+
+
+class TestKindleImageFolder:
+    """Image-folder formats (JPG/PNG/WEBP) produce a directory, which
+    cannot be emailed. The GUI must skip Kindle delivery for it, as the
+    CLI does, instead of passing the directory to send_to_kindle."""
+
+    def test_image_folder_skips_kindle_and_notifies(
+            self, worker, event_bus, monkeypatch, tmp_path):
+        import types
+        import time
+        import memanga.downloader as dl
+        import memanga.emailer as em
+
+        folder = tmp_path / "Vinland Saga Ch.71"
+        folder.mkdir()
+        sent = []
+
+        def fake_download_chapter(manga, chapter, output_dir, output_format,
+                                   state, **kwargs):
+            return folder
+
+        def fake_send_to_kindle(**kwargs):
+            sent.append(kwargs["pdf_path"])
+            return True
+
+        monkeypatch.setattr(dl, "download_chapter", fake_download_chapter)
+        monkeypatch.setattr(em, "send_to_kindle", fake_send_to_kindle)
+
+        completed, skipped = [], []
+        event_bus.subscribe("download_complete", lambda d: completed.append(d))
+        event_bus.subscribe("kindle_skipped", lambda d: skipped.append(d))
+
+        kindle_cfg = {
+            "kindle_email": "reader@kindle.com",
+            "sender_email": "me@example.com",
+            "app_password": "x",
+        }
+        worker.download_chapter(
+            {"title": "Vinland Saga"}, types.SimpleNamespace(number="71"),
+            str(tmp_path), "jpg", None, kindle_cfg=kindle_cfg,
+        )
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline and not (completed and skipped):
+            event_bus.poll()
+            time.sleep(0.02)
+
+        assert sent == []
+        assert skipped and skipped[0].get("path") == str(folder)
+        assert completed and completed[0].get("path") == str(folder)

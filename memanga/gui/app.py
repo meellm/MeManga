@@ -71,6 +71,7 @@ class MeMangaApp(QMainWindow):
         self.events.subscribe("check_complete", self._on_check_complete)
         self.events.subscribe("check_error", self._on_check_error)
         self.events.subscribe("kindle_sent", self._on_kindle_sent)
+        self.events.subscribe("kindle_skipped", self._on_kindle_skipped)
 
         # Window setup
         self.setWindowTitle(f"MeManga v{__version__}")
@@ -548,6 +549,12 @@ class MeMangaApp(QMainWindow):
 
     def _on_kindle_sent(self, data):
         self.app_state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")
+        self.events.publish("notification_added", {})
+
+    def _on_kindle_skipped(self, data):
+        name = data.get("path", "").replace("\\", "/").split("/")[-1]
+        self.app_state.add_notification(
+            "kindle", f"Not sent to Kindle (image folders cannot be emailed): {name}")
         self.events.publish("notification_added", {})
 
     # ---- First-launch source seeding ----
