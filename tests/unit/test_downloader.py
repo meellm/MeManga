@@ -109,6 +109,24 @@ class TestCheckForUpdates:
         new = check_for_updates(manga, state, from_chapter=3)
         assert all(float(c.number) >= 3 for c in new)
 
+    def test_scraper_value_error_is_not_reported_as_unsupported(
+            self, state, monkeypatch, capsys):
+        import memanga.downloader as dl
+        from memanga.downloader import check_for_updates, DownloaderError
+
+        class BrokenScraper:
+            def get_chapters(self, url):
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+
+        monkeypatch.setattr(dl, "get_scraper", lambda d: BrokenScraper())
+        manga = {"title": "Broken", "url": "https://mock.test/m",
+                 "source": "mock.test"}
+        with pytest.raises(DownloaderError):
+            check_for_updates(manga, state)
+        out = capsys.readouterr().out
+        assert "Unsupported source" not in out
+        assert "Failed to fetch from mock.test" in out
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # download_chapter — issue #23: every format under <dir>/<title>/

@@ -287,13 +287,15 @@ def check_for_updates(
 
         try:
             scraper = get_scraper(source)
-            all_chapters = scraper.get_chapters(url)
-            sources_checked += 1
         except ValueError as e:
             # Unsupported source - skip but warn
             source_errors.append(f"{source}: {e}")
             print(f"  [Warning] Unsupported source '{source}': {e}")
             continue
+
+        try:
+            all_chapters = scraper.get_chapters(url)
+            sources_checked += 1
         except Exception as e:
             # Failed to fetch - skip but warn
             source_errors.append(f"{source}: {e}")
