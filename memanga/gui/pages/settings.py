@@ -24,6 +24,11 @@ from ...cron import (build_cron_line, build_task_command, managed_lines,
                      remove_managed_lines, replace_managed_line,
                      source_checkout_root, unmanaged_memanga_lines)
 
+SCHEDULING_FROZEN_MESSAGE = (
+    "Scheduled checks are not available in the desktop app. "
+    "Use 'memanga check --auto' from a terminal or a system scheduler instead."
+)
+
 
 class _EmailTestSignals(QObject):
     result = Signal(str, str)
@@ -555,6 +560,9 @@ class SettingsPage(BasePage):
         install_btn.setMinimumHeight(36)
         install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         install_btn.clicked.connect(self._install_cron)
+        if getattr(sys, "frozen", False):
+            install_btn.setEnabled(False)
+            install_btn.setToolTip(SCHEDULING_FROZEN_MESSAGE)
         cron_btns.addWidget(install_btn)
 
         remove_btn = QPushButton("Remove")
@@ -572,7 +580,8 @@ class SettingsPage(BasePage):
         cron_btns.addStretch()
         f.addLayout(cron_btns)
 
-        self._cron_status_label = QLabel("")
+        self._cron_status_label = QLabel(SCHEDULING_FROZEN_MESSAGE if getattr(sys, "frozen", False) else "")
+        self._cron_status_label.setWordWrap(True)
         self._cron_status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
         f.addWidget(self._cron_status_label)
 
@@ -1059,6 +1068,12 @@ class SettingsPage(BasePage):
     # ── Cron ──
 
     def _install_cron(self):
+        if getattr(sys, "frozen", False):
+            # The frozen entry point ignores CLI args and the temporary
+            # PyInstaller extraction dir is gone after exit, so a scheduled
+            # run would open the GUI or fail. Refuse instead of reporting success.
+            Toast(self, SCHEDULING_FROZEN_MESSAGE, kind="error")
+            return
         cron_time = self._cron_time.text().strip()
         if not self._validate_time(cron_time):
             Toast(self, "Invalid time", kind="error")

@@ -746,6 +746,32 @@ class TestSettingsPage:
         app_window._pages["settings"]._remove_cron()
         assert app_window.config.get("cron.enabled") is True
 
+    def test_install_cron_refused_in_frozen_build(self, app_window, qapp,
+                                                  monkeypatch):
+        """Scheduling must not install a task from a frozen (desktop) build."""
+        import subprocess
+        import sys
+
+        from memanga.gui.pages import settings as settings_mod
+
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
+        app_window.config.set("cron.enabled", False)
+
+        calls = []
+
+        def _fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(settings_mod.subprocess, "run", _fake_run)
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+        page._install_cron()
+
+        assert calls == [], "frozen build must not install a scheduled task"
+        assert app_window.config.get("cron.enabled") is False
+
     def test_import_merge_deduplicates_titles_within_backup(
         self, app_window, qapp, monkeypatch, tmp_path
     ):
