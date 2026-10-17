@@ -81,6 +81,11 @@ All notable changes are recorded here. Format loosely follows
   prompts and never gives permission to download.
 
 ### Fixed
+- #406 `scripts/run.sh` and `scripts\windows\run.bat` no longer switch to
+  the project folder before running MeManga. Relative paths such as
+  `import backup.json` or `export backup.json` now resolve in the folder
+  the command was typed in. On Windows, `run.bat` and `setup.bat` also
+  leave the Command Prompt in its original folder.
 - #398 Scraper requests no longer retry permanent HTTP errors. A 403, 404
   or 410 (and other 4xx) used to be sent three times with back-off; now
   only connection errors, timeouts, 429 and 5xx responses are retried.
