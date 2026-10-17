@@ -229,11 +229,16 @@ class BaseScraper(ABC):
         """
         try:
             response = self._request(url)
+            if not looks_like_image(
+                response.content, response.headers.get("Content-Type", "")
+            ):
+                raise ValueError("Response body is not a valid image")
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "wb") as f:
                 f.write(response.content)
             return True
         except Exception as e:
+            path.unlink(missing_ok=True)
             logger.debug(f"Failed to download {url}: {e}")
             return False
 
