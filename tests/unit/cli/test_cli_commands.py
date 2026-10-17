@@ -809,6 +809,82 @@ class TestCheckCommand:
         notifications = cli.state.get("notifications", [])
         assert any("saved as partial" in n["message"] for n in notifications)
 
+    def test_check_success_records_download_history(
+            self, run_cli, config, monkeypatch, tmp_path):
+        """CLI downloads must feed download_history so the suspicion guard
+        can learn a manga's typical batch size."""
+        from memanga import cli
+
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "status": "reading",
+            "sources": [{"source": "primary.test", "url": "https://primary.test/vs"}],
+        }])
+        config.save()
+
+        primary_ch = types.SimpleNamespace(
+            number="71", title="", url="https://primary.test/c/71",
+            source="primary.test", is_backup=False)
+        pdf_path = tmp_path / "vinland-71.pdf"
+        pdf_path.write_bytes(b"x" * 1024)
+
+        monkeypatch.setattr(cli, "check_for_updates",
+                            lambda *a, **k: [primary_ch])
+        monkeypatch.setattr(cli, "download_chapter",
+                            lambda *a, **k: pdf_path)
+
+        rc = run_cli("check", "--auto", "--quiet")
+
+        assert rc == 0
+        history = cli.state.get_download_history()
+        assert [(h["title"], h["chapter"]) for h in history] == [("Vinland Saga", "71")]
+        assert history[0]["path"] == str(pdf_path)
+
+    def test_backup_complete_save_records_download_history(
+            self, run_cli, config, monkeypatch, tmp_path):
+        """A complete save from the backup source is a successful download
+        and must be recorded too, with the backup file's path."""
+        from memanga import cli
+        from memanga.downloader import DownloaderError
+
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "status": "reading",
+            "sources": [
+                {"source": "primary.test", "url": "https://primary.test/vs"},
+                {"source": "backup.test", "url": "https://backup.test/vs"},
+            ],
+        }])
+        config.save()
+
+        primary_ch = types.SimpleNamespace(
+            number="71", title="", url="https://primary.test/c/71",
+            source="primary.test", is_backup=False)
+        backup_ch = types.SimpleNamespace(
+            number="71", title="", url="https://backup.test/c/71",
+            source="backup.test", is_backup=True)
+        backup_path = tmp_path / "backup-71.pdf"
+        backup_path.write_bytes(b"x" * 2048)
+
+        monkeypatch.setattr(cli, "check_for_updates",
+                            lambda *a, **k: [primary_ch])
+        monkeypatch.setattr(cli, "_find_chapter_on_backup",
+                            lambda *a, **k: backup_ch)
+
+        def fake_download(manga, chapter, *args, **kwargs):
+            if getattr(chapter, "is_backup", False):
+                return backup_path
+            raise DownloaderError("primary failed")
+
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+
+        rc = run_cli("check", "--auto", "--quiet")
+
+        assert rc == 0
+        history = cli.state.get_download_history()
+        assert [(h["title"], h["chapter"]) for h in history] == [("Vinland Saga", "71")]
+        assert history[0]["path"] == str(backup_path)
+
     def test_over_threshold_backup_failure_records_failure_not_downloaded(
             self, run_cli, config, monkeypatch):
         """If neither complete nor partial recovery is acceptable, the

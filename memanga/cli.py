@@ -1014,6 +1014,13 @@ def _download_chapter_pipeline(manga, ch, ch_label, opts) -> bool:
         else:
             state.clear_partial_chapter(title, ch.number)
             console.print(f"     [green]✅ Saved{src}: {label}[/green]")
+            # Feeds the suspicious-batch guard (suspicion.estimate_typical_batch_size).
+            # Complete saves only: partials would skew a manga's typical size.
+            size_mb = file_path.stat().st_size / (1024 * 1024) if file_path.is_file() else 0
+            state.add_download_history(
+                title, ch.number, output_format,
+                path=str(file_path), size_mb=size_mb,
+            )
 
     try:
         # Show source info if from backup
