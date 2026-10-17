@@ -270,7 +270,7 @@ def check_for_updates(
         last_num = from_chapter - 0.001
     else:
         last_chapter = state.get_last_chapter(title)
-        last_num = float(last_chapter) if last_chapter else 0.0
+        last_num = Chapter(number=last_chapter).numeric if last_chapter else 0.0
     
     # Results to return
     chapters_to_download: List[ChapterWithSource] = []
