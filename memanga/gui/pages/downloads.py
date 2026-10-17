@@ -569,6 +569,7 @@ class DownloadsPage(BasePage):
         global_kindle = self.app.config.delivery_mode == "email" and self.app.config.email_enabled
         naming_template = self.app.config.get("delivery.naming_template")
         post_processing = self.app.config.get("delivery.post_processing")
+        delete_after_send = self.app.config.get("delivery.delete_after_send", False)
 
         skipped = 0
         jobs = []
@@ -635,6 +636,7 @@ class DownloadsPage(BasePage):
                 post_processing=post_processing,
                 allow_partial=self.app.config.partial_enabled,
                 partial_threshold=self.app.config.partial_threshold,
+                delete_after_send=delete_after_send,
             )
         if skipped:
             Toast(self, f"Skipped {skipped} chapter(s) already on disk", kind="info")
