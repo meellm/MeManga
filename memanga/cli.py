@@ -965,6 +965,9 @@ def _download_chapter_pipeline(manga, ch, ch_label, opts) -> bool:
         """Send to Kindle if configured (skips image folders)."""
         if not (delivery_mode == "email" and email_cfg.get("kindle_email")):
             return
+        # Per-manga opt-out set in the desktop app (#341). Default True.
+        if not manga.get("send_to_kindle", True):
+            return
         if file_path.is_dir():
             console.print("     [dim]📧 Skipped email (image folders cannot be emailed)[/dim]")
             return

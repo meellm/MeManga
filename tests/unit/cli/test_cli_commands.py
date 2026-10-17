@@ -746,6 +746,45 @@ class TestCheckCommand:
         assert sent == [backup_path]
         assert cli.state.is_chapter_downloaded("Vinland Saga", "71")
 
+    def test_check_skips_kindle_when_manga_send_to_kindle_false(
+            self, run_cli, config, monkeypatch, tmp_path):
+        """Desktop `send_to_kindle: false` must stop CLI email delivery
+        even when global delivery mode is email (issue #341)."""
+        from memanga import cli
+
+        config.set("delivery.mode", "email")
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [{
+            "title": "No Kindle",
+            "status": "reading",
+            "send_to_kindle": False,
+            "sources": [
+                {"source": "primary.test", "url": "https://primary.test/nk"},
+            ],
+        }])
+        config.save()
+
+        ch = types.SimpleNamespace(
+            number="5", title="", url="https://primary.test/c/5",
+            source="primary.test", is_backup=False)
+        saved_path = tmp_path / "chapter5.pdf"
+        saved_path.write_bytes(b"%PDF")
+        sent = []
+
+        monkeypatch.setattr(cli, "check_for_updates", lambda *a, **k: [ch])
+        monkeypatch.setattr(cli, "download_chapter",
+                            lambda *a, **k: saved_path)
+        monkeypatch.setattr(cli, "send_to_kindle",
+                            lambda **kwargs: sent.append(kwargs["pdf_path"]))
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+        rc = run_cli("check", "--auto", "--quiet")
+
+        assert rc == 0
+        assert sent == []
+        assert cli.state.is_chapter_downloaded("No Kindle", "5")
+
     def test_backup_partial_in_email_mode_sends_and_warns(
             self, run_cli, config, monkeypatch, tmp_path):
         """When both sources fail complete downloads, an accepted backup
