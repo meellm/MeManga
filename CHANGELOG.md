@@ -7,6 +7,16 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #247 The app password can come from `MEMANGA_SMTP_PASSWORD_FILE` (a
+  file such as a Docker secret) or `MEMANGA_SMTP_PASSWORD`, ahead of the
+  keyring and `config.yaml`, and is then never saved. Setting both, or a
+  file that cannot be read, leaves no app password (a stored one is not
+  used instead) and `memanga doctor` says why. Saving the password
+  without a usable keyring now warns, in the command line and in the
+  desktop app's Settings, that it is in plain text in `config.yaml`, with
+  the file's path; a keyring that silently drops secrets counts as
+  unusable. `config show` also hides email addresses (`***@domain`);
+  `config get KEY` still prints one value in full.
 - #409 `config.yaml` and `state.json` carry a `schema_version`. Files
   from older releases load as before and are upgraded on their next
   save, with the previous file kept as the `.bak` copy; future layout

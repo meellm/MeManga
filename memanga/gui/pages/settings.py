@@ -25,6 +25,19 @@ from ...cron import (build_cron_line, build_task_command, managed_lines,
                      source_checkout_root, unmanaged_memanga_lines)
 
 
+def _plaintext_password_toast_text(config_path) -> str:
+    """Settings-saved notice when the app password went to config.yaml
+    because no system keyring is usable (issue #247). Names the file,
+    never the password."""
+    return (
+        "Settings saved. No system keyring is available, so the app\n"
+        "password is stored in plain text in:\n"
+        f"{config_path}\n"
+        "Keep this file private: only your user account should be able\n"
+        "to read it (on Linux and macOS: chmod 600)."
+    )
+
+
 class _EmailTestSignals(QObject):
     result = Signal(str, str)
 
@@ -916,9 +929,10 @@ class SettingsPage(BasePage):
             cfg.set("email.smtp_port", 587)
 
         pw = self._password_entry.text().strip()
+        password_in_config = False
         if pw:
             from ...config import set_app_password
-            set_app_password(cfg, pw)
+            password_in_config = set_app_password(cfg, pw) == "config"
 
         cron_time = self._cron_time.text().strip()
         if not self._validate_time(cron_time):
@@ -955,7 +969,12 @@ class SettingsPage(BasePage):
             )
 
         cfg.save()
-        Toast(self, "Settings saved", kind="success")
+        if password_in_config:
+            # Issue #247: no keyring, so say where the password went.
+            Toast(self, _plaintext_password_toast_text(cfg.config_path),
+                  kind="warning", duration=10000)
+        else:
+            Toast(self, "Settings saved", kind="success")
 
     def _reset_to_defaults(self):
         cfg = self.app.config
@@ -1038,8 +1057,25 @@ class SettingsPage(BasePage):
             self._test_label.setText("Fill sender + server")
             self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
             return
-        if not pw:
-            from ...config import get_app_password
+        # Issue #247: test the password delivery will use. An injected
+        # one wins over the typed field, as it does when sending.
+        from ...config import (AppPasswordError, app_password_override,
+                               get_app_password)
+        self._test_label.setToolTip("")
+        try:
+            override = app_password_override()
+        except AppPasswordError as e:
+            self._test_label.setText("Password variable unusable")
+            self._test_label.setToolTip(str(e))
+            self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
+            return
+        if override:
+            pw = override[1]
+            self._test_label.setText(f"Testing password from {override[0]}...")
+            self._test_label.setToolTip(
+                f"{override[0]} is set, so it is used instead of the "
+                "password field, as when sending.")
+        elif not pw:
             pw = get_app_password(self.app.config)
         if not pw:
             self._test_label.setText("No password")

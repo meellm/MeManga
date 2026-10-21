@@ -59,6 +59,9 @@ def isolated_home(monkeypatch, tmp_path) -> Path:
     # Nor may their log level or NO_COLOR change what the CLI prints.
     monkeypatch.delenv("MEMANGA_LOG_LEVEL", raising=False)
     monkeypatch.delenv("NO_COLOR", raising=False)
+    # Nor may an injected SMTP password replace the stored one (#247).
+    monkeypatch.delenv("MEMANGA_SMTP_PASSWORD", raising=False)
+    monkeypatch.delenv("MEMANGA_SMTP_PASSWORD_FILE", raising=False)
     # Issue #249: the default root is the platform config folder. Pin it
     # to the isolated ~/.config/memanga on every OS so the suite behaves
     # the same on Windows and macOS as on Linux.

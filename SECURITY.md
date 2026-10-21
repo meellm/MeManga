@@ -2,8 +2,9 @@
 
 ## Supported versions
 
-Only the latest minor release on the `main` branch receives security
-fixes. Older versions are unsupported.
+Only the latest release receives security fixes. Fixes are made on the
+`main` branch and ship in the next release. Older releases and other
+branches are unsupported.
 
 ## Reporting a vulnerability
 
@@ -12,8 +13,14 @@ fixes. Older versions are unsupported.
 Email `info.meellm@gmail.com` with:
 - A short description of the issue.
 - Steps to reproduce (URL, payload, manga config snippet, etc.).
-- The MeManga version (`MeManga.exe --version` or
-  `python -m memanga --version`) and the OS you're running on.
+- The MeManga version and the OS you're running on. The command line
+  prints the version with `memanga --version` (or
+  `python -m memanga --version`); the desktop app shows it in its window
+  title and on the Settings page.
+
+Remove email addresses, app passwords and other personal details from
+any config output, logs or screenshots you send. `memanga config show`
+already hides the app password and email addresses.
 
 You'll get an acknowledgement within 72 hours. Once a fix lands we'll
 coordinate disclosure timing with you and credit you in the release

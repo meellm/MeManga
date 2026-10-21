@@ -284,6 +284,29 @@ class TestEmailAndKeyring:
     def test_keyring_not_needed_for_local_delivery(self, config):
         assert doctor.check_keyring(config).status == doctor.SKIP
 
+    def test_unusable_password_file_fails_email_check(self, config, monkeypatch,
+                                                      tmp_path):
+        # Issue #247: say why instead of "app password missing".
+        config.set("delivery.mode", "email")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(tmp_path / "missing"))
+        result = doctor.check_email(config)
+        assert result.status == doctor.FAIL
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in result.message
+        assert "cannot read" in result.message
+        # Log redaction must leave the actionable message readable.
+        from memanga.output import redact
+        assert redact(result.message) == result.message
+
+    def test_env_password_does_not_need_keyring(self, config, monkeypatch):
+        config.set("delivery.mode", "email")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "secret-pw")
+        monkeypatch.setattr(doctor, "_keyring_backend", lambda: dict(
+            available=False, backend="keyring.backends.fail.Keyring", plaintext=False))
+        result = doctor.check_keyring(config)
+        assert result.status == doctor.OK
+        assert result.details["password_source"] == "MEMANGA_SMTP_PASSWORD"
+        assert "secret-pw" not in repr(result.to_dict())
+
     @pytest.mark.parametrize("backend, expected", [
         (dict(available=True, backend="keyring.backends.SecretService.Keyring", plaintext=False), doctor.OK),
         (dict(available=False, backend="keyring.backends.fail.Keyring", plaintext=False), doctor.WARNING),
