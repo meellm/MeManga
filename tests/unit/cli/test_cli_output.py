@@ -96,6 +96,66 @@ class TestPlainOutput:
         assert ("Dry run: 1 chapter(s) available for download; checked 1 "
                 "manga, 0 could not be checked") in out.splitlines()
 
+    @pytest.mark.parametrize("counts, expected", [
+        # dry_run, checked, new, downloaded, failed, errored, unconfirmed
+        ((False, 2, 0, 0, 0, 0, 0),
+         "Summary: no new chapters found; checked 2 manga, "
+         "0 could not be checked"),
+        ((False, 2, 3, 2, 1, 1, 0),
+         "Summary: 2/3 chapters downloaded, 1 failed; checked 2 manga, "
+         "1 could not be checked; next: run 'memanga failed' for details"),
+        ((False, 1, 4, 0, 0, 0, 4),
+         "Summary: 0/4 chapters downloaded, 0 failed; checked 1 manga, "
+         "0 could not be checked, 4 chapter(s) need confirmation; "
+         "next: rerun with --download"),
+        # Could-not-be-checked alone has no next command: its errors
+        # already say why.
+        ((False, 2, 1, 1, 0, 1, 0),
+         "Summary: 1/1 chapters downloaded, 0 failed; checked 2 manga, "
+         "1 could not be checked"),
+        ((True, 1, 2, 0, 0, 0, 0),
+         "Dry run: 2 chapter(s) available for download; checked 1 manga, "
+         "0 could not be checked"),
+    ])
+    def test_summary_line_next_action(self, counts, expected):
+        """#372: the line ends with what to do next, only when needed."""
+        from memanga import cli
+        assert cli._check_summary_line(*counts) == expected
+
+    def test_failed_chapter_summary_names_next_step_under_quiet(
+            self, run_cli, seeded, check_stubs, capsys, monkeypatch):
+        """#372: -q hides the failure warning; the summary still says
+        what to run."""
+        from memanga import cli
+        from memanga.downloader import DownloaderError
+
+        def _download(*args, **kwargs):
+            raise DownloaderError("HTTP 404")
+        monkeypatch.setattr(cli, "download_chapter", _download)
+        capsys.readouterr()
+        assert run_cli("check", "--auto", global_opts=["-q"]) == 3
+        captured = capsys.readouterr()
+        assert "memanga failed" not in captured.err
+        summaries = [line for line in captured.out.splitlines()
+                     if line.startswith("Summary")]
+        assert summaries == [
+            "Summary: 0/1 chapters downloaded, 1 failed; checked 1 manga, "
+            "0 could not be checked; next: run 'memanga failed' for details"
+        ]
+
+    def test_unconfirmed_summary_names_next_step(
+            self, run_cli, seeded, check_stubs, capsys, monkeypatch):
+        from memanga import cli
+        monkeypatch.setattr(cli, "_stdin_is_tty", lambda: False)
+        capsys.readouterr()
+        assert run_cli("check") == 1
+        captured = capsys.readouterr()
+        assert captured.out.splitlines()[-1] == (
+            "Summary: 0/1 chapters downloaded, 0 failed; checked 1 manga, "
+            "0 could not be checked, 1 chapter(s) need confirmation; "
+            "next: rerun with --download")
+        assert "skipped 1 chapter(s) that need confirmation" in captured.err
+
     def test_list_table_has_no_borders(self, run_cli, seeded, capsys):
         capsys.readouterr()
         assert run_cli("list", global_opts=["--plain"]) == 0

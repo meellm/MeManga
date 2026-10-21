@@ -91,6 +91,11 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #372 The plain summary line of `memanga check` ends with the next
+  step when there is one: `next: run 'memanga failed' for details` after
+  failed chapters, or `next: rerun with --download` when chapters needed
+  confirmation. It shows even with `memanga -q`, which hides the
+  separate warning.
 - #226 Output and logging work the same everywhere. Scrapers, the
   downloader, email delivery and the desktop app report through logging
   instead of printing to stdout, so stdout only carries command results

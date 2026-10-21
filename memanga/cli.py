@@ -1593,7 +1593,13 @@ def _process_chapter(pipeline: ChapterPipeline, manga, chapter):
 
 def _check_summary_line(dry_run, checked, new, downloaded, failed,
                         errored, unconfirmed) -> str:
-    """The single plain-text summary of a `check` run (issue #226)."""
+    """The single plain-text summary of a `check` run (issue #226).
+
+    When something is left to do it ends with ``; next: <action>``
+    (issue #372), so a cron run that hides warnings still says what to
+    run. Unconfirmed chapters and failed chapters never occur in the same
+    run: the first only happens when nothing is downloaded.
+    """
     if dry_run:
         line = f"Dry run: {new} chapter(s) available for download"
     elif new == 0:
@@ -1603,7 +1609,10 @@ def _check_summary_line(dry_run, checked, new, downloaded, failed,
                 f"{failed} failed")
     line += f"; checked {checked} manga, {errored} could not be checked"
     if unconfirmed:
-        line += f", {unconfirmed} chapter(s) need confirmation"
+        line += (f", {unconfirmed} chapter(s) need confirmation"
+                 "; next: rerun with --download")
+    elif failed:
+        line += "; next: run 'memanga failed' for details"
     return line
 
 
