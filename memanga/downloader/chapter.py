@@ -7,8 +7,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
+from ..chapters import Chapter, ChapterWithSource
 from ..scrapers import get_scraper
-from ..scrapers.base import Chapter, is_image_file
+from ..scrapers.base import is_image_file
 from ..state import State
 from .errors import DownloaderError
 from .formats import (_build_comicinfo_xml, _images_to_cbz, _images_to_epub,
@@ -17,7 +18,7 @@ from .naming import (DEFAULT_NAMING_TEMPLATE, _chapter_base_name,
                      _format_chapter_number, _get_extension,
                      _sanitize_filename)
 from .post_processing import _run_post_processing
-from .sources import ChapterWithSource, _configure_mangadex, _get_sources_from_manga
+from .sources import _configure_mangadex, _get_sources_from_manga
 
 OutputFormat = Literal["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"]
 

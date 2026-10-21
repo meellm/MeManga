@@ -29,7 +29,8 @@ from PIL import Image
 
 
 class FakeState:
-    """Minimal State stand-in for downloader tests."""
+    """Minimal State stand-in for download_chapter tests (check_for_updates
+    tests use the real ``state`` fixture)."""
 
     def __init__(self):
         self.downloaded: set[str] = set()
@@ -155,7 +156,7 @@ class TestFallbackDelayMechanic:
     """
 
     def test_fresh_pending_does_not_download_immediately(
-            self, fake_state, patch_get_scraper, monkeypatch):
+            self, state, patch_get_scraper, monkeypatch):
         """If primary doesn't have ch.5 but backup does, the first call
         records a pending entry and returns nothing."""
         from memanga.downloader import check_for_updates
@@ -181,7 +182,7 @@ class TestFallbackDelayMechanic:
             {"source": "primary.test", "url": "https://primary.test/x"},
             {"source": "backup.test", "url": "https://backup.test/x"},
         ]}
-        new, _ = check_for_updates(manga, fake_state, return_all=True)
+        new, _ = check_for_updates(manga, state, return_all=True)
         # Ch.4 + Ch.5 only exist on the backup — should be pending,
         # not returned for immediate download.
         new_nums = {c.number for c in new}
@@ -191,7 +192,7 @@ class TestFallbackDelayMechanic:
         )
 
     def test_primary_source_failure_can_still_probe_backup(
-            self, fake_state, monkeypatch):
+            self, state, monkeypatch):
         """A transient primary outage should not look like an empty library."""
         from memanga.downloader import check_for_updates
         from memanga.scrapers.base import Chapter
@@ -216,11 +217,11 @@ class TestFallbackDelayMechanic:
             {"source": "backup.test", "url": "https://backup.test/x"},
         ]}
 
-        new, all_ = check_for_updates(manga, fake_state, return_all=True)
+        new, all_ = check_for_updates(manga, state, return_all=True)
 
         assert new == []
         assert all_ == []
-        assert ("X", "10") in fake_state.pending
+        assert state.get_pending_backup("X", "10") is not None
 
 
 # ─────────────────────────────────────────────────────────────────────────

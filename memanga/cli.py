@@ -48,8 +48,9 @@ from . import __version__, completion, doctor
 from .persist import SaveError
 from .process_lock import (LOCK_FILENAME, ConfigDirBusy, ConfigDirLock,
                            ConfigDirLockError)
-from .state import State, _chapter_number, _chapter_sort_key
-from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
+from .chapters import ChapterWithSource, chapter_order_key, chapter_sort_key, chapter_value
+from .state import State
+from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
 from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
 from .emailer import send_to_kindle
@@ -365,7 +366,7 @@ def _list_sort_value(entry: Dict[str, Any], key: str):
     if key == "last-chapter":
         if entry["last_chapter"] is None:
             return None
-        return _chapter_number(entry["last_chapter"])
+        return chapter_value(entry["last_chapter"])
     if key == "downloaded":
         return entry["downloaded_count"]
     return entry["n"]
@@ -930,12 +931,12 @@ def cmd_read(args):
     if args.all:
         if mark_read:
             chapters = sorted(dict.fromkeys(str(ch) for ch in downloaded),
-                              key=_chapter_sort_key)
+                              key=chapter_sort_key)
             if not chapters:
                 console.print(f"[dim]No downloaded chapters of {_esc(title)} to mark read.[/dim]")
                 return None
         else:
-            chapters = sorted(read_set, key=_chapter_sort_key)
+            chapters = sorted(read_set, key=chapter_sort_key)
             if not chapters:
                 console.print(f"[dim]No chapters of {_esc(title)} are marked read.[/dim]")
                 return None
@@ -2875,9 +2876,9 @@ def cmd_import(args):
 
 
 def _chapter_order(item):
-    """Sort key for (chapter_number, info) pairs; non-numeric labels first."""
-    number = item[0]
-    return float(number) if number.replace('.', '', 1).isdigit() else 0
+    """Sort key for (chapter_number, info) pairs; non-numeric labels first,
+    labelled chapters such as "10 Part 1" by their chapter number."""
+    return chapter_order_key(item[0])
 
 
 def _resolve_failed_target(target):

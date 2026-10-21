@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QComboBox, QCheckBox, QLineEdit,
 )
 from PySide6.QtCore import Qt, QSize
+from ...chapters import format_chapter_value
 from .base import BasePage
 from .. import theme as T
 from ..components.toast import Toast
@@ -1105,8 +1106,7 @@ class DetailPage(BasePage):
             force=True, queue_all=True,
         )
         self.app.show_page("downloads")
-        ch_display = int(from_ch) if from_ch == int(from_ch) else from_ch
-        Toast(self, f"Downloading from chapter {ch_display}...", kind="info")
+        Toast(self, f"Downloading from chapter {format_chapter_value(from_ch)}...", kind="info")
 
     def _download_all(self):
         self._do_download_from("0")

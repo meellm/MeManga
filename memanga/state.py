@@ -26,7 +26,7 @@ from .state_stores import (ActivityStore, BackupStore, CatalogueStore,
                            SourceHealthStore)
 from .state_stores._base import snapshot as _snapshot_value
 # Re-exported: existing callers import the chapter helpers from here.
-from .state_stores._base import (  # noqa: F401
+from .chapters import (  # noqa: F401
     CHAPTER_NUMBER_RE as _CHAPTER_NUMBER_RE,
     chapter_number as _chapter_number,
     chapter_sort_key as _chapter_sort_key,

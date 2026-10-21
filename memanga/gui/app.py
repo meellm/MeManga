@@ -9,6 +9,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QShortcut, QKeySequence
 
 from .. import __version__
+from ..chapters import format_chapter_value
 from ..config import Config
 from ..state import State
 from .events import EventBus
@@ -378,11 +379,7 @@ class MeMangaApp(QMainWindow):
         # Format as int when whole-numbered ("47" not "47.0") to match how
         # chapter numbers come back from scrapers.
         if marked_max is not None:
-            if marked_max == int(marked_max):
-                last_str = str(int(marked_max))
-            else:
-                last_str = str(marked_max)
-            self.app_state.set_last_chapter(title, last_str)
+            self.app_state.set_last_chapter(title, format_chapter_value(marked_max))
 
         # One-shot: pop the sentinel from config so we don't redo this on
         # every subsequent check.

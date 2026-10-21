@@ -477,7 +477,7 @@ class BackgroundWorker:
             print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}", flush=True)
             traceback.print_exc()
             state = item.get("state")
-            if state is not None and hasattr(state, "add_failed_chapter"):
+            if state is not None:
                 try:
                     state.add_failed_chapter(
                         manga["title"],

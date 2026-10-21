@@ -6,7 +6,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Mapping, Optional
 
 from ..backup import merge_backup_state
-from ._base import StateDomain, chapter_number, chapter_sort_key, snapshot
+from ..chapters import chapter_sort_key, chapter_value
+from ._base import StateDomain, snapshot
 
 
 class LibraryStore(StateDomain):
@@ -157,7 +158,7 @@ class LibraryStore(StateDomain):
                 # by their embedded chapter number. Labels with no number are preserved
                 # because they cannot be ordered safely against the threshold.
                 def _keep_downloaded(ch):
-                    num = chapter_number(ch)
+                    num = chapter_value(ch)
                     return num is None or num < from_chapter
 
                 entry["downloaded"] = [

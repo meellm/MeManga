@@ -278,10 +278,9 @@ def check_state(config, state) -> CheckResult:
     # Issue #243: State() could not copy aside or restore a damaged
     # state.json; its message says what happened and what was kept,
     # which re-reading the still-damaged file here would hide.
-    load_error = getattr(state, "load_error", None)
-    if load_error:
+    if state.load_error:
         return CheckResult("state", FAIL,
-                           f"State file could not be loaded: {load_error}", details)
+                           f"State file could not be loaded: {state.load_error}", details)
 
     if path.exists():
         try:
@@ -299,10 +298,9 @@ def check_state(config, state) -> CheckResult:
     if error:
         return CheckResult("state", FAIL, f"State directory is not writable: {error}", details)
     # Issue #243: State() recovered a damaged state.json on this run.
-    notice = getattr(state, "recovery_notice", None)
-    if notice:
+    if state.recovery_notice:
         details["preserved_copy"] = str(state.preserved_path)
-        return CheckResult("state", WARNING, notice, details)
+        return CheckResult("state", WARNING, state.recovery_notice, details)
     if not path.exists():
         return CheckResult("state", OK, "No state file yet; it will be created on first save", details)
     return CheckResult("state", OK, "State file is readable and writable", details)
