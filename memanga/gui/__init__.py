@@ -2,7 +2,10 @@
 MeManga GUI - PySide6-based graphical interface.
 """
 
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def _is_frozen():
@@ -340,6 +343,31 @@ def _set_windows_app_user_model_id():
         pass
 
 
+# Issue #226: the windowed entry (gui/__main__.py) opens runtime.log in
+# the config folder it selected, under that folder's lock, and registers
+# how to move both to the folder the window ends up locking, should
+# another process have moved the legacy folder in between (#249).
+_runtime_log_mover = None
+
+
+def set_runtime_log_mover(mover) -> None:
+    """Register ``mover(config_dir)``; ``None`` removes it."""
+    global _runtime_log_mover
+    _runtime_log_mover = mover
+
+
+def _follow_runtime_log(config_dir) -> None:
+    """Keep runtime.log, and its lock, with the folder the window locked."""
+    mover = _runtime_log_mover
+    if mover is None:
+        return
+    try:
+        mover(config_dir)
+    except Exception:
+        # A diagnostic log must never stop the window from opening.
+        logger.exception("Could not move runtime.log to %s", config_dir)
+
+
 def _lock_problem(error):
     """Dialog text for a config directory the GUI could not lock (#244)."""
     from ..process_lock import ConfigDirBusy
@@ -451,6 +479,7 @@ def launch_gui(config=None, state=None, explicit_config_dir=None):
                 "Nothing was changed. Start MeManga again.")
             sys.exit(1)
         lock = _lock(config_dir)
+    _follow_runtime_log(config_dir)
 
     if config is None:
         config = Config(config_dir, tolerate_errors=True)

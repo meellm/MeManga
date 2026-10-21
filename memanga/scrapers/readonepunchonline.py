@@ -5,12 +5,15 @@ One Punch Man manga, 217+ chapters
 WordPress + cache.imagemanga.online CDN
 """
 
+import logging
 import re
 import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class ReadOnePunchOnlineScraper(BaseScraper):
@@ -103,5 +106,5 @@ class ReadOnePunchOnlineScraper(BaseScraper):
                 f.write(resp.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

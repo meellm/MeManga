@@ -4,10 +4,13 @@ MonsterManga scraper (monstermanga.org) - Monster (Naoki Urasawa) dedicated site
 Uses WordPress, images hosted on official.lowee.us.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class MonsterMangaScraper(BaseScraper):
@@ -101,5 +104,5 @@ class MonsterMangaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

@@ -61,7 +61,7 @@ class HivetoonsScraper(PlaywrightScraper):
                         'cover': cover
                     })
             
-            logger.info(f"Found {len(results)} results for '{query}'")
+            logger.debug("Found %s results for '%s'", len(results), query)
             return results[:20]  # Limit results
             
         except Exception as e:
@@ -110,7 +110,7 @@ class HivetoonsScraper(PlaywrightScraper):
             # Sort by chapter number descending
             unique_chapters.sort(key=lambda x: float(x.get('chapter', 0) or 0), reverse=True)
             
-            logger.info(f"Found {len(unique_chapters)} chapters for {manga_url}")
+            logger.debug("Found %s chapters for %s", len(unique_chapters), manga_url)
             return unique_chapters
             
         except Exception as e:
@@ -139,7 +139,7 @@ class HivetoonsScraper(PlaywrightScraper):
                     
                     images.append(src)
             
-            logger.info(f"Found {len(images)} images for {chapter_url}")
+            logger.debug("Found %s images for %s", len(images), chapter_url)
             return images
             
         except Exception as e:

@@ -85,7 +85,7 @@ class BakiRahenScraper(BaseScraper):
             # Sort by chapter number (descending - newest first)
             chapters.sort(key=lambda c: c.numeric, reverse=True)
             
-            logger.info(f"Found {len(chapters)} chapters for Baki Rahen")
+            logger.debug("Found %s chapters for Baki Rahen", len(chapters))
             return chapters
             
         except Exception as e:
@@ -122,7 +122,7 @@ class BakiRahenScraper(BaseScraper):
                     seen.add(img)
                     unique_images.append(img)
             
-            logger.info(f"Found {len(unique_images)} images in chapter")
+            logger.debug("Found %s images in chapter", len(unique_images))
             return unique_images
             
         except Exception as e:

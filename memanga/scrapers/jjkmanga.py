@@ -5,9 +5,12 @@ Jujutsu Kaisen dedicated manga reader site.
 WordPress + pic.readkakegurui.com CDN.
 """
 
+import logging
 import cloudscraper
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class JJKMangaScraper(BaseScraper):
@@ -115,5 +118,5 @@ class JJKMangaScraper(BaseScraper):
                 f.write(resp.content)
             return True
         except Exception as e:
-            print(f"Download error: {e}")
+            logger.debug("Download error: %s", e)
             return False

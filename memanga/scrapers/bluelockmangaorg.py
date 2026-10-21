@@ -4,10 +4,13 @@ BlueLockMangaNet scraper (bluelockmanga.net) - Blue Lock dedicated site.
 WordPress-based with Blogger CDN for images.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class BlueLockMangaNetScraper(BaseScraper):
@@ -107,5 +110,5 @@ class BlueLockMangaNetScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

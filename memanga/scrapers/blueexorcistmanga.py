@@ -4,10 +4,13 @@ BlueExorcistManga scraper (blueexorcistmanga.com) - Blue Exorcist / Ao no Exorci
 Uses WordPress with manga theme, images hosted on cdn.readkakegurui.com.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class BlueExorcistMangaScraper(BaseScraper):
@@ -115,5 +118,5 @@ class BlueExorcistMangaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

@@ -16,6 +16,7 @@ Image descrambling based on:
 - https://github.com/f4rh4d-4hmed/MangaFire-API
 """
 
+import logging
 import re
 import threading
 import time
@@ -47,6 +48,8 @@ except ImportError:
     CLOUDSCRAPER_AVAILABLE = False
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 BASE_URL = "https://mangafire.to"
@@ -253,7 +256,7 @@ class VRFGenerator:
         # so sync_playwright().start() doesn't raise "already started".
         self._close_in_thread()
 
-        print("[MangaFire] Starting the browser used to mint API tokens...")
+        logger.info("Starting the browser used to mint API tokens...")
         pw = sync_playwright().start()
         try:
             browser = pw.firefox.launch(headless=True)
@@ -288,7 +291,7 @@ class VRFGenerator:
         if getattr(_vrf_thread_local, 'token_page_ready', False):
             return page
 
-        print("[MangaFire] Loading the site's token generator...")
+        logger.debug("Loading the site's token generator...")
         page.goto(BASE_URL, wait_until='domcontentloaded', timeout=60000)
         page.wait_for_function(
             "() => typeof window.getProtectionToken === 'function'",
@@ -403,7 +406,7 @@ class VRFGenerator:
 
     def restart(self):
         """Restart browser (close and clear state so next call re-opens)."""
-        print("[MangaFire] Restarting browser to free memory...")
+        logger.info("Restarting browser to free memory...")
         self.close()
 
 
@@ -830,7 +833,7 @@ class MangaFireScraper(BaseScraper):
             # Check if image needs descrambling
             offset = self._current_offsets.get(url, 0)
             if offset > 0:
-                print(f"[MangaFire] Descrambling image (offset={offset})...")
+                logger.debug("Descrambling image (offset=%s)...", offset)
                 image_data = ImageDescrambler.descramble(image_data, offset)
 
             # Save to file
@@ -840,7 +843,7 @@ class MangaFireScraper(BaseScraper):
             return True
 
         except Exception as e:
-            print(f"[MangaFire] Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False
 
 

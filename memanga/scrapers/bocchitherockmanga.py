@@ -5,10 +5,13 @@ Dedicated Bocchi the Rock! manga reader site.
 Images hosted on cdn.black-clover.org CDN.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class BocchiTheRockMangaScraper(BaseScraper):
@@ -108,5 +111,5 @@ class BocchiTheRockMangaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

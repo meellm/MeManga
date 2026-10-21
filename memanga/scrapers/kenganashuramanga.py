@@ -6,6 +6,7 @@ Manga: Kengan Ashura / Kengan Omega by Sandrovich Yabako and Daromeon
 Architecture: WordPress + wp-content/uploads CDN
 """
 
+import logging
 import re
 import requests
 from bs4 import BeautifulSoup
@@ -13,6 +14,8 @@ from typing import List, Optional
 from urllib.parse import urljoin
 
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class KenganAshuraMangaScraper(BaseScraper):
@@ -94,7 +97,7 @@ class KenganAshuraMangaScraper(BaseScraper):
             chapters.sort(key=lambda x: x.numeric, reverse=True)
             
         except Exception as e:
-            print(f"Error getting chapters: {e}")
+            logger.warning("Error getting chapters: %s", e)
         
         return chapters
     
@@ -123,7 +126,7 @@ class KenganAshuraMangaScraper(BaseScraper):
                             pages.append(src)
             
         except Exception as e:
-            print(f"Error getting pages from {chapter_url}: {e}")
+            logger.warning("Error getting pages from %s: %s", chapter_url, e)
         
         return pages
     
@@ -144,6 +147,6 @@ class KenganAshuraMangaScraper(BaseScraper):
                 return True
             
         except Exception as e:
-            print(f"Error downloading image {url}: {e}")
+            logger.debug("Error downloading image %s: %s", url, e)
         
         return False

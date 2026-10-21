@@ -1,5 +1,6 @@
 """Update checking: find new chapters across primary and backup sources."""
 
+import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -8,6 +9,8 @@ from ..scrapers import get_scraper
 from ..state import State
 from .errors import DownloaderError
 from .sources import _configure_mangadex, _get_sources_from_manga
+
+logger = logging.getLogger(__name__)
 
 # Default days to wait before falling back to backup source
 DEFAULT_FALLBACK_DELAY_DAYS = 2
@@ -153,12 +156,12 @@ def check_for_updates(
         except ValueError as e:
             # Unsupported source - skip but warn
             source_errors.append(f"{source}: {e}")
-            print(f"  [Warning] Unsupported source '{source}': {e}")
+            logger.warning("Unsupported source '%s': %s", source, e)
             continue
         except Exception as e:
             # Failed to fetch - skip but warn
             source_errors.append(f"{source}: {e}")
-            print(f"  [Warning] Failed to fetch from {source}: {e}")
+            logger.warning("Failed to fetch from %s: %s", source, e)
             continue
 
         # Capture the full chapter list from the primary source for the

@@ -187,7 +187,7 @@ class MangaDNAScraper(BaseScraper):
                         seen.add(src)
                         pages.append(src)
             
-            logger.info(f"Found {len(pages)} pages for {chapter_url}")
+            logger.debug("Found %s pages for %s", len(pages), chapter_url)
             return pages
             
         except Exception as e:

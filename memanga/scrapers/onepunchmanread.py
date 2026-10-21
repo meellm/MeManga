@@ -106,7 +106,7 @@ class OnePunchManReadScraper(BaseScraper):
                 src = src.strip()
                 pages.append(src)
         
-        logger.info(f"Found {len(pages)} pages in {chapter_url}")
+        logger.debug("Found %s pages in %s", len(pages), chapter_url)
         return pages
     
     def download_image(self, url: str, path: Path) -> bool:
@@ -126,5 +126,5 @@ class OnePunchManReadScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

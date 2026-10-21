@@ -5,10 +5,13 @@ Dedicated The Elusive Samurai (Nige Jouzu no Wakagimi) manga reader site.
 Images hosted on pic.readkakegurui.com CDN.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class ElusiveSamuraiScraper(BaseScraper):
@@ -108,5 +111,5 @@ class ElusiveSamuraiScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

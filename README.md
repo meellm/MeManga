@@ -414,6 +414,21 @@ Command results and JSON go to stdout; errors and warnings go to
 stderr. Exit codes are listed in
 [the Guide](docs/Guide.md#exit-codes).
 
+When stdout is not a terminal (a pipe, a file, cron), or with
+`memanga --plain`, output is plain text: no colour, emoji, borders or
+line wrapping, and `check` prints one summary line. `NO_COLOR` turns
+colour off. Diagnostics on stderr show warnings and errors by default;
+`memanga -v` adds progress, `-vv` debug details, and `memanga -q` hides
+warnings so only errors show (`check --quiet` only stops prompts).
+`MEMANGA_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING`, `ERROR`) sets the level
+when no flag is given. `memanga --log-file` also writes `diagnostics.log`
+in the config folder. These options go before the command:
+
+```bash
+MEMANGA_LOG_LEVEL=INFO python -m memanga check --download
+python -m memanga -vv --log-file check "Blue Lock" --dry-run
+```
+
 ```bash
 python -m memanga failed --json | jq -r '.chapters[] | "\(.title) #\(.chapter)"'
 python -m memanga doctor --json --check browsers --launch-browsers
@@ -510,6 +525,9 @@ MeManga keeps its files in the config folder of your platform:
 | `<config folder>/state.json.corrupt-*` | A damaged state file, kept for recovery instead of being overwritten |
 | `<config folder>/covers/` | Cover image cache |
 | `<config folder>/crash.log` | Uncaught exceptions from the windowed release exe |
+| `<config folder>/runtime.log` | Diagnostics from the windowed release exe; the last three sessions are kept as `runtime.log.1` to `.3` |
+| `<config folder>/memanga.log` | Output of the daily check set up with `cron install` on Linux and macOS |
+| `<config folder>/diagnostics.log` | Timestamped diagnostics written with `memanga --log-file` (rotated at 1 MB, three old files kept) |
 | `~/Downloads/MeManga/<title>/` | Default download folder (changeable in Settings) |
 
 `memanga config path` prints the config file in use.

@@ -14,11 +14,14 @@ Subclass config attributes:
     normalize_blogger: bool    - Normalize Blogger URLs to /s1600/ resolution
 """
 
+import logging
 import re
 from typing import List
 from pathlib import Path
 from bs4 import BeautifulSoup
 from ..base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class OGImageMetaScraper(BaseScraper):
@@ -154,5 +157,5 @@ class OGImageMetaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

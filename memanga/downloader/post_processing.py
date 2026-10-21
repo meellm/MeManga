@@ -1,5 +1,6 @@
 """User post-processing hook run after a chapter is saved."""
 
+import logging
 import os
 import re
 import shlex
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .errors import DownloaderError
+
+logger = logging.getLogger(__name__)
 
 # How long a post-processing command may run before it's killed (seconds).
 POST_PROCESSING_TIMEOUT = 600
@@ -71,7 +74,7 @@ def _run_post_processing(
     def _fail(message: str):
         if fail_on_error:
             raise DownloaderError(message)
-        print(f"  [Warning] {message}")
+        logger.warning("%s", message)
 
     try:
         command_args = _split_post_processing_command(command)

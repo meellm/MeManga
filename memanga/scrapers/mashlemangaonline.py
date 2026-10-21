@@ -5,12 +5,15 @@ Mashle: Magic and Muscles by Hajime Komoto, 163 chapters
 WordPress + wp-content/uploads CDN
 """
 
+import logging
 import re
 import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class MashleMangaOnlineScraper(BaseScraper):
@@ -102,5 +105,5 @@ class MashleMangaOnlineScraper(BaseScraper):
                 f.write(resp.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

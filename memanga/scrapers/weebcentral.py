@@ -13,12 +13,15 @@ Hardened against the common runtime failure modes:
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import List, Optional
 from urllib.parse import quote_plus
 
 from .playwright_base import PlaywrightScraper, cleanup_browsers, _thread_local
 from .base import Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 # Phrases that show up in the title / body of a Cloudflare challenge
@@ -154,7 +157,7 @@ class WeebCentralScraper(PlaywrightScraper):
         except RuntimeError:
             # Pre-warm the homepage and retry. A single page.goto on the
             # root domain is enough to seed CF cookies into the context.
-            print("[WeebCentral] CF interstitial — warming up homepage…")
+            logger.debug("CF interstitial — warming up homepage…")
             try:
                 _, _, p = self._new_page()
                 try:
@@ -164,14 +167,14 @@ class WeebCentralScraper(PlaywrightScraper):
                 finally:
                     p.close()
             except Exception as e:
-                print(f"[WeebCentral] homepage warm-up failed: {e}")
+                logger.debug("homepage warm-up failed: %s", e)
             try:
                 return self._do_search_once(query)
             except Exception as e:
-                print(f"[WeebCentral] retry search failed: {e}")
+                logger.warning("retry search failed: %s", e)
                 return []
         except Exception as e:
-            print(f"[WeebCentral] search error: {e}")
+            logger.warning("search error: %s", e)
             return []
 
     def search(self, query: str) -> List[Manga]:
@@ -218,7 +221,7 @@ class WeebCentralScraper(PlaywrightScraper):
             try:
                 loc = page.locator(selector)
                 if loc.count() > 0:
-                    print("[WeebCentral] Clicking 'show all chapters'…")
+                    logger.debug("Clicking 'show all chapters'…")
                     loc.first.click()
                     self._wait_for_chapter_list_stable(page)
                     return True
@@ -226,7 +229,7 @@ class WeebCentralScraper(PlaywrightScraper):
                 # Try the next selector — WeebCentral has shipped a
                 # couple of label variants over time and one stale
                 # match shouldn't crash the whole flow.
-                print(f"[WeebCentral] selector {selector!r} failed: {e}")
+                logger.debug("selector %r failed: %s", selector, e)
                 continue
         return False
 
@@ -302,7 +305,7 @@ class WeebCentralScraper(PlaywrightScraper):
                         url=chapter_url,
                     ))
             except Exception as e:
-                print(f"[WeebCentral] chapter parse skipped: {e}")
+                logger.debug("chapter parse skipped: %s", e)
                 continue
         return out
 
@@ -343,12 +346,12 @@ class WeebCentralScraper(PlaywrightScraper):
         chapters: List[Chapter] = []
         _, _, page = self._new_page()
         try:
-            print(f"[WeebCentral] Loading: {manga_url}")
+            logger.debug("Loading: %s", manga_url)
             page.goto(manga_url, wait_until="domcontentloaded", timeout=60000)
             page.wait_for_timeout(1500)
 
             if self._looks_like_404(page):
-                print(f"[WeebCentral] 404 for {manga_url}")
+                logger.warning("404 for %s", manga_url)
                 return []
 
             if _looks_like_cloudflare(page.content(), page.title() or ""):
@@ -364,16 +367,16 @@ class WeebCentralScraper(PlaywrightScraper):
             if "/chapters/" in manga_url and "/series/" not in manga_url:
                 series_url = self._resolve_series_url(page)
                 if series_url and series_url != manga_url:
-                    print(f"[WeebCentral] resolved chapter URL → series URL: {series_url}")
+                    logger.debug("resolved chapter URL → series URL: %s", series_url)
                     page.goto(series_url, wait_until="domcontentloaded",
                               timeout=60000)
                     page.wait_for_timeout(1500)
                 else:
-                    print(f"[WeebCentral] could not resolve series URL from chapter page {manga_url}")
+                    logger.warning("could not resolve series URL from chapter page %s", manga_url)
 
             self._expand_all_chapters(page)
             chapters = self._collect_chapters(page)
-            print(f"[WeebCentral] Found {len(chapters)} chapter links")
+            logger.debug("Found %s chapter links", len(chapters))
         finally:
             page.close()
 
@@ -398,11 +401,11 @@ class WeebCentralScraper(PlaywrightScraper):
             ch = self._do_chapters_once(manga_url)
             if ch:
                 return ch
-            print("[WeebCentral] empty chapter list — restarting browser and retrying")
+            logger.debug("empty chapter list — restarting browser and retrying")
         except RuntimeError:
-            print("[WeebCentral] CF interstitial on chapter page — retrying")
+            logger.debug("CF interstitial on chapter page — retrying")
         except Exception as e:
-            print(f"[WeebCentral] chapter load error: {e} — retrying")
+            logger.debug("chapter load error: %s — retrying", e)
 
         # One restart + retry. _restart_browser_in_thread closes the
         # thread-local Firefox so the next call rebuilds it from
@@ -412,7 +415,7 @@ class WeebCentralScraper(PlaywrightScraper):
         try:
             return self._do_chapters_once(manga_url)
         except Exception as e:
-            print(f"[WeebCentral] chapter retry failed: {e}")
+            logger.warning("chapter retry failed: %s", e)
             return []
 
     def get_chapters(self, manga_url: str) -> List[Chapter]:
@@ -509,7 +512,7 @@ class WeebCentralScraper(PlaywrightScraper):
 
             self._scroll_until_settled(page)
             pages = self._collect_page_images(page)
-            print(f"[WeebCentral] Found {len(pages)} pages")
+            logger.debug("Found %s pages", len(pages))
             return pages
         finally:
             page.close()
@@ -519,17 +522,17 @@ class WeebCentralScraper(PlaywrightScraper):
             pages = self._do_pages_once(chapter_url)
             if pages:
                 return pages
-            print("[WeebCentral] empty page list — restarting browser and retrying")
+            logger.debug("empty page list — restarting browser and retrying")
         except RuntimeError:
-            print("[WeebCentral] CF interstitial on reader — retrying")
+            logger.debug("CF interstitial on reader — retrying")
         except Exception as e:
-            print(f"[WeebCentral] page load error: {e} — retrying")
+            logger.debug("page load error: %s — retrying", e)
 
         self._restart_browser_in_thread()
         try:
             return self._do_pages_once(chapter_url)
         except Exception as e:
-            print(f"[WeebCentral] page retry failed: {e}")
+            logger.warning("page retry failed: %s", e)
             return []
 
     def get_pages(self, chapter_url: str) -> List[str]:

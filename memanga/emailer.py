@@ -4,6 +4,7 @@ Email handler for MeManga - sends PDFs to Kindle
 Automatically splits large PDFs that exceed Gmail's 25MB limit.
 """
 
+import logging
 import shutil
 import smtplib
 import ssl
@@ -16,6 +17,10 @@ from email.utils import encode_rfc2231
 from pathlib import Path
 from typing import Optional, List
 import pikepdf
+
+from .output import register_secret
+
+logger = logging.getLogger(__name__)
 
 
 class EmailError(Exception):
@@ -136,6 +141,8 @@ def send_to_kindle(
     
     if not app_password:
         raise EmailError("App password not configured")
+    # Issue #226: never let the password reach a log line.
+    register_secret(app_password)
     
     # Check file type - only split PDFs, send EPUBs/CBZs/ZIPs as-is
     suffix = pdf_path.suffix.lower()
@@ -163,10 +170,11 @@ def send_to_kindle(
         is_split = len(parts) > 1
         
         if is_split:
-            print(
-                f"     📎 Split into {len(parts)} parts (exceeded "
-                f"{_format_mb(MAX_ATTACHMENT_SIZE)} safe raw attachment limit; "
-                f"encoded email cap is {_format_mb(EMAIL_ATTACHMENT_LIMIT)})"
+            logger.info(
+                "Split into %d parts (exceeded %s safe raw attachment limit; "
+                "encoded email cap is %s)",
+                len(parts), _format_mb(MAX_ATTACHMENT_SIZE),
+                _format_mb(EMAIL_ATTACHMENT_LIMIT),
             )
     
     # Send each part
@@ -261,6 +269,7 @@ def test_email_config(
     Returns:
         True if connection successful
     """
+    register_secret(app_password)
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP(smtp_server, smtp_port) as server:

@@ -4,10 +4,13 @@ KaijuNo8Manga scraper (kaijuno8-manga.com) - Kaiju No. 8 dedicated site.
 WordPress-based with wp-content/uploads CDN for images.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class KaijuNo8MangaScraper(BaseScraper):
@@ -110,5 +113,5 @@ class KaijuNo8MangaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

@@ -87,7 +87,7 @@ class ReadKingdomFreeScraper(BaseScraper):
             # Sort by chapter number (descending - newest first)
             unique.sort(key=lambda x: float(x.number.replace('-', '.')) if x.number else 0, reverse=True)
             
-            logger.info(f"Found {len(unique)} chapters")
+            logger.debug("Found %s chapters", len(unique))
             return unique
             
         except Exception as e:
@@ -119,7 +119,7 @@ class ReadKingdomFreeScraper(BaseScraper):
                     if src and not src.startswith('data:'):
                         pages.append(src)
             
-            logger.info(f"Found {len(pages)} pages")
+            logger.debug("Found %s pages", len(pages))
             return pages
             
         except Exception as e:

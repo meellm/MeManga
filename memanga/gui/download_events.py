@@ -11,6 +11,7 @@ itself, so an import problem surfaces as a download error rather than
 breaking the app at start-up.
 """
 
+import logging
 import threading
 from pathlib import Path
 from typing import Any, Dict
@@ -18,10 +19,12 @@ from typing import Any, Dict
 from ..chapter_pipeline import ChapterOutcome, ChapterReporter, ChapterStatus
 from .events import EventBus
 
+logger = logging.getLogger(__name__)
+
 
 class GuiChapterReporter(ChapterReporter):
     """Publishes one queued download's progress on the event bus and
-    keeps the worker's ``[Download]`` log lines."""
+    logs what the user would otherwise not see (issue #226)."""
 
     def __init__(self, events: EventBus, task_id: str, manga: Dict[str, Any],
                  chapter, cancel: threading.Event):
@@ -30,9 +33,6 @@ class GuiChapterReporter(ChapterReporter):
         self._title = manga["title"]
         self._chapter = chapter
         self._cancel = cancel
-
-    def _log(self, message: str):
-        print(f"[Download] {message}", flush=True)
 
     def _label(self) -> str:
         return f"{self._title} Ch.{self._chapter.number}"
@@ -57,27 +57,23 @@ class GuiChapterReporter(ChapterReporter):
             pass
 
     def trying_backup(self, error, backup_chapter):
-        self._log(
-            f"Primary failed ({error}), trying backup "
-            f"({backup_chapter.source}) for {self._label()}"
-        )
+        logger.warning("Primary failed (%s), trying backup (%s) for %s",
+                       error, backup_chapter.source, self._label())
 
     def backup_failed(self, error):
-        self._log(f"Backup also failed: {error}")
+        logger.warning("Backup also failed for %s: %s", self._label(), error)
 
     def saved(self, outcome: ChapterOutcome):
         if outcome.status is ChapterStatus.PARTIAL:
             src = " from backup" if outcome.from_backup else ""
-            self._log(
-                f"Partial kept{src}: {self._label()} "
-                f"— {len(outcome.missing_pages)}/{outcome.total_pages} "
-                f"page(s) missing {outcome.missing_pages}"
-            )
+            logger.warning("Partial kept%s: %s — %d/%d page(s) missing %s",
+                           src, self._label(), len(outcome.missing_pages),
+                           outcome.total_pages, outcome.missing_pages)
         elif outcome.from_backup:
-            self._log(f"Completed from backup: {self._label()}")
+            logger.info("Completed from backup: %s", self._label())
 
     def email_skipped_folder(self, path: Path):
-        self._log(f"Kindle skipped (image folders cannot be emailed): {path}")
+        logger.warning("Kindle skipped (image folders cannot be emailed): %s", path)
         # Issue #340: tell the user, as the CLI does, rather than only
         # logging it.
         self._events.publish("kindle_skipped", {
@@ -93,10 +89,10 @@ class GuiChapterReporter(ChapterReporter):
         })
 
     def deleted_after_send(self, path: Path):
-        self._log(f"Deleted local copy after sending: {path}")
+        logger.info("Deleted local copy after sending: %s", path)
 
     def delete_failed(self, path: Path, error: OSError):
-        self._log(f"Could not delete local copy after sending: {error}")
+        logger.warning("Could not delete local copy after sending: %s", error)
 
     def email_failed(self, error):
         self._events.publish("kindle_error", {
@@ -104,7 +100,7 @@ class GuiChapterReporter(ChapterReporter):
         })
 
     def failed(self, outcome: ChapterOutcome):
-        self._log(f"ERROR: {self._label()}: {outcome.message}")
+        logger.error("%s: %s", self._label(), outcome.message)
 
 
 def download_complete_payload(task_id: str, manga: Dict[str, Any],

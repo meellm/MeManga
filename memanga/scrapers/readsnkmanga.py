@@ -83,7 +83,7 @@ class ReadSNKMangaScraper(BaseScraper):
             
             # Sort by chapter number
             chapters.sort(key=lambda x: x.numeric)
-            logger.info(f"Found {len(chapters)} chapters")
+            logger.debug("Found %s chapters", len(chapters))
             
         except Exception as e:
             logger.error(f"Error getting chapters: {e}")
@@ -112,7 +112,7 @@ class ReadSNKMangaScraper(BaseScraper):
                     if src not in pages:
                         pages.append(src)
             
-            logger.info(f"Found {len(pages)} pages in chapter")
+            logger.debug("Found %s pages in chapter", len(pages))
             
         except Exception as e:
             logger.error(f"Error getting pages from {chapter_url}: {e}")
@@ -136,5 +136,5 @@ class ReadSNKMangaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False
