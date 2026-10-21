@@ -4,7 +4,6 @@ Three layouts: continuous vertical scroll, single page, two-up spreads.
 """
 
 import io
-import re
 import shutil
 import zipfile
 from pathlib import Path
@@ -17,6 +16,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QImage, QKeyEvent, QShortcut
 from PySide6.QtCore import Qt, QByteArray, QBuffer, QEvent, QObject, QTimer
 
+from ...chapters import chapter_value
 from .base import BasePage
 from .. import theme as T
 
@@ -105,20 +105,11 @@ def _chapter_sort_key(number) -> Optional[float]:
     """Numeric sort key for a chapter number, or None when it can't be
     parsed. Used by the reader prefetch (issue #107) to find the
     immediate next chapter without assuming the cache is pre-sorted.
-    Mirrors Chapter.numeric's extraction so labels like "Chapter 2" or
-    "2 Part 1" resolve too, but yields None instead of 0.0 when nothing
-    numeric is found -- an unparseable chapter must skip prefetch, not
-    sort as chapter zero."""
-    if number is None:
-        return None
-    try:
-        return float(str(number).strip())
-    except (ValueError, TypeError):
-        pass
-    match = re.search(r"(\d+\.?\d*)", str(number))
-    if match:
-        return float(match.group(1))
-    return None
+    Uses Chapter.numeric's rules so labels like "Chapter 2" or "2 Part 1"
+    resolve too, but yields None instead of 0.0 when nothing numeric is
+    found -- an unparseable chapter must skip prefetch, not sort as
+    chapter zero."""
+    return chapter_value(number)
 
 
 _PREFETCH_SKIP = object()

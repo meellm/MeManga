@@ -3018,6 +3018,17 @@ class TestFailedJson:
             "failed", "mangadex.org", "timeout")
         assert entry["total_pages"] is None
 
+    def test_labelled_chapters_list_in_chapter_order(self, run_cli, cli_state, capsys):
+        # Issue #227: labelled chapters sort by their chapter number, not
+        # as chapter 0; non-numeric labels still come first.
+        for number in ["11", "10 Part 1", "2", "Extra", "2.5", "10"]:
+            cli_state.add_failed_chapter("Berserk", number, "mangadex.org", "x")
+
+        assert run_cli("failed", "--json") == 0
+        payload = _stdout_json(capsys)
+        assert [c["chapter"] for c in payload["chapters"]] == [
+            "Extra", "2", "2.5", "10", "10 Part 1", "11"]
+
     def test_title_filter(self, run_cli, cli_state, capsys):
         cli_state.add_failed_chapter("Vinland Saga", "10", "mangadex.org", "x")
         cli_state.add_failed_chapter("Berserk", "1", "mangadex.org", "y")

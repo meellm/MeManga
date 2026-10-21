@@ -18,9 +18,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from .downloader import (DEFAULT_PAGE_RETRIES, ChapterWithSource,
-                         DownloaderError, _find_chapter_on_backup,
-                         _get_sources_from_manga, download_chapter)
+from .chapters import ChapterWithSource
+from .downloader import (DEFAULT_PAGE_RETRIES, DownloaderError,
+                         _find_chapter_on_backup, _get_sources_from_manga,
+                         download_chapter)
 from .emailer import send_to_kindle
 
 

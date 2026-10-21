@@ -3,7 +3,6 @@ Base scraper class and data models
 """
 
 import io
-import re
 import time
 import logging
 import threading
@@ -12,6 +11,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional
 from pathlib import Path
+
+# The chapter model lives in memanga.chapters; scrapers keep importing it from here.
+from ..chapters import Chapter
 
 logger = logging.getLogger(__name__)
 
@@ -156,31 +158,6 @@ def _retry(func, max_attempts=3, base_delay=1.0, exceptions=(Exception,), retry_
                 logger.debug(f"Attempt {attempt}/{max_attempts} failed: {e}. Retrying in {delay}s...")
                 time.sleep(delay)
     raise last_error
-
-
-@dataclass
-class Chapter:
-    """Represents a manga chapter."""
-    number: str  # Can be "1", "1.5", "Extra", etc.
-    title: Optional[str] = None
-    url: str = ""
-    date: Optional[str] = None
-
-    def __lt__(self, other):
-        """Compare chapters by number for sorting."""
-        return self.numeric < other.numeric
-
-    @property
-    def numeric(self) -> float:
-        """Get numeric chapter number."""
-        try:
-            return float(self.number)
-        except ValueError:
-            # Extract number from string like "Chapter 10" or "10.5"
-            match = re.search(r'(\d+\.?\d*)', self.number)
-            if match:
-                return float(match.group(1))
-            return 0.0
 
 
 @dataclass

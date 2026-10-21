@@ -14,6 +14,8 @@ them short and self-explanatory.
 
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from .chapters import chapter_order_key
+
 EXPORT_VERSION = 1
 
 # Migrations from an older schema version to the next one. When
@@ -153,17 +155,10 @@ _STATE_FIELD_CHECKS: Dict[str, Tuple[str, Callable[[Any], bool]]] = {
 _NON_NULL_STATE_FIELDS = frozenset({"reader_positions"})
 
 
-def _chapter_sort_key(value: Any):
-    try:
-        return (0, float(value), str(value))
-    except (TypeError, ValueError):
-        return (1, str(value).lower())
-
-
 def _merge_unique_chapters(local: Any, imported: Any) -> list:
     merged = {str(ch) for ch in (local or [])}
     merged.update(str(ch) for ch in (imported or []))
-    return sorted(merged, key=_chapter_sort_key)
+    return sorted(merged, key=chapter_order_key)
 
 
 def _chapter_record_key(record: Any):
@@ -215,7 +210,7 @@ def _max_chapter(local: Any, imported: Any):
         return imported
     if imported in (None, ""):
         return local
-    return max((local, imported), key=_chapter_sort_key)
+    return max((local, imported), key=chapter_order_key)
 
 
 def merge_manga_state(local: Dict[str, Any], imported: Dict[str, Any]) -> Dict[str, Any]:

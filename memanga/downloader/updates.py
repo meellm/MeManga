@@ -1,14 +1,13 @@
 """Update checking: find new chapters across primary and backup sources."""
 
-import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..chapters import Chapter, ChapterWithSource, chapter_value
 from ..scrapers import get_scraper
-from ..scrapers.base import Chapter
 from ..state import State
 from .errors import DownloaderError
-from .sources import ChapterWithSource, _configure_mangadex, _get_sources_from_manga
+from .sources import _configure_mangadex, _get_sources_from_manga
 
 # Default days to wait before falling back to backup source
 DEFAULT_FALLBACK_DELAY_DAYS = 2
@@ -29,13 +28,10 @@ def _max_cached_chapter(cached: List[Dict[str, Any]]) -> float:
         num = entry.get("number")
         if num is None:
             continue
-        try:
-            best = max(best, float(num))
-        except (TypeError, ValueError):
-            # Fall back to the leading number in strings like "12 Part 1".
-            match = re.search(r"\d+\.?\d*", str(num))
-            if match:
-                best = max(best, float(match.group()))
+        # Labels such as "12 Part 1" count by their leading number.
+        value = chapter_value(num)
+        if value is not None:
+            best = max(best, value)
     return best
 
 
@@ -213,29 +209,13 @@ def check_for_updates(
     if primary_checked:
         primary_high = max((ch.numeric for ch in primary_all), default=0.0)
 
-        get_suspicious_batch = getattr(state, "get_suspicious_batch", None)
-        active_suspicious = (
-            get_suspicious_batch(title)
-            if callable(get_suspicious_batch)
-            else None
-        )
-        get_catalogue_baseline = getattr(state, "get_catalogue_baseline", None)
-        baseline = (
-            get_catalogue_baseline(title)
-            if callable(get_catalogue_baseline)
-            else None
-        )
+        active_suspicious = state.get_suspicious_batch(title)
+        baseline = state.get_catalogue_baseline(title)
         if baseline is None and not active_suspicious:
             # No trusted snapshot yet (manga predates this field, or was
             # never checked). Bootstrap from the last cached catalogue so an
             # existing large backlog isn't mistaken for a jump.
-            get_available_chapters = getattr(state, "get_available_chapters", None)
-            cached = (
-                get_available_chapters(title)
-                if callable(get_available_chapters)
-                else []
-            )
-            baseline = _max_cached_chapter(cached)
+            baseline = _max_cached_chapter(state.get_available_chapters(title))
         if baseline is None:
             baseline = 0.0
         bootstrapped_manual_baseline = False
@@ -327,9 +307,7 @@ def check_for_updates(
         # run (fresh manga, explicit from_chapter) gives later checks a
         # baseline so a big existing backlog is never re-scored as a jump.
         if not dry_run and catalogue_trusted and (primary_high > baseline or bootstrapped_manual_baseline):
-            set_catalogue_baseline = getattr(state, "set_catalogue_baseline", None)
-            if callable(set_catalogue_baseline):
-                set_catalogue_baseline(title, primary_high)
+            state.set_catalogue_baseline(title, primary_high)
 
     # Process primary chapters first (always download these)
     for ch_num, ch in primary_chapters.items():

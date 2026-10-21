@@ -11,9 +11,8 @@ dirty flag. Stores never keep a reference to ``_data`` itself:
 from __future__ import annotations
 
 import copy
-import re
 from contextlib import AbstractContextManager
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Protocol
 
 
 class StateBackend(Protocol):
@@ -58,28 +57,3 @@ def snapshot(value: Any) -> Any:
     that consumes these snapshots.
     """
     return copy.deepcopy(value) if isinstance(value, (dict, list)) else value
-
-
-CHAPTER_NUMBER_RE = re.compile(r"(\d+(?:\.\d+)?)")
-
-
-def chapter_number(label: Any) -> Optional[float]:
-    """Return the first numeric chapter value embedded in a label."""
-    match = CHAPTER_NUMBER_RE.search(str(label))
-    if not match:
-        return None
-    return float(match.group(1))
-
-
-def chapter_sort_key(chapter: Any) -> float:
-    """Numeric sort key for a chapter identifier.
-
-    Mirrors Chapter.numeric (scrapers/base.py): plain numbers sort by
-    value and labelled numbers like "2 Part 1" or "Chapter 10" by their
-    first embedded number, so labelled chapters land after their plain
-    predecessors and the reader's Next controls can reach a prefetched
-    "2 Part 1" from chapter "1" (issue #107). Fully non-numeric labels
-    keep the old float()-only fallback of 0.0.
-    """
-    num = chapter_number(chapter)
-    return num if num is not None else 0.0

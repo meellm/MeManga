@@ -4,25 +4,9 @@ scrapers are set up."""
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
+# Re-exported: ChapterWithSource lives with the chapter model now.
+from ..chapters import ChapterWithSource  # noqa: F401
 from ..scrapers import list_supported_sources
-from ..scrapers.base import Chapter
-
-
-class ChapterWithSource(Chapter):
-    """Chapter with source info for multi-source support."""
-    
-    def __init__(self, chapter: Chapter, source: str, source_url: str, is_backup: bool = False):
-        super().__init__(
-            number=chapter.number,
-            title=chapter.title,
-            url=chapter.url,
-            date=chapter.date,
-        )
-        self.source = source
-        self.source_url = source_url
-        self.is_backup = is_backup
-        self.group_ids = getattr(chapter, "group_ids", [])
-        self.group_names = getattr(chapter, "group_names", [])
 
 
 def _configure_mangadex(scraper, state=None):

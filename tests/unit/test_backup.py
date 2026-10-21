@@ -195,6 +195,42 @@ class TestMergeMangaState:
 
         assert merged["last_chapter"] == "10"
 
+    @pytest.mark.parametrize("local, imported", [("1", ".5"), (".5", "1")])
+    def test_leading_dot_last_chapter_does_not_roll_back(self, local, imported):
+        # Issue #227: ".5" is chapter 0.5, so it never replaces cursor "1".
+        merged = merge_manga_state(
+            {"last_chapter": local},
+            {"last_chapter": imported},
+        )
+
+        assert merged["last_chapter"] == "1"
+
+    def test_leading_dot_chapter_merges_in_chapter_order(self):
+        merged = merge_manga_state(
+            {"downloaded": ["5", "1"]},
+            {"downloaded": [".5"]},
+        )
+
+        assert merged["downloaded"] == [".5", "1", "5"]
+
+    def test_labelled_last_chapter_uses_its_chapter_number(self):
+        # Issue #227: "9 Part 1" is chapter 9, so it does not beat "10".
+        merged = merge_manga_state(
+            {"last_chapter": "9 Part 1"},
+            {"last_chapter": "10"},
+        )
+
+        assert merged["last_chapter"] == "10"
+
+    def test_merged_chapters_use_shared_chapter_order(self):
+        merged = merge_manga_state(
+            {"downloaded": ["10 Part 1", "Extra", "2"]},
+            {"downloaded": ["10", "2.5", "Bonus"]},
+        )
+
+        assert merged["downloaded"] == [
+            "Bonus", "Extra", "2", "2.5", "10", "10 Part 1"]
+
 
 class TestValidateBackupContents:
     """Issue #354: payload shape is checked before an import writes."""
