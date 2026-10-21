@@ -6,6 +6,7 @@ A friendly CLI for tracking and downloading manga chapters.
 
 import argparse
 import json
+import logging
 import os
 import platform
 import re
@@ -56,6 +57,13 @@ from .search import compute_search_sources, probe_chapter_counts, sweep
 from .emailer import send_to_kindle
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
                                PipelineOptions)
+from .output import (LOG_FILE_NAME, LOG_LEVEL_ENV, RICH_MARKUP,
+                     configure_logging, ensure_utf8_streams,
+                     invalid_log_level_env, is_plain_console,
+                     logging_configured, make_console, resolve_log_level,
+                     set_console_renderer, stream_is_plain)
+
+logger = logging.getLogger(__name__)
 
 console = Console()
 # Issue #239: diagnostics (errors, refused or degraded work) go to stderr
@@ -75,6 +83,92 @@ def _esc(value) -> str:
     """Escape data (titles, statuses, paths, errors) for interpolation
     into Rich markup so brackets render literally (issue #375)."""
     return escape(str(value))
+
+
+def _panel(text: str, **kwargs):
+    """A Panel, or just its text when stdout is plain (issue #226)."""
+    if is_plain_console(console):
+        return text
+    return Panel(text, **kwargs)
+
+
+def _table(*args, **kwargs) -> Table:
+    """A Table, borderless when stdout is plain (issue #226)."""
+    if is_plain_console(console):
+        kwargs.update(box=None, show_lines=False)
+    return Table(*args, **kwargs)
+
+
+def _log_level(args) -> int:
+    """Console log level for the parsed command line.
+
+    Only the global ``memanga -q`` quiets logging. ``check --quiet``
+    keeps its own meaning (never prompt), so the scheduled
+    ``check --auto --quiet`` still records degraded sources.
+    """
+    default = logging.INFO if getattr(args, "gui", False) else logging.WARNING
+    return resolve_log_level(getattr(args, "verbose", 0),
+                             getattr(args, "log_quiet", False), default)
+
+
+def _render_on_err_console(markup: str) -> None:
+    err_console.print(markup)
+
+
+def _configure_output(args) -> None:
+    """Set up consoles and logging for this run (issue #226).
+
+    Output to a pipe, file or cron, ``--plain`` or ``TERM=dumb`` is plain
+    text: no colour, emoji, borders or hard wrapping. ``NO_COLOR`` only
+    turns colour off. Log records go to stderr; ``-v``/``-vv``/``-q``,
+    then ``MEMANGA_LOG_LEVEL``, choose the level (default WARNING, INFO
+    with ``--gui``). On an interactive stderr, command warnings and
+    errors (see :func:`_diagnostic`) keep their Rich rendering.
+    """
+    global console, err_console
+    ensure_utf8_streams()
+    plain = getattr(args, "plain", False)
+    if stream_is_plain(sys.stdout, plain):
+        console = make_console(plain=True)
+    if stream_is_plain(sys.stderr, plain):
+        err_console = make_console(stderr=True, plain=True)
+
+    configure_logging(_log_level(args))
+    if not is_plain_console(err_console):
+        set_console_renderer(_render_on_err_console)
+    bad = invalid_log_level_env()
+    if bad is not None:
+        logger.warning("Ignoring %s=%r: use DEBUG, INFO, WARNING, ERROR or "
+                       "CRITICAL", LOG_LEVEL_ENV, bad)
+
+
+def _enable_log_file(args, root: Path) -> None:
+    """Also log to the rotating ``diagnostics.log`` in ``root`` when
+    ``--log-file`` was given. A file that can't be opened only warns."""
+    if not getattr(args, "log_file", False):
+        return
+    path = root / LOG_FILE_NAME
+    try:
+        configure_logging(_log_level(args), log_file=path)
+    except OSError as e:
+        sys.stderr.write(f"warning: cannot write log file {path}: "
+                         f"{e.strerror or e}\n")
+
+
+def _diagnostic(level: int, markup: str, message: str, *args) -> None:
+    """Report a command's warning or error (issue #226).
+
+    It is a log record on ``memanga.cli``: ``memanga -q`` and
+    ``MEMANGA_LOG_LEVEL`` decide whether it shows, redirected stderr and
+    ``--log-file`` get one plain line with a timestamp and level, and an
+    interactive terminal still shows ``markup``. When main() did not set
+    up logging (a command function called directly), ``markup`` is
+    printed as before.
+    """
+    if not logging_configured():
+        err_console.print(markup)
+        return
+    logger.log(level, message, *args, extra={RICH_MARKUP: markup})
 
 
 def _stdin_is_tty() -> bool:
@@ -439,7 +533,7 @@ def cmd_list(args):
         console.print(f"[dim]No manga with status {_esc(', '.join(statuses))}.[/dim]")
         return
     
-    table = Table(
+    table = _table(
         title="📚 Tracked Manga",
         box=box.ROUNDED,
         show_lines=True,
@@ -1352,7 +1446,8 @@ def _chapter_label(ch) -> str:
 
 class _ConsoleChapterReporter(ChapterReporter):
     """Prints chapter-pipeline progress the way `check` always has:
-    progress and saves on stdout, warnings and failures on stderr."""
+    progress and saves on stdout; warnings and failures are log records
+    on stderr (see :func:`_diagnostic`)."""
 
     def downloading(self, chapter):
         source_info = ""
@@ -1361,20 +1456,31 @@ class _ConsoleChapterReporter(ChapterReporter):
         console.print(f"     [dim]⬇️  Downloading {_chapter_label(chapter)}...{source_info}[/dim]")
 
     def trying_backup(self, error, backup_chapter):
-        err_console.print(f"     [yellow]⚠️  Primary failed ({_esc(error)}), trying backup ({_esc(backup_chapter.source)})...[/yellow]")
+        _diagnostic(
+            logging.WARNING,
+            f"     [yellow]⚠️  Primary failed ({_esc(error)}), trying backup ({_esc(backup_chapter.source)})...[/yellow]",
+            "Chapter %s: primary failed (%s), trying backup (%s)",
+            backup_chapter.number, error, backup_chapter.source,
+        )
 
     def backup_failed(self, error):
-        err_console.print(f"     [red]❌ Backup also failed: {_esc(error)}[/red]")
+        _diagnostic(logging.ERROR,
+                    f"     [red]❌ Backup also failed: {_esc(error)}[/red]",
+                    "Backup also failed: %s", error)
 
     def saved(self, outcome):
         path = outcome.path
-        label = _esc(f"{path.parent.name}/{path.name}/" if path.is_dir() else path.name)
+        name = f"{path.parent.name}/{path.name}/" if path.is_dir() else path.name
+        label = _esc(name)
         src = " from backup" if outcome.from_backup else ""
         if outcome.status is ChapterStatus.PARTIAL:
             miss = outcome.missing_pages
-            err_console.print(
+            _diagnostic(
+                logging.WARNING,
                 f"     [yellow]⚠️  Saved partial{src}: {label} — "
-                f"{len(miss)}/{outcome.total_pages} page(s) missing (pages {_esc(miss)})[/yellow]"
+                f"{len(miss)}/{outcome.total_pages} page(s) missing (pages {_esc(miss)})[/yellow]",
+                "Saved partial%s: %s — %d/%d page(s) missing (pages %s)",
+                src, name, len(miss), outcome.total_pages, miss,
             )
         else:
             console.print(f"     [green]✅ Saved{src}: {label}[/green]")
@@ -1392,13 +1498,21 @@ class _ConsoleChapterReporter(ChapterReporter):
         console.print("     [dim]🗑️  Deleted local copy[/dim]")
 
     def delete_failed(self, path, error):
-        err_console.print(f"     [yellow]⚠️  Could not delete local copy: {_esc(error)}[/yellow]")
+        _diagnostic(
+            logging.WARNING,
+            f"     [yellow]⚠️  Could not delete local copy: {_esc(error)}[/yellow]",
+            "Could not delete local copy %s: %s", path, error,
+        )
 
     def email_failed(self, error):
-        err_console.print(f"     [red]📧 Email failed: {_esc(error)}[/red]")
+        _diagnostic(logging.ERROR,
+                    f"     [red]📧 Email failed: {_esc(error)}[/red]",
+                    "Email failed: %s", error)
 
     def failed(self, outcome):
-        err_console.print(f"     [red]❌ Failed: {_esc(outcome.error)}[/red]")
+        _diagnostic(logging.ERROR,
+                    f"     [red]❌ Failed: {_esc(outcome.error)}[/red]",
+                    "Chapter %s: Failed: %s", outcome.chapter, outcome.error)
 
 
 def _chapter_pipeline(output_format=None, max_retries=DEFAULT_PAGE_RETRIES,
@@ -1476,6 +1590,22 @@ def _process_chapter(pipeline: ChapterPipeline, manga, chapter):
     return outcome
 
 
+def _check_summary_line(dry_run, checked, new, downloaded, failed,
+                        errored, unconfirmed) -> str:
+    """The single plain-text summary of a `check` run (issue #226)."""
+    if dry_run:
+        line = f"Dry run: {new} chapter(s) available for download"
+    elif new == 0:
+        line = "Summary: no new chapters found"
+    else:
+        line = (f"Summary: {downloaded}/{new} chapters downloaded, "
+                f"{failed} failed")
+    line += f"; checked {checked} manga, {errored} could not be checked"
+    if unconfirmed:
+        line += f", {unconfirmed} chapter(s) need confirmation"
+    return line
+
+
 def cmd_check(args):
     """Check for new chapters and download them.
 
@@ -1518,13 +1648,13 @@ def cmd_check(args):
     console.print(f"[dim]=== {datetime.now().strftime('%Y-%m-%d %H:%M')} ===[/dim]")
 
     if dry_run:
-        console.print(Panel("[bold]🔍 Dry Run — Check Only (nothing is downloaded or recorded)[/bold]", border_style="yellow"))
+        console.print(_panel("[bold]🔍 Dry Run — Check Only (nothing is downloaded or recorded)[/bold]", border_style="yellow"))
     elif from_chapter is not None and from_chapter == 0:
-        console.print(Panel("[bold]📥 Downloading All Chapters[/bold]", border_style="green"))
+        console.print(_panel("[bold]📥 Downloading All Chapters[/bold]", border_style="green"))
     elif from_chapter is not None:
-        console.print(Panel(f"[bold]📥 Downloading from Chapter {from_chapter}[/bold]", border_style="green"))
+        console.print(_panel(f"[bold]📥 Downloading from Chapter {from_chapter}[/bold]", border_style="green"))
     else:
-        console.print(Panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
+        console.print(_panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
     console.print()
     
     total_new = 0
@@ -1584,30 +1714,40 @@ def cmd_check(args):
             else:
                 suspicious = state.get_suspicious_batch(title) if from_chapter is None else None
             if suspicious:
-                err_console.print(
-                    f"  [yellow]└─ Warning: Suspicious chapter batch detected: "
-                    f"{_esc(suspicious.get('count'))} chapter(s) up to "
-                    f"{_esc(suspicious.get('highest'))} "
-                    f"(last tracked: {_esc(suspicious.get('last_chapter'))})[/yellow]"
-                )
-                for reason in suspicious.get("reasons", []):
-                    err_console.print(f"     [dim]- {_esc(reason)}[/dim]")
-                err_console.print(f"     [dim]- {_esc(suspicious.get('backup_status'))}[/dim]")
+                reasons = list(suspicious.get("reasons", []))
+                reasons.append(suspicious.get("backup_status"))
                 if dry_run:
-                    err_console.print(
-                        "     [yellow]A download run would skip these chapters. Run "
-                        "'memanga check --download --force-suspicious' to accept anyway.[/yellow]"
-                    )
+                    advice = ("A download run would skip these chapters. Run "
+                              "'memanga check --download --force-suspicious' "
+                              "to accept anyway.")
                 else:
-                    err_console.print(
-                        "     [yellow]Skipped auto-delivery. Run "
-                        "'memanga check --force-suspicious' to accept anyway.[/yellow]"
-                    )
+                    advice = ("Skipped auto-delivery. Run "
+                              "'memanga check --force-suspicious' to accept anyway.")
+                markup = "\n".join(
+                    [f"  [yellow]└─ Warning: Suspicious chapter batch detected: "
+                     f"{_esc(suspicious.get('count'))} chapter(s) up to "
+                     f"{_esc(suspicious.get('highest'))} "
+                     f"(last tracked: {_esc(suspicious.get('last_chapter'))})[/yellow]"]
+                    + [f"     [dim]- {_esc(reason)}[/dim]" for reason in reasons]
+                    + [f"     [yellow]{_esc(advice)}[/yellow]"]
+                )
+                _diagnostic(
+                    logging.WARNING, markup,
+                    "%s: Suspicious chapter batch detected: %s chapter(s) up to "
+                    "%s (last tracked: %s); %s; %s",
+                    title, suspicious.get("count"), suspicious.get("highest"),
+                    suspicious.get("last_chapter"),
+                    "; ".join(str(r) for r in reasons), advice,
+                )
             elif dry_run and report.get("forced"):
-                err_console.print(
+                _diagnostic(
+                    logging.WARNING,
                     f"  [yellow]└─ --force-suspicious: includes {_esc(report['forced'])} "
                     "chapter(s) from a suspicious batch; a download run with "
-                    "this flag would accept it.[/yellow]"
+                    "this flag would accept it.[/yellow]",
+                    "%s: --force-suspicious: includes %s chapter(s) from a "
+                    "suspicious batch; a download run with this flag would "
+                    "accept it.", title, report["forced"],
                 )
 
             if not new_chapters:
@@ -1655,10 +1795,13 @@ def cmd_check(args):
             # delivered once results can't be recorded.
             raise
         except DownloaderError as e:
-            err_console.print(f"  [red]└─ Error: {_esc(e)}[/red]")
+            _diagnostic(logging.ERROR, f"  [red]└─ Error: {_esc(e)}[/red]",
+                        "%s: Error: %s", title, e)
             total_errored += 1
         except Exception as e:
-            err_console.print(f"  [red]└─ Unexpected error: {_esc(e)}[/red]")
+            _diagnostic(logging.ERROR,
+                        f"  [red]└─ Unexpected error: {_esc(e)}[/red]",
+                        "%s: Unexpected error: %s", title, e)
             total_errored += 1
     
     # Record check history with actual counts. A dry run is a preview:
@@ -1667,19 +1810,35 @@ def cmd_check(args):
         state.update_last_check(new_chapters=total_new, downloaded=total_downloaded)
 
     # Summary
-    console.print()
-    if total_new == 0:
-        console.print("[dim]No new chapters found.[/dim]")
-    elif dry_run:
-        console.print(f"[yellow]📊 Dry run: {total_new} chapter(s) available for download[/yellow]")
+    if is_plain_console(console):
+        # Issue #226: one greppable line for cron and pipes.
+        console.print(_check_summary_line(
+            dry_run, total_checked, total_new, total_downloaded,
+            total_failed, total_errored, total_unconfirmed,
+        ), markup=False)
     else:
-        console.print(f"[green]📊 Summary: {total_downloaded}/{total_new} chapters downloaded[/green]")
-        if delivery_mode == "local":
-            console.print(f"[dim]📁 Downloads: {_esc(download_dir)}[/dim]")
+        console.print()
+        if total_new == 0:
+            console.print("[dim]No new chapters found.[/dim]")
+        elif dry_run:
+            console.print(f"[yellow]📊 Dry run: {total_new} chapter(s) available for download[/yellow]")
+        else:
+            console.print(f"[green]📊 Summary: {total_downloaded}/{total_new} chapters downloaded[/green]")
+            if delivery_mode == "local":
+                console.print(f"[dim]📁 Downloads: {_esc(download_dir)}[/dim]")
     if total_failed > 0:
-        err_console.print(f"[yellow]⚠️  {total_failed} chapter(s) failed — run 'memanga failed' for details.[/yellow]")
+        _diagnostic(
+            logging.WARNING,
+            f"[yellow]⚠️  {total_failed} chapter(s) failed — run 'memanga failed' for details.[/yellow]",
+            "%d chapter(s) failed — run 'memanga failed' for details.",
+            total_failed,
+        )
     if total_errored:
-        err_console.print(f"[yellow]⚠️  {total_errored}/{total_checked} manga could not be checked.[/yellow]")
+        _diagnostic(
+            logging.WARNING,
+            f"[yellow]⚠️  {total_errored}/{total_checked} manga could not be checked.[/yellow]",
+            "%d/%d manga could not be checked.", total_errored, total_checked,
+        )
     if total_unconfirmed:
         return _non_interactive_error(
             f"skipped {total_unconfirmed} chapter(s) that need confirmation; "
@@ -1738,11 +1897,11 @@ def cmd_status(args):
         _print_json(_status_payload())
         return
 
-    console.print(Panel("[bold]📊 MeManga Status[/bold]", border_style="blue"))
+    console.print(_panel("[bold]📊 MeManga Status[/bold]", border_style="blue"))
     console.print()
     
     # Configuration
-    table = Table(title="Configuration", box=box.SIMPLE, show_header=False)
+    table = _table(title="Configuration", box=box.SIMPLE, show_header=False)
     table.add_column(style="dim", width=18)
     table.add_column(style="white")
     
@@ -1817,7 +1976,7 @@ def _config_show(args):
         _print_json(_masked_config_data())
         return
     import yaml
-    console.print(Panel("[bold]Current Configuration[/bold]", border_style="cyan"))
+    console.print(_panel("[bold]Current Configuration[/bold]", border_style="cyan"))
     console.print(_esc(yaml.dump(_masked_config_data(), default_flow_style=False)))
 
 
@@ -1930,7 +2089,7 @@ def _config_edit(args):
 
 def _config_email(args):
     password_set = bool(get_app_password(config))
-    table = Table(title="Email delivery", box=box.SIMPLE, show_header=False)
+    table = _table(title="Email delivery", box=box.SIMPLE, show_header=False)
     table.add_column(style="dim", width=18)
     table.add_column(style="white")
     table.add_row("Delivery mode", _esc(config.delivery_mode))
@@ -2022,7 +2181,7 @@ def cmd_config(args):
             "`config set KEY VALUE` or a config flag"
         )
 
-    console.print(Panel("[bold]⚙️  Configure MeManga[/bold]", border_style="yellow"))
+    console.print(_panel("[bold]⚙️  Configure MeManga[/bold]", border_style="yellow"))
     console.print()
     
     # Delivery mode
@@ -2371,10 +2530,10 @@ def cmd_sources(args):
     """List supported manga sources."""
     sources = get_supported_sources()
     
-    console.print(Panel("[bold]🌐 Supported Sources[/bold]", border_style="cyan"))
+    console.print(_panel("[bold]🌐 Supported Sources[/bold]", border_style="cyan"))
     console.print()
     
-    table = Table(box=box.SIMPLE)
+    table = _table(box=box.SIMPLE)
     table.add_column("Source", style="cyan")
     table.add_column("Type", style="dim")
     table.add_column("Best For")
@@ -2521,7 +2680,7 @@ def cmd_search(args):
         err_console.print(f"[dim]{_esc(summary)}[/dim]")
         return EXIT_ERROR
 
-    table = Table(box=box.SIMPLE)
+    table = _table(box=box.SIMPLE)
     table.add_column("#", style="dim", justify="right")
     table.add_column("Source", style="green")
     table.add_column("Title", style="cyan bold")
@@ -3030,7 +3189,7 @@ def cmd_failed(args):
         console.print("[dim]No failed or partial chapters recorded.[/dim]")
         return
 
-    table = Table(
+    table = _table(
         title="⚠️  Retryable Chapter Downloads",
         box=box.ROUNDED,
         show_lines=True,
@@ -3090,7 +3249,11 @@ def cmd_failed(args):
         for manga_title, chapters in retryable.items():
             manga = manga_by_title.get(manga_title)
             if not manga:
-                err_console.print(f"  [yellow]⚠️  Manga not found in config: {_esc(manga_title)}[/yellow]")
+                _diagnostic(
+                    logging.WARNING,
+                    f"  [yellow]⚠️  Manga not found in config: {_esc(manga_title)}[/yellow]",
+                    "Manga not found in config: %s", manga_title,
+                )
                 # Unretryable records still count as unrecovered (#239).
                 retried += len(chapters)
                 continue
@@ -3102,17 +3265,32 @@ def cmd_failed(args):
 
             for chapter_num, info in sorted(chapters.items(), key=_chapter_order):
                 if not sources:
-                    err_console.print(f"  [yellow]⚠️  No source to retry Chapter {_esc(chapter_num)} of {_esc(manga_title)}[/yellow]")
+                    _diagnostic(
+                        logging.WARNING,
+                        f"  [yellow]⚠️  No source to retry Chapter {_esc(chapter_num)} of {_esc(manga_title)}[/yellow]",
+                        "No source to retry Chapter %s of %s",
+                        chapter_num, manga_title,
+                    )
                     retried += 1
                     continue
 
                 ch_obj = primary.get(chapter_num)
                 if not ch_obj:
-                    err_console.print(f"  [yellow]⚠️  Could not find Chapter {_esc(chapter_num)} of {_esc(manga_title)} on primary source[/yellow]")
+                    _diagnostic(
+                        logging.WARNING,
+                        f"  [yellow]⚠️  Could not find Chapter {_esc(chapter_num)} of {_esc(manga_title)} on primary source[/yellow]",
+                        "Could not find Chapter %s of %s on primary source",
+                        chapter_num, manga_title,
+                    )
                     # Try backup directly
                     ch_obj = _find_chapter_on_backup(manga, chapter_num, state)
                     if not ch_obj:
-                        err_console.print(f"  [red]❌ Chapter {_esc(chapter_num)} not found on any source[/red]")
+                        _diagnostic(
+                            logging.ERROR,
+                            f"  [red]❌ Chapter {_esc(chapter_num)} not found on any source[/red]",
+                            "Chapter %s of %s not found on any source",
+                            chapter_num, manga_title,
+                        )
                         retried += 1
                         continue
                 else:
@@ -3138,6 +3316,14 @@ _DOCTOR_ICONS = {
     doctor.SKIP: "[dim]➖[/dim]",
 }
 
+# Plain output drops the icons (issue #226), so it names the status.
+_DOCTOR_LABELS = {
+    doctor.OK: "OK",
+    doctor.WARNING: "WARN",
+    doctor.FAIL: "FAIL",
+    doctor.SKIP: "SKIP",
+}
+
 
 def cmd_doctor(args):
     """Diagnose common setup and runtime problems (issue #250).
@@ -3161,15 +3347,17 @@ def cmd_doctor(args):
     with console.status("[dim]Running checks...[/dim]"):
         results = run()
 
-    table = Table(title="🩺 MeManga Doctor", box=box.SIMPLE, show_header=False)
-    table.add_column(width=2)
+    plain = is_plain_console(console)
+    table = _table(title="🩺 MeManga Doctor", box=box.SIMPLE, show_header=False)
+    table.add_column(width=None if plain else 2)
     table.add_column(style="cyan")
     table.add_column(no_wrap=False)
+    status_cells = _DOCTOR_LABELS if plain else _DOCTOR_ICONS
     for r in results:
         message = _esc(r.message)
         if r.status == doctor.SKIP:
             message = f"[dim]{message}[/dim]"
-        table.add_row(_DOCTOR_ICONS[r.status], _esc(r.name), message)
+        table.add_row(status_cells[r.status], _esc(r.name), message)
     console.print(table)
 
     report = doctor.build_report(results)
@@ -3368,22 +3556,25 @@ def _run_main():
         err_console.print("\n[dim]Terminated.[/dim]")
         sys.exit(EXIT_TERMINATED)
     except StateCheckpointError as e:
-        err_console.print(f"[red]❌ Could not save state: {_esc(e)}[/red]")
-        err_console.print(
-            "[red]Stopped: nothing more is downloaded or sent while "
-            "results can't be recorded.[/red]"
+        stopped = ("Stopped: nothing more is downloaded or sent while "
+                   "results can't be recorded.")
+        _diagnostic(
+            logging.ERROR,
+            f"[red]❌ Could not save state: {_esc(e)}[/red]\n[red]{stopped}[/red]",
+            "Could not save state: %s. %s", e, stopped,
         )
         sys.exit(EXIT_ERROR)
     except SaveError as e:
         # Issue #243: a failed config/state save (full disk, permissions)
         # ends the command with a message instead of a traceback.
-        err_console.print(
-            f"[red]❌ Could not save {_esc(e.path.name)}: "
-            f"{_esc(e.error.strerror or e.error)}[/red]")
-        err_console.print(
-            f"[red]{_esc(e.path)} and its backup were not changed by this "
-            "save. Free up disk space or check the folder's permissions, "
-            "then retry.[/red]"
+        reason = e.error.strerror or e.error
+        advice = ("and its backup were not changed by this save. Free up "
+                  "disk space or check the folder's permissions, then retry.")
+        _diagnostic(
+            logging.ERROR,
+            f"[red]❌ Could not save {_esc(e.path.name)}: {_esc(reason)}[/red]\n"
+            f"[red]{_esc(e.path)} {advice}[/red]",
+            "Could not save %s: %s. %s %s", e.path.name, reason, e.path, advice,
         )
         sys.exit(EXIT_ERROR)
 
@@ -3436,7 +3627,9 @@ def _flush_state_on_interrupt():
     try:
         state.flush()
     except Exception as e:
-        err_console.print(f"[yellow]⚠️  Could not save state: {_esc(e)}[/yellow]")
+        _diagnostic(logging.WARNING,
+                    f"[yellow]⚠️  Could not save state: {_esc(e)}[/yellow]",
+                    "Could not save state: %s", e)
 
 
 def _subparser(parser, name):
@@ -3499,6 +3692,30 @@ Examples:
         "--gui",
         action="store_true",
         help=argparse.SUPPRESS if _cli_only else "Launch the graphical user interface",
+    )
+    # Issue #226: output and logging. Like --config-dir these go before
+    # the command; `check -q` keeps its own meaning (never prompt).
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="Show more diagnostics on stderr (-v progress, -vv debug). "
+             f"Overrides ${LOG_LEVEL_ENV}. Goes before the command.",
+    )
+    verbosity.add_argument(
+        "-q", "--quiet", dest="log_quiet", action="store_true",
+        help="Hide warning, progress and debug diagnostics; errors still "
+             f"show. Overrides ${LOG_LEVEL_ENV}. Goes before the command.",
+    )
+    parser.add_argument(
+        "--plain", action="store_true",
+        help="Plain text output: no colour, emoji, borders or line wrapping "
+             "(automatic when output is not a terminal). Goes before the "
+             "command.",
+    )
+    parser.add_argument(
+        "--log-file", action="store_true",
+        help=f"Also write diagnostics to {LOG_FILE_NAME} in the config "
+             "directory (rotated, with timestamps). Goes before the command.",
     )
     
     subparsers = parser.add_subparsers(dest="command", title="commands")
@@ -3679,7 +3896,8 @@ Examples:
     p_check.add_argument("--download", "-a", "--auto", "-y", "--yes", dest="download", action="store_true",
                          help="Download new chapters without prompting (--auto and --yes are aliases)")
     p_check.add_argument("-q", "--quiet", action="store_true",
-                         help="Never prompt; without --download, new chapters are skipped and the run exits 1")
+                         help="Never prompt; without --download, new chapters are skipped and the run exits 1 "
+                              "(to hide warnings, use `memanga -q check`)")
     p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
     p_check.add_argument("-n", "--dry-run", action="store_true",
                          help="Check only: list what would be downloaded; no downloads or state changes (wins over --download)")
@@ -3883,6 +4101,7 @@ def _main():
     p_failed = _subparser(parser, "failed")
 
     args = parser.parse_args()
+    _configure_output(args)
 
     if args.command == "check":
         if args.target and args.title and args.target != args.title:
@@ -3942,6 +4161,7 @@ def _main():
     if ctx.state.needs_recovery and _acquire_config_lock(lock_dir, required=False):
         ctx = build_context(config_dir, root=lock_dir)
     use_context(ctx)
+    _enable_log_file(args, lock_dir)
 
     # Only doctor and `config path/edit` may run on fallback defaults;
     # anything else could act on an empty manga list or overwrite the

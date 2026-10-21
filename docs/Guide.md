@@ -1130,7 +1130,7 @@ Remove:
 ./scripts/run.sh cron remove
 ```
 
-Output is logged to `memanga.log` in the MeManga config directory (the platform folder listed in [Where your data lives](../README.md#where-your-data-lives) by default, or the directory passed with `--config-dir`).
+Output is logged to `memanga.log` in the MeManga config directory (the platform folder listed in [Where your data lives](../README.md#where-your-data-lives) by default, or the directory passed with `--config-dir`). Each run prints one summary line, and its warnings and errors (a source that failed or fell back to a backup, a partial or failed chapter) are logged with a timestamp and level (see [Output and logging](#output-and-logging)).
 
 ### Linux — Cron
 
@@ -1419,6 +1419,49 @@ title while they have records. Without a target every manga is included.
 `--retry` and `--clear` are kept as aliases of `failed retry` and
 `failed clear`. `failed retry` exits `3` when a chapter still fails or is
 saved as a partial again; its record stays listed.
+
+### Output and logging
+
+Results go to stdout; diagnostics go to stderr through logging, at these
+levels:
+
+| Level | Used for |
+|-------|----------|
+| `DEBUG` | Scraper internals and per-page retries |
+| `INFO` | Normal progress (browser restarts, PDF splitting) |
+| `WARNING` | Degraded or fallback behaviour (a source could not be fetched, a backup was used, a partial chapter) |
+| `ERROR` | Failures |
+
+stderr shows `WARNING` and up by default. The level comes from, in order:
+
+1. `memanga -v` (`INFO`), `memanga -vv` (`DEBUG`) or `memanga -q`
+   (`ERROR`)
+2. `MEMANGA_LOG_LEVEL` (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`)
+3. the default: `WARNING`, or `INFO` for the desktop app
+
+The warnings and errors of `check` and `failed retry` themselves (a
+source that could not be checked, a backup used, a partial or failed
+chapter) follow the same level, so `memanga -q` hides the warnings and
+keeps the errors. `check --quiet` only means "never prompt" and does not
+change the level, so the daily check still records warnings. A
+command's direct answer, such as "Not found", always shows.
+
+When stderr is not a terminal (cron, a redirect), each log line starts
+with a timestamp and level, for example
+`2026-10-21 06:00:03 WARNING memanga.downloader.updates: Failed to fetch from ...`.
+`memanga --log-file` also writes `diagnostics.log` in the config
+directory: `INFO` and up, a timestamp and level on every line, rotated at
+1 MB with three old files kept. Passwords and tokens are masked in log
+output.
+
+When stdout is not a terminal, or with `memanga --plain`, output is plain
+text without colour, emoji, borders or line wrapping (symbols in manga
+titles are kept; `doctor` names each result `OK`, `WARN`, `FAIL` or
+`SKIP`), and `check` prints one summary line such as
+`Summary: 2/3 chapters downloaded, 1 failed; checked 4 manga, 0 could not be checked`.
+`NO_COLOR` only turns colour off. Redirected output is written as UTF-8,
+also on Windows. `-v`, `-q`, `--plain` and `--log-file` go before the
+command, like `--config-dir`.
 
 ### Exit codes
 

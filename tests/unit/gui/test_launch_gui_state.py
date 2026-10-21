@@ -321,6 +321,69 @@ class TestMoveRaceWithDirectGui:
         assert not (legacy / "config.yaml").exists()
         assert not (legacy / "state.json").exists()
 
+    def test_runtime_log_and_lock_follow_the_window(self, dirs, fake_qt,
+                                                    monkeypatch, lock_holder):
+        """Issue #226: the windowed entry locked the recreated legacy
+        folder for runtime.log after the move. When the window switches
+        to the platform folder, the log follows it there and the legacy
+        lock is let go instead of being held for the whole session."""
+        import os
+        import sys
+        from pathlib import Path
+
+        import memanga
+        from memanga import config as config_mod
+        from memanga import gui
+
+        legacy, native = dirs
+        # The other process finished its move before the entry started.
+        native.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(legacy, native)
+        legacy.mkdir()
+        (legacy / config_mod.MOVED_NOTE).write_text("moved", encoding="utf-8")
+        (native / "runtime.log").write_text("earlier session\n", encoding="utf-8")
+
+        src = (Path(memanga.__file__).parent / "gui" / "__main__.py").read_text()
+        entry: dict = {}
+        exec(src.split("if getattr(sys")[0], entry)
+        old_log = entry["_open_runtime_log"](legacy)
+        old_log.write("entry\n")
+        monkeypatch.setattr(sys, "stderr", old_log)
+        dup2 = []
+        monkeypatch.setattr(os, "dup2", lambda fd, target: dup2.append(target))
+        monkeypatch.setattr(gui, "_runtime_log_mover", entry["_move_runtime_log"])
+        real = config_mod.default_config_dir
+        calls = []
+
+        def stale_then_real():
+            calls.append(1)
+            return legacy if len(calls) == 1 else real()
+        monkeypatch.setattr(config_mod, "default_config_dir", stale_then_real)
+
+        try:
+            assert _launch() == 0
+            new_log = sys.stderr
+            assert new_log is not old_log
+            new_log.write("window\n")
+            new_log.flush()
+        finally:
+            old_log.close()
+
+        config, _ = fake_qt["windows"][0]
+        assert config.config_dir == native
+        assert lock_holder.can_lock(legacy)
+        assert not lock_holder.can_lock(native)
+        assert dup2 == [2]
+        assert (legacy / "runtime.log").read_text(encoding="utf-8") == "entry\n"
+        assert (native / "runtime.log").read_text(encoding="utf-8") == "window\n"
+        # The platform folder's previous session was rotated, not lost.
+        assert (native / "runtime.log.1").read_text(
+            encoding="utf-8") == "earlier session\n"
+        lock = entry["_runtime_log_lock"]
+        assert lock.acquired and lock.config_dir == native
+        new_log.close()
+        lock.release()
+
     def test_busy_platform_folder_shows_error_and_loads_nothing(
             self, dirs, fake_qt, monkeypatch, lock_holder):
         """The mover still holds the platform folder: the window is not

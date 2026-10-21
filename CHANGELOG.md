@@ -81,6 +81,23 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #226 Output and logging work the same everywhere. Scrapers, the
+  downloader, email delivery and the desktop app report through logging
+  instead of printing to stdout, so stdout only carries command results
+  and `--json` stays clean. Diagnostics go to stderr: warnings and errors
+  by default, more with `memanga -v` (progress) or `-vv` (debug), only
+  errors with `memanga -q`, or any level through `MEMANGA_LOG_LEVEL`;
+  this covers the warnings and errors `check` and `failed retry` report
+  themselves. When stdout is not a terminal (pipes, files, cron), or
+  with `--plain`, output is plain text without colour, emoji, borders or
+  line wrapping, and `check` prints a single summary line;
+  `NO_COLOR` turns colour off. Log lines on a redirected stderr or in a
+  log file, traceback lines included, carry a timestamp and level. `memanga --log-file`
+  also writes a rotating `diagnostics.log` in the config folder. The
+  desktop app keeps the last three `runtime.log` files instead of
+  overwriting it at every start. Passwords and tokens
+  are masked in log output, and redirected output on Windows is written
+  as UTF-8.
 - #249 Config and state live in the platform config folder:
   `%APPDATA%\memanga` on Windows, `~/Library/Application Support/memanga`
   on macOS and `$XDG_CONFIG_HOME/memanga` (default `~/.config/memanga`) on

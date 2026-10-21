@@ -85,7 +85,7 @@ class OnePunchManMangaaScraper(BaseScraper):
             # Sort by chapter number descending
             unique_chapters.sort(key=lambda x: float(x.number) if x.number.replace(".", "").isdigit() else 0, reverse=True)
             
-            logger.info(f"Found {len(unique_chapters)} chapters on onepunchmanmangaa.com")
+            logger.debug("Found %s chapters on onepunchmanmangaa.com", len(unique_chapters))
             return unique_chapters
             
         except Exception as e:
@@ -177,7 +177,7 @@ class OnePunchManMangaaScraper(BaseScraper):
                                     if src not in pages:
                                         pages.append(src)
             
-            logger.info(f"Found {len(pages)} pages in chapter")
+            logger.debug("Found %s pages in chapter", len(pages))
             return pages
             
         except Exception as e:

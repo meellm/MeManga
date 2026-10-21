@@ -5,10 +5,13 @@ Uses WordPress with Toivo Lite theme, images hosted on cdn.mangaclash.com CDN.
 Images are listed in og:image meta tags.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class FireForceMangaOrgScraper(BaseScraper):
@@ -119,5 +122,5 @@ class FireForceMangaOrgScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

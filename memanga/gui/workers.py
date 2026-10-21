@@ -3,6 +3,7 @@ Background worker for long-running operations.
 Wraps ThreadPoolExecutor; publishes events to the EventBus.
 """
 
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .events import EventBus
+
+logger = logging.getLogger(__name__)
 
 
 # Relevance filter and popularity ranking are shared with the CLI's
@@ -215,8 +218,6 @@ class BackgroundWorker:
         chapters for every manga regardless of mode — manual-mode manga
         are otherwise only surfaced, never auto-queued.
         """
-        import sys as _sys
-
         def _complete_payload(results, **extra):
             payload = {"results": results, **extra}
             if request_id is not None:
@@ -247,32 +248,28 @@ class BackgroundWorker:
                 "Offline", "Can't check for updates while offline."))
             self._events.publish("check_complete", _complete_payload([]))
             return
-        print(f"[Check] check_updates called with {len(manga_list)} manga", flush=True)
+        logger.info("Checking %d manga for updates", len(manga_list))
         for m in manga_list:
-            print(f"[Check]   - '{m.get('title')}' source={m.get('source', '')} status={m.get('status', 'reading')}", flush=True)
+            logger.debug("  '%s' source=%s status=%s", m.get('title'),
+                         m.get('source', ''), m.get('status', 'reading'))
 
         def _task():
-            import traceback
-            print(f"[Check] Background task started", flush=True)
             try:
                 from ..downloader import check_for_updates
             except Exception as e:
-                print(f"[Check] FATAL: Failed to import downloader: {e}", flush=True)
-                traceback.print_exc()
-                _sys.stdout.flush()
+                logger.exception("Failed to import downloader: %s", e)
                 self._events.publish(
                     "check_error", _error_payload("Import Error", str(e)))
                 self._events.publish("check_complete", _complete_payload([]))
                 return
             results = []
-            _sys.stdout.flush()
             for i, manga in enumerate(manga_list):
                 status = manga.get("status", "reading")
                 if not force and status != "reading":
-                    print(f"[Check] Skipping '{manga.get('title')}' — status={status}", flush=True)
+                    logger.debug("Skipping '%s' — status=%s", manga.get('title'), status)
                     continue
                 title = manga.get("title", "")
-                print(f"[Check] Checking '{title}' ({i+1}/{len(manga_list)})", flush=True)
+                logger.info("Checking '%s' (%d/%d)", title, i + 1, len(manga_list))
                 self._events.publish(
                     "check_progress",
                     _progress_payload(i + 1, len(manga_list), title),
@@ -281,16 +278,15 @@ class BackgroundWorker:
                 # Determine source domain for health tracking
                 sources = manga.get("sources", [])
                 domain = sources[0].get("source", "") if sources else manga.get("source", "")
-                print(f"[Check]   Source domain: {domain}", flush=True)
+                logger.debug("Source domain: %s", domain)
 
                 try:
                     new_chapters, all_chapters = check_for_updates(
                         manga, state, return_all=True,
                     )
-                    print(
-                        f"[Check]   Found {len(new_chapters)} new chapter(s) "
-                        f"(total {len(all_chapters)} available on primary)",
-                        flush=True,
+                    logger.info(
+                        "'%s': %d new chapter(s) (total %d available on primary)",
+                        title, len(new_chapters), len(all_chapters),
                     )
                     # Always include the result so the GUI can cache the full
                     # chapter list (used by Detail page for Read/Download UI).
@@ -304,15 +300,13 @@ class BackgroundWorker:
                     if domain:
                         state.update_source_health(domain, success=True)
                 except Exception as e:
-                    print(f"[Check]   ERROR: {e}", flush=True)
-                    traceback.print_exc()
-                    _sys.stdout.flush()
+                    logger.exception("Check failed for '%s': %s", title, e)
                     # Mark source unhealthy
                     if domain:
                         state.update_source_health(domain, success=False, error_msg=str(e))
                     self._events.publish(
                         "check_error", _error_payload(title, str(e)))
-            print(f"[Check] Done. Total results: {len(results)} manga with new chapters", flush=True)
+            logger.info("Check done: %d manga checked", len(results))
             self._events.publish(
                 "check_complete",
                 _complete_payload(results, queue_all=queue_all),
@@ -405,7 +399,6 @@ class BackgroundWorker:
         """Execute a single download task through the shared chapter
         pipeline (issue #295), so recovery, delivery and state records
         match `memanga check` and `failed retry`."""
-        import traceback
         try:
             from .. import downloader, emailer
             from ..chapter_pipeline import (
@@ -419,8 +412,7 @@ class BackgroundWorker:
                 download_error_payload,
             )
         except Exception as e:
-            print(f"[Download] FATAL: Failed to import downloader: {e}", flush=True)
-            traceback.print_exc()
+            logger.exception("Failed to import downloader: %s", e)
             self._events.publish("download_error", {
                 "task_id": item["task_id"], "error": f"Import error: {e}",
                 "title": item["manga"]["title"], "chapter": "?",
@@ -434,8 +426,8 @@ class BackgroundWorker:
         manga = item["manga"]
         chapter = item["chapter"]
 
-        print(f"[Download] Starting: {manga['title']} Ch.{chapter.number}", flush=True)
-        print(f"[Download]   Output: {item['output_dir']} format={item['output_format']}", flush=True)
+        logger.info("Downloading %s Ch.%s", manga['title'], chapter.number)
+        logger.debug("Output: %s format=%s", item['output_dir'], item['output_format'])
 
         # Kindle delivery is opted into per job: the page passes a
         # kindle_cfg only when email delivery applies to this manga.
@@ -474,8 +466,8 @@ class BackgroundWorker:
             # Not a download failure the pipeline knows how to record
             # (those come back as a FAILED outcome): keep a record anyway
             # so the chapter shows up as failed and can be retried.
-            print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}", flush=True)
-            traceback.print_exc()
+            logger.exception("Download failed: %s Ch.%s: %s",
+                             manga['title'], chapter.number, e)
             state = item.get("state")
             if state is not None:
                 try:
@@ -486,7 +478,7 @@ class BackgroundWorker:
                         str(e),
                     )
                 except Exception:
-                    traceback.print_exc()
+                    logger.exception("Could not record the failed chapter")
             self._events.publish("download_error", {
                 "task_id": task_id, "error": str(e),
                 "title": manga["title"], "chapter": chapter.number,

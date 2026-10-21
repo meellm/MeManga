@@ -6,6 +6,7 @@ Popular manga aggregator. Uses Playwright for chapter pages (JS-loaded images)
 and HTTP for search/chapter listing.
 """
 
+import logging
 import json
 import re
 from typing import List
@@ -13,6 +14,8 @@ from pathlib import Path
 from urllib.parse import quote_plus
 from .playwright_base import PlaywrightScraper
 from .base import Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class MangaBuddyScraper(PlaywrightScraper):
@@ -278,5 +281,5 @@ class MangaBuddyScraper(PlaywrightScraper):
                 return True
             except Exception as e:
                 error = e
-        print(f"Failed to download {url}: {error}")
+        logger.debug("Failed to download %s: %s", url, error)
         return False

@@ -1,6 +1,7 @@
 """Chapter download orchestration: fetch pages, write the output file and
 run the post-processing hook."""
 
+import logging
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,6 +20,8 @@ from .naming import (DEFAULT_NAMING_TEMPLATE, _chapter_base_name,
                      _sanitize_filename)
 from .post_processing import _run_post_processing
 from .sources import _configure_mangadex, _get_sources_from_manga
+
+logger = logging.getLogger(__name__)
 
 OutputFormat = Literal["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"]
 
@@ -198,9 +201,9 @@ def download_chapter(
                           if idx not in results]
                 if not failed:
                     break
-                print(
-                    f"  Retrying {len(failed)} failed page(s), "
-                    f"attempt {attempt}/{max_retries}..."
+                logger.debug(
+                    "Retrying %d failed page(s), attempt %d/%d",
+                    len(failed), attempt, max_retries,
                 )
                 time.sleep(2 ** (attempt - 1))
                 for idx, url, img_path in failed:
@@ -234,10 +237,12 @@ def download_chapter(
                     total_pages=total_pages,
                 )
 
-            print(
-                f"  Partial chapter kept: {len(still_failed)}/{total_pages} "
-                f"page(s) missing ({failed_pct:.0f}% <= "
-                f"{partial_threshold:g}% tolerance), pages {failed_page_nums}"
+            # INFO: the chapter pipeline reports the partial as a warning.
+            logger.info(
+                "Partial chapter kept: %d/%d page(s) missing "
+                "(%.0f%% <= %g%% tolerance), pages %s",
+                len(still_failed), total_pages, failed_pct,
+                partial_threshold, failed_page_nums,
             )
             if on_partial is not None:
                 try:

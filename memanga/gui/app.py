@@ -2,6 +2,7 @@
 MeManga GUI Application - PySide6 MainWindow with sidebar + QStackedWidget.
 """
 
+import logging
 from datetime import datetime
 
 from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
@@ -20,6 +21,8 @@ from . import theme as T
 from .components.sidebar import Sidebar
 from .components.offline_banner import OfflineBanner
 from .pages.base import BasePage
+
+logger = logging.getLogger(__name__)
 
 
 class MeMangaApp(QMainWindow):
@@ -435,7 +438,7 @@ class MeMangaApp(QMainWindow):
         error = data.get("error", "Unknown")
         self.app_state.add_notification("error", f"Check failed: {title} - {error[:80]}")
         self.events.publish("notification_added", {})
-        print(f"[Check Error] {title}: {error}", flush=True)
+        logger.error("Check failed: %s: %s", title, error)
 
     def _on_download_error(self, data):
         title = data.get("title", "")

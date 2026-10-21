@@ -5,11 +5,14 @@ Architecture: PHP with attachment CDN
 218 chapters of Sakamoto Days
 """
 
+import logging
 import re
 import requests
 from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class SakamotoDaysOnlineScraper(BaseScraper):
@@ -115,5 +118,5 @@ class SakamotoDaysOnlineScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Error downloading {url}: {e}")
+            logger.debug("Error downloading %s: %s", url, e)
             return False

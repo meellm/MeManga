@@ -15,11 +15,14 @@ Page images are served from a rotating CDN host (currently
 instead of assuming a fixed CDN.
 """
 
+import logging
 import re
 from typing import List, Optional
 from pathlib import Path
 from urllib.parse import urlparse
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class MangaTaroScraper(BaseScraper):
@@ -319,5 +322,5 @@ class MangaTaroScraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

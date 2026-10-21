@@ -4,10 +4,13 @@ BlueLockReadOnline scraper (bluelockread.online) - Blue Lock dedicated site.
 Uses WordPress, images hosted on wp-content/uploads.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class BlueLockReadOnlineScraper(BaseScraper):
@@ -112,5 +115,5 @@ class BlueLockReadOnlineScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

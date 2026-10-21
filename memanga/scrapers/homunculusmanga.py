@@ -5,10 +5,13 @@ Uses WordPress with Comic Easel plugin, images hosted on mangaread.org CDN.
 Images are listed in og:image meta tags.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class HomunculusMangaScraper(BaseScraper):
@@ -118,5 +121,5 @@ class HomunculusMangaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

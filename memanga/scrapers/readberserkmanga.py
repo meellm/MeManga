@@ -5,12 +5,15 @@ Content: Berserk by Kentaro Miura (383+ chapters)
 Architecture: WordPress + hot.planeptune.us CDN
 """
 
+import logging
 import re
 import requests
 from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ReadBerserkMangaScraper(BaseScraper):
@@ -76,7 +79,7 @@ class ReadBerserkMangaScraper(BaseScraper):
             chapters.sort(key=lambda x: float(x.number), reverse=True)
             
         except Exception as e:
-            print(f"Error fetching chapters: {e}")
+            logger.warning("Error fetching chapters: %s", e)
         
         return chapters
 
@@ -108,7 +111,7 @@ class ReadBerserkMangaScraper(BaseScraper):
             return unique_images
             
         except Exception as e:
-            print(f"Error fetching pages: {e}")
+            logger.warning("Error fetching pages: %s", e)
         
         return images
 
@@ -129,5 +132,5 @@ class ReadBerserkMangaScraper(BaseScraper):
                 f.write(resp.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

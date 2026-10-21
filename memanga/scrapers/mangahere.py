@@ -9,12 +9,15 @@ only a loading.gif placeholder. Each image URL comes from the
 JavaScript that assembles the CDN paths (issue #174).
 """
 
+import logging
 import re
 from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urljoin, quote
 
 from .base import BaseScraper, Manga, Chapter, looks_like_image
+
+logger = logging.getLogger(__name__)
 
 
 # Pages are fetched two at a time, so a chapter without a usable
@@ -66,7 +69,7 @@ class MangaHereScraper(BaseScraper):
         try:
             html = self._get_html(search_url)
         except Exception as e:
-            print(f"[MangaHere] Search request failed: {e}")
+            logger.warning("Search request failed: %s", e)
             return []
         
         soup = BeautifulSoup(html, 'html.parser')
@@ -109,7 +112,7 @@ class MangaHereScraper(BaseScraper):
         try:
             html = self._get_html(manga_url)
         except Exception as e:
-            print(f"[MangaHere] Failed to get manga page: {e}")
+            logger.warning("Failed to get manga page: %s", e)
             return []
         
         soup = BeautifulSoup(html, 'html.parser')
@@ -172,12 +175,12 @@ class MangaHereScraper(BaseScraper):
         try:
             html = self._get_html(chapter_url)
         except Exception as e:
-            print(f"[MangaHere] Failed to get chapter page: {e}")
+            logger.warning("Failed to get chapter page: %s", e)
             return []
         
         chapter_id = re.search(r'var\s+chapterid\s*=\s*(\d+)', html)
         if not chapter_id:
-            print(f"[MangaHere] No chapter id found in {chapter_url}")
+            logger.warning("No chapter id found in %s", chapter_url)
             return []
 
         count_match = re.search(r'var\s+imagecount\s*=\s*(\d+)', html)
@@ -202,7 +205,7 @@ class MangaHereScraper(BaseScraper):
             pages.extend(new)
 
         if not pages:
-            print(f"[MangaHere] No page images returned for {chapter_url}")
+            logger.warning("No page images returned for %s", chapter_url)
 
         return pages[:total]
 
@@ -237,7 +240,7 @@ class MangaHereScraper(BaseScraper):
         try:
             script = self._request(url, headers=headers).text
         except Exception as e:
-            print(f"[MangaHere] Image request failed for page {page}: {e}")
+            logger.debug("Image request failed for page %s: %s", page, e)
             return []
         
         unpacked = _unpack(script)
@@ -275,12 +278,12 @@ class MangaHereScraper(BaseScraper):
             
             if not looks_like_image(response.content,
                                      response.headers.get('Content-Type', '')):
-                print(f"[MangaHere] Not image data, refusing to save: {url}")
+                logger.debug("Not image data, refusing to save: %s", url)
                 return False
 
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"[MangaHere] Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

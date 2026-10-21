@@ -5,10 +5,13 @@ https://mangaread.org
 Madara-based WordPress manga site - simple requests-based scraper.
 """
 
+import logging
 import re
 from typing import List
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class MangaReadScraper(BaseScraper):
@@ -111,5 +114,5 @@ class MangaReadScraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

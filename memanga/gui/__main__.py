@@ -4,9 +4,17 @@ Entry point for MeManga GUI (.exe / standalone).
 Sets up SSL certificates and Playwright browser path for frozen builds.
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
+
+# Not __name__: run as a script that is "__main__", which the logging
+# setup would treat as a third-party logger.
+logger = logging.getLogger("memanga.gui.entry")
+
+# Previous sessions' runtime.log files kept next to the current one.
+RUNTIME_LOG_BACKUPS = 3
 
 
 def _config_dir() -> Path:
@@ -90,9 +98,9 @@ def _ensure_valid_std_streams() -> bool:
 
     Pointing the missing streams at a real, writable log file restores a
     valid file descriptor and leaves a diagnostic trail for bug reports —
-    the scraper layer's ``print``/traceback output then lands in
-    ``runtime.log`` instead of vanishing, which is what makes a frozen
-    Playwright failure diagnosable at all.
+    log records and tracebacks then land in ``runtime.log`` instead of
+    vanishing, which is what makes a frozen Playwright failure
+    diagnosable at all.
 
     Returns ``True`` when streams had to be repaired (i.e. this is the
     windowed build), ``False`` when they were already usable (the console
@@ -114,15 +122,15 @@ def _ensure_valid_std_streams() -> bool:
     if not (need_out or need_err or need_in):
         return False
 
+    # Before opening anything: the repairs below dup2 onto descriptors
+    # 0-2, which would silently close a config directory lock opened on
+    # a free one of them.
+    _reserve_std_fds()
+
     if need_out or need_err:
         log = None
         try:
-            config_dir = _config_dir()
-            config_dir.mkdir(parents=True, exist_ok=True)
-            # Truncate per launch — this is a "last session" diagnostic
-            # log, not an append-forever file that grows unbounded.
-            log = open(config_dir / "runtime.log", "w",
-                       encoding="utf-8", buffering=1)
+            log = _open_runtime_log(_config_dir())
         except OSError:
             # No writable config dir — fall back to the null device.
             # It still provides a valid fd, which is all the Playwright
@@ -132,25 +140,12 @@ def _ensure_valid_std_streams() -> bool:
             except OSError:
                 log = None
         if log is not None:
-            if need_out:
-                sys.stdout = log
-            if need_err:
-                sys.stderr = log
-            # Also point the process's OS-level standard handles at the
-            # log. Playwright's Node driver is a child process: on
-            # Windows a windowed build leaves the real stdout/stderr
-            # handles invalid, and a child that inherits those handles
-            # — rather than reading ``sys.stderr.fileno()`` — gets broken
-            # ones and the driver fails to start. ``dup2`` makes the
-            # inherited descriptors valid too.
-            try:
-                _fd = log.fileno()
-                if need_out:
-                    os.dup2(_fd, 1)
-                if need_err:
-                    os.dup2(_fd, 2)
-            except (OSError, ValueError, AttributeError):
-                pass
+            _point_std_streams(log, need_out, need_err)
+            if log is _runtime_log_file:
+                # Issue #226: launch_gui() moves the log along if it
+                # switches config directories.
+                from memanga.gui import set_runtime_log_mover
+                set_runtime_log_mover(_move_runtime_log)
 
     if need_in:
         try:
@@ -164,6 +159,167 @@ def _ensure_valid_std_streams() -> bool:
             pass
 
     return True
+
+
+def _reserve_std_fds() -> None:
+    """Open the null device on any closed descriptor 0, 1 or 2.
+
+    Files opened later (the config directory lock, runtime.log) then get
+    descriptors above 2, so pointing the standard handles at the log or
+    the null device cannot close them. Issue #226: with descriptor 0
+    free, the lock landed on it and the stdin repair dropped the lock, so
+    a second launch rotated this session's runtime.log.
+    """
+    for fd in (0, 1, 2):
+        try:
+            os.fstat(fd)
+            continue
+        except OSError:
+            pass
+        try:
+            null = os.open(os.devnull, os.O_RDWR)
+        except OSError:
+            return
+        if null != fd:
+            try:
+                os.dup2(null, fd)
+            except OSError:
+                pass
+            os.close(null)
+        else:
+            os.set_inheritable(fd, True)
+
+
+def _point_std_streams(log, out: bool, err: bool) -> None:
+    """Point ``sys.stdout`` (``out``) and/or ``sys.stderr`` (``err``) at
+    ``log``.
+
+    Also point the process's OS-level standard handles at the log.
+    Playwright's Node driver is a child process: on Windows a windowed
+    build leaves the real stdout/stderr handles invalid, and a child that
+    inherits those handles — rather than reading ``sys.stderr.fileno()``
+    — gets broken ones and the driver fails to start. ``dup2`` makes the
+    inherited descriptors valid too.
+    """
+    if out:
+        sys.stdout = log
+    if err:
+        sys.stderr = log
+    try:
+        _fd = log.fileno()
+        if out:
+            os.dup2(_fd, 1)
+        if err:
+            os.dup2(_fd, 2)
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+# This session's runtime.log, its config directory, and the lock on that
+# directory taken for it; the lock is held until exit (launch_gui() joins
+# it) or until launch_gui() switches directories.
+_runtime_log_file = None
+_runtime_log_dir = None
+_runtime_log_lock = None
+
+
+def _open_runtime_log(config_dir: Path):
+    """Open this session's ``runtime.log``, keeping earlier sessions.
+
+    Issue #226: earlier logs rotate to ``runtime.log.1`` (newest) up to
+    ``runtime.log.3`` instead of being truncated, so a failure from the
+    session before a restart is still there for a bug report. Each file
+    holds one session, so the set stays bounded.
+
+    Only the instance holding the config directory lock rotates. A
+    second launch while one is running (it stops at the "already
+    running" dialog) appends to the running instance's log instead of
+    moving or truncating it, as does a launch that could not take the
+    lock at all and any launch whose rotation failed because the file is
+    still open elsewhere (Windows).
+    """
+    global _runtime_log_file, _runtime_log_dir, _runtime_log_lock
+    from memanga.output import rotate_log_file
+    from memanga.process_lock import ConfigDirBusy, ConfigDirLock, ConfigDirLockError
+
+    config_dir.mkdir(parents=True, exist_ok=True)
+    path = config_dir / "runtime.log"
+    lock = ConfigDirLock(config_dir)
+    try:
+        lock.acquire()
+    except (ConfigDirBusy, ConfigDirLockError):
+        # Another instance may be writing this log: it holds the lock, or
+        # no lock could be taken to rule that out (launch_gui() reports
+        # the latter).
+        lock = None
+        mode = "a"
+    else:
+        mode = "w" if rotate_log_file(path, RUNTIME_LOG_BACKUPS) else "a"
+    try:
+        log = open(path, mode, encoding="utf-8", buffering=1)
+    except OSError:
+        if lock is not None:
+            lock.release()
+        raise
+    _runtime_log_file, _runtime_log_dir = log, config_dir
+    if lock is not None:
+        _runtime_log_lock = lock
+    return log
+
+
+def _move_runtime_log(new_dir: Path) -> None:
+    """Continue this session's ``runtime.log`` in ``new_dir``.
+
+    Called by launch_gui() with the config folder it locked. That is
+    the folder this entry opened the log in, unless another process
+    moved the legacy folder to the platform folder in between (issue
+    #249). Then the log is reopened in ``new_dir`` (rotating that
+    folder's earlier sessions under its lock, which this process now
+    holds), the standard streams are pointed at it, and the lock on the
+    old, recreated folder is let go rather than held for the session.
+
+    The old file object is flushed but not closed: code that kept a
+    reference to the old stream must not start failing.
+
+    If the new log cannot be opened, the old one stays in use and keeps
+    its lock for the session; without it, another launch on the old
+    folder would rotate the file this process is still writing.
+    """
+    global _runtime_log_lock
+    if _runtime_log_file is None or _same_dir(_runtime_log_dir, new_dir):
+        return
+    old_file, old_lock = _runtime_log_file, _runtime_log_lock
+    try:
+        new_file = _open_runtime_log(Path(new_dir))
+    except OSError:
+        logger.warning("Could not move runtime.log to %s", new_dir)
+        return
+    if _runtime_log_lock is old_lock:
+        _runtime_log_lock = None  # no lock was taken on new_dir
+    out, err = sys.stdout is old_file, sys.stderr is old_file
+    try:
+        old_file.flush()
+    except (OSError, ValueError):
+        pass
+    _point_std_streams(new_file, out, err)
+    logger.info("Config folder moved; runtime.log continues in %s", new_dir)
+    # Only now is the old file no longer the active log.
+    if old_lock is not None:
+        old_lock.release()
+
+
+def _same_dir(a, b) -> bool:
+    return (os.path.normcase(os.path.realpath(a))
+            == os.path.normcase(os.path.realpath(b)))
+
+
+def _configure_logging() -> None:
+    """Log to stderr with timestamps (``runtime.log`` in the windowed
+    build). INFO by default; ``MEMANGA_LOG_LEVEL`` overrides it."""
+    from memanga.output import configure_logging, resolve_log_level
+
+    configure_logging(resolve_log_level(default=logging.INFO),
+                      timestamps=True)
 
 
 def _install_windowed_subprocess_defaults() -> None:
@@ -275,6 +431,7 @@ if getattr(sys, 'frozen', False):
         # Windowed build only: keep Windows from allocating a console for
         # the Playwright Node driver, which otherwise fails to start.
         _install_windowed_subprocess_defaults()
+    _configure_logging()
 
     bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(sys.executable)))
 
@@ -283,7 +440,7 @@ if getattr(sys, 'frozen', False):
     if os.path.exists(ca_bundle):
         os.environ['SSL_CERT_FILE'] = ca_bundle
         os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
-        print(f"[SSL] CA bundle: {ca_bundle}", flush=True)
+        logger.info("CA bundle: %s", ca_bundle)
     else:
         ca_bundle_alt = os.path.join(os.path.dirname(sys.executable), '_internal', 'certifi', 'cacert.pem')
         if os.path.exists(ca_bundle_alt):
@@ -295,7 +452,7 @@ if getattr(sys, 'frozen', False):
                 os.environ['SSL_CERT_FILE'] = certifi.where()
                 os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
             except Exception:
-                print("[SSL] WARNING: No CA bundle found!", flush=True)
+                logger.warning("No CA bundle found")
 
     # --- Playwright browsers ---
     # Pin the browser cache location unconditionally; see
@@ -303,20 +460,21 @@ if getattr(sys, 'frozen', False):
     # every Playwright source on a fresh machine's first session.
     pw_browsers = _configure_playwright_browsers()
     if pw_browsers.exists():
-        print(f"[Playwright] Browsers: {pw_browsers}", flush=True)
+        logger.info("Playwright browsers: %s", pw_browsers)
     else:
-        print(f"[Playwright] Browser dir not present yet "
-              f"(first-launch install creates it): {pw_browsers}", flush=True)
+        logger.info("Playwright browser dir not present yet "
+                    "(first-launch install creates it): %s", pw_browsers)
 
     # Quick SSL test
     try:
         import urllib.request
         urllib.request.urlopen("https://httpbin.org/get", timeout=5)
-        print("[SSL] HTTPS test passed", flush=True)
+        logger.info("HTTPS test passed")
     except Exception as e:
-        print(f"[SSL] HTTPS test FAILED: {e}", flush=True)
+        logger.warning("HTTPS test failed: %s", e)
 else:
-    print("[Init] Running from source", flush=True)
+    _configure_logging()
+    logger.info("Running from source")
 
 # Release-pipeline self-test — must run before the GUI import so the
 # verdict is pure Playwright, with no Qt/display dependency.

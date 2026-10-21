@@ -5,10 +5,13 @@ https://truemanga.com (chapters on mangamonk.com)
 Manga library with chapters hosted on mangamonk.com CDN.
 """
 
+import logging
 import re
 from typing import List
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class TrueMangaScraper(BaseScraper):
@@ -114,5 +117,5 @@ class TrueMangaScraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

@@ -5,10 +5,13 @@ WordPress-based with Contabo storage CDN for images.
 Uses direct img tags in content.
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class OnePieceManga1Scraper(BaseScraper):
@@ -112,5 +115,5 @@ class OnePieceManga1Scraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

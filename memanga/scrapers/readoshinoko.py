@@ -5,12 +5,15 @@ Content: Oshi no Ko by Aka Akasaka and Mengo Yokoyari (167+ chapters)
 Architecture: WordPress + mangaread.org CDN
 """
 
+import logging
 import re
 import requests
 from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ReadOshiNoKoScraper(BaseScraper):
@@ -81,7 +84,7 @@ class ReadOshiNoKoScraper(BaseScraper):
             chapters.sort(key=sort_key, reverse=True)
             
         except Exception as e:
-            print(f"Error fetching chapters: {e}")
+            logger.warning("Error fetching chapters: %s", e)
         
         return chapters
 
@@ -122,7 +125,7 @@ class ReadOshiNoKoScraper(BaseScraper):
             return unique_images
             
         except Exception as e:
-            print(f"Error fetching pages: {e}")
+            logger.warning("Error fetching pages: %s", e)
         
         return images
 
@@ -143,5 +146,5 @@ class ReadOshiNoKoScraper(BaseScraper):
                 f.write(resp.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

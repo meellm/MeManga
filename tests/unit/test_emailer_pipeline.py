@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import io
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -131,14 +132,17 @@ class TestSendToKindle:
         smtp.assert_not_called()
 
     def test_pdf_split_message_explains_raw_and_encoded_limits(
-        self, good_cfg, tiny_pdf, capsys
+        self, good_cfg, tiny_pdf, capsys, caplog
     ):
         smtp = _make_smtp_mock()
-        with patch("memanga.emailer.split_pdf", return_value=[tiny_pdf, tiny_pdf]):
-            with patch("smtplib.SMTP", return_value=smtp):
-                _call_send(good_cfg, tiny_pdf)
+        with caplog.at_level(logging.INFO, logger="memanga.emailer"):
+            with patch("memanga.emailer.split_pdf", return_value=[tiny_pdf, tiny_pdf]):
+                with patch("smtplib.SMTP", return_value=smtp):
+                    _call_send(good_cfg, tiny_pdf)
 
-        msg = capsys.readouterr().out
+        # Issue #226: a log record, never stdout.
+        assert capsys.readouterr().out == ""
+        msg = caplog.text
         assert "Split into 2 parts" in msg
         assert "18.0MB safe raw attachment limit" in msg
         assert "25.0MB" in msg

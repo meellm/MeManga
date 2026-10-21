@@ -4,10 +4,13 @@ DeathNoteManga scraper (death-note-manga.com) - Death Note dedicated site.
 Uses WordPress, images hosted on Blogger CDN (blogger.googleusercontent.com).
 """
 
+import logging
 import re
 from typing import List
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class DeathNoteMangaScraper(BaseScraper):
@@ -122,5 +125,5 @@ class DeathNoteMangaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

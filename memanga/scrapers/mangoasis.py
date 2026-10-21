@@ -153,7 +153,7 @@ class MangOasisScraper(BaseScraper):
                     if src and 'cdn.mangoasis.com' in src and src not in pages:
                         pages.append(src)
             
-            logger.info(f"Found {len(pages)} pages for chapter")
+            logger.debug("Found %s pages for chapter", len(pages))
             return pages
             
         except Exception as e:

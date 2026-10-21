@@ -4,11 +4,14 @@ Website: https://readcomiconline.li
 Comics site with manga content
 """
 
+import logging
 import re
 from typing import List, Optional
 from urllib.parse import urljoin, quote
 
 from .base import BaseScraper, Manga, Chapter
+
+logger = logging.getLogger(__name__)
 
 
 class ReadComicOnlineScraper(BaseScraper):
@@ -33,12 +36,12 @@ class ReadComicOnlineScraper(BaseScraper):
             response.raise_for_status()
             html = response.text
         except Exception as e:
-            print(f"Search request failed: {e}")
+            logger.debug("Search request failed: %s", e)
             # Fallback to GET search
             try:
                 html = self._get_html(f"{self.base_url}/Search/Comic?keyword={quote(query)}")
             except Exception as e2:
-                print(f"GET search also failed: {e2}")
+                logger.warning("GET search also failed: %s", e2)
                 return []
         
         soup = BeautifulSoup(html, 'html.parser')
@@ -102,7 +105,7 @@ class ReadComicOnlineScraper(BaseScraper):
         try:
             html = self._get_html(manga_url)
         except Exception as e:
-            print(f"Failed to get comic page: {e}")
+            logger.warning("Failed to get comic page: %s", e)
             return []
         
         soup = BeautifulSoup(html, 'html.parser')
@@ -162,7 +165,7 @@ class ReadComicOnlineScraper(BaseScraper):
         try:
             html = self._get_html(chapter_url)
         except Exception as e:
-            print(f"Failed to get chapter page: {e}")
+            logger.warning("Failed to get chapter page: %s", e)
             return []
         
         soup = BeautifulSoup(html, 'html.parser')

@@ -81,7 +81,7 @@ class MangaYYScraper(PlaywrightScraper):
                     seen.add(r['url'])
                     unique.append(r)
             
-            logger.info(f"Found {len(unique)} results for '{query}'")
+            logger.debug("Found %s results for '%s'", len(unique), query)
             return unique[:20]
             
         except Exception as e:
@@ -127,7 +127,7 @@ class MangaYYScraper(PlaywrightScraper):
             # Sort descending
             unique.sort(key=lambda x: float(x.get('chapter', 0) or 0), reverse=True)
             
-            logger.info(f"Found {len(unique)} chapters for {manga_url}")
+            logger.debug("Found %s chapters for %s", len(unique), manga_url)
             return unique
             
         except Exception as e:
@@ -163,7 +163,7 @@ class MangaYYScraper(PlaywrightScraper):
                     if src and ('chapter' in src.lower() or 'page' in src.lower() or 'manga' in src.lower()):
                         images.append(src.strip())
             
-            logger.info(f"Found {len(images)} images for {chapter_url}")
+            logger.debug("Found %s images for %s", len(images), chapter_url)
             return images
             
         except Exception as e:

@@ -2916,16 +2916,19 @@ class TestListFilterSort:
         out = capsys.readouterr().out
         for header in ("Status", "Mode", "Kindle"):
             assert header in out
+        # Issue #226: captured stdout is not a terminal, so the table is
+        # plain text without borders; columns are separated by spaces.
+        assert not any("\u2500" <= ch <= "\u257f" for ch in out)
         lines = out.splitlines()
         # Mode and Kindle are stacked in one column: mode, then on/off below.
         i = next(i for i, line in enumerate(lines) if "beta" in line)
         assert "completed" in lines[i] and "manual" in lines[i]
-        assert lines[i].split("│")[1].strip() == "1"
+        assert lines[i].split()[0] == "1"
         assert "off" in lines[i + 1]
         assert "(+2)" in out  # backup count, in the Source column
         i = next(i for i, line in enumerate(lines) if "Alpha" in line)
         assert "auto" in lines[i] and " on " in lines[i + 1]
-        assert lines[i].split("│")[1].strip() == "2"
+        assert lines[i].split()[0] == "2"
         assert out.index("Alpha") < out.index("beta") < out.index("Delta")
         assert "gamma" not in out
 

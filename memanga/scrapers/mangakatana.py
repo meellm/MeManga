@@ -5,11 +5,14 @@ https://mangakatana.com
 Extends PlaywrightScraper for thread-safe Playwright with shared cleanup.
 """
 
+import logging
 import re
 from typing import List, Optional
 from pathlib import Path
 from .playwright_base import PlaywrightScraper
 from .base import Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class MangakatanataScraper(PlaywrightScraper):
@@ -31,7 +34,7 @@ class MangakatanataScraper(PlaywrightScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False
 
     def search(self, query: str) -> List[Manga]:

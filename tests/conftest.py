@@ -56,6 +56,9 @@ def isolated_home(monkeypatch, tmp_path) -> Path:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     # A developer's MEMANGA_CONFIG_DIR would point the CLI elsewhere.
     monkeypatch.delenv("MEMANGA_CONFIG_DIR", raising=False)
+    # Nor may their log level or NO_COLOR change what the CLI prints.
+    monkeypatch.delenv("MEMANGA_LOG_LEVEL", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
     # Issue #249: the default root is the platform config folder. Pin it
     # to the isolated ~/.config/memanga on every OS so the suite behaves
     # the same on Windows and macOS as on Linux.
@@ -64,6 +67,28 @@ def isolated_home(monkeypatch, tmp_path) -> Path:
                         lambda *args, **kwargs: tmp_path / ".config" / "memanga")
     (tmp_path / ".config" / "memanga").mkdir(parents=True, exist_ok=True)
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _reset_output_setup():
+    """Undo what a `cli.main()` run set up for output (issue #226).
+
+    main() installs logging handlers and may swap the CLI consoles for
+    plain ones; neither may leak into the next test.
+    """
+    cli = sys.modules.get("memanga.cli")
+    saved = (cli.console, cli.err_console) if cli is not None else None
+    yield
+    output = sys.modules.get("memanga.output")
+    if output is not None:
+        output.reset_logging()
+    cli = sys.modules.get("memanga.cli")
+    if cli is None:
+        return
+    if saved is None:
+        from rich.console import Console
+        saved = (Console(), Console(stderr=True))
+    cli.console, cli.err_console = saved
 
 
 # ─────────────────────────────────────────────────────────────────────────

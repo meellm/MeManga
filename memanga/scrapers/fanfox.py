@@ -6,6 +6,7 @@ Uses Playwright with stealth for consistent results.
 FanFox has packed JS for chapter images which we handle via Playwright.
 """
 
+import logging
 import re
 import json
 from typing import List, Optional
@@ -15,6 +16,8 @@ from bs4 import BeautifulSoup
 
 from .playwright_base import PlaywrightScraper
 from .base import Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class FanFoxScraper(PlaywrightScraper):
@@ -152,7 +155,7 @@ class FanFoxScraper(PlaywrightScraper):
             if pages and len(pages) > 0:
                 return pages
         except Exception as e:
-            print(f"[FanFox] JS execution failed: {e}")
+            logger.debug("JS execution failed: %s", e)
         
         # Fallback: parse HTML for images from CDN
         html = self._get_page_content(chapter_url, wait_time=8000)

@@ -5,11 +5,14 @@ https://mangasee123.com
 High quality manga scans.
 """
 
+import logging
 import re
 import json
 from typing import List
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class MangaSeeScraper(BaseScraper):
@@ -154,5 +157,5 @@ class MangaSeeScraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

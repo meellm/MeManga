@@ -5,6 +5,7 @@ https://www.mangago.me
 Large yaoi/shoujo collection, general manga too.
 """
 
+import logging
 import re
 import time
 from typing import List
@@ -13,6 +14,8 @@ from pathlib import Path
 import requests
 
 from .base import BaseScraper, Chapter, Manga, _retry, is_retryable_request_error
+
+logger = logging.getLogger(__name__)
 
 
 class MangagoScraper(BaseScraper):
@@ -181,5 +184,5 @@ class MangagoScraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False
