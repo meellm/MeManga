@@ -2,6 +2,7 @@
 Configuration management for MeManga
 """
 
+import logging
 import os
 import sys
 import threading
@@ -14,6 +15,8 @@ from .persist import atomic_write_text
 from .process_lock import ConfigDirBusy, ConfigDirLock, ConfigDirLockError
 from .schema import (SCHEMA_VERSION_KEY, SchemaVersionError, add_schema_version,
                      migrate as migrate_schema)
+
+logger = logging.getLogger(__name__)
 
 APP_DIR_NAME = "memanga"
 
@@ -465,9 +468,96 @@ class Config:
 _KEYRING_SERVICE = "memanga"
 _KEYRING_KEY = "app_password"
 
+# Issue #247: headless and container installs inject the app password
+# instead of storing it. Either variable wins over the keyring and
+# config.yaml; setting both is an error (as with Docker's *_FILE
+# convention). A password from them is never written anywhere.
+SMTP_PASSWORD_ENV = "MEMANGA_SMTP_PASSWORD"
+SMTP_PASSWORD_FILE_ENV = "MEMANGA_SMTP_PASSWORD_FILE"
+
+# A password file larger than this is not a password file.
+_PASSWORD_FILE_MAX_BYTES = 4096
+
+
+class AppPasswordError(Exception):
+    """$MEMANGA_SMTP_PASSWORD(_FILE) is set but cannot be used. The
+    message never contains the password.
+
+    Messages built from it must not put a colon right after the word
+    "password" ("App password: ..."): log redaction (memanga.output)
+    treats that as a secret and masks the next word.
+    """
+
+
+def app_password_override(environ=None):
+    """The app password injected through the environment (issue #247).
+
+    Returns ``(variable_name, password)``, or None when neither
+    variable is set (an empty value counts as unset). Raises
+    AppPasswordError when both are set or the file cannot be used.
+    """
+    environ = os.environ if environ is None else environ
+    value = environ.get(SMTP_PASSWORD_ENV) or None
+    file_name = environ.get(SMTP_PASSWORD_FILE_ENV) or None
+    if value and file_name:
+        raise AppPasswordError(
+            f"{SMTP_PASSWORD_ENV} and {SMTP_PASSWORD_FILE_ENV} are both set; "
+            "set only one")
+    if value:
+        return SMTP_PASSWORD_ENV, value
+    if not file_name:
+        return None
+    invalid_path = AppPasswordError(
+        f"{SMTP_PASSWORD_FILE_ENV} path {file_name!r} is not a valid file path")
+    try:
+        path = Path(file_name).expanduser()
+    except RuntimeError:
+        # "~name" for an unknown user, or no home folder at all.
+        raise AppPasswordError(
+            f"cannot resolve the home folder in {SMTP_PASSWORD_FILE_ENV} "
+            f"path {file_name!r}") from None
+    except ValueError:
+        # A NUL in "~name" fails the user lookup on POSIX.
+        raise invalid_path from None
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(_PASSWORD_FILE_MAX_BYTES + 1)
+    except OSError as e:
+        raise AppPasswordError(
+            f"cannot read {SMTP_PASSWORD_FILE_ENV} file {path} "
+            f"({e.strerror or type(e).__name__})") from None
+    except ValueError:
+        # An embedded NUL character, for example.
+        raise invalid_path from None
+    if len(raw) > _PASSWORD_FILE_MAX_BYTES:
+        raise AppPasswordError(
+            f"{SMTP_PASSWORD_FILE_ENV} file {path} is too large to be a password")
+    try:
+        # Secret files usually end with a newline; the password does not.
+        password = raw.decode("utf-8-sig").rstrip("\r\n")
+    except UnicodeDecodeError:
+        raise AppPasswordError(
+            f"{SMTP_PASSWORD_FILE_ENV} file {path} is not UTF-8 text") from None
+    if not password:
+        raise AppPasswordError(f"{SMTP_PASSWORD_FILE_ENV} file {path} is empty")
+    return SMTP_PASSWORD_FILE_ENV, password
+
 
 def get_app_password(cfg: Config) -> str:
-    """Get app password from keyring, falling back to config file."""
+    """Get the app password: $MEMANGA_SMTP_PASSWORD or the file named by
+    $MEMANGA_SMTP_PASSWORD_FILE, else the keyring, else the config file.
+
+    Never raises. When an override is set but unusable, the problem is
+    logged and "" is returned: a stored password is not used in its
+    place, so delivery fails visibly instead of with a stale password.
+    """
+    try:
+        override = app_password_override()
+    except AppPasswordError as e:
+        logger.warning("App password not available: %s", e)
+        return ""
+    if override:
+        return override[1]
     try:
         import keyring
         password = keyring.get_password(_KEYRING_SERVICE, _KEYRING_KEY)
@@ -478,21 +568,44 @@ def get_app_password(cfg: Config) -> str:
     return cfg.get("email.app_password", "")
 
 
-def set_app_password(cfg: Config, password: str):
-    """Store app password in keyring, falling back to config file. Saves config."""
+def set_app_password(cfg: Config, password: str) -> str:
+    """Store the app password in the keyring, falling back to the config
+    file. Saves config. Returns where it went: "keyring" or "config".
+
+    A "config" result means the password is now in plain text in
+    ``cfg.config_path``; callers tell the user (see
+    :func:`plaintext_password_notice`).
+    """
     try:
         import keyring
         keyring.set_password(_KEYRING_SERVICE, _KEYRING_KEY, password)
+        # A backend that discards secrets does not raise; read it back.
+        if keyring.get_password(_KEYRING_SERVICE, _KEYRING_KEY) != password:
+            raise RuntimeError("keyring did not keep the password")
         # Clear plaintext from config if keyring succeeded
         if cfg.get("email.app_password"):
             cfg.set("email.app_password", "")
             cfg.save()
-        return
-    except Exception:
-        pass
+        return "keyring"
+    except Exception as e:
+        # The type only: a backend's message is not worth the risk.
+        logger.debug("Keyring unavailable (%s); using the config file",
+                     type(e).__name__)
     # Fallback: store in config
     cfg.set("email.app_password", password)
     cfg.save()
+    return "config"
+
+
+def plaintext_password_notice(cfg: Config) -> str:
+    """What to tell the user after set_app_password() returned "config"."""
+    return (
+        "No usable system keyring, so the app password was saved in plain "
+        f"text in {cfg.config_path}. Keep that file private (on Linux and "
+        "macOS it should be readable only by you, e.g. chmod 600). On "
+        f"servers and in containers, set {SMTP_PASSWORD_FILE_ENV} or "
+        f"{SMTP_PASSWORD_ENV} instead."
+    )
 
 
 # ============================================================================

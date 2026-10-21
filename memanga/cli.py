@@ -35,12 +35,13 @@ from .backup import (
     validate_backup,
     validate_backup_contents,
 )
-from .config import (CONFIG_DIR_ENV, CONFIG_KEYS, Config, ConfigError,
-                     UnknownConfigKey,
+from .config import (CONFIG_DIR_ENV, CONFIG_KEYS, AppPasswordError, Config,
+                     ConfigError, UnknownConfigKey, app_password_override,
                      config_key_spec, config_section_problems,
                      config_value_problem, default_config_dir,
                      default_root_moved, explicit_config_dir,
-                     get_app_password, parse_config_value, set_app_password)
+                     get_app_password, parse_config_value,
+                     plaintext_password_notice, set_app_password)
 from .cron import (build_cron_line, build_task_command, managed_lines,
                    read_crontab,
                    remove_managed_lines, replace_managed_line,
@@ -1944,13 +1945,30 @@ def cmd_status(args):
         console.print(f"[dim]Last check:[/dim] {_esc(last_check)}")
 
 
+# Issue #247: `config show` output is often pasted into issue reports.
+_MASKED_EMAIL_KEYS = ("kindle_email", "sender_email")
+
+
+def _mask_email(value):
+    """``***@domain`` for an address: the domain helps diagnose, the
+    mailbox name is personal."""
+    if not isinstance(value, str) or not value:
+        return value
+    _, at, domain = value.rpartition("@")
+    return f"***@{domain}" if at else "***"
+
+
 def _masked_config_data():
-    """A copy of the loaded config with the app password masked."""
+    """A copy of the loaded config with the app password and email
+    addresses masked."""
     import copy
     display = copy.deepcopy(config._data)
-    pw = display.get("email", {}).get("app_password", "")
-    if pw:
-        display["email"]["app_password"] = "****"
+    email = display.get("email", {})
+    if email.get("app_password", ""):
+        email["app_password"] = "****"
+    for key in _MASKED_EMAIL_KEYS:
+        if key in email:
+            email[key] = _mask_email(email[key])
     return display
 
 
@@ -1978,6 +1996,9 @@ def _config_show(args):
     import yaml
     console.print(_panel("[bold]Current Configuration[/bold]", border_style="cyan"))
     console.print(_esc(yaml.dump(_masked_config_data(), default_flow_style=False)))
+    console.print("[dim]The app password and email addresses are hidden; "
+                  "`memanga config get KEY` prints one value. Check for "
+                  "personal details before sharing this output.[/dim]")
 
 
 def _config_get(args):
@@ -2010,6 +2031,25 @@ def _read_secret(args):
     return Prompt.ask("App password", password=True)
 
 
+def _report_app_password_storage(stored: str):
+    """Warn on stderr when a just-saved app password is in plain text or
+    will not be used (issue #247)."""
+    messages = []
+    if stored == "config":
+        messages.append(plaintext_password_notice(config))
+    try:
+        override = app_password_override()
+    except AppPasswordError as e:
+        messages.append(f"App password from the environment is unusable: {e}")
+    else:
+        if override:
+            messages.append(f"{override[0]} is set and is used instead of "
+                            "the saved app password.")
+    for message in messages:
+        _diagnostic(logging.WARNING, f"[yellow]⚠️  {_esc(message)}[/yellow]",
+                    "%s", message)
+
+
 def _config_set(args):
     try:
         spec = config_key_spec(args.key)
@@ -2023,8 +2063,9 @@ def _config_set(args):
         secret = _read_secret(args)
         if secret is None:
             return EXIT_ERROR
-        set_app_password(config, secret)
+        stored = set_app_password(config, secret)
         console.print(f"[green]✅ {_esc(args.key)} updated[/green]")
+        _report_app_password_storage(stored)
         return
 
     if args.value is None:
@@ -2220,7 +2261,7 @@ def cmd_config(args):
 
         if Confirm.ask("Update app password?"):
             app_password = Prompt.ask("App password", password=True)
-            set_app_password(config, app_password)
+            _report_app_password_storage(set_app_password(config, app_password))
 
         delete_after = Confirm.ask(
             "Delete files after sending to Kindle?",
@@ -3945,7 +3986,7 @@ Examples:
     config_keys_help = "KEY is one of: " + ", ".join(CONFIG_KEYS)
     config_actions = p_config.add_subparsers(dest="config_action", title="actions", metavar="ACTION")
     p_cfg_show = config_actions.add_parser(
-        "show", help="Show the current config (app password masked)")
+        "show", help="Show the current config (app password and email addresses masked)")
     p_cfg_show.add_argument("--json", action="store_true", help="Machine-readable JSON output")
     p_cfg_get = config_actions.add_parser(
         "get", help="Print one setting's value", description=config_keys_help)

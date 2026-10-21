@@ -3,6 +3,8 @@ mutation, app-password keyring helpers, persistence round-trips."""
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 
@@ -140,6 +142,180 @@ class TestKeyringHelpers:
         # Contract: when nothing stored in keyring AND nothing in config,
         # return the empty string (not None — Config never stores None).
         assert get_app_password(config) == ""
+
+
+class TestAppPasswordStorage:
+    """Issue #247: the plaintext fallback is reported, and the password
+    can be injected through the environment."""
+
+    @pytest.fixture
+    def keyring_store(self, monkeypatch):
+        import keyring
+        store = {}
+        monkeypatch.setattr(keyring, "set_password",
+                            lambda s, u, p: store.__setitem__((s, u), p))
+        monkeypatch.setattr(keyring, "get_password",
+                            lambda s, u: store.get((s, u)))
+        return store
+
+    @pytest.fixture
+    def broken_keyring(self, monkeypatch):
+        import keyring
+
+        def broken(*a):
+            raise RuntimeError("no backend")
+        monkeypatch.setattr(keyring, "set_password", broken)
+        monkeypatch.setattr(keyring, "get_password", broken)
+
+    def test_keyring_store_reported_and_config_cleared(self, config, keyring_store):
+        from memanga.config import set_app_password
+        config.set("email.app_password", "old-plain")
+        assert set_app_password(config, "secret-pw") == "keyring"
+        assert config.get("email.app_password") == ""
+        assert keyring_store == {("memanga", "app_password"): "secret-pw"}
+
+    def test_keyring_failure_falls_back_to_config(self, config, broken_keyring):
+        from memanga.config import get_app_password, set_app_password
+        assert set_app_password(config, "secret-pw") == "config"
+        config.reload()
+        assert config.get("email.app_password") == "secret-pw"
+        assert get_app_password(config) == "secret-pw"
+
+    def test_discarding_keyring_counts_as_unavailable(self, config, monkeypatch):
+        import keyring
+        monkeypatch.setattr(keyring, "set_password", lambda s, u, p: None)
+        monkeypatch.setattr(keyring, "get_password", lambda s, u: None)
+        from memanga.config import get_app_password, set_app_password
+        assert set_app_password(config, "secret-pw") == "config"
+        assert get_app_password(config) == "secret-pw"
+
+    def test_plaintext_notice_names_path_not_password(self, config, broken_keyring):
+        from memanga.config import plaintext_password_notice, set_app_password
+        set_app_password(config, "secret-pw")
+        notice = plaintext_password_notice(config)
+        assert str(config.config_path) in notice
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in notice
+        assert "secret-pw" not in notice
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+    def test_plaintext_fallback_file_is_private(self, config, broken_keyring):
+        import os
+        import stat
+        from memanga.config import set_app_password
+        set_app_password(config, "secret-pw")
+        mode = stat.S_IMODE(os.stat(config.config_path).st_mode)
+        assert mode & 0o077 == 0
+
+    def test_env_password_wins_and_is_not_stored(self, config, keyring_store,
+                                                 monkeypatch):
+        from memanga.config import get_app_password
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        config.set("email.app_password", "config-pw")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "env-pw")
+        assert get_app_password(config) == "env-pw"
+        assert config.get("email.app_password") == "config-pw"
+        assert keyring_store == {("memanga", "app_password"): "keyring-pw"}
+        assert not config.config_path.exists()
+
+    def test_password_file_wins_and_strips_newline(self, config, keyring_store,
+                                                   monkeypatch, tmp_path):
+        from memanga.config import get_app_password
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        secret = tmp_path / "smtp_password"
+        secret.write_bytes(b"file pw with spaces\n")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(secret))
+        assert get_app_password(config) == "file pw with spaces"
+
+    def test_empty_env_values_count_as_unset(self, config, keyring_store,
+                                             monkeypatch):
+        from memanga.config import app_password_override, get_app_password
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", "")
+        assert app_password_override() is None
+        assert get_app_password(config) == "keyring-pw"
+
+    @pytest.mark.parametrize("problem", ["both", "missing", "empty", "directory",
+                                         "too_large", "not_utf8"])
+    def test_unusable_override_fails_safe(self, config, keyring_store, monkeypatch,
+                                          tmp_path, caplog, problem):
+        from memanga.config import (AppPasswordError, app_password_override,
+                                    get_app_password)
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        config.set("email.app_password", "config-pw")
+        secret = tmp_path / "smtp_password"
+        if problem == "both":
+            secret.write_text("file-pw", encoding="utf-8")
+            monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "env-pw")
+        elif problem == "empty":
+            secret.write_text("\n", encoding="utf-8")
+        elif problem == "directory":
+            secret.mkdir()
+        elif problem == "too_large":
+            secret.write_text("x" * 5000, encoding="utf-8")
+        elif problem == "not_utf8":
+            secret.write_bytes(b"\xff\xfe\xfa")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(secret))
+
+        with pytest.raises(AppPasswordError) as excinfo:
+            app_password_override()
+        message = str(excinfo.value)
+        assert "file-pw" not in message and "env-pw" not in message
+        # Never falls back to a stored password, and never raises.
+        with caplog.at_level("WARNING", logger="memanga.config"):
+            assert get_app_password(config) == ""
+        assert "MEMANGA_SMTP_PASSWORD" in caplog.text
+        assert "file-pw" not in caplog.text and "env-pw" not in caplog.text
+
+    @pytest.mark.parametrize("file_name", [
+        "smtp\x00password",                      # open() raises ValueError
+        "~memanga-no-such-user-247\x00/pw",      # expanduser() raises ValueError
+    ])
+    def test_nul_in_password_file_path_fails_safe(self, config, keyring_store,
+                                                  monkeypatch, caplog, file_name):
+        # A NUL must not escape get_app_password, wherever it is caught.
+        # The OS environment cannot hold a NUL, so the value is injected
+        # through a mapping, and config's os.environ is replaced by a
+        # plain dict for this test only.
+        from memanga import config as config_mod
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        config.set("email.app_password", "config-pw")
+        environ = {"MEMANGA_SMTP_PASSWORD_FILE": file_name}
+        with pytest.raises(config_mod.AppPasswordError) as excinfo:
+            config_mod.app_password_override(environ)
+        message = str(excinfo.value)
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in message
+        assert "not a valid file path" in message
+        monkeypatch.setattr(config_mod.os, "environ",
+                            dict(config_mod.os.environ, **environ))
+        with caplog.at_level("WARNING", logger="memanga.config"):
+            assert config_mod.get_app_password(config) == ""
+        for text in (message, caplog.text):
+            assert "keyring-pw" not in text and "config-pw" not in text
+
+    def test_unknown_user_in_password_file_path_fails_safe(self, config, keyring_store,
+                                                           monkeypatch):
+        # Through the real environment: get_app_password never raises.
+        from memanga.config import (AppPasswordError, app_password_override,
+                                    get_app_password)
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE",
+                           "~memanga-no-such-user-247/smtp_password")
+        with pytest.raises(AppPasswordError) as excinfo:
+            app_password_override()
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in str(excinfo.value)
+        assert get_app_password(config) == ""
+
+    def test_unresolvable_home_in_password_file_path(self, monkeypatch):
+        from memanga import config as config_mod
+
+        def no_home(self):
+            raise RuntimeError("Could not determine home directory.")
+        monkeypatch.setattr(config_mod.Path, "expanduser", no_home)
+        with pytest.raises(config_mod.AppPasswordError) as excinfo:
+            config_mod.app_password_override(
+                {"MEMANGA_SMTP_PASSWORD_FILE": "~/smtp_password"})
+        assert "home folder" in str(excinfo.value)
 
 
 class TestInvalidConfigFile:

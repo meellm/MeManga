@@ -310,6 +310,130 @@ class TestSettingsPage:
         # No exception = passes. Config got at least one write.
         assert app_window.config.get("delivery.output_format") is not None
 
+    @pytest.fixture
+    def toasts(self, monkeypatch):
+        from memanga.gui.pages import settings as settings_mod
+        shown = []
+        monkeypatch.setattr(settings_mod, "Toast",
+                            lambda parent, message, **kw: shown.append((message, kw)))
+        return shown
+
+    def test_save_password_without_keyring_warns_with_path(
+            self, app_window, qapp, monkeypatch, toasts):
+        # Issue #247: the plaintext fallback is never silent in the app.
+        import keyring
+
+        def broken(*a):
+            raise RuntimeError("no backend")
+        monkeypatch.setattr(keyring, "set_password", broken)
+        monkeypatch.setattr(keyring, "get_password", broken)
+        page = app_window._pages["settings"]
+        page._password_entry.setText("gui-secret-pw")
+        page._save()
+
+        cfg = app_window.config
+        assert cfg.get("email.app_password") == "gui-secret-pw"
+        assert len(toasts) == 1
+        message, kw = toasts[0]
+        assert kw.get("kind") == "warning"
+        assert str(cfg.config_path) in message
+        assert "plain text" in message
+        assert "chmod 600" in message
+        assert "gui-secret-pw" not in message
+
+    def test_save_password_in_keyring_reports_success(
+            self, app_window, qapp, monkeypatch, toasts):
+        import keyring
+        store = {}
+        monkeypatch.setattr(keyring, "set_password",
+                            lambda s, u, p: store.__setitem__((s, u), p))
+        monkeypatch.setattr(keyring, "get_password",
+                            lambda s, u: store.get((s, u)))
+        page = app_window._pages["settings"]
+        page._password_entry.setText("gui-secret-pw")
+        page._save()
+
+        assert store == {("memanga", "app_password"): "gui-secret-pw"}
+        assert app_window.config.get("email.app_password") == ""
+        assert toasts == [("Settings saved", {"kind": "success"})]
+
+    @pytest.fixture
+    def smtp_logins(self, monkeypatch):
+        """Run the SMTP test synchronously against a fake server and
+        record each login as (user, password)."""
+        import smtplib
+        import types
+        from memanga.gui.pages import settings as settings_mod
+        logins = []
+
+        class FakeSMTP:
+            def __init__(self, *a, **k):
+                pass
+
+            def ehlo(self):
+                pass
+
+            def starttls(self, **k):
+                pass
+
+            def login(self, user, password):
+                logins.append((user, password))
+
+            def quit(self):
+                pass
+
+        class SyncThread:
+            def __init__(self, target, daemon=None):
+                self._target = target
+
+            def start(self):
+                self._target()
+        monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+        monkeypatch.setattr(settings_mod, "threading",
+                            types.SimpleNamespace(Thread=SyncThread))
+        return logins
+
+    def _fill_smtp_test(self, page, typed_password):
+        page._entry_sender_email.setText("sender@example.invalid")
+        page._entry_smtp_server.setText("smtp.example.invalid")
+        page._entry_smtp_port.setText("587")
+        page._password_entry.setText(typed_password)
+
+    def test_smtp_test_uses_typed_password_without_override(
+            self, app_window, qapp, smtp_logins):
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._test_email()
+        assert smtp_logins == [("sender@example.invalid", "typed-pw")]
+        assert page._test_label.text() == "Success!"
+
+    def test_smtp_test_uses_active_override(
+            self, app_window, qapp, smtp_logins, monkeypatch, tmp_path):
+        # Issue #247: test the password delivery will actually use.
+        secret = tmp_path / "smtp_password"
+        secret.write_text("file-pw\n", encoding="utf-8")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(secret))
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._test_email()
+        assert smtp_logins == [("sender@example.invalid", "file-pw")]
+        assert page._test_label.text() == "Success!"
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in page._test_label.toolTip()
+        assert "file-pw" not in page._test_label.toolTip()
+
+    def test_smtp_test_reports_unusable_override(
+            self, app_window, qapp, smtp_logins, monkeypatch, tmp_path):
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(tmp_path / "missing"))
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._test_email()
+        # Never falls back to the typed password, and never logs in.
+        assert smtp_logins == []
+        assert page._test_label.text() == "Password variable unusable"
+        tip = page._test_label.toolTip()
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in tip
+        assert "typed-pw" not in tip
+
     def test_mangadex_quality_choice_saves_and_resets(self, app_window, qapp):
         page = app_window._pages["settings"]
         assert page._mangadex_quality.currentData() is False

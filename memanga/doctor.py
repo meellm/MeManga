@@ -33,7 +33,7 @@ from typing import Any, Callable, Dict, List, Optional
 import yaml
 
 from . import __version__
-from .config import get_app_password
+from .config import AppPasswordError, app_password_override, get_app_password
 from .cron import is_managed_line
 
 SCHEMA_VERSION = 1
@@ -339,6 +339,14 @@ def check_email(config, state=None) -> CheckResult:
         return CheckResult("email", SKIP, f"Delivery mode is {mode}; email is not used",
                            {"delivery_mode": mode})
 
+    try:
+        app_password_override()
+    except AppPasswordError as e:
+        # Issue #247: say why, rather than "app password missing".
+        return CheckResult("email", FAIL,
+                           f"App password from the environment is unusable: {e}",
+                           {"delivery_mode": mode})
+
     details = {
         "delivery_mode": mode,
         "kindle_email_set": bool(config.get("email.kindle_email")),
@@ -391,6 +399,16 @@ def check_keyring(config, state=None) -> CheckResult:
     if config.delivery_mode != "email":
         return CheckResult("keyring", SKIP,
                            f"Not needed for local delivery (backend: {backend})", details)
+    try:
+        override = app_password_override()
+    except AppPasswordError:
+        override = None  # reported by the email check
+    if override:
+        # Issue #247: an injected password does not need the keyring.
+        details["password_source"] = override[0]
+        return CheckResult("keyring", OK,
+                           f"App password comes from {override[0]}; keyring not used",
+                           details)
     if not info["available"]:
         return CheckResult("keyring", WARNING,
                            "No usable keyring backend; the app password would be saved "

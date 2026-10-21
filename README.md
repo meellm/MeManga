@@ -562,7 +562,23 @@ the app's Settings keep a chosen directory in the scheduled check.
 
 Sensitive credentials (SMTP App Password) are stored in the OS keyring
 (Keychain on macOS, Credential Manager on Windows, Secret Service on
-Linux).
+Linux). Without a usable keyring the password is saved in plain text in
+`config.yaml`, and MeManga says so with the file's path; keep that file
+private.
+
+On servers and in containers, the app password can come from the
+environment instead and is then never saved:
+
+- `MEMANGA_SMTP_PASSWORD_FILE` names a file holding the password (for
+  example a Docker secret under `/run/secrets/`); a trailing newline is
+  ignored.
+- `MEMANGA_SMTP_PASSWORD` holds the password itself. Environment
+  variables can be seen by other tools on the same machine, so prefer
+  the file.
+
+Either one is used instead of the keyring and `config.yaml`. Setting
+both, or naming a file that cannot be read, leaves MeManga without an
+app password, and `memanga doctor` reports why.
 
 ---
 

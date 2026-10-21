@@ -1322,6 +1322,26 @@ class TestConfigActions:
         assert "Current Configuration" in action_out
         assert "file-secret" not in action_out
 
+    def test_show_masks_email_addresses(self, run_cli, config, capsys):
+        # Issue #247: config output is often pasted into issue reports.
+        config.set("email.kindle_email", "reader@kindle.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.save()
+        assert run_cli("config", "show") == 0
+        text_out = capsys.readouterr().out
+        assert run_cli("config", "show", "--json") == 0
+        json_out = capsys.readouterr().out
+        for out in (text_out, json_out):
+            assert "reader@" not in out and "sender@" not in out
+        payload = json.loads(json_out)
+        assert payload["email"]["kindle_email"] == "***@kindle.com"
+        assert payload["email"]["sender_email"] == "***@example.com"
+        assert "hidden" in text_out
+        # The real value stays one explicit command away.
+        assert run_cli("config", "get", "email.kindle_email") == 0
+        assert capsys.readouterr().out == "reader@kindle.com\n"
+        assert config.get("email.kindle_email") == "reader@kindle.com"
+
     # ── set ──
 
     def test_set_persists_typed_value(self, run_cli, config, capsys):
@@ -1398,10 +1418,86 @@ class TestConfigActions:
         monkeypatch.setattr(sys, "stdin", io.StringIO("plain-pw\n"))
         assert run_cli("config", "set", "email.app_password", "-") == 0
         assert config.get("email.app_password") == "plain-pw"
+        set_err = capsys.readouterr().err
+        # Issue #247: the plaintext fallback is never silent.
+        assert "plain text" in set_err
+        assert "config.yaml" in set_err
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in set_err
         assert run_cli("config", "get", "email.app_password") == 0
         captured = capsys.readouterr()
-        assert "plain-pw" not in captured.out + captured.err
+        assert "plain-pw" not in captured.out + captured.err + set_err
         assert captured.out.endswith("****\n")
+
+    def _run_wizard_setting_password(self, run_cli, monkeypatch, password):
+        """Drive the interactive `config` wizard: email mode, new app
+        password, every other answer left at its default."""
+        from memanga import cli
+        answers = {"Select mode": "2", "App password": password,
+                   "Update app password?": True}
+
+        def ask(prompt, *a, **k):
+            for start, answer in answers.items():
+                if prompt.startswith(start):
+                    return answer
+            return k.get("default", "")
+        monkeypatch.setattr(cli.Prompt, "ask", ask)
+        monkeypatch.setattr(cli.Confirm, "ask", lambda prompt, *a, **k: bool(
+            answers.get(prompt, k.get("default", False))))
+        return run_cli("config")
+
+    def test_wizard_password_without_keyring_warns(self, run_cli, monkeypatch,
+                                                   capsys, config, tty):
+        # Issue #247: the wizard reports the plaintext fallback too.
+        import keyring
+
+        def broken(*a):
+            raise RuntimeError("no backend")
+        monkeypatch.setattr(keyring, "set_password", broken)
+        monkeypatch.setattr(keyring, "get_password", broken)
+        assert self._run_wizard_setting_password(run_cli, monkeypatch, "wizard-pw") == 0
+        captured = capsys.readouterr()
+        assert "plain text" in captured.err
+        assert "config.yaml" in captured.err
+        assert "wizard-pw" not in captured.out + captured.err
+        assert config.get("email.app_password") == "wizard-pw"
+
+    def test_wizard_password_in_keyring_does_not_warn(self, run_cli, monkeypatch,
+                                                      capsys, keyring_store, tty):
+        assert self._run_wizard_setting_password(run_cli, monkeypatch, "wizard-pw") == 0
+        captured = capsys.readouterr()
+        assert "plain text" not in captured.err
+        assert "wizard-pw" not in captured.out + captured.err
+        assert keyring_store == {("memanga", "app_password"): "wizard-pw"}
+
+    def test_set_secret_reports_unusable_override(self, run_cli, monkeypatch,
+                                                  capsys, keyring_store, tmp_path):
+        # Issue #247: the saved password is not used while the variable
+        # is set, so say what is wrong with it.
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(tmp_path / "missing"))
+        monkeypatch.setattr(sys, "stdin", io.StringIO("s3cret-pw\n"))
+        assert run_cli("config", "set", "email.app_password", "-") == 0
+        captured = capsys.readouterr()
+        # The redacted stderr a user reads keeps the reason intact.
+        assert ("App password from the environment is unusable: cannot read "
+                "MEMANGA_SMTP_PASSWORD_FILE file") in captured.err
+        assert "***" not in captured.err
+        assert "s3cret-pw" not in captured.out + captured.err
+        assert keyring_store == {("memanga", "app_password"): "s3cret-pw"}
+
+    def test_set_secret_in_keyring_does_not_warn(self, run_cli, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "stdin", io.StringIO("s3cret-pw\n"))
+        assert run_cli("config", "set", "email.app_password", "-") == 0
+        assert "plain text" not in capsys.readouterr().err
+
+    def test_set_secret_notes_env_override(self, run_cli, monkeypatch, capsys,
+                                           keyring_store):
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "env-pw")
+        monkeypatch.setattr(sys, "stdin", io.StringIO("s3cret-pw\n"))
+        assert run_cli("config", "set", "email.app_password", "-") == 0
+        captured = capsys.readouterr()
+        assert "MEMANGA_SMTP_PASSWORD is set" in captured.err
+        assert "env-pw" not in captured.out + captured.err
+        assert keyring_store == {("memanga", "app_password"): "s3cret-pw"}
 
     def test_secret_on_command_line_is_refused(self, run_cli, capsys, keyring_store):
         assert run_cli("config", "set", "email.app_password", "argv-pw") == 1
@@ -3592,6 +3688,20 @@ class TestFailedSubcommands:
 
 
 class TestDoctorCommand:
+    def test_unusable_password_variable_is_readable(self, run_cli, config, cli_state,
+                                                    monkeypatch, tmp_path, capsys):
+        # Issue #247: the reason is shown as is, not masked by redaction.
+        config.set("delivery.mode", "email")
+        config.save()
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(tmp_path / "missing"))
+        capsys.readouterr()
+        assert run_cli("doctor", "--json", "--check", "email") == 1
+        captured = capsys.readouterr()
+        message = json.loads(captured.out)["checks"][0]["message"]
+        assert message.startswith("App password from the environment is unusable: "
+                                  "cannot read MEMANGA_SMTP_PASSWORD_FILE file")
+        assert "***" not in captured.out + captured.err
+
     def test_json_report(self, run_cli, cli_state, capsys):
         assert run_cli("doctor", "--json", "--check", "config", "--check", "state") == 0
         payload = _stdout_json(capsys)

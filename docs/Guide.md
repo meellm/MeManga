@@ -343,9 +343,16 @@ For daily checks, add a host cron entry from the repository directory:
 ### Kindle delivery
 
 Run `docker compose run --rm memanga config`, choose email delivery, and
-enter the Kindle/Gmail settings. Keep the Docker config volume private:
-containers usually do not have a desktop keyring, so MeManga may store
-the Gmail app credential in the config volume as a fallback.
+enter the Kindle/Gmail settings. Containers usually do not have a desktop
+keyring, so a password entered there is stored in plain text in the
+config volume (MeManga prints a warning with the file path); keep that
+volume private.
+
+To keep the password out of the config volume, pass it in instead:
+point `MEMANGA_SMTP_PASSWORD_FILE` at a file holding it (for example a
+Docker secret, mounted under `/run/secrets/`), or set
+`MEMANGA_SMTP_PASSWORD`. A password passed this way is never saved and
+is used instead of a stored one.
 
 ---
 
@@ -913,7 +920,7 @@ App password: abcdefghijklmnop
 ✅ Configuration saved!
 ```
 
-The app password is stored in your system keyring when available. If the keyring isn't available, it falls back to storing it in the config file.
+The app password is stored in your system keyring when available. If the keyring isn't available, it is stored in plain text in the config file instead, and MeManga warns you with the file's path. Keep that file private (on Linux and macOS, readable only by you). On servers and in containers you can set `MEMANGA_SMTP_PASSWORD_FILE` (a file holding the password) or `MEMANGA_SMTP_PASSWORD` instead; a password passed this way is never saved.
 
 ### Step 4 — Test it
 

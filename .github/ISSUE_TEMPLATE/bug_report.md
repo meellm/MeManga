@@ -22,15 +22,16 @@ A short description of the expected behaviour.
 
 ## Environment
 
-- MeManga version (from `MeManga.exe --version` or `python -m memanga --version`):
+- MeManga version (`memanga --version`, or the desktop app's window title):
 - OS + version:
 - Build type: prebuilt release exe / `python build.py` / `python -m memanga`
 - Source / manga the bug involves (if applicable):
 
 ## Logs
 
-Paste the relevant terminal output between the fences. Trim anything
-that looks like a credential first.
+Paste the relevant terminal output between the fences. Remove
+passwords, tokens and email addresses first (`memanga config show`
+already hides the app password and email addresses).
 
 ```
 …
