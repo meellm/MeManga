@@ -1458,7 +1458,11 @@ When stdout is not a terminal, or with `memanga --plain`, output is plain
 text without colour, emoji, borders or line wrapping (symbols in manga
 titles are kept; `doctor` names each result `OK`, `WARN`, `FAIL` or
 `SKIP`), and `check` prints one summary line such as
-`Summary: 2/3 chapters downloaded, 1 failed; checked 4 manga, 0 could not be checked`.
+`Summary: 2/3 chapters downloaded, 1 failed; checked 4 manga, 0 could not be checked; next: run 'memanga failed' for details`.
+The `; next: ...` part only appears when something is left to do:
+`run 'memanga failed' for details` after failed chapters, or
+`rerun with --download` when chapters were skipped because no one could
+confirm them.
 `NO_COLOR` only turns colour off. Redirected output is written as UTF-8,
 also on Windows. `-v`, `-q`, `--plain` and `--log-file` go before the
 command, like `--config-dir`.
