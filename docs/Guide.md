@@ -922,6 +922,8 @@ App password: abcdefghijklmnop
 
 The app password is stored in your system keyring when available. If the keyring isn't available, it is stored in plain text in the config file instead, and MeManga warns you with the file's path. Keep that file private (on Linux and macOS, readable only by you). On servers and in containers you can set `MEMANGA_SMTP_PASSWORD_FILE` (a file holding the password) or `MEMANGA_SMTP_PASSWORD` instead; a password passed this way is never saved.
 
+Each step of talking to the SMTP server (connecting, logging in, sending, logging out) waits at most 60 seconds, so an unreachable or stalled server ends with a timeout error instead of hanging `check`. Change the limit with `memanga config set email.smtp_timeout SECONDS` (1 to 600).
+
 ### Step 4 — Test it
 
 ```bash

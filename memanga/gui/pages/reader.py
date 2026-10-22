@@ -1500,6 +1500,7 @@ class ReaderPage(BasePage):
                     app_password=get_app_password(cfg),
                     smtp_server=cfg.get("email.smtp_server", "smtp.gmail.com"),
                     smtp_port=cfg.get("email.smtp_port", 587),
+                    smtp_timeout=cfg.get("email.smtp_timeout"),
                 )
             except Exception:
                 kindle_cfg = None

@@ -55,7 +55,7 @@ from .state import State
 from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
 from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
-from .emailer import send_to_kindle
+from .emailer import send_to_kindle, smtp_timeout
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
                                DeliveryStatus, PipelineOptions)
 from .output import (LOG_FILE_NAME, LOG_LEVEL_ENV, RICH_MARKUP,
@@ -2175,6 +2175,8 @@ def _config_email(args):
         table.add_row(label, _esc(value) if value else "[red]not set[/red]")
     table.add_row("SMTP server", _esc(config.get("email.smtp_server", "smtp.gmail.com")))
     table.add_row("SMTP port", _esc(config.get("email.smtp_port", 587)))
+    table.add_row("SMTP timeout",
+                  f"{smtp_timeout(config.get('email.smtp_timeout')):g} seconds")
     table.add_row("App password", "set" if password_set else "[red]not set[/red]")
     console.print(table)
     if not args.test:

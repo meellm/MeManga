@@ -1220,19 +1220,19 @@ class SettingsPage(BasePage):
         from ...output import register_secret
         register_secret(pw)
 
+        # Issue #361: the same bounded login as delivery and doctor.
+        timeout = self.app.config.get("email.smtp_timeout")
+
         def _test():
-            import smtplib
-            import ssl
+            from ...emailer import EmailAuthError, EmailTimeoutError, smtp_login
             try:
-                context = ssl.create_default_context()
-                server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=10)
-                server.ehlo()
-                server.starttls(context=context)
-                server.login(sender, pw)
-                server.quit()
+                smtp_login(sender, smtp_server, int(smtp_port), pw,
+                           timeout=timeout)
                 self._email_test_signals.result.emit("Success!", "success", "")
-            except smtplib.SMTPAuthenticationError as e:
+            except EmailAuthError as e:
                 self._email_test_signals.result.emit("Auth failed", "error", str(e))
+            except EmailTimeoutError as e:
+                self._email_test_signals.result.emit("Timed out", "error", str(e))
             except Exception as e:
                 self._email_test_signals.result.emit(
                     f"Failed: {summarize_error(e, 40)}", "error", str(e))
