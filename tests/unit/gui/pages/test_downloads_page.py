@@ -83,3 +83,27 @@ def test_cancel_all_confirms_when_cancelling(app_window, qapp, monkeypatch):
 
     assert len(app_window.worker._download_queue) == 0
     assert toasts == ["Cancelled all downloads"]
+
+
+def test_history_shows_kindle_and_deletion_status(app_window, qapp):
+    # Issue #338: History says which chapters went to the Kindle and
+    # which of those had their local copy deleted afterwards.
+    from PySide6.QtWidgets import QLabel
+
+    state = app_window.app_state
+    state.add_download_history("Kept", "1", "pdf", "/x/k.pdf", 1.0)
+    state.add_download_history("Sent", "2", "pdf", "/x/s.pdf", 1.0, True)
+    state.add_download_history("Gone", "3", "pdf", "/x/g.pdf", 1.0, True,
+                               deleted_after_send=True)
+
+    app_window.show_page("downloads")
+    page = app_window._pages["downloads"]
+    page._switch_tab("history")
+    qapp.processEvents()
+
+    labels = page._history_content.findChildren(QLabel, "history_delivery")
+    # Newest first.
+    assert [lbl.text() for lbl in labels] == ["Sent · deleted", "Sent", ""]
+    assert [lbl.toolTip() for lbl in labels] == [
+        "Sent to Kindle; local copy deleted", "Sent to Kindle", ""]
+    assert labels[0].accessibleName() == "Sent to Kindle; local copy deleted"

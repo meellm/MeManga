@@ -27,12 +27,14 @@ class GuiChapterReporter(ChapterReporter):
     logs what the user would otherwise not see (issue #226)."""
 
     def __init__(self, events: EventBus, task_id: str, manga: Dict[str, Any],
-                 chapter, cancel: threading.Event):
+                 chapter, cancel: threading.Event,
+                 delete_after_send: bool = False):
         self._events = events
         self._task_id = task_id
         self._title = manga["title"]
         self._chapter = chapter
         self._cancel = cancel
+        self._delete_after_send = delete_after_send
 
     def _label(self) -> str:
         return f"{self._title} Ch.{self._chapter.number}"
@@ -83,17 +85,27 @@ class GuiChapterReporter(ChapterReporter):
             "path": str(path),
         })
 
-    def email_sent(self, path: Path):
+    def _publish_sent(self, path: Path, **local_copy):
         self._events.publish("kindle_sent", {
             "task_id": self._task_id, "path": str(path),
             "title": self._title, "chapter": self._chapter.number,
+            **local_copy,
         })
+
+    def email_sent(self, path: Path):
+        # Issue #338: with delete-after-send on, the pipeline reports the
+        # deletion right after this; one event then says both what was
+        # sent and what happened to the local copy.
+        if not self._delete_after_send:
+            self._publish_sent(path)
 
     def deleted_after_send(self, path: Path):
         logger.info("Deleted local copy after sending: %s", path)
+        self._publish_sent(path, local_copy="deleted")
 
     def delete_failed(self, path: Path, error: OSError):
         logger.warning("Could not delete local copy after sending: %s", error)
+        self._publish_sent(path, local_copy="kept", delete_error=str(error))
 
     def email_failed(self, error):
         # The chapter stays recorded as undelivered (issue #360); the

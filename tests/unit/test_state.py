@@ -742,6 +742,14 @@ class TestDownloadHistory:
         assert entry["kindle_sent"] is True
         assert (entry["source"], entry["from_backup"], entry["partial"]) == \
             (None, False, False)
+        assert entry["deleted_after_send"] is False
+
+    def test_deleted_after_send_is_stored(self, state):
+        # Issue #338: a sent chapter whose local copy was deleted.
+        state.add_download_history("X", "1", "pdf", "/tmp/x.pdf", 1.0, True,
+                                   deleted_after_send=True)
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, True)
 
     def test_source_and_flags_are_stored(self, state):
         state.add_download_history("X", "1", "pdf", source="backup.test",

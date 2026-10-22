@@ -452,7 +452,7 @@ class BackgroundWorker:
                 state=state,
                 reporter=GuiChapterReporter(
                     self._events, task_id, manga, Chapter(number=number),
-                    threading.Event(),
+                    threading.Event(), delete_after_send=delete_after_send,
                 ),
                 send=emailer.send_to_kindle,
                 app_password=lambda: kindle_cfg.get("app_password"),
@@ -526,6 +526,7 @@ class BackgroundWorker:
             state=item["state"],
             reporter=GuiChapterReporter(
                 self._events, task_id, manga, chapter, item["cancel"],
+                delete_after_send=options.delete_after_send,
             ),
             download=downloader.download_chapter,
             find_backup=downloader._find_chapter_on_backup,

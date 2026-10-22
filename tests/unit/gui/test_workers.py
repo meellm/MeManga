@@ -999,13 +999,67 @@ class TestSharedChapterPipeline:
             kindle_cfg=dict(self._KINDLE), delete_after_send=True)
 
         assert self._names(events)[-2:] == ["kindle_sent", "download_complete"]
+        # Issue #338: one event says it was sent and the copy deleted.
+        assert self._names(events).count("kindle_sent") == 1
         assert events[-2][1] == {"task_id": "Vinland Saga:71", "path": str(pdf),
-                                 "title": "Vinland Saga", "chapter": "71"}
+                                 "title": "Vinland Saga", "chapter": "71",
+                                 "local_copy": "deleted"}
         assert "kindle_skipped" not in self._names(events)
         assert sent[0]["pdf_path"] == pdf
         assert sent[0]["app_password"] == "secret"
         assert not pdf.exists()
         assert state.is_chapter_downloaded("Vinland Saga", "71")
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, True)
+
+    def test_kindle_send_without_delete_keeps_file(
+            self, worker, event_bus, state, monkeypatch, tmp_path):
+        pdf = tmp_path / "ch71.pdf"
+        pdf.write_bytes(b"%PDF")
+
+        events = self._run(
+            worker, event_bus, state, monkeypatch,
+            lambda manga, chapter, *a, **k: pdf, lambda **kw: None,
+            kindle_cfg=dict(self._KINDLE))
+
+        assert self._names(events)[-2:] == ["kindle_sent", "download_complete"]
+        # No deletion was asked for, so the event says nothing about it.
+        assert events[-2][1] == {"task_id": "Vinland Saga:71", "path": str(pdf),
+                                 "title": "Vinland Saga", "chapter": "71"}
+        assert pdf.exists()
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, False)
+
+    def test_kindle_send_with_failed_delete_reports_kept_copy(
+            self, worker, event_bus, state, monkeypatch, tmp_path):
+        # Issue #338: sent, but the local copy could not be deleted. The
+        # event says so, with the reason, instead of claiming a deletion.
+        pdf = tmp_path / "ch71.pdf"
+        pdf.write_bytes(b"%PDF")
+
+        real_unlink = type(pdf).unlink
+
+        def refuse(self, *args, **kwargs):
+            if self == pdf:
+                raise PermissionError("in use")
+            return real_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(type(pdf), "unlink", refuse)
+        events = self._run(
+            worker, event_bus, state, monkeypatch,
+            lambda manga, chapter, *a, **k: pdf, lambda **kw: None,
+            kindle_cfg=dict(self._KINDLE), delete_after_send=True)
+
+        assert self._names(events)[-2:] == ["kindle_sent", "download_complete"]
+        assert self._names(events).count("kindle_sent") == 1
+        assert events[-2][1] == {"task_id": "Vinland Saga:71", "path": str(pdf),
+                                 "title": "Vinland Saga", "chapter": "71",
+                                 "local_copy": "kept",
+                                 "delete_error": "in use"}
+        assert "kindle_error" not in self._names(events)
+        assert pdf.exists()
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, False)
 
     @pytest.mark.parametrize("fmt", ["jpg", "png", "webp"])
     def test_image_folder_skips_kindle_with_event(
@@ -1087,6 +1141,7 @@ class TestSharedChapterPipeline:
         pdf = tmp_path / "ch71.pdf"
         pdf.write_bytes(b"%PDF")
         state.add_downloaded_chapter("Vinland Saga", "71")
+        state.add_download_history("Vinland Saga", "71", "pdf", str(pdf), 0.1)
         state.failures.add_undelivered("Vinland Saga", "71", str(pdf), "SMTP down")
         sent = []
 
@@ -1098,12 +1153,35 @@ class TestSharedChapterPipeline:
                               delete_after_send=True)
 
         assert self._names(events) == ["kindle_sent", "kindle_resend_done"]
+        assert events[0][1]["local_copy"] == "deleted"
         assert events[-1][1]["sent"] is True
         assert sent[0]["pdf_path"] == pdf
         assert sent[0]["app_password"] == "secret"
         assert not pdf.exists()
         assert state.failures.get_undelivered("Vinland Saga") == {}
         assert state.is_chapter_downloaded("Vinland Saga", "71")
+        # Issue #338: History shows the chapter as sent and deleted.
+        history = state.get_download_history()
+        assert len(history) == 1
+        assert (history[0]["kindle_sent"],
+                history[0]["deleted_after_send"]) == (True, True)
+
+    def test_send_pending_without_delete_marks_history_sent(
+            self, worker, event_bus, state, monkeypatch, tmp_path):
+        pdf = tmp_path / "ch71.pdf"
+        pdf.write_bytes(b"%PDF")
+        state.add_downloaded_chapter("Vinland Saga", "71")
+        state.add_download_history("Vinland Saga", "71", "pdf", str(pdf), 0.1)
+        state.failures.add_undelivered("Vinland Saga", "71", str(pdf), "SMTP down")
+
+        events = self._resend(worker, event_bus, state, monkeypatch,
+                              lambda **kw: None)
+
+        assert self._names(events) == ["kindle_sent", "kindle_resend_done"]
+        assert "local_copy" not in events[0][1]
+        assert pdf.exists()
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, False)
 
     def test_send_pending_failure_keeps_record_and_file(
             self, worker, event_bus, state, monkeypatch, tmp_path):

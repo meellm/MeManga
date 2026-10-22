@@ -256,8 +256,29 @@ class DownloadsPage(BasePage):
             size_label.setFixedWidth(55)
             row_layout.addWidget(size_label)
 
+            # Issue #338: whether the chapter went to the Kindle and its
+            # local copy was deleted afterwards.
+            status, status_tip = self._history_delivery(h)
+            status_label = QLabel(status)
+            status_label.setObjectName("history_delivery")
+            status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+            status_label.setFixedWidth(90)
+            if status_tip:
+                status_label.setToolTip(status_tip)
+                status_label.setAccessibleName(status_tip)
+            row_layout.addWidget(status_label)
+
             self._history_layout.addWidget(row)
             self._history_widgets.append(row)
+
+    @staticmethod
+    def _history_delivery(entry) -> tuple:
+        """Short delivery status for a history row and its full wording."""
+        if not entry.get("kindle_sent"):
+            return "", ""
+        if entry.get("deleted_after_send"):
+            return "Sent · deleted", "Sent to Kindle; local copy deleted"
+        return "Sent", "Sent to Kindle"
 
     def on_show(self, **kwargs):
         if self._current_tab == "history":
