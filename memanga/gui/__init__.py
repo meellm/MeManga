@@ -406,6 +406,25 @@ def _startup_problem(config, state):
     return None
 
 
+def _ensure_logging() -> None:
+    """Give a direct start the same redacting log setup as the others.
+
+    ``memanga --gui`` and ``python -m memanga.gui`` (and the frozen
+    builds) configure logging before calling :func:`launch_gui`; the
+    ``memanga-gui`` script and other direct callers did not, so records
+    went out through Python's fallback handler without
+    :class:`memanga.output.RedactingFormatter` and printed URL
+    credentials, tokens and passwords as they were (issue #342). Setup
+    done by a caller wins: its level, log file and handlers are kept, and
+    no second set of handlers is added.
+    """
+    from ..output import configure_logging, logging_configured, resolve_log_level
+    if logging_configured():
+        return
+    # Same defaults as the module entry point (gui/__main__.py).
+    configure_logging(resolve_log_level(default=logging.INFO), timestamps=True)
+
+
 def launch_gui(config=None, state=None, explicit_config_dir=None):
     """Launch the MeManga GUI application.
 
@@ -417,6 +436,9 @@ def launch_gui(config=None, state=None, explicit_config_dir=None):
     or ``$MEMANGA_CONFIG_DIR`` (None for the default), so the daily check
     set up from Settings runs on the same directory.
     """
+    # Before anything can log, imports included (issue #342).
+    _ensure_logging()
+
     from PySide6.QtWidgets import QApplication, QMessageBox
     from PySide6.QtCore import QTimer
     from .app import MeMangaApp

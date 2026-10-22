@@ -173,6 +173,26 @@ All notable changes are recorded here. Format loosely follows
   removed in the next release.
 
 ### Fixed
+- #342 The desktop app no longer cuts error messages off after 30-80
+  characters. Toasts, download rows and the Settings email test show a
+  short summary, and the Notifications entry keeps the complete error
+  behind a Details button, with a Copy action. For the 20 most recent
+  errors longer than 4,000 characters, up to 100,000 characters are kept
+  in a private file in the config folder's `error-details` directory
+  (removed with its notification, about 2 MB at most); when less than
+  the whole error is kept, the Details view says so. Kindle delivery
+  failures now get a notification too. The Search page has a Failure
+  details button listing why each source failed in the current search
+  (up to 20,000 characters per source and 100,000 per search, with any
+  cut marked). Passwords, tokens, the whole user part of URLs
+  (`https://***@host/...`), the name part of email addresses and the
+  home folder are masked in shown, copied and saved error text,
+  notification titles included. Check, download, Kindle, search and
+  Settings (email test, schedule, export, import) failures are written
+  to the log. The log masks passwords, tokens and the user part of URLs,
+  now also when the app is started with the `memanga-gui` command, which
+  printed its log lines unmasked before; it does not mask email
+  addresses or the home folder.
 - #246 File and folder names are valid on Windows, macOS and Linux:
   control characters are removed and a Windows device name such as
   `CON` or `nul` gets a `_` suffix. `add`, `edit --title`, `search --add`

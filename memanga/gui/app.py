@@ -20,6 +20,7 @@ from .network_status import NetworkMonitor
 from . import theme as T
 from .components.sidebar import Sidebar
 from .components.offline_banner import OfflineBanner
+from .components.error_details import notify_error
 from .pages.base import BasePage
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class MeMangaApp(QMainWindow):
         self.events.subscribe("check_error", self._on_check_error)
         self.events.subscribe("kindle_sent", self._on_kindle_sent)
         self.events.subscribe("kindle_skipped", self._on_kindle_skipped)
+        self.events.subscribe("kindle_error", self._on_kindle_error)
 
         # Window setup
         self.setWindowTitle(f"MeManga v{__version__}")
@@ -436,15 +438,15 @@ class MeMangaApp(QMainWindow):
             return
         title = data.get("title", "")
         error = data.get("error", "Unknown")
-        self.app_state.add_notification("error", f"Check failed: {title} - {error[:80]}")
-        self.events.publish("notification_added", {})
+        # Issue #342: a short line in the list, the full error behind
+        # its Details button.
+        notify_error(self, f"Check failed: {title}", error)
         logger.error("Check failed: %s: %s", title, error)
 
     def _on_download_error(self, data):
         title = data.get("title", "")
         error = data.get("error", "Unknown")
-        self.app_state.add_notification("error", f"Failed: {title} - {error[:50]}")
-        self.events.publish("notification_added", {})
+        notify_error(self, f"Failed: {title}", error)
         self._settle_new_chapter_download(
             title, data.get("task_id"), failed=True
         )
@@ -531,6 +533,16 @@ class MeMangaApp(QMainWindow):
     def _on_kindle_sent(self, data):
         self.app_state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")
         self.events.publish("notification_added", {})
+
+    def _on_kindle_error(self, data):
+        # The chapter is saved but the e-mail failed (SMTP, auth, size);
+        # without this the failure was only in the log.
+        task_id = data.get("task_id", "")
+        title, _, chapter = task_id.rpartition(":")
+        label = f"{title} Ch. {chapter}" if title else task_id
+        error = data.get("error", "Unknown")
+        notify_error(self, f"Not sent to Kindle: {label}", error)
+        logger.error("Not sent to Kindle: %s: %s", label, error)
 
     def _on_kindle_skipped(self, data):
         # Issue #340: image formats save a folder of pages, which can't

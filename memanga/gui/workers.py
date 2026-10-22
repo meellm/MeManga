@@ -600,9 +600,13 @@ class BackgroundWorker:
             except Exception as e:
                 if cancel.is_set():
                     return 0
+                # Issue #342: the whole cause; the Search page summarises
+                # and shows it on request.
+                logger.warning("Search on %s failed: no scraper: %s",
+                               source_domain, e)
                 self._events.publish("search_source_failed", {
                     "source": source_domain, "seq": seq,
-                    "error": f"no scraper: {e}"[:160],
+                    "error": f"no scraper: {e}",
                 })
                 return 0
             try:
@@ -610,9 +614,11 @@ class BackgroundWorker:
             except Exception as e:
                 if cancel.is_set():
                     return 0
+                logger.warning("Search on %s failed: %s: %s",
+                               source_domain, type(e).__name__, e)
                 self._events.publish("search_source_failed", {
                     "source": source_domain, "seq": seq,
-                    "error": f"{type(e).__name__}: {e}"[:160],
+                    "error": f"{type(e).__name__}: {e}",
                 })
                 return 0
             if cancel.is_set():
@@ -839,7 +845,7 @@ class BackgroundWorker:
             except requests.RequestException as e:
                 latency = int((time.perf_counter() - t0) * 1000)
                 state.update_source_health(
-                    domain, False, error_msg=str(e)[:80], latency_ms=latency,
+                    domain, False, error_msg=str(e), latency_ms=latency,
                 )
 
         def _task():

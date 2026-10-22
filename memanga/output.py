@@ -100,7 +100,9 @@ _KEY_VALUE = re.compile(
     r"(\"[^\"]*\"|'[^']*'|[^\s&,;\"']+)"
 )
 _BEARER = re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=-]+")
-_URL_USERINFO = re.compile(r"(://[^/\s:@]+:)[^/\s@]+@")
+# The whole userinfo (`user:password@` or `user@`): a URL user name can
+# be an account name or a token in its own right (issue #342).
+_URL_USERINFO = re.compile(r"(://)[^/?#\s@\"'<>]+@")
 
 REDACTED = "***"
 
@@ -121,6 +123,50 @@ def redact(text: str) -> str:
     text = _BEARER.sub(lambda m: f"{m.group(1)} {REDACTED}", text)
     text = _KEY_VALUE.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", text)
     return _URL_USERINFO.sub(lambda m: f"{m.group(1)}{REDACTED}@", text)
+
+
+# Error text the desktop app keeps inline in state.json (issue #342).
+# Long enough for any real error message; longer text is kept whole in
+# a side file by the notification store, so this only keeps a runaway
+# response body out of state.json.
+DETAIL_MAX_CHARS = 4000
+
+_EMAIL = re.compile(r"(?<![\w.%+-])[\w.%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)")
+
+
+def _mask_home(text: str) -> str:
+    try:
+        home = str(Path.home()).rstrip("\\/")
+    except (RuntimeError, KeyError):
+        return text
+    if len(home) < 2:
+        return text
+    # Exception text may hold the path as-is, with forward slashes, or
+    # repr-escaped (`'C:\\Users\\me'`). A following name character means
+    # a different directory (a home named `al` must not match `alice`).
+    variants = {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}
+    flags = re.IGNORECASE if os.name == "nt" else 0
+    for variant in sorted(variants, key=len, reverse=True):
+        text = re.sub(re.escape(variant) + r"(?![\w.-])", "~", text, flags=flags)
+    return text
+
+
+def redact_diagnostic(text, limit: Optional[int] = DETAIL_MAX_CHARS) -> str:
+    """Error text that is safe to store, show and copy.
+
+    Applies :func:`redact`, shows the home directory as ``~`` and masks
+    the local part of e-mail addresses, keeping the rest of the message
+    (hosts, ports, other paths, causes) so it stays actionable. Text
+    beyond ``limit`` characters is cut and says how much is missing;
+    ``limit=None`` keeps it whole.
+    """
+    text = redact(str(text if text is not None else ""))
+    text = _mask_home(text)
+    text = _EMAIL.sub(lambda m: f"{REDACTED}@{m.group(1)}", text).strip()
+    if limit is not None and len(text) > limit:
+        more = len(text) - limit
+        text = f"{text[:limit].rstrip()}… [{more} more characters cut]"
+    return text
 
 
 class RedactingFormatter(logging.Formatter):

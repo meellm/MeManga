@@ -3,6 +3,7 @@ Settings page - Tabbed: General, Email, Sources, Advanced.
 """
 
 import json
+import logging
 import platform
 import subprocess
 import sys
@@ -17,12 +18,15 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QObject, Signal, Slot
 from .base import BasePage
 from .. import theme as T
+from ..components.error_details import detail_tooltip, notify_error, summarize_error
 from ..components.toast import Toast
 from ...backup import EXPORT_VERSION, BackupVersionError, validate_backup
 from ...cron import (build_cron_line, build_task_command, managed_lines,
                      read_crontab,
                      remove_managed_lines, replace_managed_line,
                      source_checkout_root, unmanaged_memanga_lines)
+
+logger = logging.getLogger(__name__)
 
 
 def _plaintext_password_toast_text(config_path) -> str:
@@ -39,7 +43,7 @@ def _plaintext_password_toast_text(config_path) -> str:
 
 
 class _EmailTestSignals(QObject):
-    result = Signal(str, str)
+    result = Signal(str, str, str)  # text, kind, full error (may be "")
 
 
 class SettingsPage(BasePage):
@@ -504,6 +508,8 @@ class SettingsPage(BasePage):
         test_row.addWidget(test_btn)
 
         self._test_label = QLabel("")
+        # Shows a server's reply: never render it as HTML.
+        self._test_label.setTextFormat(Qt.TextFormat.PlainText)
         self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt;")
         test_row.addWidget(self._test_label)
         test_row.addStretch()
@@ -1082,6 +1088,10 @@ class SettingsPage(BasePage):
             self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
             return
 
+        # Issue #342: the password must not reach the error details.
+        from ...output import register_secret
+        register_secret(pw)
+
         def _test():
             import smtplib
             import ssl
@@ -1092,22 +1102,36 @@ class SettingsPage(BasePage):
                 server.starttls(context=context)
                 server.login(sender, pw)
                 server.quit()
-                self._email_test_signals.result.emit("Success!", "success")
-            except smtplib.SMTPAuthenticationError:
-                self._email_test_signals.result.emit("Auth failed", "error")
+                self._email_test_signals.result.emit("Success!", "success", "")
+            except smtplib.SMTPAuthenticationError as e:
+                self._email_test_signals.result.emit("Auth failed", "error", str(e))
             except Exception as e:
-                msg = str(e)[:30]
-                self._email_test_signals.result.emit(f"Failed: {msg}", "error")
+                self._email_test_signals.result.emit(
+                    f"Failed: {summarize_error(e, 40)}", "error", str(e))
 
         threading.Thread(target=_test, daemon=True).start()
 
-    @Slot(str, str)
-    def _set_email_test_result(self, text: str, kind: str):
+    @Slot(str, str, str)
+    def _set_email_test_result(self, text: str, kind: str, detail: str = ""):
         color = T.SUCCESS if kind == "success" else T.ERROR
         self._test_label.setText(text)
         self._test_label.setStyleSheet(
             f"font-size: {T.FONT_SIZE_XS}pt; color: {color};"
         )
+        if detail:
+            # Issue #342: the server's full reply, on hover and in
+            # Notifications (keyboard and screen-reader reachable).
+            self._test_label.setToolTip(detail_tooltip(detail))
+            notify_error(self.app, "Email test failed", detail)
+            logger.error("Email test failed: %s", detail)
+
+    def _error_toast(self, prefix: str, error) -> None:
+        """Issue #342: a short toast; the full error goes to Notifications
+        and the (redacted) log."""
+        notify_error(self.app, prefix, error)
+        logger.error("%s: %s", prefix, error)
+        Toast(self, f"{prefix}: {summarize_error(error, 40) or 'Unknown error'}"
+                    " (details in Notifications)", kind="error")
 
     # ── Cron ──
 
@@ -1159,9 +1183,9 @@ class SettingsPage(BasePage):
                 else:
                     Toast(self, f"Cron: daily at {hour}:{minute}", kind="success")
             else:
-                Toast(self, f"Failed: {proc.stderr[:40]}", kind="error")
+                self._error_toast("Cron setup failed", proc.stderr)
         except Exception as e:
-            Toast(self, f"Error: {str(e)[:40]}", kind="error")
+            self._error_toast("Cron setup failed", e)
 
     def _install_cron_windows(self, cron_time):
         from .._subprocess import no_window_kwargs
@@ -1190,9 +1214,9 @@ class SettingsPage(BasePage):
                 self.app.config.save()
                 Toast(self, f"Task: daily at {cron_time}", kind="success")
             else:
-                Toast(self, f"Failed: {result.stderr[:40]}", kind="error")
+                self._error_toast("Task setup failed", result.stderr)
         except Exception as e:
-            Toast(self, f"Error: {str(e)[:40]}", kind="error")
+            self._error_toast("Task setup failed", e)
 
     def _remove_cron(self):
         if platform.system() == "Windows":
@@ -1218,7 +1242,7 @@ class SettingsPage(BasePage):
                         capture_output=True, text=True,
                     )
                     if proc.returncode != 0:
-                        Toast(self, f"Failed: {proc.stderr[:40]}", kind="error")
+                        self._error_toast("Cron removal failed", proc.stderr)
                         return
                     Toast(self, "Cron removed", kind="success")
                 else:
@@ -1279,7 +1303,7 @@ class SettingsPage(BasePage):
                 json.dump(data, f, indent=2, default=str)
             Toast(self, f"Exported {len(data['manga'])} manga", kind="success")
         except Exception as e:
-            Toast(self, f"Export failed: {str(e)[:40]}", kind="error")
+            self._error_toast("Export failed", e)
 
     def _import(self, replace=False):
         path, _ = QFileDialog.getOpenFileName(self, "Import", "", "JSON (*.json)")
@@ -1332,4 +1356,4 @@ class SettingsPage(BasePage):
         except json.JSONDecodeError:
             Toast(self, "Invalid JSON", kind="error")
         except Exception as e:
-            Toast(self, f"Failed: {str(e)[:40]}", kind="error")
+            self._error_toast("Import failed", e)

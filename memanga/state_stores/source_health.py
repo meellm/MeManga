@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Optional
 
+from ..output import redact_diagnostic
 from ._base import StateDomain, snapshot
 
 
@@ -43,7 +44,9 @@ class SourceHealthStore(StateDomain):
                     health["status"] = "ok"
             else:
                 health["last_error"] = now
-                health["last_error_msg"] = error_msg[:100]
+                # Issue #342: redacted, and up to DETAIL_MAX_CHARS (with a
+                # cut note) instead of a 100-character slice.
+                health["last_error_msg"] = redact_diagnostic(error_msg)
                 health["error_count"] = health.get("error_count", 0) + 1
                 health["status"] = "warning" if health["error_count"] < 3 else "error"
             if latency_ms is not None:

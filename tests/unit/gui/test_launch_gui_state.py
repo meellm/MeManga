@@ -359,6 +359,12 @@ class TestMoveRaceWithDirectGui:
             calls.append(1)
             return legacy if len(calls) == 1 else real()
         monkeypatch.setattr(config_mod, "default_config_dir", stale_then_real)
+        # The entry configures logging before launch_gui() (which then
+        # keeps it, issue #342); WARNING keeps its INFO lines out of the
+        # exact log contents checked below.
+        import logging
+        from memanga import output
+        output.configure_logging(logging.WARNING)
 
         try:
             assert _launch() == 0
@@ -417,3 +423,83 @@ class TestMoveRaceWithDirectGui:
         config, state = fake_qt["windows"][0]
         assert config.config_dir == state.config_dir == legacy
         assert fake_qt["explicit"] == [legacy]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Issue #342: a direct start (the `memanga-gui` script) logs redacted
+# ─────────────────────────────────────────────────────────────────────────
+
+_CREDENTIAL_ERROR = (
+    "All sources failed for 'T': src.test: HTTPSConnectionPool("
+    "host='127.0.0.1', port=9): Max retries exceeded with url: "
+    "/manga/https://some-user:some-pass@host/path (Caused by "
+    "NewConnectionError('Connection refused'))"
+)
+
+
+def _own_handlers():
+    import logging
+    from memanga import output
+    return [h for h in logging.getLogger().handlers
+            if getattr(h, output._OWN_HANDLER, False)]
+
+
+def test_console_script_is_launch_gui():
+    # The regression below covers the installed script only while it
+    # still points here.
+    from pathlib import Path
+    tomllib = pytest.importorskip("tomllib")
+    pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
+    scripts = tomllib.loads(pyproject.read_text(encoding="utf-8"))[
+        "project"]["scripts"]
+    assert scripts["memanga-gui"] == "memanga.gui:launch_gui"
+
+
+def test_direct_launch_redacts_url_credentials_in_logs(cfg_dir, fake_qt,
+                                                       capsys):
+    import logging
+    from memanga import output
+    output.reset_logging()
+    assert not output.logging_configured()
+
+    assert _launch() == 0
+    capsys.readouterr()
+    logging.getLogger("memanga.gui.app").error(
+        "Check failed: %s: %s", "T", _CREDENTIAL_ERROR)
+    try:
+        raise RuntimeError(_CREDENTIAL_ERROR)
+    except RuntimeError:
+        logging.getLogger("memanga.gui.workers").exception("Check failed")
+    err = capsys.readouterr().err
+
+    assert "some-user" not in err and "some-pass" not in err
+    assert "/manga/https://***@host/path" in err
+    assert "host='127.0.0.1', port=9" in err
+    assert "Connection refused" in err
+    assert "ERROR memanga.gui.app: Check failed: T:" in err
+
+
+def test_launch_keeps_logging_set_up_by_the_caller(cfg_dir, fake_qt):
+    # `memanga --gui` and `python -m memanga.gui` configure logging
+    # first: no second handler, and their level stays.
+    import logging
+    from memanga import output
+    output.configure_logging(logging.ERROR)
+    before = _own_handlers()
+    level = logging.getLogger().level
+
+    assert _launch() == 0
+    assert _launch() == 0
+
+    assert _own_handlers() == before
+    assert logging.getLogger().level == level
+
+
+def test_repeated_direct_launch_adds_no_handlers(cfg_dir, fake_qt):
+    from memanga import output
+    output.reset_logging()
+    assert _launch() == 0
+    first = _own_handlers()
+    assert len(first) == 1
+    assert _launch() == 0
+    assert _own_handlers() == first

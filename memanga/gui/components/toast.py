@@ -20,6 +20,8 @@ class Toast(QLabel):
 
     def __init__(self, parent: QWidget, message: str, kind: str = "info", duration: int = 3000):
         super().__init__(message, parent)
+        # Messages often quote error text from sites; show it literally.
+        self.setTextFormat(Qt.TextFormat.PlainText)
         bg = _COLORS.get(kind, T.ACCENT)
         self.setStyleSheet(
             f"background: {bg}; color: #ffffff; border-radius: 6px; padding: 8px 16px;"
