@@ -1,5 +1,5 @@
 """
-Settings page - Tabbed: General, Email, Sources, Advanced.
+Settings page - Tabbed: General, Email, Advanced, About.
 """
 
 import json
@@ -15,9 +15,11 @@ from PySide6.QtWidgets import (
     QLineEdit, QFileDialog, QButtonGroup, QSizePolicy, QSpinBox,
     QAbstractSpinBox,
 )
-from PySide6.QtCore import Qt, QObject, Signal, Slot
+from PySide6.QtCore import Qt, QObject, QTimer, Signal, Slot
+from PySide6.QtGui import QGuiApplication
 from .base import BasePage
 from .. import theme as T
+from ... import doctor
 from ..components.error_details import detail_tooltip, notify_error, summarize_error
 from ..components.toast import Toast
 from ...backup import EXPORT_VERSION, BackupVersionError, validate_backup
@@ -46,6 +48,10 @@ class _EmailTestSignals(QObject):
     result = Signal(str, str, str)  # text, kind, full error (may be "")
 
 
+class _AboutSignals(QObject):
+    checked = Signal(object)  # doctor.about_checks() result
+
+
 class SettingsPage(BasePage):
     """Tabbed settings: General, Email, Sources, Advanced."""
 
@@ -54,6 +60,9 @@ class SettingsPage(BasePage):
         self._current_tab = "general"
         self._email_test_signals = _EmailTestSignals(self)
         self._email_test_signals.result.connect(self._set_email_test_result)
+        self._about_signals = _AboutSignals(self)
+        self._about_signals.checked.connect(self._set_about_checks)
+        self._about_info = None  # filled on the first visit to About
         self._build()
 
     def _build(self):
@@ -117,6 +126,7 @@ class SettingsPage(BasePage):
             ("general",  "General",        "settings"),
             ("email",    "Kindle / Email", "bell"),
             ("advanced", "Advanced",       "refresh"),
+            ("about",    "About",          "info"),
         ]
         for key, label, icon_name in nav_items:
             btn = QPushButton("  " + label)
@@ -176,10 +186,22 @@ class SettingsPage(BasePage):
         self._advanced_scroll.setWidget(advanced_content)
         self._build_advanced()
 
+        # ── About tab ──
+        self._about_scroll = QScrollArea()
+        self._about_scroll.setWidgetResizable(True)
+        self._about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        about_content = QWidget()
+        self._about_layout = QVBoxLayout(about_content)
+        self._about_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._about_layout.setSpacing(T.PAD_SM)
+        self._about_scroll.setWidget(about_content)
+        self._build_about()
+
         # Add all tab scrolls into the right pane
         right_l.addWidget(self._general_scroll, 1)
         right_l.addWidget(self._email_scroll, 1)
         right_l.addWidget(self._advanced_scroll, 1)
+        right_l.addWidget(self._about_scroll, 1)
 
         # Sticky save bar pinned to the bottom of the right pane — outside
         # every scroll area so it stays visible no matter how tall the
@@ -251,6 +273,9 @@ class SettingsPage(BasePage):
         self._general_scroll.setVisible(tab_name == "general")
         self._email_scroll.setVisible(tab_name == "email")
         self._advanced_scroll.setVisible(tab_name == "advanced")
+        self._about_scroll.setVisible(tab_name == "about")
+        if tab_name == "about" and self._about_info is None:
+            self._start_about_checks()
 
         for name, btn in self._tab_buttons.items():
             is_active = (name == tab_name)
@@ -749,8 +774,111 @@ class SettingsPage(BasePage):
         f.addLayout(diag_row)
 
         # Refresh cache size on display.
-        from PySide6.QtCore import QTimer
         QTimer.singleShot(100, self._refresh_cache_size)
+
+    # ── About Tab ──
+
+    def _build_about(self):
+        """Version and environment for bug reports (issue #343).
+
+        Rows start as "Checking…" for the keyring and browsers; those are
+        probed off the GUI thread on the first visit to the tab.
+        """
+        f = self._about_layout
+        self._section(f, "About")
+
+        hint = QLabel("Version and environment details for bug reports. "
+                      "Copied text leaves out folder paths, user names, "
+                      "e-mail addresses and passwords.")
+        hint.setProperty("role", "hint")
+        hint.setWordWrap(True)
+        f.addWidget(hint)
+
+        self._about_values: dict[str, QLabel] = {}
+        for label_text, value in doctor.about_rows({}):
+            row = QHBoxLayout()
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+            lbl.setFixedWidth(120)
+            row.addWidget(lbl)
+
+            val = QLabel(value)
+            val.setTextFormat(Qt.TextFormat.PlainText)
+            val.setWordWrap(True)
+            val.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+            val.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+                | Qt.TextInteractionFlag.TextSelectableByKeyboard
+            )
+            row.addWidget(val, 1)
+            f.addLayout(row)
+            self._about_values[label_text] = val
+
+        f.addSpacing(T.PAD_SM)
+        copy_row = QHBoxLayout()
+        self._copy_about_btn = QPushButton("Copy diagnostics")
+        self._copy_about_btn.setMinimumHeight(36)
+        self._copy_about_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._copy_about_btn.setAccessibleDescription(
+            "Copy the version and environment details to the clipboard")
+        self._copy_about_btn.clicked.connect(self._copy_about)
+        # Enabled once the checks report back: "Checking…" rows are not
+        # worth pasting into a bug report.
+        self._copy_about_btn.setEnabled(False)
+        copy_row.addWidget(self._copy_about_btn)
+        copy_row.addStretch()
+        f.addLayout(copy_row)
+
+    def _start_about_checks(self):
+        self._about_info = doctor.about_basics()
+        self._refresh_about_rows()
+        signals = self._about_signals
+
+        def _check():
+            try:
+                result = doctor.about_checks()
+            except Exception:
+                result = {}
+            try:
+                signals.checked.emit(result)
+            except RuntimeError:
+                pass  # page already closed and deleted
+
+        threading.Thread(target=_check, daemon=True,
+                         name="settings-about-checks").start()
+
+    @Slot(object)
+    def _set_about_checks(self, result):
+        if self._about_info is None:
+            return
+        self._about_info.update(result or {
+            "keyring": {"backend": None},
+            "browsers": {"status": "error"},
+        })
+        self._refresh_about_rows()
+        self._copy_about_btn.setEnabled(True)
+
+    def _refresh_about_rows(self):
+        for label_text, value in doctor.about_rows(self._about_info or {}):
+            val = self._about_values.get(label_text)
+            if val is not None:
+                val.setText(value)
+                val.setAccessibleName(f"{label_text}: {value}")
+
+    def _copy_about(self):
+        if self._about_info is None or not self._copy_about_btn.isEnabled():
+            return  # checks still running
+        QGuiApplication.clipboard().setText(doctor.format_about(self._about_info))
+        self._copy_about_btn.setText("Copied")
+        self._copy_about_btn.setAccessibleName("Copied")
+        QTimer.singleShot(1500, self._reset_copy_about_label)
+
+    def _reset_copy_about_label(self):
+        try:
+            self._copy_about_btn.setText("Copy diagnostics")
+            self._copy_about_btn.setAccessibleName("")
+        except RuntimeError:
+            pass  # page already closed and deleted
 
     def _refresh_post_processing_enabled(self):
         enabled = self._post_processing_check.isChecked()

@@ -7,6 +7,12 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #343 Settings in the desktop app has an About page with the MeManga
+  version, install type (packaged app or not), Python, OS, Qt and
+  Playwright versions, whether the Playwright browsers are installed and
+  which keyring stores the app password. "Copy diagnostics" copies the
+  same list for a bug report; it holds no folder paths, user names,
+  e-mail addresses or passwords.
 - #247 The app password can come from `MEMANGA_SMTP_PASSWORD_FILE` (a
   file such as a Docker secret) or `MEMANGA_SMTP_PASSWORD`, ahead of the
   keyring and `config.yaml`, and is then never saved. Setting both, or a

@@ -573,3 +573,132 @@ class TestRunnerAndReport:
     def test_all_skipped_is_ok(self):
         results = [doctor.CheckResult("smtp", doctor.SKIP, "not run")]
         assert doctor.overall_status(results) == doctor.OK
+
+
+class TestAbout:
+    """Settings → About summary (#343): an allowlist with no paths,
+    names or error text, safe to paste into a bug report."""
+
+    BASICS_KEYS = {"version", "install_mode", "frozen", "python", "os",
+                   "machine", "qt", "playwright"}
+
+    def _info(self, **overrides):
+        info = {
+            "version": "1.2.3", "install_mode": "frozen", "frozen": True,
+            "python": "3.12.1 (CPython)", "os": "Linux-6.1-x86_64-with-glibc2.36",
+            "machine": "x86_64", "qt": "6.7.2 (PySide6 6.7.2)",
+            "playwright": "1.48.0",
+            "keyring": {"available": True, "plaintext": False,
+                        "backend": "keyring.backends.SecretService.Keyring"},
+            "browsers": {"status": "ok",
+                         "installed": {"firefox": True, "chromium": False}},
+        }
+        info.update(overrides)
+        return info
+
+    def test_basics_are_allowlisted_and_pathless(self, monkeypatch):
+        monkeypatch.delattr(sys, "frozen", raising=False)
+        basics = doctor.about_basics()
+        assert set(basics) == self.BASICS_KEYS
+        from memanga import __version__
+        assert basics["version"] == __version__
+        assert basics["frozen"] is False
+        package_dir = str(Path(doctor.__file__).resolve().parent)
+        for value in basics.values():
+            text = str(value)
+            assert sys.executable not in text
+            assert package_dir not in text
+            assert str(Path.home()) not in text
+
+    def test_basics_report_frozen_build(self, monkeypatch):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        basics = doctor.about_basics()
+        assert basics["frozen"] is True
+        assert basics["install_mode"] == "frozen"
+
+    def test_checks_drop_paths_and_error_text(self, monkeypatch):
+        monkeypatch.setattr(doctor, "_keyring_backend", lambda: dict(
+            available=False, backend=None, plaintext=False,
+            error="cannot open /home/alice/.local/share/keyrings"))
+        monkeypatch.setattr(doctor, "_probe_browsers", lambda launch: dict(
+            firefox=dict(installed=True, executable="/home/alice/ms-playwright/ff",
+                         launched=None, error=None),
+            chromium=dict(installed=False, executable=None, launched=None,
+                          error="missing at /home/alice/ms-playwright")))
+        checks = doctor.about_checks()
+        assert checks == {
+            "keyring": {"available": False, "backend": None, "plaintext": False},
+            "browsers": {"status": "ok",
+                         "installed": {"firefox": True, "chromium": False}},
+        }
+
+    def test_checks_never_raise(self, monkeypatch):
+        def no_playwright(launch):
+            raise ImportError("playwright")
+
+        def broken_keyring():
+            raise RuntimeError("/home/alice boom")
+        monkeypatch.setattr(doctor, "_probe_browsers", no_playwright)
+        monkeypatch.setattr(doctor, "_keyring_backend", broken_keyring)
+        checks = doctor.about_checks()
+        assert checks["browsers"] == {"status": "playwright_missing", "installed": {}}
+        assert checks["keyring"] == {"available": False, "backend": None,
+                                     "plaintext": False}
+
+        def driver_crash(launch):
+            raise RuntimeError("driver died in /home/alice/app")
+        monkeypatch.setattr(doctor, "_probe_browsers", driver_crash)
+        assert doctor.about_checks()["browsers"] == {"status": "error", "installed": {}}
+
+    def test_format_lists_every_row(self):
+        assert doctor.format_about(self._info()).splitlines() == [
+            "MeManga: 1.2.3",
+            "Install: packaged app",
+            "Frozen: yes",
+            "Python: 3.12.1 (CPython)",
+            "OS: Linux-6.1-x86_64-with-glibc2.36",
+            "Architecture: x86_64",
+            "Qt: 6.7.2 (PySide6 6.7.2)",
+            "Playwright: 1.48.0",
+            "Browsers: firefox installed, chromium missing",
+            "Keyring: keyring.backends.SecretService.Keyring (available)",
+        ]
+
+    def test_rows_before_checks_finish(self):
+        info = self._info()
+        del info["keyring"], info["browsers"]
+        rows = dict(doctor.about_rows(info))
+        assert rows["Browsers"] == doctor.CHECKING
+        assert rows["Keyring"] == doctor.CHECKING
+        assert dict(doctor.about_rows({}))["MeManga"] == "unknown"
+
+    @pytest.mark.parametrize("browsers, expected", [
+        ({"status": "playwright_missing", "installed": {}}, "Playwright is not installed"),
+        ({"status": "error", "installed": {}}, "could not be checked"),
+    ])
+    def test_browser_failures(self, browsers, expected):
+        assert dict(doctor.about_rows(self._info(browsers=browsers)))["Browsers"] == expected
+
+    @pytest.mark.parametrize("keyring_info, expected", [
+        ({"available": False, "backend": "keyring.backends.fail.Keyring",
+          "plaintext": False}, "keyring.backends.fail.Keyring (unavailable)"),
+        ({"available": True, "backend": "keyrings.alt.file.PlaintextKeyring",
+          "plaintext": True}, "keyrings.alt.file.PlaintextKeyring (plain text file)"),
+        ({"available": False, "backend": None, "plaintext": False}, "none (unavailable)"),
+    ])
+    def test_keyring_states(self, keyring_info, expected):
+        assert dict(doctor.about_rows(self._info(keyring=keyring_info)))["Keyring"] == expected
+
+    def test_missing_optional_packages(self):
+        rows = dict(doctor.about_rows(self._info(qt=None, playwright=None,
+                                                 install_mode="source", frozen=False)))
+        assert rows["Qt"] == "not installed"
+        assert rows["Playwright"] == "not installed"
+        assert rows["Install"] == "source checkout"
+        assert rows["Frozen"] == "no"
+
+    def test_format_redacts_as_a_safety_net(self):
+        home = str(Path.home())
+        text = doctor.format_about(self._info(os=f"{home}/odd", machine="me@example.com"))
+        assert home not in text
+        assert "me@example.com" not in text
