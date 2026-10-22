@@ -457,7 +457,7 @@ class BackgroundWorker:
                 send=emailer.send_to_kindle,
                 app_password=lambda: kindle_cfg.get("app_password"),
             )
-            sent = pipeline.redeliver(title, number) is DeliveryStatus.SENT
+            sent = pipeline.redeliver(title, number, manga) is DeliveryStatus.SENT
         except Exception as e:
             logger.exception("Resending %s Ch.%s to Kindle failed: %s",
                              title, number, e)

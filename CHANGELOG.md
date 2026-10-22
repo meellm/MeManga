@@ -197,6 +197,15 @@ All notable changes are recorded here. Format loosely follows
   chapters that went to the Kindle, including chapters sent later with
   Send or `memanga send --pending`. Files are still only deleted after a
   successful send.
+- #341 The command line now honors the per-manga mode and Kindle settings
+  of the desktop app. `check --download` (and cron's `check --auto
+  --quiet`) without a manga name lists the new chapters of `manual`-mode
+  manga instead of downloading them, and the summary counts them;
+  naming the manga or answering the per-chapter question still
+  downloads. A manga with Kindle delivery turned off is never emailed by
+  `check`, `failed retry`, `send --pending` or the desktop app's Send
+  button; its chapters are saved as usual. Entries without these fields
+  keep the old defaults (automatic, Kindle on).
 - #342 The desktop app no longer cuts error messages off after 30-80
   characters. Toasts, download rows and the Settings email test show a
   short summary, and the Notifications entry keeps the complete error

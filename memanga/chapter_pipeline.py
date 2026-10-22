@@ -37,7 +37,8 @@ class ChapterStatus(Enum):
 class DeliveryStatus(Enum):
     """What Kindle delivery did with a saved chapter."""
 
-    NOT_REQUESTED = "not_requested"    # local delivery, or no Kindle address
+    NOT_REQUESTED = "not_requested"    # local delivery, no Kindle address,
+                                       # or the manga opted out (#341)
     SKIPPED_FOLDER = "skipped_folder"  # image folders cannot be emailed
     SENT = "sent"
     FAILED = "failed"                  # the file stays on disk and an
@@ -94,6 +95,23 @@ class ChapterOutcome:
         if self.backup_error is not None:
             return f"Primary: {self.error}; Backup: {self.backup_error}"
         return self.error
+
+
+def manga_auto_downloads(manga: Dict[str, Any]) -> bool:
+    """Whether new chapters of ``manga`` may be downloaded without the
+    user asking for them (#341).
+
+    The desktop app's ``mode: manual`` manga are only surfaced, never
+    queued by a background check; any other value, or none (older
+    entries), means automatic.
+    """
+    return manga.get("mode") != "manual"
+
+
+def manga_sends_to_kindle(manga: Dict[str, Any]) -> bool:
+    """Whether ``manga`` takes part in Kindle delivery (#341). A missing
+    ``send_to_kindle`` (older entries) means it does."""
+    return bool(manga.get("send_to_kindle", True))
 
 
 def chapter_source(manga: Dict[str, Any], chapter) -> str:
@@ -365,7 +383,7 @@ class ChapterPipeline:
         # Measured before delivery, which may delete the local copy.
         size_mb = _size_mb(path)
         # Delivery runs before the chapter is marked downloaded (#86).
-        delivery, delivery_error, deleted = self._deliver(path)
+        delivery, delivery_error, deleted = self._deliver(path, manga)
         outcome = replace(outcome, delivery=delivery,
                           delivery_error=delivery_error,
                           local_copy_deleted=deleted)
@@ -389,7 +407,8 @@ class ChapterPipeline:
         )
         return outcome
 
-    def redeliver(self, title: str, chapter: str) -> DeliveryStatus:
+    def redeliver(self, title: str, chapter: str,
+                  manga: Optional[Dict[str, Any]] = None) -> DeliveryStatus:
         """Send a saved chapter whose earlier Kindle delivery failed (#360).
 
         Uses the undelivered record's file and the same delivery step as
@@ -398,14 +417,15 @@ class ChapterPipeline:
         kept, with the new error and attempt, when it fails again or its
         file is gone. A send also updates the chapter's download-history
         entry: sent, and whether the local copy was deleted (#338). With
-        email delivery not configured nothing is sent and the record is
-        left as it is (``NOT_REQUESTED``).
+        email delivery not configured, or ``manga`` (the tracked entry,
+        when there is one) opted out of Kindle delivery, nothing is sent
+        and the record is left as it is (``NOT_REQUESTED``).
         """
         chapter = str(chapter)
         record = self.state.failures.get_undelivered(title).get(chapter)
         if record is None:
             return DeliveryStatus.NOT_REQUESTED
-        if not self.delivers_to_kindle():
+        if not self.delivers_to_kindle(manga):
             return DeliveryStatus.NOT_REQUESTED
         recorded = str(record.get("path") or "")
         path = Path(recorded)
@@ -415,7 +435,7 @@ class ChapterPipeline:
             self.reporter.email_failed(error)
             status, delivery_error = DeliveryStatus.FAILED, str(error)
         else:
-            status, delivery_error, deleted = self._deliver(path)
+            status, delivery_error, deleted = self._deliver(path, manga)
             if status is DeliveryStatus.SENT:
                 self.state.activity.mark_download_sent(
                     title, chapter, recorded, deleted_after_send=deleted)
@@ -432,19 +452,22 @@ class ChapterPipeline:
         elif status is DeliveryStatus.SENT:
             self.state.failures.clear_undelivered(title, chapter, reason="sent")
 
-    def delivers_to_kindle(self) -> bool:
-        """True when this run sends saved chapters to a Kindle address."""
+    def delivers_to_kindle(self, manga: Optional[Dict[str, Any]] = None) -> bool:
+        """True when this run sends saved chapters to a Kindle address
+        and, given ``manga``, that manga has not opted out (#341)."""
         opts = self.options
+        if manga is not None and not manga_sends_to_kindle(manga):
+            return False
         return opts.delivery_mode == "email" and bool(opts.email.get("kindle_email"))
 
-    def _deliver(self, path: Path
+    def _deliver(self, path: Path, manga: Optional[Dict[str, Any]] = None
                  ) -> Tuple[DeliveryStatus, Optional[str], bool]:
-        """Send to Kindle when email delivery is configured. Returns the
-        status, the error text when it FAILED, and whether the local copy
-        was deleted after sending."""
+        """Send to Kindle when email delivery is configured and ``manga``
+        takes part in it. Returns the status, the error text when it
+        FAILED, and whether the local copy was deleted after sending."""
         opts = self.options
         email = opts.email
-        if not self.delivers_to_kindle():
+        if not self.delivers_to_kindle(manga):
             return DeliveryStatus.NOT_REQUESTED, None, False
         if path.is_dir():
             self.reporter.email_skipped_folder(path)

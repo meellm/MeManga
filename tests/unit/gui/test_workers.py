@@ -1115,7 +1115,7 @@ class TestSharedChapterPipeline:
         assert record["path"] == str(pdf)
 
     def _resend(self, worker, event_bus, state, monkeypatch, fake_send,
-                **kwargs):
+                manga=None, **kwargs):
         """Send the recorded chapter again; collect events until done."""
         import time
         import memanga.emailer as emailer
@@ -1125,8 +1125,8 @@ class TestSharedChapterPipeline:
         for name in ("kindle_sent", "kindle_error", "kindle_resend_done"):
             event_bus.subscribe(name, lambda d, n=name: events.append((n, d)))
 
-        worker.send_pending(self._MANGA, "71", state, dict(self._KINDLE),
-                            **kwargs)
+        worker.send_pending(manga or self._MANGA, "71", state,
+                            dict(self._KINDLE), **kwargs)
 
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
@@ -1182,6 +1182,27 @@ class TestSharedChapterPipeline:
         assert pdf.exists()
         entry = state.get_download_history()[0]
         assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, False)
+
+    def test_send_pending_honors_kindle_opt_out(
+            self, worker, event_bus, state, monkeypatch, tmp_path):
+        """#341: the shared resend step never emails a manga that opted
+        out, even when handed Kindle settings."""
+        pdf = tmp_path / "ch71.pdf"
+        pdf.write_bytes(b"%PDF")
+        state.failures.add_undelivered("Vinland Saga", "71", str(pdf), "SMTP down")
+        before = state.failures.get_undelivered("Vinland Saga")
+        sent = []
+
+        events = self._resend(worker, event_bus, state, monkeypatch,
+                              lambda **kw: sent.append(kw),
+                              manga={**self._MANGA, "send_to_kindle": False},
+                              delete_after_send=True)
+
+        assert self._names(events) == ["kindle_resend_done"]
+        assert events[-1][1]["sent"] is False
+        assert sent == []
+        assert pdf.exists()
+        assert state.failures.get_undelivered("Vinland Saga") == before
 
     def test_send_pending_failure_keeps_record_and_file(
             self, worker, event_bus, state, monkeypatch, tmp_path):
