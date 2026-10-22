@@ -14,6 +14,7 @@ from .base import BasePage
 from .. import theme as T
 from ..components.toast import Toast
 from ..components.dialogs import ConfirmDialog, InputDialog
+from ..components.error_details import detail_tooltip
 
 
 class DetailPage(BasePage):
@@ -29,6 +30,8 @@ class DetailPage(BasePage):
         # task_ids of in-flight per-chapter Download buttons → button widget,
         # so we can flip them to "Read" when their download completes.
         self._pending_downloads: dict = {}
+        # (title, chapter) pairs being sent to Kindle again (issue #360).
+        self._sending: set = set()
         # Chapter filter state (HTML chip row: All/Downloaded/Not downloaded/Unread)
         self._chapter_filter = "all"
         self._chapter_chips: dict = {}
@@ -55,6 +58,8 @@ class DetailPage(BasePage):
         # Also refresh after a check completes — newly discovered chapters
         # surface as Download rows immediately, no navigation needed.
         self.app.events.subscribe("check_complete", self._on_any_check_complete)
+        # A chapter sent to Kindle again leaves (or stays on) the list.
+        self.app.events.subscribe("kindle_resend_done", self._on_kindle_resend_done)
 
     def on_show(self, **kwargs):
         manga = kwargs.get("manga")
@@ -453,6 +458,7 @@ class DetailPage(BasePage):
         available = self.app.app_state.get_available_chapters(title)
         external = self.app.app_state.get_external_chapters(title)
         partials = self.app.app_state.get_partial_chapters(title)
+        undelivered = self.app.app_state.failures.get_undelivered(title)
 
         # Build the merged set, keyed by chapter number string.
         # Available entries provide source/url metadata; downloaded entries
@@ -584,6 +590,7 @@ class DetailPage(BasePage):
             entry = merged[num]
             is_dl = self.app.app_state.is_chapter_downloaded(title, num)
             partial_info = partials.get(num) if is_dl else None
+            undelivered_info = undelivered.get(num) if is_dl else None
             is_external = (not is_dl and self.app.app_state.is_external_chapter(title, num))
 
             # Filter
@@ -701,8 +708,14 @@ class DetailPage(BasePage):
                 sub_state = "Read elsewhere"
             else:
                 sub_state = "Not downloaded"
+            if undelivered_info:
+                # Issue #360: saved, but the Kindle never got it.
+                sub_state = (f"{sub_state} · Not sent to Kindle"
+                             if partial_info else "Not sent to Kindle")
             sub_lbl = QLabel(sub_state)
             sub_lbl.setProperty("role", "hint")
+            if undelivered_info and undelivered_info.get("error"):
+                sub_lbl.setToolTip(detail_tooltip(undelivered_info["error"]))
             title_l.addWidget(sub_lbl)
             ch_row.addLayout(title_l, 1)
 
@@ -718,18 +731,31 @@ class DetailPage(BasePage):
                 ch_row.addWidget(date_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
             # Action column
-            if partial_info:
+            if partial_info or undelivered_info:
                 actions = QHBoxLayout()
                 actions.setSpacing(8)
-                retry_btn = QPushButton("Retry")
-                retry_btn.setProperty("size", "sm")
-                retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                retry_btn.clicked.connect(
-                    lambda _, e=entry, b=retry_btn: self._download_chapter(
-                        e, b, retry_partial=True
+                if partial_info:
+                    retry_btn = QPushButton("Retry")
+                    retry_btn.setProperty("size", "sm")
+                    retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    retry_btn.clicked.connect(
+                        lambda _, e=entry, b=retry_btn: self._download_chapter(
+                            e, b, retry_partial=True
+                        )
                     )
-                )
-                actions.addWidget(retry_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+                    actions.addWidget(retry_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+                if undelivered_info:
+                    send_btn = QPushButton("Send")
+                    send_btn.setProperty("size", "sm")
+                    send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    send_btn.setToolTip("Send this chapter to Kindle again")
+                    if (title, num) in self._sending:
+                        send_btn.setEnabled(False)
+                        send_btn.setText("Sending…")
+                    send_btn.clicked.connect(
+                        lambda _, c=num, b=send_btn: self._send_pending(c, b)
+                    )
+                    actions.addWidget(send_btn, 0, Qt.AlignmentFlag.AlignVCenter)
 
                 read_btn = QPushButton("Read")
                 read_btn.setProperty("variant", "primary")
@@ -1182,21 +1208,8 @@ class DetailPage(BasePage):
 
         # Optional Kindle delivery, same gating as the auto-queue path
         kindle_cfg = None
-        global_email_on = (
-            self.app.config.delivery_mode == "email" and self.app.config.email_enabled
-        )
-        if global_email_on and self._manga.get("send_to_kindle", True):
-            try:
-                from ...config import get_app_password
-                kindle_cfg = {
-                    "kindle_email": self.app.config.get("email.kindle_email"),
-                    "sender_email": self.app.config.get("email.sender_email"),
-                    "app_password": get_app_password(self.app.config),
-                    "smtp_server": self.app.config.get("email.smtp_server", "smtp.gmail.com"),
-                    "smtp_port": self.app.config.get("email.smtp_port", 587),
-                }
-            except Exception:
-                kindle_cfg = None
+        if self._manga.get("send_to_kindle", True):
+            kindle_cfg = self._kindle_settings()
 
         naming_template = self.app.config.get("delivery.naming_template")
         post_processing = self.app.config.get("delivery.post_processing")
@@ -1224,6 +1237,62 @@ class DetailPage(BasePage):
             f"Retrying partial Chapter {number}" if retry_partial else f"Queued Chapter {number}",
             kind="info",
         )
+
+    def _kindle_settings(self):
+        """Kindle email settings when email delivery is on, else None."""
+        global_email_on = (
+            self.app.config.delivery_mode == "email" and self.app.config.email_enabled
+        )
+        if not global_email_on:
+            return None
+        try:
+            from ...config import get_app_password
+            return {
+                "kindle_email": self.app.config.get("email.kindle_email"),
+                "sender_email": self.app.config.get("email.sender_email"),
+                "app_password": get_app_password(self.app.config),
+                "smtp_server": self.app.config.get("email.smtp_server", "smtp.gmail.com"),
+                "smtp_port": self.app.config.get("email.smtp_port", 587),
+            }
+        except Exception:
+            return None
+
+    def _send_pending(self, number: str, button=None):
+        """Send a chapter whose Kindle delivery failed again (issue #360),
+        the same way `memanga send --pending` does."""
+        if not self._manga:
+            return
+        kindle_cfg = self._kindle_settings()
+        if not kindle_cfg:
+            Toast(self, "Turn on Kindle email delivery in Settings first", kind="error")
+            return
+        title = self._manga["title"]
+        self._sending.add((title, number))
+        if button is not None:
+            button.setEnabled(False)
+            button.setText("Sending…")
+        self.app.worker.send_pending(
+            self._manga, number, self.app.app_state, kindle_cfg,
+            delete_after_send=self.app.config.get("delivery.delete_after_send", False),
+        )
+        Toast(self, f"Sending Chapter {number} to Kindle", kind="info")
+
+    def _on_kindle_resend_done(self, data):
+        """Refresh the row once a resend finished; the app has already
+        noted the result in Notifications."""
+        key = (data.get("title"), str(data.get("chapter", "")))
+        if key not in self._sending:
+            return
+        self._sending.discard(key)
+        if (not self._manga or key[0] != self._manga.get("title")
+                or not self.isVisible()):
+            return
+        if data.get("sent"):
+            Toast(self, f"Sent Chapter {key[1]} to Kindle", kind="success")
+        else:
+            Toast(self, f"Chapter {key[1]} was not sent — see Notifications",
+                  kind="error")
+        self._refresh_chapter_list()
 
     def _on_any_download_complete(self, data):
         """Refresh the chapter list when a download for the current manga

@@ -116,6 +116,16 @@ class TestPlainOutput:
         ((True, 1, 2, 0, 0, 0, 0),
          "Dry run: 2 chapter(s) available for download; checked 1 manga, "
          "0 could not be checked"),
+        # Issue #360: saved but not sent to Kindle; failed downloads
+        # still come first.
+        ((False, 1, 2, 2, 0, 0, 0, 1),
+         "Summary: 2/2 chapters downloaded, 0 failed, 1 not sent to Kindle; "
+         "checked 1 manga, 0 could not be checked; "
+         "next: run 'memanga send --pending'"),
+        ((False, 1, 2, 1, 1, 0, 0, 1),
+         "Summary: 1/2 chapters downloaded, 1 failed, 1 not sent to Kindle; "
+         "checked 1 manga, 0 could not be checked; "
+         "next: run 'memanga failed' for details"),
     ])
     def test_summary_line_next_action(self, counts, expected):
         """#372: the line ends with what to do next, only when needed."""

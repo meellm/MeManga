@@ -88,6 +88,190 @@ class TestMergeMangaState:
         assert merged["partial_chapters"]["4"] == local["partial_chapters"]["4"]
         assert merged["partial_chapters"]["5"] == imported["partial_chapters"]["5"]
 
+    def test_undelivered_chapters_merge_per_chapter(self):
+        # Issue #360: records of chapters not sent to Kindle merge like
+        # the failure records; a local record wins.
+        local = {"undelivered_chapters": {"4": {"path": "local.pdf", "attempts": 2}}}
+        imported = {"undelivered_chapters": {
+            "4": {"path": "imported.pdf", "attempts": 1},
+            "5": {"path": "five.pdf", "attempts": 1},
+        }}
+
+        merged = merge_manga_state(local, imported)
+
+        assert merged["undelivered_chapters"] == {
+            "4": {"path": "local.pdf", "attempts": 2},
+            "5": {"path": "five.pdf", "attempts": 1},
+        }
+
+    def test_older_backup_cannot_requeue_a_resolved_delivery(self):
+        # Issue #360: a chapter sent (or dismissed) after the backup was
+        # made stays resolved; its old record is not restored.
+        local = {"resolved_deliveries": {
+            "4": {"resolved_at": "2026-10-02T09:00:00.000000+00:00", "reason": "sent"}}}
+        imported = {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-01T09:00:00.000000+00:00", "path": "four.pdf"},
+            "5": {"failed_at": "2026-10-01T09:00:00.000000+00:00", "path": "five.pdf"},
+        }}
+
+        merged = merge_manga_state(local, imported)
+
+        assert list(merged["undelivered_chapters"]) == ["5"]
+        assert merged["resolved_deliveries"] == local["resolved_deliveries"]
+
+    def test_failure_newer_than_resolution_stays_pending(self):
+        local = {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-03T09:00:00.000000+00:00", "path": "four.pdf"}}}
+        imported = {"resolved_deliveries": {
+            "4": {"resolved_at": "2026-10-02T09:00:00.000000+00:00", "reason": "sent"}}}
+
+        merged = merge_manga_state(local, imported)
+
+        assert merged["undelivered_chapters"] == local["undelivered_chapters"]
+
+    def test_older_local_record_cannot_hide_newer_imported_failure(self):
+        # Imported failure 10:00, local failure 08:00, resolution 09:00:
+        # the 08:00 record is resolved, the 10:00 one is still pending.
+        newer = {"failed_at": "2026-10-22T10:00:00.000000+00:00", "path": "new.pdf"}
+        local = {
+            "undelivered_chapters": {
+                "4": {"failed_at": "2026-10-22T08:00:00.000000+00:00", "path": "old.pdf"}},
+            "resolved_deliveries": {
+                "4": {"resolved_at": "2026-10-22T09:00:00.000000+00:00", "reason": "sent"}},
+        }
+        imported = {"undelivered_chapters": {"4": newer}}
+
+        merged = merge_manga_state(local, imported)
+        assert merged["undelivered_chapters"] == {"4": newer}
+
+        # Same when the resolution comes from the backup instead.
+        local = {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-22T08:00:00.000000+00:00", "path": "old.pdf"}}}
+        imported = {
+            "undelivered_chapters": {"4": newer},
+            "resolved_deliveries": {
+                "4": {"resolved_at": "2026-10-22T09:00:00.000000+00:00", "reason": "sent"}},
+        }
+        merged = merge_manga_state(local, imported)
+        assert merged["undelivered_chapters"] == {"4": newer}
+
+    def test_later_of_two_surviving_failures_wins(self):
+        newer = {"failed_at": "2026-10-22T10:00:00.000000+00:00", "attempts": 3}
+        local = {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-22T08:00:00.000000+00:00", "attempts": 1}}}
+        imported = {"undelivered_chapters": {"4": newer}}
+
+        assert merge_manga_state(local, imported)["undelivered_chapters"] == {"4": newer}
+
+    @pytest.mark.parametrize("failed_at, resolved_at, pending", [
+        # Same second: the fraction decides, whether or not it is written.
+        ("2026-10-22T09:00:00.500000+00:00", "2026-10-22T09:00:00+00:00", True),
+        ("2026-10-22T09:00:00+00:00", "2026-10-22T09:00:00.000001+00:00", False),
+        # The same instant is not later: resolved.
+        ("2026-10-22T09:00:00+00:00", "2026-10-22T09:00:00.000000+00:00", False),
+        # Instants, not strings: 11:00+02:00 is 09:00 UTC, before 09:30 UTC.
+        ("2026-10-22T11:00:00+02:00", "2026-10-22T09:30:00+00:00", False),
+        ("2026-10-22T10:00:00+00:00", "2026-10-22T11:30:00+02:00", True),
+    ])
+    def test_imported_failure_is_ordered_by_instant(
+            self, failed_at, resolved_at, pending):
+        local = {"resolved_deliveries": {"4": {"resolved_at": resolved_at}}}
+        imported = {"undelivered_chapters": {"4": {"failed_at": failed_at}}}
+
+        merged = merge_manga_state(local, imported)
+
+        assert ("4" in merged["undelivered_chapters"]) is pending
+
+    def test_legacy_naive_times_never_requeue_from_a_backup(self):
+        # A naive local time has no order against a resolution, so an
+        # imported record is not restored even if its text sorts later.
+        local = {"resolved_deliveries": {
+            "4": {"resolved_at": "2026-10-22T09:00:00.000000+00:00"},
+            "5": {"resolved_at": "2026-10-22T09:00:00"},
+        }}
+        imported = {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-23T09:00:00"},
+            "5": {"failed_at": "2026-10-23T09:00:00.000000+00:00"},
+            "6": {"failed_at": "not a time"},
+        }}
+
+        merged = merge_manga_state(local, imported)
+
+        # Chapter 6 has no resolution, so nothing to order against.
+        assert list(merged["undelivered_chapters"]) == ["6"]
+
+    def test_legacy_local_failure_is_dropped_by_any_resolution(self):
+        # Unordered against a resolution, a local record is dropped too:
+        # a lost retry is preferred to a duplicate delivery. Without a
+        # resolution a legacy record stays, as before.
+        local = {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-23T09:00:00"},
+            "6": {"failed_at": "2026-10-01T09:00:00"},
+        }}
+        imported = {"resolved_deliveries": {
+            "4": {"resolved_at": "2026-10-22T09:00:00.000000+00:00"},
+        }}
+
+        merged = merge_manga_state(local, imported)
+
+        assert merged["undelivered_chapters"] == {"6": local["undelivered_chapters"]["6"]}
+
+    @pytest.mark.parametrize("local_at, imported_at", [
+        # Local UTC 09:00, imported legacy naive 11:00, and the reverse.
+        ("2026-10-22T09:00:00.000000+00:00", "2026-10-22T11:00:00"),
+        ("2026-10-22T11:00:00", "2026-10-22T09:00:00.000000+00:00"),
+    ])
+    def test_unordered_resolution_survives_successive_imports(
+            self, local_at, imported_at):
+        # Import 1 brings an unordered resolution; import 2 an old UTC
+        # failure at 10:00. The second import must still see the
+        # ambiguity, not just the 09:00 time, and keep it resolved.
+        state = {"resolved_deliveries": {"4": {"resolved_at": local_at, "reason": "sent"}}}
+
+        state = merge_manga_state(state, {"resolved_deliveries": {
+            "4": {"resolved_at": imported_at, "reason": "sent"}}})
+        assert state["resolved_deliveries"]["4"]["unordered"] is True
+        assert state.get("undelivered_chapters", {}) == {}
+
+        state = merge_manga_state(state, {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-22T10:00:00.000000+00:00", "path": "four.pdf"}}})
+        assert state["undelivered_chapters"] == {}
+        assert state["resolved_deliveries"]["4"]["unordered"] is True
+
+        # The tombstone stays through further imports, even a later UTC one.
+        state = merge_manga_state(state, {"resolved_deliveries": {
+            "4": {"resolved_at": "2026-10-22T12:00:00.000000+00:00", "reason": "sent"}}})
+        state = merge_manga_state(state, {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-22T13:00:00.000000+00:00"}}})
+        assert state["undelivered_chapters"] == {}
+        assert state["resolved_deliveries"]["4"]["unordered"] is True
+
+    def test_ordered_resolutions_are_not_marked_unordered(self):
+        local = {"resolved_deliveries": {
+            "4": {"resolved_at": "2026-10-22T09:00:00.000000+00:00"}}}
+        imported = {"resolved_deliveries": {
+            "4": {"resolved_at": "2026-10-22T11:00:00.000000+00:00"}}}
+
+        merged = merge_manga_state(local, imported)
+
+        assert merged["resolved_deliveries"] == imported["resolved_deliveries"]
+
+    @pytest.mark.parametrize("resolved_at, pending", [
+        ("2026-10-22T09:00:00.000000+00:00", True),   # failure provably later
+        ("2026-10-23T09:00:00.000000+00:00", False),  # resolution provably later
+        ("2026-10-22T10:00:00+00:00", False),         # same instant
+        ("2026-10-22T09:00:00", False),               # legacy naive: unordered
+        ("not a time", False),                        # unparseable: unordered
+    ])
+    def test_local_failure_against_imported_resolution(self, resolved_at, pending):
+        local = {"undelivered_chapters": {
+            "4": {"failed_at": "2026-10-22T10:00:00.000000+00:00", "path": "four.pdf"}}}
+        imported = {"resolved_deliveries": {"4": {"resolved_at": resolved_at}}}
+
+        merged = merge_manga_state(local, imported)
+
+        assert ("4" in merged["undelivered_chapters"]) is pending
+
     def test_preserves_local_and_imported_progress_fields(self):
         local = {
             "downloaded": ["1", "3"],

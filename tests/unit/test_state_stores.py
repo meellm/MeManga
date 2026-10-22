@@ -651,6 +651,47 @@ class TestCliFlow:
         assert s.get_stats()["total_chapters"] == 2
         assert s.get_check_history()[0]["new_chapters"] == 2
 
+    def test_undelivered_record_cycle(self, state):
+        # Issue #360: a chapter saved but not sent to Kindle stays on
+        # record, counts its attempts and is cleared once sent.
+        t = "Series"
+        state.library.add_downloaded(t, "4")
+        state.failures.add_undelivered(t, "4", "c4.pdf", "SMTP down")
+        state.failures.add_undelivered(t, "4", "c4.pdf", "x" * 400)
+        state.failures.add_undelivered(t, "5", "c5.pdf", "auth failed")
+
+        s = _reload(state)
+        record = s.failures.get_undelivered(t)["4"]
+        assert (record["path"], record["attempts"]) == ("c4.pdf", 2)
+        # UTC with an offset and a fixed fraction, so backups order it.
+        from datetime import datetime, timezone
+        failed_at = datetime.fromisoformat(record["failed_at"])
+        assert failed_at.tzinfo is not None
+        assert failed_at.utcoffset() == timezone.utc.utcoffset(None)
+        assert len(record["failed_at"]) == len("2026-10-22T08:00:00.000000+00:00")
+        assert record["error"] == "x" * 300
+        assert sorted(s.failures.get_all_undelivered()[t]) == ["4", "5"]
+        # Download records are a separate list.
+        assert s.get_all_failed_chapters() == {}
+
+        s.failures.clear_undelivered(t, "4")
+        s.failures.clear_undelivered(t, "5")
+        s.failures.clear_undelivered(t, "missing")
+        s = _reload(s)
+        assert s.failures.get_undelivered(t) == {}
+        assert s.failures.get_all_undelivered() == {}
+        assert s.get_downloaded_chapters(t) == ["4"]
+        # The resolutions persist (backup merges rely on them); clearing
+        # a chapter with no record leaves none.
+        resolved = s.get_manga_state(t)["resolved_deliveries"]
+        assert sorted(resolved) == ["4", "5"]
+        assert resolved["4"]["reason"] == "cleared"
+        assert resolved["4"]["resolved_at"].endswith("+00:00")
+
+        # A new failure supersedes the resolution.
+        s.failures.add_undelivered(t, "4", "c4.pdf", "SMTP down")
+        assert "4" not in s.get_manga_state(t)["resolved_deliveries"]
+
     def test_reset_and_rename(self, state):
         state.library.add_downloaded("Old", "1")
         state.library.add_downloaded("Old", "2")

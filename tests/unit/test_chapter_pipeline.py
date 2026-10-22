@@ -352,9 +352,14 @@ class TestDelivery:
 
         assert outcome.status is ChapterStatus.COMPLETE
         assert outcome.delivery is DeliveryStatus.FAILED
+        assert outcome.delivery_error == "SMTP down"
         assert pdf.exists()
         assert pipeline.reporter.events[-1] == ("email_failed", "SMTP down")
         assert state.is_chapter_downloaded(TITLE, "71")
+        # Issue #360: the chapter stays retryable for delivery.
+        record = state.failures.get_undelivered(TITLE)["71"]
+        assert (record["path"], record["error"], record["attempts"]) == (
+            str(pdf), "SMTP down", 1)
 
     def test_attachment_preparation_error_is_a_failed_delivery(
             self, state, tmp_path, pdf):
@@ -650,3 +655,122 @@ class TestDownloadHistory:
         history = state.get_download_history(limit=1000)
         assert len(history) == 200
         assert history[0]["chapter"] == "10"
+
+
+class TestUndeliveredChapters:
+    """Issue #360: a saved chapter whose Kindle delivery failed is kept on
+    record until a later send reaches the Kindle."""
+
+    def _failed_delivery(self, state, tmp_path, pdf, **opts):
+        downloads = _Downloads({("primary.test", False): pdf})
+        pipeline = _pipeline(state, tmp_path, downloads,
+                             sent=EmailError("SMTP down"),
+                             delivery_mode="email", email=EMAIL, **opts)
+        pipeline.process(SINGLE, _primary())
+        return pipeline
+
+    def test_record_survives_a_restart(self, state, tmp_path, pdf):
+        from memanga.state import State
+
+        self._failed_delivery(state, tmp_path, pdf)
+        state.flush()
+
+        reloaded = State(config_dir=state.config_dir)
+        assert list(reloaded.failures.get_all_undelivered()) == [TITLE]
+        assert reloaded.failures.get_undelivered(TITLE)["71"]["path"] == str(pdf)
+        assert reloaded.get_failed_chapters(TITLE) == {}
+
+    def test_sent_download_clears_an_old_record(self, state, tmp_path, pdf):
+        state.failures.add_undelivered(TITLE, "71", str(pdf), "SMTP down")
+        downloads = _Downloads({("primary.test", False): pdf})
+        pipeline = _pipeline(state, tmp_path, downloads, sent=[],
+                             delivery_mode="email", email=EMAIL)
+
+        pipeline.process(SINGLE, _primary())
+
+        assert state.failures.get_undelivered(TITLE) == {}
+
+    def test_local_delivery_leaves_no_record(self, state, tmp_path, pdf):
+        downloads = _Downloads({("primary.test", False): pdf})
+        pipeline = _pipeline(state, tmp_path, downloads)
+
+        pipeline.process(SINGLE, _primary())
+
+        assert state.failures.get_all_undelivered() == {}
+
+    def test_redeliver_sends_then_deletes_and_clears(self, state, tmp_path, pdf):
+        pipeline = self._failed_delivery(state, tmp_path, pdf,
+                                         delete_after_send=True)
+        assert pdf.exists()
+        sent = []
+
+        def send(**kwargs):
+            # Delete-after-send only runs once the send returned.
+            assert kwargs["pdf_path"].exists()
+            sent.append(kwargs["pdf_path"])
+
+        pipeline.send = send
+        status = pipeline.redeliver(TITLE, "71")
+
+        assert status is DeliveryStatus.SENT
+        assert sent == [pdf]
+        assert not pdf.exists()
+        assert state.failures.get_undelivered(TITLE) == {}
+        resolved = state.get_manga_state(TITLE)["resolved_deliveries"]["71"]
+        assert resolved["reason"] == "sent"
+        assert pipeline.reporter.events[-2:] == [("email_sent",),
+                                                 ("deleted_after_send",)]
+        assert state.is_chapter_downloaded(TITLE, "71")
+
+    def test_redeliver_failure_keeps_file_and_counts_attempt(
+            self, state, tmp_path, pdf):
+        pipeline = self._failed_delivery(state, tmp_path, pdf,
+                                         delete_after_send=True)
+
+        def send(**kwargs):
+            raise EmailError("Mailbox full")
+
+        pipeline.send = send
+        status = pipeline.redeliver(TITLE, "71")
+
+        assert status is DeliveryStatus.FAILED
+        assert pdf.exists()
+        record = state.failures.get_undelivered(TITLE)["71"]
+        assert (record["error"], record["attempts"]) == ("Mailbox full", 2)
+
+    def test_redeliver_missing_file_is_reported_not_sent(
+            self, state, tmp_path, pdf):
+        pipeline = self._failed_delivery(state, tmp_path, pdf)
+        pdf.unlink()
+        sent = []
+        pipeline.send = lambda **kwargs: sent.append(kwargs)
+
+        status = pipeline.redeliver(TITLE, "71")
+
+        assert status is DeliveryStatus.FAILED
+        assert sent == []
+        record = state.failures.get_undelivered(TITLE)["71"]
+        assert record["attempts"] == 2
+        assert record["path"] == str(pdf)
+        assert "no longer there" in record["error"]
+
+    def test_redeliver_without_email_delivery_changes_nothing(
+            self, state, tmp_path, pdf):
+        self._failed_delivery(state, tmp_path, pdf)
+        before = state.failures.get_undelivered(TITLE)
+        sent = []
+        pipeline = _pipeline(state, tmp_path, _Downloads({}), sent=sent)
+
+        status = pipeline.redeliver(TITLE, "71")
+
+        assert status is DeliveryStatus.NOT_REQUESTED
+        assert sent == []
+        assert state.failures.get_undelivered(TITLE) == before
+
+    def test_redeliver_unknown_chapter_sends_nothing(self, state, tmp_path):
+        sent = []
+        pipeline = _pipeline(state, tmp_path, _Downloads({}), sent=sent,
+                             delivery_mode="email", email=EMAIL)
+
+        assert pipeline.redeliver(TITLE, "71") is DeliveryStatus.NOT_REQUESTED
+        assert sent == []

@@ -135,8 +135,8 @@ class TestCompletionCommand:
         tokens = set(captured.out.translate(str.maketrans('"|)', "   ")).split())
         for name in ("list", "ls", "add", "remove", "rm", "update",
                      "edit", "check", "status", "config", "cron", "sources",
-                     "search", "export", "import", "failed", "doctor", "tui",
-                     "completion", "path", "open"):
+                     "search", "export", "import", "failed", "send", "doctor",
+                     "tui", "completion", "path", "open"):
             assert name in tokens, name
         for option in ("--config-dir", "--version"):
             assert option in tokens
@@ -3685,6 +3685,227 @@ class TestFailedSubcommands:
         for text in ("failed retry [TARGET]", "failed clear [TARGET]",
                      "aliases", "Exit codes"):
             assert text in out
+
+
+class TestSendPending:
+    """Issue #360: `send --pending [TARGET]` sends chapters whose Kindle
+    delivery failed again; `--list` only lists, `--clear` forgets."""
+
+    @pytest.fixture(autouse=True)
+    def wide_console(self, monkeypatch):
+        from rich.console import Console
+        from memanga import cli
+        monkeypatch.setattr(cli, "console", Console(width=250))
+        monkeypatch.setattr(cli, "err_console", Console(width=250, stderr=True))
+
+    @pytest.fixture
+    def email(self, config, monkeypatch):
+        from memanga import cli
+        config.set("delivery.mode", "email")
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [
+            {"title": t, "source": "mangadex.org",
+             "url": f"https://mangadex.org/title/{i}/x", "status": "reading"}
+            for i, t in enumerate(("Berserk", "Vinland Saga"))
+        ])
+        config.save()
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+    @pytest.fixture
+    def pending(self, cli_state, tmp_path):
+        """One undelivered chapter per manga; returns their files."""
+        files = {}
+        for title, chapter in (("Berserk", "1"), ("Vinland Saga", "10")):
+            path = tmp_path / f"{title}-{chapter}.pdf"
+            path.write_bytes(b"pdf")
+            cli_state.add_downloaded_chapter(title, chapter)
+            cli_state.failures.add_undelivered(title, chapter, str(path), "SMTP down")
+            files[title] = path
+        cli_state.save()
+        return files
+
+    @pytest.fixture
+    def sends(self, monkeypatch):
+        """Fake sender; paths in `fail` raise. Returns (sent, fail)."""
+        from memanga import cli
+        from memanga.emailer import EmailError
+        sent, fail = [], set()
+
+        def _send(**kwargs):
+            if kwargs["pdf_path"] in fail:
+                raise EmailError("Mailbox full")
+            sent.append(kwargs["pdf_path"])
+
+        monkeypatch.setattr(cli, "send_to_kindle", _send)
+        return sent, fail
+
+    def test_list_only_lists(self, run_cli, email, pending, sends, capsys):
+        sent, _ = sends
+        assert run_cli("send", "--pending", "--list") == 0
+        out = capsys.readouterr().out
+        assert "Berserk" in out and "Vinland Saga" in out
+        assert "SMTP down" in out
+        assert sent == []
+        assert len(_disk_state().failures.get_all_undelivered()) == 2
+
+    def test_sends_every_pending_chapter_and_clears_records(
+            self, run_cli, email, pending, sends, capsys):
+        sent, _ = sends
+        assert run_cli("send", "--pending") == 0
+        assert sorted(sent) == sorted(pending.values())
+        assert _disk_state().failures.get_all_undelivered() == {}
+        assert "2/2 chapters sent" in capsys.readouterr().out
+        # Without delete-after-send the files stay.
+        assert all(p.exists() for p in pending.values())
+
+    def test_delete_after_send_only_removes_sent_files(
+            self, run_cli, config, email, pending, sends):
+        sent, fail = sends
+        config.set("delivery.delete_after_send", True)
+        config.save()
+        fail.add(pending["Berserk"])
+
+        assert run_cli("send", "--pending") == 3
+        assert sent == [pending["Vinland Saga"]]
+        assert not pending["Vinland Saga"].exists()
+        assert pending["Berserk"].exists()
+        records = _disk_state().failures.get_all_undelivered()
+        assert list(records) == ["Berserk"]
+        assert records["Berserk"]["1"]["attempts"] == 2
+        assert records["Berserk"]["1"]["error"] == "Mailbox full"
+
+    def test_target_limits_to_one_manga(self, run_cli, email, pending, sends):
+        sent, _ = sends
+        assert run_cli("send", "--pending", "vinland saga") == 0
+        assert sent == [pending["Vinland Saga"]]
+        assert list(_disk_state().failures.get_all_undelivered()) == ["Berserk"]
+
+    def test_unknown_target_is_an_error(self, run_cli, email, pending, sends, capsys):
+        sent, _ = sends
+        assert run_cli("send", "--pending", "Nope") == 1
+        assert sent == []
+
+    def test_clear_forgets_records_and_keeps_files(
+            self, run_cli, email, pending, sends):
+        sent, _ = sends
+        assert run_cli("send", "--pending", "--clear", "Berserk") == 0
+        assert sent == []
+        assert list(_disk_state().failures.get_all_undelivered()) == ["Vinland Saga"]
+        assert pending["Berserk"].exists()
+        assert _disk_state().is_chapter_downloaded("Berserk", "1")
+
+    def test_email_delivery_not_set_up_is_an_error(
+            self, run_cli, config, email, pending, sends, capsys):
+        sent, _ = sends
+        config.set("delivery.mode", "local")
+        config.save()
+        assert run_cli("send", "--pending") == 1
+        assert "not set up" in capsys.readouterr().err
+        assert sent == []
+        assert len(_disk_state().failures.get_all_undelivered()) == 2
+
+    def test_nothing_pending(self, run_cli, email, sends, capsys):
+        assert run_cli("send", "--pending") == 0
+        assert "No chapters are waiting" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("resolve", [["send", "--pending"],
+                                         ["send", "--pending", "--clear"]])
+    def test_old_backup_does_not_requeue_resolved_delivery(
+            self, run_cli, email, pending, sends, tmp_path, resolve):
+        """fail -> export -> send (or clear) -> import the old backup: the
+        chapter is not pending again and is not sent a second time."""
+        sent, _ = sends
+        backup = tmp_path / "before.json"
+        assert run_cli("export", str(backup)) == 0
+
+        assert run_cli(*resolve) == 0
+        sent_before = list(sent)
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+        assert run_cli("import", str(backup)) == 0
+        state = _disk_state()
+        assert state.failures.get_all_undelivered() == {}
+        assert state.is_chapter_downloaded("Berserk", "1")
+        assert run_cli("send", "--pending") == 0
+        assert sent == sent_before
+
+    def test_unordered_resolution_blocks_a_later_old_backup(
+            self, run_cli, email, pending, sends, tmp_path):
+        """Import a legacy (naive) resolution newer than the local one,
+        then a backup with a UTC failure between the two: the chapter
+        stays resolved and `send --pending` offers nothing."""
+        from datetime import datetime, timedelta
+        sent, _ = sends
+        assert run_cli("send", "--pending", "--clear", "Berserk") == 0
+        resolved_at = datetime.fromisoformat(
+            _disk_state().get_manga_state("Berserk")["resolved_deliveries"]["1"]["resolved_at"])
+
+        backup = tmp_path / "backup.json"
+        assert run_cli("export", str(backup)) == 0
+        data = json.loads(backup.read_text())
+        entry = data["state"]["Berserk"]
+        entry.pop("undelivered_chapters", None)
+        entry["resolved_deliveries"] = {"1": {
+            "resolved_at": (resolved_at + timedelta(hours=2)).replace(tzinfo=None).isoformat(),
+            "reason": "sent"}}
+        backup.write_text(json.dumps(data))
+        assert run_cli("import", str(backup)) == 0
+
+        entry.pop("resolved_deliveries")
+        entry["undelivered_chapters"] = {"1": {
+            "failed_at": (resolved_at + timedelta(hours=1)).isoformat(timespec="microseconds"),
+            "path": str(pending["Berserk"]), "error": "SMTP down", "attempts": 1}}
+        backup.write_text(json.dumps(data))
+        assert run_cli("import", str(backup)) == 0
+
+        assert list(_disk_state().failures.get_all_undelivered()) == ["Vinland Saga"]
+        assert run_cli("send", "--pending", "Berserk") == 0
+        assert sent == []
+
+    def test_pending_is_required(self, run_cli, email):
+        assert run_cli("send") == 2
+
+    def test_list_and_clear_are_exclusive(self, run_cli, email):
+        assert run_cli("send", "--pending", "--list", "--clear") == 2
+
+    def test_check_records_failed_delivery_and_exits_partial(
+            self, run_cli, email, monkeypatch, tmp_path, capsys):
+        """The baseline of #360: the chapter is saved but not sent. It
+        must stay visible and retryable instead of a silent success."""
+        from memanga import cli
+        from memanga.emailer import EmailError
+
+        path = tmp_path / "Berserk-2.pdf"
+        path.write_bytes(b"pdf")
+        chapter = types.SimpleNamespace(
+            number="2", title="", url="https://mangadex.org/c/2",
+            source="mangadex.org", is_backup=False)
+        monkeypatch.setattr(
+            cli, "check_for_updates",
+            lambda manga, *a, **k: [chapter] if manga["title"] == "Berserk" else [])
+        monkeypatch.setattr(cli, "download_chapter", lambda *a, **k: path)
+
+        def _fail(**kwargs):
+            raise EmailError("SMTP down")
+
+        monkeypatch.setattr(cli, "send_to_kindle", _fail)
+
+        assert run_cli("check", "--download") == cli.EXIT_PARTIAL
+        captured = capsys.readouterr()
+        assert "memanga send --pending" in captured.out + captured.err
+        state = _disk_state()
+        assert state.is_chapter_downloaded("Berserk", "2")
+        assert state.failures.get_undelivered("Berserk")["2"]["path"] == str(path)
+        assert path.exists()
+
+        # The retry route then delivers it.
+        sent = []
+        monkeypatch.setattr(cli, "send_to_kindle",
+                            lambda **kw: sent.append(kw["pdf_path"]))
+        assert run_cli("send", "--pending") == 0
+        assert sent == [path]
+        assert _disk_state().failures.get_all_undelivered() == {}
 
 
 class TestDoctorCommand:

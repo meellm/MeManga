@@ -930,6 +930,8 @@ run check --download
 
 When a new chapter is found and downloaded, MeManga sends it to your Kindle automatically. If the PDF exceeds 23MB, it's automatically split into smaller parts.
 
+If sending fails, the chapter stays downloaded, its file is kept and it is listed as not sent to Kindle until it is: run `run send --pending` to send it again (`--list` only lists, `--clear` forgets the records), or use **Send** next to the chapter in the desktop app's chapter list.
+
 ### Switch back to local downloads
 
 ```bash
@@ -1302,6 +1304,9 @@ run import - --replace --yes < memanga_export.json
 | `run failed clear` | Forget every listed chapter (`--clear` is an alias) |
 | `run failed clear "Title"` | Forget one manga's records only |
 | `run failed --json` | Failed and partial chapters as JSON (listing only) |
+| `run send --pending` | Send every chapter whose Kindle delivery failed again |
+| `run send --pending --list "Title"` | List them (title or `#N`), sending nothing |
+| `run send --pending --clear` | Forget them; the files stay |
 | `run sources` | List all supported sources |
 | `run cron install` | Set up daily automatic checks |
 | `run cron install --time 07:30` | Set custom check time |
