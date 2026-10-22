@@ -293,6 +293,7 @@ For a host cron job, run Compose from the repository directory:
 | `check [TITLE] [--dry-run \| --download] [--from N] [--safe]` | Look for new chapters (`TITLE` can also be given as `-t TITLE`). `--dry-run` only lists them; `--download` (aliases `--auto`, `--yes`) downloads without prompting; otherwise it asks on a terminal and downloads nothing without one |
 | `path TITLE` / `open TITLE` | Print a manga's download folder (only the path, for scripts) or open it in the file manager; a manga with nothing downloaded yet exits `1` |
 | `failed [list [TARGET]] [--json]` / `failed retry [TARGET]` / `failed clear [TARGET]` | List, re-download or forget failed and partial chapters; TARGET goes after the action and is a title or `#N`, matched like `check TITLE`. `--retry` / `--clear` are aliases of `retry` / `clear` |
+| `send --pending [TARGET] [--list \| --clear]` | Send chapters that were saved but never reached the Kindle again; `--list` only lists them, `--clear` forgets the records (the files stay) |
 | `status [--json]` | Show config dir, download dir, manga count, last check time |
 | `doctor [--json] [--check NAME] [--smtp] [--launch-browsers]` | Diagnose install, paths, browsers, email, keyring, scheduler and source health |
 | `config` | Interactive settings editor |
@@ -384,6 +385,22 @@ any page failed, and tracks the failure so you can batch-retry later.
 `failed retry` downloads each chapter the same way `check --download`
 does (backup source, partial-chapter rules, email delivery).
 `failed clear [TARGET]` forgets the records without downloading.
+
+### Resend chapters that never reached the Kindle
+
+```bash
+python -m memanga send --pending --list   # what is waiting
+python -m memanga send --pending          # send them again
+```
+
+When a chapter is saved but the email to the Kindle fails (SMTP outage,
+wrong password, attachment too large), the chapter stays downloaded and
+its file is kept. MeManga remembers it until it is sent: `check` and
+`failed retry` say so and exit `3`, `send --pending [TARGET]` sends it
+again, and the desktop app shows "Not sent to Kindle" with a Send button
+in the manga's chapter list. With `delivery.delete_after_send` on, a
+file is only deleted after it was sent. `send --pending --clear
+[TARGET]` forgets the records without sending.
 
 ### Diagnose setup problems
 

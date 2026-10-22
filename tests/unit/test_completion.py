@@ -160,7 +160,7 @@ class TestBashCompletion:
         reply = _complete(script, "")
         assert {"edit", "update"} <= set(reply)
         assert "set" not in reply
-        assert _complete(script, "se") == ["search"]
+        assert _complete(script, "se") == ["search", "send"]
         assert _complete(script, "update", "Some Title", "--st") == ["--status"]
 
     def test_read_unread(self, script):

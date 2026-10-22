@@ -86,6 +86,7 @@ class GuiChapterReporter(ChapterReporter):
     def email_sent(self, path: Path):
         self._events.publish("kindle_sent", {
             "task_id": self._task_id, "path": str(path),
+            "title": self._title, "chapter": self._chapter.number,
         })
 
     def deleted_after_send(self, path: Path):
@@ -95,8 +96,11 @@ class GuiChapterReporter(ChapterReporter):
         logger.warning("Could not delete local copy after sending: %s", error)
 
     def email_failed(self, error):
+        # The chapter stays recorded as undelivered (issue #360); the
+        # Detail page offers to send it again.
         self._events.publish("kindle_error", {
             "task_id": self._task_id, "error": str(error),
+            "title": self._title, "chapter": self._chapter.number,
         })
 
     def failed(self, outcome: ChapterOutcome):

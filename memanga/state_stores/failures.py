@@ -1,16 +1,28 @@
-"""Failed and accepted-partial chapter records."""
+"""Failed, accepted-partial and undelivered chapter records."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from ._base import StateDomain, snapshot
 
 
+def delivery_timestamp() -> str:
+    """Now as an ISO 8601 UTC time with a fixed precision, e.g.
+    ``2026-10-22T08:00:00.000000+00:00``.
+
+    Kindle delivery records (issue #360) are ordered by these times when
+    backups merge, so they must compare across time zones, DST changes and
+    machines; naive local times cannot.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
 class FailureStore(StateDomain):
-    """Chapters whose download failed, and partial chapters the user
-    accepted but that stay retryable."""
+    """Chapters whose download failed, partial chapters the user
+    accepted but that stay retryable, and saved chapters whose Kindle
+    delivery failed."""
 
     __slots__ = ()
 
@@ -116,4 +128,73 @@ class FailureStore(StateDomain):
             partials = data.get("manga", {}).get(manga_title, {}).get("partial_chapters", {})
             if chapter_str in partials:
                 del partials[chapter_str]
+                self._backend.save()
+
+    # ── Chapters saved but not delivered to Kindle (issue #360) ────────
+
+    def add_undelivered(
+        self,
+        manga_title: str,
+        chapter: str,
+        path: str,
+        error: str,
+    ) -> None:
+        """Record a saved chapter whose Kindle delivery failed, so it can
+        be sent again. The chapter stays downloaded; ``path`` is the file
+        that was kept for the retry."""
+        with self._backend._locked() as data:
+            self._backend._ensure_manga_entry(manga_title)
+            chapter_str = str(chapter)
+            entry = data["manga"][manga_title]
+            undelivered = entry.setdefault("undelivered_chapters", {})
+            existing = undelivered.get(chapter_str, {})
+            undelivered[chapter_str] = {
+                "failed_at": delivery_timestamp(),
+                "path": path,
+                "error": error[:300],
+                "attempts": existing.get("attempts", 0) + 1,
+            }
+            # A new failure supersedes an earlier resolution.
+            resolved = entry.get("resolved_deliveries")
+            if isinstance(resolved, dict):
+                resolved.pop(chapter_str, None)
+            self._backend.save()
+
+    def get_undelivered(self, manga_title: str) -> Dict[str, Any]:
+        """Undelivered chapter records for a manga."""
+        records = self._backend._entry_value(manga_title, "undelivered_chapters", {})
+        return records if isinstance(records, dict) else {}
+
+    def get_all_undelivered(self) -> Dict[str, Dict[str, Any]]:
+        """Undelivered chapters for all manga that have any."""
+        with self._backend._locked() as data:
+            return {
+                title: snapshot(records)
+                for title, manga_state in data.get("manga", {}).items()
+                if isinstance(records := manga_state.get("undelivered_chapters"), dict)
+                and records
+            }
+
+    def clear_undelivered(self, manga_title: str, chapter: str,
+                          reason: str = "cleared") -> None:
+        """Remove an undelivered record once the chapter reached the Kindle
+        (``reason="sent"``) or the user dismissed it.
+
+        The resolution is kept under ``resolved_deliveries`` so importing
+        an older backup cannot bring the record back and send the chapter
+        twice (see :func:`memanga.backup.merge_manga_state`).
+        """
+        with self._backend._locked() as data:
+            chapter_str = str(chapter)
+            entry = data.get("manga", {}).get(manga_title, {})
+            records = entry.get("undelivered_chapters", {})
+            if chapter_str in records:
+                del records[chapter_str]
+                resolved = entry.get("resolved_deliveries")
+                if not isinstance(resolved, dict):
+                    resolved = entry["resolved_deliveries"] = {}
+                resolved[chapter_str] = {
+                    "resolved_at": delivery_timestamp(),
+                    "reason": reason,
+                }
                 self._backend.save()

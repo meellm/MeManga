@@ -395,6 +395,82 @@ class BackgroundWorker:
         if task_id in self._cancel_flags:
             self._cancel_flags[task_id].set()
 
+    def send_pending(self, manga, chapter_number, state, kindle_cfg,
+                     delete_after_send=False):
+        """Send a saved chapter whose Kindle delivery failed again
+        (issue #360).
+
+        Runs :meth:`ChapterPipeline.redeliver`, the step behind `memanga
+        send --pending`: the undelivered record is cleared once the
+        chapter is sent and kept when it fails again, and
+        ``delete_after_send`` only removes a file that was sent. Publishes
+        ``kindle_sent`` or ``kindle_error`` like a download, then
+        ``kindle_resend_done`` with ``sent``.
+        """
+        title = manga["title"]
+        number = str(chapter_number)
+        task_id = f"{title}:{number}"
+        if self._is_offline():
+            self._events.publish("kindle_error", {
+                "task_id": task_id, "title": title, "chapter": number,
+                "error": "Offline — connect to the internet and try again.",
+            })
+            self._events.publish("kindle_resend_done", {
+                "task_id": task_id, "title": title, "chapter": number,
+                "sent": False,
+            })
+            return None
+        return self._safe_submit(self._run_send_pending, manga, number,
+                                 state, dict(kindle_cfg or {}),
+                                 delete_after_send)
+
+    def _run_send_pending(self, manga, number, state, kindle_cfg,
+                          delete_after_send):
+        title = manga["title"]
+        task_id = f"{title}:{number}"
+        sent = False
+        try:
+            from .. import emailer
+            from ..chapter_pipeline import (
+                ChapterPipeline,
+                DeliveryStatus,
+                PipelineOptions,
+            )
+            from ..chapters import Chapter
+            from .download_events import GuiChapterReporter
+
+            options = PipelineOptions(
+                # Nothing is downloaded: the recorded file is sent.
+                download_dir=Path(),
+                output_format="",
+                delivery_mode="email" if kindle_cfg else "local",
+                email=kindle_cfg,
+                delete_after_send=delete_after_send,
+            )
+            pipeline = ChapterPipeline(
+                options=options,
+                state=state,
+                reporter=GuiChapterReporter(
+                    self._events, task_id, manga, Chapter(number=number),
+                    threading.Event(),
+                ),
+                send=emailer.send_to_kindle,
+                app_password=lambda: kindle_cfg.get("app_password"),
+            )
+            sent = pipeline.redeliver(title, number) is DeliveryStatus.SENT
+        except Exception as e:
+            logger.exception("Resending %s Ch.%s to Kindle failed: %s",
+                             title, number, e)
+            self._events.publish("kindle_error", {
+                "task_id": task_id, "title": title, "chapter": number,
+                "error": str(e),
+            })
+        finally:
+            self._events.publish("kindle_resend_done", {
+                "task_id": task_id, "title": title, "chapter": number,
+                "sent": sent,
+            })
+
     def _run_download(self, item):
         """Execute a single download task through the shared chapter
         pipeline (issue #295), so recovery, delivery and state records

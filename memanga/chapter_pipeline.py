@@ -3,8 +3,9 @@
 ``check``, ``failed retry`` and GUI downloads all run every chapter
 through :class:`ChapterPipeline` (issues #222, #295), so backup recovery,
 partial-chapter salvage (issue #86), Kindle delivery, delete-after-send,
-failure records, download history (issue #240) and state cleanup cannot
-drift between them.
+failure records, download history (issue #240), records of chapters
+whose Kindle delivery failed (issue #360) and state cleanup cannot drift
+between them.
 
 The pipeline makes the decisions and writes state; it prints nothing.
 Progress goes to a :class:`ChapterReporter` while a chapter is processed
@@ -16,7 +17,7 @@ import threading
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .chapters import ChapterWithSource
 from .downloader import (DEFAULT_PAGE_RETRIES, DownloaderError,
@@ -39,7 +40,8 @@ class DeliveryStatus(Enum):
     NOT_REQUESTED = "not_requested"    # local delivery, or no Kindle address
     SKIPPED_FOLDER = "skipped_folder"  # image folders cannot be emailed
     SENT = "sent"
-    FAILED = "failed"                  # the file stays on disk
+    FAILED = "failed"                  # the file stays on disk and an
+                                       # undelivered record is kept (#360)
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ class ChapterOutcome:
     missing_pages: List[int] = field(default_factory=list)
     total_pages: int = 0
     delivery: DeliveryStatus = DeliveryStatus.NOT_REQUESTED
+    # Only when delivery FAILED: why it failed.
+    delivery_error: Optional[str] = None
     # Only for FAILED: why the primary and (when tried) backup failed.
     error: Optional[str] = None
     backup_error: Optional[str] = None
@@ -139,7 +143,8 @@ class ChapterReporter:
     def email_failed(self, error: Exception):
         """Sending failed with ``error`` (usually an ``EmailError``, but
         any delivery problem lands here); the chapter still counts as
-        saved and its file stays on disk."""
+        saved, its file stays on disk and it is recorded as undelivered
+        so it can be sent again."""
 
     def failed(self, outcome: ChapterOutcome):
         """Nothing could be saved; the failure has been recorded."""
@@ -358,7 +363,13 @@ class ChapterPipeline:
         # Measured before delivery, which may delete the local copy.
         size_mb = _size_mb(path)
         # Delivery runs before the chapter is marked downloaded (#86).
-        outcome = replace(outcome, delivery=self._deliver(path))
+        delivery, delivery_error = self._deliver(path)
+        outcome = replace(outcome, delivery=delivery,
+                          delivery_error=delivery_error)
+        # The chapter is saved either way; one that didn't reach the
+        # Kindle stays on record until it does (#360).
+        self._record_delivery(title, chapter.number, path, delivery,
+                              delivery_error)
         self.state.add_downloaded_chapter(title, chapter.number)
         self.state.clear_pending_backup(title, chapter.number)
         self.state.clear_failed_chapter(title, chapter.number)
@@ -374,15 +385,59 @@ class ChapterPipeline:
         )
         return outcome
 
-    def _deliver(self, path: Path) -> DeliveryStatus:
-        """Send to Kindle when email delivery is configured."""
+    def redeliver(self, title: str, chapter: str) -> DeliveryStatus:
+        """Send a saved chapter whose earlier Kindle delivery failed (#360).
+
+        Uses the undelivered record's file and the same delivery step as
+        a download, so delete-after-send still only happens once the send
+        succeeded. The record is cleared when the chapter is sent and
+        kept, with the new error and attempt, when it fails again or its
+        file is gone. With email delivery not configured nothing is sent
+        and the record is left as it is (``NOT_REQUESTED``).
+        """
+        chapter = str(chapter)
+        record = self.state.failures.get_undelivered(title).get(chapter)
+        if record is None:
+            return DeliveryStatus.NOT_REQUESTED
+        if not self.delivers_to_kindle():
+            return DeliveryStatus.NOT_REQUESTED
+        recorded = str(record.get("path") or "")
+        path = Path(recorded)
+        if not recorded or not path.is_file():
+            error = FileNotFoundError(
+                f"The saved file is no longer there: {recorded or '(unknown)'}")
+            self.reporter.email_failed(error)
+            status, delivery_error = DeliveryStatus.FAILED, str(error)
+        else:
+            status, delivery_error = self._deliver(path)
+        self._record_delivery(title, chapter, recorded, status, delivery_error)
+        return status
+
+    def _record_delivery(self, title, chapter, path, status,
+                         error) -> None:
+        """Keep the undelivered record in step with a delivery attempt."""
+        if status is DeliveryStatus.FAILED:
+            self.state.failures.add_undelivered(
+                title, chapter, "" if path is None else str(path),
+                error or "")
+        elif status is DeliveryStatus.SENT:
+            self.state.failures.clear_undelivered(title, chapter, reason="sent")
+
+    def delivers_to_kindle(self) -> bool:
+        """True when this run sends saved chapters to a Kindle address."""
+        opts = self.options
+        return opts.delivery_mode == "email" and bool(opts.email.get("kindle_email"))
+
+    def _deliver(self, path: Path) -> Tuple[DeliveryStatus, Optional[str]]:
+        """Send to Kindle when email delivery is configured. Returns the
+        status and, when it FAILED, the error text."""
         opts = self.options
         email = opts.email
-        if not (opts.delivery_mode == "email" and email.get("kindle_email")):
-            return DeliveryStatus.NOT_REQUESTED
+        if not self.delivers_to_kindle():
+            return DeliveryStatus.NOT_REQUESTED, None
         if path.is_dir():
             self.reporter.email_skipped_folder(path)
-            return DeliveryStatus.SKIPPED_FOLDER
+            return DeliveryStatus.SKIPPED_FOLDER, None
         self.reporter.email_sending(path)
         # The chapter is already saved, so no delivery problem may undo
         # that: besides EmailError, preparing the attachment (reading or
@@ -401,7 +456,7 @@ class ChapterPipeline:
             raise
         except Exception as error:
             self.reporter.email_failed(error)
-            return DeliveryStatus.FAILED
+            return DeliveryStatus.FAILED, str(error) or type(error).__name__
         self.reporter.email_sent(path)
         if opts.delete_after_send:
             # The chapter reached the Kindle; a copy that can't be deleted
@@ -412,4 +467,4 @@ class ChapterPipeline:
                 self.reporter.delete_failed(path, error)
             else:
                 self.reporter.deleted_after_send(path)
-        return DeliveryStatus.SENT
+        return DeliveryStatus.SENT, None

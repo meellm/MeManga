@@ -6,7 +6,7 @@ store per domain::
     state.library        LibraryStore        downloaded chapters, entries
     state.catalogue      CatalogueStore      available chapters, badges
     state.backups        BackupStore         pending backups, suspicious batches
-    state.failures       FailureStore        failed and partial chapters
+    state.failures       FailureStore        failed, partial, undelivered
     state.reading        ReadingStore        progress, positions, read set
     state.notifications  NotificationStore   notification log
     state.searches       SearchHistoryStore  recent searches

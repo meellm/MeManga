@@ -1596,6 +1596,73 @@ class TestDetailPage:
 
         assert queued == ["7"]
 
+    @staticmethod
+    def _undelivered_page(app_window, qapp, sample_manga, tmp_path):
+        title = sample_manga["title"]
+        app_window.config.set("manga", [sample_manga])
+        path = tmp_path / "ch8.pdf"
+        path.write_bytes(b"%PDF")
+        app_window.app_state.add_downloaded_chapter(title, "8")
+        app_window.app_state.failures.add_undelivered(
+            title, "8", str(path), "SMTP down")
+        app_window.show_page("detail", manga=sample_manga); qapp.processEvents()
+        return app_window._pages["detail"]
+
+    @staticmethod
+    def _send_button(page):
+        from PySide6.QtWidgets import QPushButton
+        return next(b for b in page._chapters_container.findChildren(QPushButton)
+                    if b.text() in ("Send", "Sending…"))
+
+    def test_undelivered_chapter_offers_send(
+            self, app_window, qapp, sample_manga, tmp_path, monkeypatch):
+        # Issue #360: a chapter that never reached the Kindle says so and
+        # can be sent again from its row.
+        from PySide6.QtWidgets import QLabel
+        monkeypatch.setattr("memanga.config.get_app_password", lambda cfg: "pw")
+        app_window.config.set("delivery.mode", "email")
+        app_window.config.set("email.kindle_email", "reader@example.com")
+        app_window.config.set("email.sender_email", "sender@example.com")
+        page = self._undelivered_page(app_window, qapp, sample_manga, tmp_path)
+        texts = [lbl.text() for lbl in page._chapters_container.findChildren(QLabel)]
+        assert "Not sent to Kindle" in texts
+
+        calls = []
+        app_window.worker.send_pending = (
+            lambda manga, number, state, kindle_cfg, **kw:
+            calls.append((manga["title"], number, kindle_cfg["kindle_email"],
+                          kindle_cfg["app_password"])))
+        self._send_button(page).click()
+        qapp.processEvents()
+
+        assert calls == [(sample_manga["title"], "8", "reader@example.com", "pw")]
+        assert self._send_button(page).text() == "Sending…"
+
+        app_window.app_state.failures.clear_undelivered(sample_manga["title"], "8")
+        page._on_kindle_resend_done({"title": sample_manga["title"],
+                                     "chapter": "8", "sent": True})
+        assert page._sending == set()
+        from PySide6.QtCore import QCoreApplication, QEvent
+        page._refresh_chapter_list()
+        # The old rows are deleteLater'd; flush them so only the rebuilt
+        # rows are inspected.
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        qapp.processEvents()
+        texts = [lbl.text() for lbl in page._chapters_container.findChildren(QLabel)]
+        assert "Not sent to Kindle" not in texts
+
+    def test_send_needs_email_delivery(
+            self, app_window, qapp, sample_manga, tmp_path):
+        app_window.config.set("delivery.mode", "local")
+        page = self._undelivered_page(app_window, qapp, sample_manga, tmp_path)
+        calls = []
+        app_window.worker.send_pending = lambda *a, **kw: calls.append(a)
+
+        page._send_pending("8")
+
+        assert calls == []
+        assert app_window.app_state.failures.get_undelivered(sample_manga["title"])
+
 
 class TestDownloadsQueueing:
     """Issue #50: an explicit "Download All" / "Download from chapter"

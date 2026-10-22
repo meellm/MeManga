@@ -12,6 +12,7 @@ show :class:`BackupVersionError` messages to the user as-is, so keep
 them short and self-explanatory.
 """
 
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 from .chapters import chapter_order_key
@@ -170,6 +171,8 @@ _STATE_FIELD_CHECKS: Dict[str, Tuple[str, Callable[[Any], bool]]] = {
     "failed_chapters": ("an object", lambda v: isinstance(v, dict)),
     "pending_backup": ("an object", lambda v: isinstance(v, dict)),
     "partial_chapters": ("an object", lambda v: isinstance(v, dict)),
+    "undelivered_chapters": ("an object", lambda v: isinstance(v, dict)),
+    "resolved_deliveries": ("an object", lambda v: isinstance(v, dict)),
     "saved_chapter_groups": ("an object", lambda v: isinstance(v, dict)),
     "reading_progress": ("an object", lambda v: isinstance(v, dict)),
     "reader_positions": ("an object", lambda v: isinstance(v, dict)),
@@ -242,6 +245,128 @@ def _max_chapter(local: Any, imported: Any):
     return max((local, imported), key=chapter_order_key)
 
 
+def _instant(record: Any, key: str) -> Optional[datetime]:
+    """The time ``record[key]`` names, or None when it can't be ordered.
+
+    Delivery records written since issue #360 carry UTC times with an
+    offset. A legacy naive local time, or anything that doesn't parse,
+    names no instant: its order against another machine's or another
+    zone's time is unknown.
+    """
+    if not isinstance(record, dict):
+        return None
+    try:
+        value = datetime.fromisoformat(str(record.get(key) or ""))
+    except ValueError:
+        return None
+    return value if value.tzinfo is not None else None
+
+
+def _after(record: Any, record_key: str, other: Any, other_key: str) -> bool:
+    """True only when both times are known and ``record`` is later."""
+    mine = _instant(record, record_key)
+    theirs = _instant(other, other_key)
+    return mine is not None and theirs is not None and mine > theirs
+
+
+def _resolution_instant(resolution: Any) -> Optional[datetime]:
+    """When ``resolution`` provably happened, or None when its order is
+    unknown: a legacy or unparseable time, or a merged marker that once
+    absorbed one (``"unordered": true``)."""
+    if isinstance(resolution, dict) and resolution.get("unordered"):
+        return None
+    return _instant(resolution, "resolved_at")
+
+
+def _failed_after(record: Any, resolution: Any) -> bool:
+    """True only when ``record`` provably failed after ``resolution``."""
+    failed = _instant(record, "failed_at")
+    resolved = _resolution_instant(resolution)
+    return failed is not None and resolved is not None and failed > resolved
+
+
+def _merge_resolutions(markers: List[Any]) -> Any:
+    """One chapter's resolution markers, local first, merged into one.
+
+    The provably latest marker wins, else the first (local) one. If any
+    marker can't be ordered, the result is marked ``"unordered": true``
+    for good: dropping that marker would let a later import compare a
+    pending record against the remaining time alone and queue a
+    delivered chapter again. Like a deletion tombstone, the marker
+    has to survive every later merge.
+    """
+    best = markers[0]
+    for marker in markers[1:]:
+        if _after(marker, "resolved_at", best, "resolved_at"):
+            best = marker
+    if any(_resolution_instant(m) is None for m in markers):
+        best = {**best, "unordered": True} if isinstance(best, dict) else {"unordered": True}
+    return best
+
+
+def _delivery_maps(side: Dict[str, Any], key: str) -> Dict[str, Any]:
+    value = side.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _merge_deliveries(merged: Dict[str, Any], local: Dict[str, Any],
+                      imported: Dict[str, Any]) -> None:
+    """Merge Kindle delivery records (issue #360) into ``merged``.
+
+    Each side's pending record of a chapter is checked on its own against
+    every resolution (sent, or dismissed) of that chapter, so an older
+    record on one side cannot hide a newer failure on the other. A
+    record, local or imported, survives only when it is provably later
+    than every resolution; a chapter with no resolution keeps its records
+    as before.
+
+    "Provably" needs both times to carry a UTC offset; legacy naive or
+    unparseable times are unordered. An unordered record is dropped
+    rather than kept: losing a retry (the user can still send the file
+    from its folder) is preferred to sending a delivered chapter twice.
+    When both records survive, the later one wins, else the local one.
+
+    Resolutions merge into one marker per chapter (see
+    :func:`_merge_resolutions`) and pending records are checked against
+    that stored marker, so a later import sees exactly what this one
+    enforced. Only a new local failure or resolution replaces a marker
+    (``FailureStore``), since it happens after everything already known.
+    """
+    imported_pending = _delivery_maps(imported, "undelivered_chapters")
+    local_pending = _delivery_maps(local, "undelivered_chapters")
+    imported_resolved = _delivery_maps(imported, "resolved_deliveries")
+    local_resolved = _delivery_maps(local, "resolved_deliveries")
+
+    resolved: Dict[str, Any] = {
+        chapter: _merge_resolutions(
+            [side[chapter] for side in (local_resolved, imported_resolved)
+             if chapter in side])
+        for chapter in set(local_resolved) | set(imported_resolved)
+    }
+
+    pending: Dict[str, Any] = {}
+    for chapter in set(imported_pending) | set(local_pending):
+        resolution = resolved.get(chapter)
+        candidates = [
+            side[chapter] for side in (imported_pending, local_pending)
+            if chapter in side
+            and (resolution is None or _failed_after(side[chapter], resolution))
+        ]
+        if len(candidates) == 2:
+            # [imported, local]: the later failure, else the local one.
+            pending[chapter] = (candidates[0]
+                                if _after(candidates[0], "failed_at",
+                                          candidates[1], "failed_at")
+                                else candidates[1])
+        elif candidates:
+            pending[chapter] = candidates[0]
+
+    for key, value in (("undelivered_chapters", pending),
+                       ("resolved_deliveries", resolved)):
+        if value or key in merged:
+            merged[key] = value
+
+
 def merge_manga_state(local: Dict[str, Any], imported: Dict[str, Any]) -> Dict[str, Any]:
     """Merge one manga's imported backup state into local state.
 
@@ -269,6 +394,8 @@ def merge_manga_state(local: Dict[str, Any], imported: Dict[str, Any]) -> Dict[s
         local_map = local.get(key) if isinstance(local.get(key), dict) else {}
         if imported_map or local_map:
             merged[key] = {**imported_map, **local_map}
+
+    _merge_deliveries(merged, local, imported)
 
     merged["reading_progress"] = _newer_progress(
         local.get("reading_progress"),

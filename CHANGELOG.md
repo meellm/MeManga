@@ -7,6 +7,15 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #360 A chapter that was saved but could not be sent to the Kindle is
+  no longer only a log line. It stays downloaded, its file is kept and it
+  is recorded as not sent until a send succeeds. `memanga send --pending
+  [TARGET]` sends those chapters again (`--list` only lists them,
+  `--clear` forgets the records; the files stay), and the desktop app
+  shows "Not sent to Kindle" with a Send button in the manga's chapter
+  list. `delivery.delete_after_send` still only deletes a file once it
+  was sent. `check` and `failed retry` now report such chapters and exit
+  `3`, like other incomplete runs.
 - #343 Settings in the desktop app has an About page with the MeManga
   version, install type (packaged app or not), Python, OS, Qt and
   Playwright versions, whether the Playwright browsers are installed and

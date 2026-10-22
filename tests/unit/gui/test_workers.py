@@ -999,6 +999,8 @@ class TestSharedChapterPipeline:
             kindle_cfg=dict(self._KINDLE), delete_after_send=True)
 
         assert self._names(events)[-2:] == ["kindle_sent", "download_complete"]
+        assert events[-2][1] == {"task_id": "Vinland Saga:71", "path": str(pdf),
+                                 "title": "Vinland Saga", "chapter": "71"}
         assert "kindle_skipped" not in self._names(events)
         assert sent[0]["pdf_path"] == pdf
         assert sent[0]["app_password"] == "secret"
@@ -1050,8 +1052,80 @@ class TestSharedChapterPipeline:
 
         assert self._names(events)[-2:] == ["kindle_error", "download_complete"]
         assert events[-2][1]["error"] == "SMTP down"
+        assert (events[-2][1]["title"], events[-2][1]["chapter"]) == (
+            "Vinland Saga", "71")
         assert pdf.exists()
         assert state.is_chapter_downloaded("Vinland Saga", "71")
+        # Issue #360: kept for a later send.
+        record = state.failures.get_undelivered("Vinland Saga")["71"]
+        assert record["path"] == str(pdf)
+
+    def _resend(self, worker, event_bus, state, monkeypatch, fake_send,
+                **kwargs):
+        """Send the recorded chapter again; collect events until done."""
+        import time
+        import memanga.emailer as emailer
+
+        monkeypatch.setattr(emailer, "send_to_kindle", fake_send)
+        events = []
+        for name in ("kindle_sent", "kindle_error", "kindle_resend_done"):
+            event_bus.subscribe(name, lambda d, n=name: events.append((n, d)))
+
+        worker.send_pending(self._MANGA, "71", state, dict(self._KINDLE),
+                            **kwargs)
+
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            event_bus.poll()
+            if any(n == "kindle_resend_done" for n, _ in events):
+                break
+            time.sleep(0.02)
+        return events
+
+    def test_send_pending_sends_deletes_and_clears_record(
+            self, worker, event_bus, state, monkeypatch, tmp_path):
+        pdf = tmp_path / "ch71.pdf"
+        pdf.write_bytes(b"%PDF")
+        state.add_downloaded_chapter("Vinland Saga", "71")
+        state.failures.add_undelivered("Vinland Saga", "71", str(pdf), "SMTP down")
+        sent = []
+
+        def fake_send(**kwargs):
+            assert kwargs["pdf_path"].exists()
+            sent.append(kwargs)
+
+        events = self._resend(worker, event_bus, state, monkeypatch, fake_send,
+                              delete_after_send=True)
+
+        assert self._names(events) == ["kindle_sent", "kindle_resend_done"]
+        assert events[-1][1]["sent"] is True
+        assert sent[0]["pdf_path"] == pdf
+        assert sent[0]["app_password"] == "secret"
+        assert not pdf.exists()
+        assert state.failures.get_undelivered("Vinland Saga") == {}
+        assert state.is_chapter_downloaded("Vinland Saga", "71")
+
+    def test_send_pending_failure_keeps_record_and_file(
+            self, worker, event_bus, state, monkeypatch, tmp_path):
+        from memanga.emailer import EmailError
+        pdf = tmp_path / "ch71.pdf"
+        pdf.write_bytes(b"%PDF")
+        state.failures.add_undelivered("Vinland Saga", "71", str(pdf), "SMTP down")
+
+        def fake_send(**kwargs):
+            raise EmailError("Mailbox full")
+
+        events = self._resend(worker, event_bus, state, monkeypatch, fake_send,
+                              delete_after_send=True)
+
+        assert self._names(events) == ["kindle_error", "kindle_resend_done"]
+        assert events[0][1]["error"] == "Mailbox full"
+        assert events[-1][1] == {"task_id": "Vinland Saga:71",
+                                 "title": "Vinland Saga", "chapter": "71",
+                                 "sent": False}
+        assert pdf.exists()
+        record = state.failures.get_undelivered("Vinland Saga")["71"]
+        assert (record["error"], record["attempts"]) == ("Mailbox full", 2)
 
     def test_kindle_preparation_error_still_completes(
             self, worker, event_bus, state, monkeypatch, tmp_path):
