@@ -1495,6 +1495,11 @@ class _ConsoleChapterReporter(ChapterReporter):
     def email_sending(self, path):
         console.print("     [dim]📧 Sending to Kindle...[/dim]")
 
+    def email_part_sent(self, path, part, total):
+        # Issue #364: the mail server took this part; it may still be on
+        # its way to the Kindle.
+        console.print(f"     [dim]📧 Part {part}/{total} accepted by the mail server[/dim]")
+
     def email_sent(self, path):
         console.print("     [green]📬 Sent to Kindle![/green]")
 

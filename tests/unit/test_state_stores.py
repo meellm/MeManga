@@ -693,6 +693,32 @@ class TestCliFlow:
         s.failures.add_undelivered(t, "4", "c4.pdf", "SMTP down")
         assert "4" not in s.get_manga_state(t)["resolved_deliveries"]
 
+    def test_undelivered_split_progress(self, state):
+        # Issue #364: the parts the mail server accepted are kept until a
+        # later failure reports new progress or the chapter is sent.
+        t = "Series"
+        parts = {"total": 3, "accepted": [1]}
+        state.failures.add_undelivered(t, "4", "c4.pdf", "part 2 failed",
+                                       parts=parts)
+        parts["accepted"].append(2)  # the caller's dict is not stored
+        state.failures.add_undelivered(t, "4", "c4.pdf", "auth failed")
+
+        s = _reload(state)
+        record = s.failures.get_undelivered(t)["4"]
+        assert (record["parts"], record["attempts"]) == (
+            {"total": 3, "accepted": [1]}, 2)
+
+        s.failures.add_undelivered(t, "4", "c4.pdf", "part 3 failed",
+                                   parts={"total": 3, "accepted": [1, 2]})
+        assert s.failures.get_undelivered(t)["4"]["parts"]["accepted"] == [1, 2]
+        # A record without split progress has no ``parts`` key.
+        s.failures.add_undelivered(t, "5", "c5.pdf", "SMTP down")
+        assert "parts" not in s.failures.get_undelivered(t)["5"]
+
+        s.failures.clear_undelivered(t, "4", reason="sent")
+        s.failures.add_undelivered(t, "4", "c4.pdf", "SMTP down")
+        assert "parts" not in s.failures.get_undelivered(t)["4"]
+
     def test_reset_and_rename(self, state):
         state.library.add_downloaded("Old", "1")
         state.library.add_downloaded("Old", "2")

@@ -188,7 +188,7 @@ Hit **Re-check health** to ping every enabled source and see their status.
    when it works.
 4. On the Detail page of any manga, toggle **Send to Kindle after download**.
 
-Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs over 18 MB are split automatically; EPUB files can't be split so they fail-loud with a size warning.
+Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs over 18 MB are split automatically and the parts are sent in one mail session; EPUB files can't be split so they fail-loud with a size warning.
 
 ---
 
@@ -399,7 +399,9 @@ its file is kept. MeManga remembers it until it is sent: `check` and
 `failed retry` say so and exit `3`, `send --pending [TARGET]` sends it
 again, and the desktop app shows "Not sent to Kindle" with a Send button
 in the manga's chapter list. With `delivery.delete_after_send` on, a
-file is only deleted after it was sent. `send --pending --clear
+file is only deleted after it was sent. When a split PDF fails partway,
+the parts the mail server already accepted are not sent again, unless
+the file or the Kindle address changed since. `send --pending --clear
 [TARGET]` forgets the records without sending.
 
 ### Diagnose setup problems
