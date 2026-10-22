@@ -22,8 +22,7 @@ from memanga.emailer import (DEFAULT_SMTP_TIMEOUT, MAX_SMTP_TIMEOUT,
                              EmailProviderError, EmailTimeoutError,
                              send_to_kindle, smtp_login, smtp_session,
                              smtp_timeout)
-# Aliased so pytest does not collect it as a test.
-from memanga.emailer import test_email_config as check_email_config
+from memanga.emailer import check_email_config
 
 SERVER = "smtp.example.invalid"
 

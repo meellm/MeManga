@@ -186,6 +186,10 @@ All notable changes are recorded here. Format loosely follows
   with the same output and exit codes, prints the matching `edit` command
   on stderr, and no longer appears in help or completion. It will be
   removed in the next release.
+- #245 `memanga.emailer.test_email_config` is renamed
+  `check_email_config`. The old name still works, warns with a
+  `DeprecationWarning`, and is no longer collected by pytest when a test
+  module imports it.
 
 ### Fixed
 - #362 Chapters saved as CBZ or ZIP are no longer emailed to the Kindle,
