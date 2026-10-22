@@ -55,7 +55,7 @@ from .state import State
 from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
 from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
-from .emailer import send_to_kindle, smtp_timeout
+from .emailer import kindle_format_error, send_to_kindle, smtp_timeout
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
                                DeliveryStatus, PipelineOptions,
                                manga_auto_downloads)
@@ -1489,8 +1489,8 @@ class _ConsoleChapterReporter(ChapterReporter):
         else:
             console.print(f"     [green]✅ Saved{src}: {label}[/green]")
 
-    def email_skipped_folder(self, path):
-        console.print("     [dim]📧 Skipped email (image folders cannot be emailed)[/dim]")
+    def email_skipped_format(self, path, reason):
+        console.print(f"     [dim]📧 Not sent to Kindle: {_esc(reason)}[/dim]")
 
     def email_sending(self, path):
         console.print("     [dim]📧 Sending to Kindle...[/dim]")
@@ -1640,6 +1640,27 @@ def _warn_undelivered(count: int) -> None:
         )
 
 
+def _warn_kindle_format(reason: str, hint: str) -> None:
+    """Kindle delivery is on but the output format can't be sent (#362):
+    chapters are saved and kept, never emailed."""
+    message = (f"{reason} Chapters are saved but not sent to Kindle; "
+               f"{hint}.")
+    _diagnostic(logging.WARNING, f"[yellow]⚠️  {_esc(message)}[/yellow]",
+                "%s", message)
+
+
+def _warn_config_kindle_format(cfg=None) -> None:
+    """Warn when the saved delivery mode and output format conflict
+    (#362). The values are kept: the format is still valid locally."""
+    cfg = config if cfg is None else cfg
+    if cfg.delivery_mode != "email":
+        return
+    reason = kindle_format_error(cfg.output_format)
+    if reason:
+        _warn_kindle_format(
+            reason, "set delivery.output_format to pdf or epub to send them")
+
+
 def _quoted_title(title: str) -> str:
     """``title`` quoted for a command line on this platform."""
     if sys.platform == "win32":
@@ -1732,6 +1753,14 @@ def cmd_check(args):
     )
     delivery_mode = pipeline.options.delivery_mode
     download_dir = pipeline.options.download_dir
+    # A dry run downloads and sends nothing, so it has nothing to warn of.
+    kindle_reason = None if dry_run else pipeline.kindle_format_error()
+    if kindle_reason:
+        # Said once, before anything is downloaded (#362).
+        _warn_kindle_format(
+            kindle_reason,
+            "use --format pdf or epub, or 'memanga config set "
+            "delivery.output_format pdf'")
 
     for manga in manga_list:
         title = manga["title"]
@@ -2150,6 +2179,8 @@ def _config_set(args):
     config.set(args.key, value)
     config.save()
     console.print(f"[green]✅ {_esc(args.key)} = {_esc(_config_value_text(value))}[/green]")
+    if args.key in ("delivery.mode", "delivery.output_format"):
+        _warn_config_kindle_format()
 
 
 def _config_edit(args):
@@ -2199,6 +2230,7 @@ def _config_edit(args):
         sys.stderr.write("Run `memanga config edit` again to fix it.\n")
         return EXIT_ERROR
     console.print(f"[green]✅ {_esc(path)} is valid[/green]")
+    _warn_config_kindle_format(edited)
 
 
 def _config_email(args):
@@ -2347,13 +2379,14 @@ def cmd_config(args):
     # Output format
     current_format = config.output_format
     console.print(f"\n[bold]Output Format[/bold] (current: [cyan]{_esc(current_format)}[/cyan])")
+    console.print("[dim]Only pdf and epub can be sent to Kindle.[/dim]")
     console.print("  [1] pdf   - Portable Document Format")
     console.print("  [2] epub  - E-reader format (Kindle optimized)")
-    console.print("  [3] cbz   - Comic Book ZIP archive")
-    console.print("  [4] zip   - ZIP archive of images")
-    console.print("  [5] jpg   - JPEG images (folder per chapter)")
-    console.print("  [6] png   - PNG images (folder per chapter)")
-    console.print("  [7] webp  - WebP images (folder per chapter)")
+    console.print("  [3] cbz   - Comic Book ZIP archive (not for Kindle)")
+    console.print("  [4] zip   - ZIP archive of images (not for Kindle)")
+    console.print("  [5] jpg   - JPEG images (folder per chapter, not for Kindle)")
+    console.print("  [6] png   - PNG images (folder per chapter, not for Kindle)")
+    console.print("  [7] webp  - WebP images (folder per chapter, not for Kindle)")
     fmt_choice = Prompt.ask("Select format", choices=["1", "2", "3", "4", "5", "6", "7", ""], default="")
 
     if fmt_choice == "1":
@@ -2370,6 +2403,7 @@ def cmd_config(args):
         config.set("delivery.output_format", "png")
     elif fmt_choice == "7":
         config.set("delivery.output_format", "webp")
+    _warn_config_kindle_format()
 
     current_quality = "data-saver" if config.get("mangadex.data_saver", False) else "original"
     quality = Prompt.ask(

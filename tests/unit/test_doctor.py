@@ -275,6 +275,30 @@ class TestEmailAndKeyring:
         assert result.status == doctor.OK
         assert "secret-pw" not in repr(result.to_dict())
 
+    @pytest.mark.parametrize("fmt, status", [
+        ("pdf", doctor.OK), ("epub", doctor.OK),
+        ("cbz", doctor.WARNING), ("zip", doctor.WARNING),
+        ("jpg", doctor.WARNING),
+    ])
+    def test_email_mode_warns_on_format_kindle_rejects(
+            self, config, monkeypatch, fmt, status):
+        # Issue #362: chapters in these formats are saved but not sent.
+        config.set("delivery.mode", "email")
+        config.set("delivery.output_format", fmt)
+        config.set("email.kindle_email", "me@kindle.com")
+        config.set("email.sender_email", "me@gmail.com")
+        monkeypatch.setattr(doctor, "get_app_password", lambda cfg: "secret-pw")
+        result = doctor.check_email(config)
+        assert result.status == status
+        assert result.details["output_format"] == fmt
+        if status == doctor.WARNING:
+            assert "can't be sent to Kindle" in result.message
+            assert "pdf or epub" in result.message
+
+    def test_local_mode_ignores_output_format(self, config):
+        config.set("delivery.output_format", "cbz")
+        assert doctor.check_email(config).status == doctor.SKIP
+
     def test_plaintext_password_in_config_warns(self, config):
         config.set("email.app_password", "secret-pw")
         result = doctor.check_keyring(config)

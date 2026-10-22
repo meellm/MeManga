@@ -104,6 +104,39 @@ class TestSendToKindle:
         with pytest.raises((EmailError, KeyError, ValueError)):
             _call_send(bad, tiny_pdf)
 
+    @pytest.mark.parametrize("name, label", [
+        ("ch.cbz", "CBZ files"),
+        ("ch.zip", "ZIP files"),
+        ("ch.CBZ", "CBZ files"),
+        ("Chapter 71", "Image folders"),
+    ])
+    def test_unsupported_kindle_format_is_refused_before_smtp(
+            self, good_cfg, tmp_path, name, label):
+        # Issue #362: Send to Kindle rejects these; nothing is sent.
+        from memanga.emailer import EmailError
+        path = tmp_path / name
+        if "." in name:
+            path.write_bytes(b"PK")
+        else:
+            path.mkdir()
+        with patch("smtplib.SMTP") as smtp:
+            with pytest.raises(EmailError) as exc_info:
+                _call_send(good_cfg, path)
+        assert str(exc_info.value) == (
+            f"{label} can't be sent to Kindle; only PDF and EPUB can.")
+        smtp.assert_not_called()
+
+    def test_epub_is_sent_as_epub_attachment(self, good_cfg, tmp_path):
+        epub = tmp_path / "ch.epub"
+        epub.write_bytes(b"PK epub")
+        smtp = _make_smtp_mock()
+        with patch("smtplib.SMTP", return_value=smtp):
+            assert _call_send(good_cfg, epub) is True
+        msg = smtp.send_message.call_args.args[0]
+        attachment = msg.get_payload()[0]
+        assert attachment.get_content_type() == "application/epub+zip"
+        assert attachment.get_filename() == "ch.epub"
+
     def test_smtp_auth_error_propagates(self, good_cfg, tiny_pdf):
         smtp = _make_smtp_mock()
         smtp.login.side_effect = smtplib.SMTPAuthenticationError(535, b"bad")
@@ -116,15 +149,15 @@ class TestSendToKindle:
         self, good_cfg, tmp_path
     ):
         from memanga.emailer import EmailError, MAX_ATTACHMENT_SIZE
-        cbz = tmp_path / "large.cbz"
-        cbz.write_bytes(b"0" * (MAX_ATTACHMENT_SIZE + 1024 * 1024))
+        epub = tmp_path / "large.epub"
+        epub.write_bytes(b"0" * (MAX_ATTACHMENT_SIZE + 1024 * 1024))
 
         with patch("smtplib.SMTP") as smtp:
             with pytest.raises(EmailError) as exc_info:
-                _call_send(good_cfg, cbz)
+                _call_send(good_cfg, epub)
 
         msg = str(exc_info.value)
-        assert "CBZ file is 19.0MB" in msg
+        assert "EPUB file is 19.0MB" in msg
         assert "18.0MB safe raw attachment limit" in msg
         assert "25.0MB encoded email cap" in msg
         assert "base64 encoded" in msg

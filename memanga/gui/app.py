@@ -560,14 +560,14 @@ class MeMangaApp(QMainWindow):
         logger.error("Not sent to Kindle: %s: %s", label, error)
 
     def _on_kindle_skipped(self, data):
-        # Issue #340: image formats save a folder of pages, which can't
-        # be emailed. The chapter is still downloaded; say why no book
-        # reaches the Kindle.
+        # Issues #340, #362: Kindle doesn't accept the saved format (an
+        # image folder, CBZ or ZIP). The chapter is still downloaded;
+        # say why no book reaches the Kindle.
+        reason = data.get("reason") or "Its format can't be sent to Kindle."
         self.app_state.add_notification(
             "warn",
             f"Not sent to Kindle: {data.get('title', '')} Ch. {data.get('chapter', '')} "
-            "— image folders (JPG/PNG/WEBP) can't be emailed. "
-            "Choose PDF, EPUB, CBZ or ZIP in Settings to send to Kindle.",
+            f"— {reason} Choose PDF or EPUB in Settings to send to Kindle.",
         )
         self.events.publish("notification_added", {})
 

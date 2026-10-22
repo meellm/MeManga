@@ -949,9 +949,12 @@ Set delivery mode to `local`. Downloaded chapters will be saved to the download 
 
 - **PDF:** Auto-splits if over 23MB. Best choice for email delivery.
 - **EPUB:** Sent as-is. Kindle supports EPUB natively. Cannot be split — if over 25MB, switch to PDF.
-- **CBZ:** Kindle does not support CBZ. Use PDF or EPUB for email delivery.
-- **ZIP:** Sent as-is. Cannot be split — if over 25MB, switch to PDF.
-- **JPG/PNG/WEBP:** Cannot be emailed (saved as image folders). Use PDF, EPUB, or CBZ for email delivery.
+- **CBZ:** Kindle does not support CBZ, so it is never emailed: the chapter is saved but not sent. Use PDF or EPUB for email delivery.
+- **ZIP:** Kindle does not support ZIP either; saved but not sent, like CBZ.
+- **JPG/PNG/WEBP:** Cannot be emailed (saved as image folders). Use PDF or EPUB for email delivery.
+
+With email delivery on and one of these formats chosen, `memanga check`
+warns before downloading, and `memanga doctor` reports a warning.
 
 ---
 

@@ -26,6 +26,8 @@ class TestKindleSkippedNotification:
         _handle(stub, {
             "task_id": "Vinland Saga:71", "title": "Vinland Saga",
             "chapter": "71", "path": "/downloads/Vinland Saga/Chapter 71",
+            "reason": "Image folders can't be sent to Kindle; "
+                      "only PDF and EPUB can.",
         })
         event_bus.poll()
 
@@ -34,9 +36,26 @@ class TestKindleSkippedNotification:
         assert notes[0]["type"] == "warn"
         message = notes[0]["message"]
         assert message.startswith("Not sent to Kindle: Vinland Saga Ch. 71")
-        assert "image folders" in message
-        assert "PDF, EPUB, CBZ or ZIP" in message
+        assert "Image folders can't be sent to Kindle" in message
+        assert message.endswith(
+            "Choose PDF or EPUB in Settings to send to Kindle.")
+        assert "CBZ" not in message
         assert added == [{}]
+
+    def test_archive_reason_is_shown(self, state, event_bus):
+        # Issue #362: CBZ and ZIP are skipped too, with their own reason.
+        stub = SimpleNamespace(app_state=state, events=event_bus)
+        _handle(stub, {
+            "task_id": "Vinland Saga:71", "title": "Vinland Saga",
+            "chapter": "71", "path": "/downloads/Vinland Saga/ch71.cbz",
+            "reason": "CBZ files can't be sent to Kindle; "
+                      "only PDF and EPUB can.",
+        })
+        message = state.get_notifications()[0]["message"]
+        assert message == (
+            "Not sent to Kindle: Vinland Saga Ch. 71 — CBZ files can't be "
+            "sent to Kindle; only PDF and EPUB can. Choose PDF or EPUB in "
+            "Settings to send to Kindle.")
 
 
 def _handle_sent(stub, data):
