@@ -21,8 +21,6 @@ import json
 import os
 import platform
 import shlex
-import smtplib
-import ssl
 import subprocess
 import sys
 import tempfile
@@ -35,6 +33,7 @@ import yaml
 from . import __version__
 from .config import AppPasswordError, app_password_override, get_app_password
 from .cron import is_managed_line
+from .emailer import EmailAuthError, smtp_login
 
 SCHEMA_VERSION = 1
 
@@ -63,8 +62,6 @@ CHECK_NAMES = (
 REQUIRED_BROWSERS = ("firefox", "chromium")
 
 WINDOWS_TASK_NAME = "MeManga_AutoCheck"
-
-SMTP_TIMEOUT_SECONDS = 20
 
 
 @dataclass
@@ -419,12 +416,10 @@ def check_keyring(config, state=None) -> CheckResult:
     return CheckResult("keyring", OK, f"Using keyring backend {backend}", details)
 
 
-def _smtp_login(server: str, port: int, user: str, password: str) -> None:
+def _smtp_login(server: str, port: int, user: str, password: str,
+                timeout=None) -> None:
     """Log in the way delivery does (SMTP + STARTTLS). Raises on failure."""
-    context = ssl.create_default_context()
-    with smtplib.SMTP(server, port, timeout=SMTP_TIMEOUT_SECONDS) as smtp:
-        smtp.starttls(context=context)
-        smtp.login(user, password)
+    smtp_login(user, server, port, password, timeout=timeout)
 
 
 def check_smtp(config, state=None, live: bool = False) -> CheckResult:
@@ -441,8 +436,9 @@ def check_smtp(config, state=None, live: bool = False) -> CheckResult:
                            "Sender email and app password are required for the login test", details)
 
     try:
-        _smtp_login(server, int(port), sender, password)
-    except smtplib.SMTPAuthenticationError:
+        _smtp_login(server, int(port), sender, password,
+                    timeout=config.get("email.smtp_timeout"))
+    except EmailAuthError:
         return CheckResult("smtp", FAIL,
                            "SMTP authentication failed; check the sender email and app password",
                            details)

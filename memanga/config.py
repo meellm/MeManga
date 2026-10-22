@@ -304,6 +304,7 @@ class Config:
                 "sender_email": "",
                 "smtp_server": "smtp.gmail.com",
                 "smtp_port": 587,
+                "smtp_timeout": 60,  # seconds per SMTP operation
                 "app_password": "",
             },
             "cron": {
@@ -637,6 +638,7 @@ CONFIG_KEYS = {
     "email.sender_email": {"kind": "str"},
     "email.smtp_server": {"kind": "str", "required": True},
     "email.smtp_port": {"kind": "int", "min": 1, "max": 65535},
+    "email.smtp_timeout": {"kind": "int", "min": 1, "max": 600},
     "email.app_password": {"kind": "str", "secret": True},
     "cron.enabled": {"kind": "bool", "read_only": "memanga cron install/remove"},
     "cron.time": {"kind": "time", "read_only": "memanga cron install --time HH:MM"},

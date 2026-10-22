@@ -451,6 +451,7 @@ class ChapterPipeline:
                 smtp_server=email.get("smtp_server", "smtp.gmail.com"),
                 smtp_port=email.get("smtp_port", 587),
                 app_password=self.app_password(),
+                timeout=email.get("smtp_timeout"),
             )
         except InterruptedError:
             raise

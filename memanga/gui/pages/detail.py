@@ -1253,6 +1253,7 @@ class DetailPage(BasePage):
                 "app_password": get_app_password(self.app.config),
                 "smtp_server": self.app.config.get("email.smtp_server", "smtp.gmail.com"),
                 "smtp_port": self.app.config.get("email.smtp_port", 587),
+                "smtp_timeout": self.app.config.get("email.smtp_timeout"),
             }
         except Exception:
             return None

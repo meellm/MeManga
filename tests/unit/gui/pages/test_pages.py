@@ -614,6 +614,9 @@ class TestSettingsPage:
             def quit(self):
                 pass
 
+            def close(self):
+                pass
+
         monkeypatch.setattr(smtplib, "SMTP", FailingSMTP)
         page = app_window._pages["settings"]
         self._fill_smtp_test(page, "typed-pw-1234")
@@ -629,6 +632,31 @@ class TestSettingsPage:
                      note["details"]):
             assert "typed-pw-1234" not in text
             assert "sender@example.invalid" not in text
+
+    def test_smtp_test_uses_configured_timeout_and_reports_timeout(
+            self, app_window, qapp, smtp_logins, monkeypatch):
+        # Issue #361: the Settings test shares the bounded login and says
+        # when the server did not answer in time.
+        import smtplib
+        seen = {}
+
+        class StalledSMTP:
+            def __init__(self, host, port, timeout=None):
+                seen["timeout"] = timeout
+                try:
+                    raise TimeoutError("timed out")
+                except TimeoutError:
+                    raise smtplib.SMTPServerDisconnected(
+                        "Connection unexpectedly closed: timed out")
+
+        monkeypatch.setattr(smtplib, "SMTP", StalledSMTP)
+        app_window.config.set("email.smtp_timeout", 5)
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._test_email()
+        assert seen == {"timeout": 5}
+        assert page._test_label.text() == "Timed out"
+        assert "within 5 seconds" in page._test_label.toolTip()
 
     def test_error_toast_short_with_full_redacted_notification(
             self, app_window, qapp, monkeypatch, isolated_home, caplog):
@@ -898,6 +926,9 @@ class TestSettingsPage:
                     raise login_error
 
             def quit(self):
+                pass
+
+            def close(self):
                 pass
 
         monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)

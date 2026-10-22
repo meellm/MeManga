@@ -5,7 +5,6 @@ are replaced with fakes so the suite stays offline and deterministic.
 """
 
 import json
-import smtplib
 import sys
 import types
 from pathlib import Path
@@ -13,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from memanga import doctor
+from memanga.emailer import EmailAuthError, EmailTimeoutError
 
 
 def _run_result(returncode=0, stdout=""):
@@ -324,7 +324,7 @@ class TestSmtp:
         monkeypatch.setattr(doctor, "get_app_password", lambda cfg: password)
 
     def test_skipped_unless_live(self, config, monkeypatch):
-        def boom(*a):
+        def boom(*a, **k):
             raise AssertionError("must not touch the network")
         monkeypatch.setattr(doctor, "_smtp_login", boom)
         assert doctor.check_smtp(config).status == doctor.SKIP
@@ -332,16 +332,18 @@ class TestSmtp:
     def test_live_login_ok(self, config, monkeypatch):
         self._email_config(config, monkeypatch)
         calls = []
-        monkeypatch.setattr(doctor, "_smtp_login", lambda *a: calls.append(a))
+        monkeypatch.setattr(doctor, "_smtp_login",
+                            lambda *a, **k: calls.append((a, k)))
         result = doctor.check_smtp(config, live=True)
         assert result.status == doctor.OK
-        assert calls == [("smtp.gmail.com", 587, "me@gmail.com", "secret-pw")]
+        assert calls == [(("smtp.gmail.com", 587, "me@gmail.com", "secret-pw"),
+                          {"timeout": 60})]
 
     def test_auth_failure(self, config, monkeypatch):
         self._email_config(config, monkeypatch)
 
-        def fail(*a):
-            raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+        def fail(*a, **k):
+            raise EmailAuthError("SMTP authentication failed")
         monkeypatch.setattr(doctor, "_smtp_login", fail)
         result = doctor.check_smtp(config, live=True)
         assert result.status == doctor.FAIL
@@ -350,16 +352,32 @@ class TestSmtp:
     def test_error_message_masks_password(self, config, monkeypatch):
         self._email_config(config, monkeypatch)
 
-        def fail(*a):
+        def fail(*a, **k):
             raise OSError("connection reset while sending secret-pw")
         monkeypatch.setattr(doctor, "_smtp_login", fail)
         result = doctor.check_smtp(config, live=True)
         assert result.status == doctor.FAIL
         assert "secret-pw" not in result.message
 
+    def test_timeout_is_configurable_and_reported(self, config, monkeypatch):
+        # Issue #361: the login uses email.smtp_timeout and says it timed out.
+        self._email_config(config, monkeypatch)
+        config.set("email.smtp_timeout", 7)
+        seen = []
+
+        def stall(*a, timeout=None):
+            seen.append(timeout)
+            raise EmailTimeoutError(
+                "SMTP server smtp.gmail.com:587 did not respond within 7 seconds")
+        monkeypatch.setattr(doctor, "_smtp_login", stall)
+        result = doctor.check_smtp(config, live=True)
+        assert seen == [7]
+        assert result.status == doctor.FAIL
+        assert "did not respond within 7 seconds" in result.message
+
     def test_missing_credentials_fail_without_network(self, config, monkeypatch):
         monkeypatch.setattr(doctor, "get_app_password", lambda cfg: "")
-        monkeypatch.setattr(doctor, "_smtp_login", lambda *a: pytest.fail("network"))
+        monkeypatch.setattr(doctor, "_smtp_login", lambda *a, **k: pytest.fail("network"))
         assert doctor.check_smtp(config, live=True).status == doctor.FAIL
 
 

@@ -774,3 +774,29 @@ class TestUndeliveredChapters:
 
         assert pipeline.redeliver(TITLE, "71") is DeliveryStatus.NOT_REQUESTED
         assert sent == []
+
+
+class TestSmtpTimeout:
+    @pytest.mark.parametrize("email, expected", [
+        (dict(EMAIL, smtp_timeout=15), 15),
+        (EMAIL, None),  # unset: the emailer default applies
+    ])
+    def test_delivery_passes_configured_timeout(self, state, tmp_path, pdf,
+                                                email, expected):
+        # Issue #361: delivery honours email.smtp_timeout.
+        calls = []
+        pipeline = ChapterPipeline(
+            options=PipelineOptions(download_dir=tmp_path, output_format="pdf",
+                                    delivery_mode="email", email=email),
+            state=state,
+            reporter=_Recorder(),
+            download=_Downloads({("primary.test", False): pdf}),
+            find_backup=lambda manga, number, state: None,
+            send=lambda **kwargs: calls.append(kwargs),
+            app_password=lambda: "pw",
+        )
+
+        outcome = pipeline.process(SINGLE, _primary())
+
+        assert outcome.delivery is DeliveryStatus.SENT
+        assert [c["timeout"] for c in calls] == [expected]
