@@ -4,6 +4,7 @@ Email handler for MeManga - sends PDFs to Kindle
 Automatically splits large PDFs that exceed Gmail's 25MB limit.
 """
 
+import hashlib
 import logging
 import shutil
 import smtplib
@@ -16,7 +17,7 @@ from email.mime.text import MIMEText
 from email import encoders
 from email.utils import encode_rfc2231
 from pathlib import Path
-from typing import Iterator, Optional, List
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional
 import pikepdf
 
 from .output import register_secret
@@ -54,6 +55,32 @@ class EmailProviderError(EmailError):
         self.recipients = recipients
 
 
+class EmailPartError(EmailError):
+    """Part ``part`` of a PDF split into ``total`` parts was not sent
+    (issue #364); the failure behind it is the ``__cause__``.
+
+    ``accepted`` lists the parts the mail server accepted, in this call
+    or an earlier one. Acceptance means the SMTP server took the message
+    (reply 250); it does not prove the Kindle received or converted it.
+    ``progress`` is what to pass back as ``send_to_kindle(progress=...)``
+    so a retry of the same file sends only the parts not yet accepted.
+    """
+
+    def __init__(self, part: int, total: int, progress: Dict[str, Any],
+                 detail: str):
+        accepted = list(progress.get("accepted", []))
+        if accepted:
+            status = ("parts accepted by the mail server: "
+                      + ", ".join(str(n) for n in accepted))
+        else:
+            status = "no parts accepted by the mail server"
+        super().__init__(f"Part {part} of {total} not sent ({status}): {detail}")
+        self.part = part
+        self.total = total
+        self.accepted = tuple(accepted)
+        self.progress = progress
+
+
 # Issue #361: every SMTP socket operation (connect, greeting, TLS
 # handshake, login, each chunk sent, QUIT) waits at most this long.
 # It bounds a stalled server, not the total transfer time.
@@ -66,6 +93,8 @@ MAX_SMTP_TIMEOUT = 600
 # 33%, so keep raw files lower to stay under the encoded cap.
 EMAIL_ATTACHMENT_LIMIT = 25 * 1024 * 1024
 MAX_ATTACHMENT_SIZE = 18 * 1024 * 1024  # 18MB raw (~24MB after base64)
+# split_pdf writes the parts to a temp folder with this name prefix.
+SPLIT_DIR_PREFIX = "memanga_split_"
 
 
 # Issue #362: the output formats Send to Kindle accepts by email. CBZ and
@@ -133,38 +162,50 @@ def split_pdf(pdf_path: Path, max_size: int = MAX_ATTACHMENT_SIZE) -> List[Path]
         pages_per_part = max(1, int(max_size / avg_page_size) - 1)  # -1 for safety margin
         
         # Create temp directory for parts
-        temp_dir = Path(tempfile.mkdtemp(prefix="memanga_split_"))
-        parts = []
+        temp_dir = Path(tempfile.mkdtemp(prefix=SPLIT_DIR_PREFIX))
+        try:
+            return _write_parts(pdf, pdf_path, temp_dir, total_pages,
+                                pages_per_part, max_size)
+        except BaseException:
+            # Issue #364: a failed split leaves no temp folder behind.
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise
+
+
+def _write_parts(pdf, pdf_path: Path, temp_dir: Path, total_pages: int,
+                 pages_per_part: int, max_size: int) -> List[Path]:
+    """Save the pages of ``pdf`` as parts under ``max_size`` in ``temp_dir``."""
+    parts = []
+
+    part_num = 1
+    start_page = 0
+
+    while start_page < total_pages:
+        end_page = min(start_page + pages_per_part, total_pages)
         
-        part_num = 1
-        start_page = 0
+        # Create part PDF
+        part_pdf = pikepdf.new()
+        for page_num in range(start_page, end_page):
+            part_pdf.pages.append(pdf.pages[page_num])
         
-        while start_page < total_pages:
-            end_page = min(start_page + pages_per_part, total_pages)
-            
-            # Create part PDF
-            part_pdf = pikepdf.new()
-            for page_num in range(start_page, end_page):
-                part_pdf.pages.append(pdf.pages[page_num])
-            
-            # Save part - use decimal format (.01, .02) like source chapters
-            stem = pdf_path.stem
-            part_path = temp_dir / f"{stem}.{str(part_num).zfill(2)}.pdf"
-            part_pdf.save(part_path)
-            part_pdf.close()
-            
-            # Check if part is still too large and needs further splitting
-            if part_path.stat().st_size > max_size and end_page - start_page > 1:
-                # Reduce pages per part and try again
-                pages_per_part = max(1, (end_page - start_page) // 2)
-                part_path.unlink()
-                continue
-            
-            parts.append(part_path)
-            part_num += 1
-            start_page = end_page
+        # Save part - use decimal format (.01, .02) like source chapters
+        stem = pdf_path.stem
+        part_path = temp_dir / f"{stem}.{str(part_num).zfill(2)}.pdf"
+        part_pdf.save(part_path)
+        part_pdf.close()
         
-        return parts
+        # Check if part is still too large and needs further splitting
+        if part_path.stat().st_size > max_size and end_page - start_page > 1:
+            # Reduce pages per part and try again
+            pages_per_part = max(1, (end_page - start_page) // 2)
+            part_path.unlink()
+            continue
+
+        parts.append(part_path)
+        part_num += 1
+        start_page = end_page
+
+    return parts
 
 
 def send_to_kindle(
@@ -176,6 +217,8 @@ def send_to_kindle(
     app_password: str,
     subject: Optional[str] = None,
     timeout: Optional[float] = None,
+    progress: Optional[Mapping[str, Any]] = None,
+    on_part_sent: Optional[Callable[[int, int], None]] = None,
 ) -> bool:
     """
     Send a PDF or EPUB to Kindle via email.
@@ -184,6 +227,11 @@ def send_to_kindle(
     EPUB files are sent as-is (Kindle handles them natively). Any other
     file (CBZ, ZIP, ...) or a folder is refused before anything is sent
     (issue #362).
+
+    Issue #364: the parts of a split PDF are sent in order over one SMTP
+    session (one login), stopping at the first part that fails, which
+    raises EmailPartError. The split's temp folder is removed however
+    sending ends.
     
     Args:
         pdf_path: Path to the PDF or EPUB file
@@ -195,12 +243,19 @@ def send_to_kindle(
         subject: Email subject (optional, defaults to filename)
         timeout: Seconds each SMTP operation may wait (defaults to
             DEFAULT_SMTP_TIMEOUT)
+        progress: ``EmailPartError.progress`` of an earlier attempt. Parts
+            it lists as accepted are not sent again, provided the file
+            content, its part count, the part size limit and the Kindle
+            address are unchanged; otherwise every part is sent.
+        on_part_sent: Called with ``(part, total)`` after the mail server
+            accepted each part of a split PDF.
     
     Returns:
-        True if sent successfully
+        True if sent successfully (every part accepted by the mail server)
     
     Raises:
-        EmailError: If sending fails
+        EmailPartError: If a part of a split PDF was not sent
+        EmailError: If sending fails otherwise
     """
     if not pdf_path.exists():
         raise EmailError(f"File not found: {pdf_path}")
@@ -250,45 +305,166 @@ def send_to_kindle(
                 _format_mb(EMAIL_ATTACHMENT_LIMIT),
             )
     
-    # Send each part
-    for i, part_path in enumerate(parts):
-        part_subject = subject or pdf_path.stem
+    try:
         if is_split:
-            part_subject = f"{part_subject}.{str(i+1).zfill(2)}"
-        
-        _send_single_email(
-            pdf_path=part_path,
-            kindle_email=kindle_email,
-            sender_email=sender_email,
-            smtp_server=smtp_server,
-            smtp_port=smtp_port,
-            app_password=app_password,
-            subject=part_subject,
-            timeout=timeout,
-        )
-    
-    # Cleanup temp files if split
-    if is_split and parts:
-        try:
-            shutil.rmtree(parts[0].parent)
-        except Exception:
-            pass
+            _send_parts(
+                pdf_path, parts, subject or pdf_path.stem, progress,
+                on_part_sent, kindle_email=kindle_email,
+                sender_email=sender_email, smtp_server=smtp_server,
+                smtp_port=smtp_port, app_password=app_password,
+                timeout=timeout,
+            )
+        else:
+            _send_single_email(
+                pdf_path=parts[0],
+                kindle_email=kindle_email,
+                sender_email=sender_email,
+                smtp_server=smtp_server,
+                smtp_port=smtp_port,
+                app_password=app_password,
+                subject=subject or pdf_path.stem,
+                timeout=timeout,
+            )
+    finally:
+        _remove_split_parts(pdf_path, parts)
     
     return True
 
 
-def _send_single_email(
+# What must match for an earlier attempt's accepted parts to count.
+_PROGRESS_IDENTITY = ("total", "source_size", "source_mtime_ns",
+                      "source_sha256", "recipient_sha256", "part_limit")
+
+
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _file_sha256(path: Path) -> Optional[str]:
+    """SHA-256 of the file's bytes, or None when it can't be read."""
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as e:
+        logger.warning("Could not read %s to identify it: %s", path.name, e)
+        return None
+    return digest.hexdigest()
+
+
+def _split_progress(pdf_path: Path, total: int, kindle_email: str,
+                    earlier: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Delivery progress of ``pdf_path`` split into ``total`` parts for
+    ``kindle_email``: the parts ``earlier`` recorded as accepted when it
+    describes the same file content, split and recipient, else none.
+
+    The file is identified by its SHA-256 (plus size and mtime) and the
+    recipient by the SHA-256 of the address, so the address itself is not
+    stored. When the file can't be hashed, nothing counts as accepted.
+    JSON-safe, so it can be kept in state."""
+    stat = pdf_path.stat()
+    current: Dict[str, Any] = {
+        "total": total,
+        "accepted": [],
+        "source_size": stat.st_size,
+        "source_mtime_ns": stat.st_mtime_ns,
+        "source_sha256": _file_sha256(pdf_path),
+        "recipient_sha256": _sha256(kindle_email.strip().encode("utf-8")),
+        "part_limit": MAX_ATTACHMENT_SIZE,
+    }
+    if not isinstance(earlier, Mapping):
+        return current
+    if (current["source_sha256"] is None
+            or any(earlier.get(key) != current[key]
+                   for key in _PROGRESS_IDENTITY)):
+        logger.info("%s or its recipient changed since its earlier delivery "
+                    "attempt; sending every part", pdf_path.name)
+        return current
+    accepted = earlier.get("accepted")
+    if isinstance(accepted, list):
+        current["accepted"] = sorted({
+            n for n in accepted
+            if isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= total
+        })
+    return current
+
+
+def _send_parts(
     pdf_path: Path,
+    parts: List[Path],
+    subject: str,
+    earlier: Optional[Mapping[str, Any]],
+    on_part_sent: Optional[Callable[[int, int], None]],
+    *,
     kindle_email: str,
     sender_email: str,
     smtp_server: str,
     smtp_port: int,
     app_password: str,
-    subject: str,
-    timeout: Optional[float] = None,
-) -> bool:
-    """Send a single file (PDF or EPUB) via email."""
-    # Create message
+    timeout: Optional[float],
+) -> None:
+    """Send the parts of a split PDF not yet accepted, over one session."""
+    total = len(parts)
+    progress = _split_progress(pdf_path, total, kindle_email, earlier)
+    accepted = progress["accepted"]
+    pending = [n for n in range(1, total + 1) if n not in accepted]
+    if accepted:
+        logger.info("Not sending parts %s again: the mail server already "
+                    "accepted them", ", ".join(str(n) for n in accepted))
+    if not pending:
+        return
+
+    # The part being sent; None between a part's acceptance and the next.
+    failed: Optional[int] = pending[0]
+    try:
+        with smtp_session(sender_email, smtp_server, smtp_port, app_password,
+                          timeout=timeout) as server:
+            for number in pending:
+                failed = number
+                part_path = parts[number - 1]
+                try:
+                    msg = _kindle_message(part_path, kindle_email,
+                                          sender_email,
+                                          f"{subject}.{str(number).zfill(2)}")
+                except OSError as e:
+                    # Not a connection problem, which smtp_session would
+                    # report it as.
+                    raise EmailError(
+                        f"Could not read {part_path.name}: {e}") from e
+                server.send_message(msg)
+                failed = None
+                accepted.append(number)
+                logger.info("Part %d/%d accepted by the mail server",
+                            number, total)
+                if on_part_sent is not None:
+                    on_part_sent(number, total)
+    except Exception as e:
+        if failed is None:
+            # Raised by on_part_sent, not by sending.
+            raise
+        detail = str(e) if isinstance(e, EmailError) else f"Failed to send email: {e}"
+        progress["accepted"] = sorted(accepted)
+        raise EmailPartError(failed, total, progress, detail) from e
+
+
+def _remove_split_parts(pdf_path: Path, parts: List[Path]) -> None:
+    """Remove the temp folder split_pdf wrote ``parts`` to, if any. The
+    original file and its folder are never touched."""
+    folders = {part.parent for part in parts if part != pdf_path}
+    for folder in folders:
+        if folder == pdf_path.parent or not folder.name.startswith(SPLIT_DIR_PREFIX):
+            continue
+        try:
+            shutil.rmtree(folder)
+        except OSError as e:
+            logger.warning("Could not remove split PDF parts in %s: %s",
+                           folder, e)
+
+
+def _kindle_message(pdf_path: Path, kindle_email: str, sender_email: str,
+                    subject: str) -> MIMEMultipart:
+    """The email carrying ``pdf_path`` (PDF or EPUB) as its attachment."""
     msg = MIMEMultipart()
     msg["From"] = sender_email
     msg["To"] = kindle_email
@@ -312,6 +488,21 @@ def _send_single_email(
             filename=pdf_path.name,
         )
         msg.attach(part)
+    return msg
+
+
+def _send_single_email(
+    pdf_path: Path,
+    kindle_email: str,
+    sender_email: str,
+    smtp_server: str,
+    smtp_port: int,
+    app_password: str,
+    subject: str,
+    timeout: Optional[float] = None,
+) -> bool:
+    """Send a single file (PDF or EPUB) via email."""
+    msg = _kindle_message(pdf_path, kindle_email, sender_email, subject)
     
     # Send
     try:

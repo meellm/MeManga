@@ -937,6 +937,8 @@ When a new chapter is found and downloaded, MeManga sends it to your Kindle auto
 
 If sending fails, the chapter stays downloaded, its file is kept and it is listed as not sent to Kindle until it is: run `run send --pending` to send it again (`--list` only lists, `--clear` forgets the records), or use **Send** next to the chapter in the desktop app's chapter list.
 
+A split PDF is sent part by part over one mail session, stopping at the first part that fails. The error names that part and the parts the mail server already accepted; a retry of the unchanged file to the same Kindle address sends only the remaining parts; otherwise every part is sent again. "Accepted" means your mail server took the email, not that the Kindle has it yet.
+
 ### Switch back to local downloads
 
 ```bash

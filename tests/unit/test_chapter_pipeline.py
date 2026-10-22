@@ -13,7 +13,7 @@ from memanga.chapter_pipeline import (ChapterPipeline, ChapterReporter,
                                       PipelineOptions, manga_auto_downloads,
                                       manga_sends_to_kindle)
 from memanga.downloader import ChapterWithSource, DownloaderError
-from memanga.emailer import EmailError
+from memanga.emailer import EmailError, EmailPartError
 from memanga.scrapers.base import Chapter
 
 
@@ -63,6 +63,9 @@ class _Recorder(ChapterReporter):
 
     def email_sending(self, path):
         self.events.append(("email_sending",))
+
+    def email_part_sent(self, path, part, total):
+        self.events.append(("email_part_sent", part, total))
 
     def email_sent(self, path):
         self.events.append(("email_sent",))
@@ -939,6 +942,111 @@ class TestUndeliveredChapters:
 
         assert pipeline.redeliver(TITLE, "71") is DeliveryStatus.NOT_REQUESTED
         assert sent == []
+
+
+class TestSplitPartDelivery:
+    """Issue #364: which parts of a split PDF the mail server accepted is
+    kept on the undelivered record, so a retry sends only the rest."""
+
+    PROGRESS = {"total": 3, "accepted": [1], "source_size": 4,
+                "source_mtime_ns": 1, "part_limit": 18 * 1024 * 1024}
+
+    def _part_error(self, progress=None):
+        return EmailPartError(2, 3, dict(progress or self.PROGRESS),
+                              "SMTP error from smtp.test:587: 554 rejected")
+
+    def _failed_part(self, state, tmp_path, pdf, **opts):
+        downloads = _Downloads({("primary.test", False): pdf})
+        pipeline = _pipeline(state, tmp_path, downloads,
+                             sent=self._part_error(),
+                             delivery_mode="email", email=EMAIL, **opts)
+        outcome = pipeline.process(SINGLE, _primary())
+        return pipeline, outcome
+
+    def test_failed_part_records_accepted_parts(self, state, tmp_path, pdf):
+        _, outcome = self._failed_part(state, tmp_path, pdf,
+                                       delete_after_send=True)
+
+        assert outcome.delivery is DeliveryStatus.FAILED
+        assert outcome.delivery_error.startswith(
+            "Part 2 of 3 not sent (parts accepted by the mail server: 1)")
+        record = state.failures.get_undelivered(TITLE)["71"]
+        assert record["parts"] == self.PROGRESS
+        assert record["error"] == outcome.delivery_error
+        # Not every part was sent, so the local copy stays.
+        assert pdf.exists()
+        assert state.is_chapter_downloaded(TITLE, "71")
+
+    def test_progress_survives_a_restart(self, state, tmp_path, pdf):
+        from memanga.state import State
+
+        self._failed_part(state, tmp_path, pdf)
+        state.flush()
+
+        reloaded = State(config_dir=state.config_dir)
+        assert reloaded.failures.get_undelivered(TITLE)["71"]["parts"] == self.PROGRESS
+
+    def test_redeliver_passes_progress_then_clears(self, state, tmp_path, pdf):
+        pipeline, _ = self._failed_part(state, tmp_path, pdf,
+                                        delete_after_send=True)
+        calls = []
+
+        def send(**kwargs):
+            calls.append(kwargs["progress"])
+            kwargs["on_part_sent"](2, 3)
+            kwargs["on_part_sent"](3, 3)
+
+        pipeline.send = send
+        status = pipeline.redeliver(TITLE, "71")
+
+        assert status is DeliveryStatus.SENT
+        assert calls == [self.PROGRESS]
+        assert state.failures.get_undelivered(TITLE) == {}
+        assert not pdf.exists()
+        assert pipeline.reporter.events[-4:] == [
+            ("email_part_sent", 2, 3), ("email_part_sent", 3, 3),
+            ("email_sent",), ("deleted_after_send",)]
+
+    def test_redeliver_part_failure_replaces_progress(self, state, tmp_path, pdf):
+        pipeline, _ = self._failed_part(state, tmp_path, pdf)
+        later = dict(self.PROGRESS, accepted=[1, 2])
+
+        def send(**kwargs):
+            raise EmailPartError(3, 3, dict(later), "timed out")
+
+        pipeline.send = send
+        assert pipeline.redeliver(TITLE, "71") is DeliveryStatus.FAILED
+
+        record = state.failures.get_undelivered(TITLE)["71"]
+        assert (record["parts"], record["attempts"]) == (later, 2)
+        assert record["error"].startswith("Part 3 of 3 not sent")
+
+    @pytest.mark.parametrize("missing_file", [False, True])
+    def test_failure_before_any_part_keeps_progress(self, state, tmp_path,
+                                                    pdf, missing_file):
+        pipeline, _ = self._failed_part(state, tmp_path, pdf)
+
+        def send(**kwargs):
+            raise EmailError("App password not configured")
+
+        pipeline.send = send
+        if missing_file:
+            pdf.unlink()
+        assert pipeline.redeliver(TITLE, "71") is DeliveryStatus.FAILED
+
+        record = state.failures.get_undelivered(TITLE)["71"]
+        assert (record["parts"], record["attempts"]) == (self.PROGRESS, 2)
+
+    def test_download_without_record_passes_no_progress(self, state,
+                                                        tmp_path, pdf):
+        calls = []
+        downloads = _Downloads({("primary.test", False): pdf})
+        pipeline = _pipeline(state, tmp_path, downloads,
+                             delivery_mode="email", email=EMAIL)
+        pipeline.send = lambda **kwargs: calls.append(kwargs["progress"])
+
+        assert pipeline.process(SINGLE, _primary()).delivery is DeliveryStatus.SENT
+        assert calls == [None]
 
 
 class TestPerMangaPolicy:

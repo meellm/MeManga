@@ -138,22 +138,33 @@ class FailureStore(StateDomain):
         chapter: str,
         path: str,
         error: str,
+        parts: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Record a saved chapter whose Kindle delivery failed, so it can
         be sent again. The chapter stays downloaded; ``path`` is the file
-        that was kept for the retry."""
+        that was kept for the retry.
+
+        ``parts`` is the delivery progress of a split PDF (issue #364):
+        which parts the mail server already accepted, so a retry does not
+        send them again. Without it, the progress already on record is
+        kept (a failure before any part was tried changes nothing)."""
         with self._backend._locked() as data:
             self._backend._ensure_manga_entry(manga_title)
             chapter_str = str(chapter)
             entry = data["manga"][manga_title]
             undelivered = entry.setdefault("undelivered_chapters", {})
             existing = undelivered.get(chapter_str, {})
-            undelivered[chapter_str] = {
+            record = {
                 "failed_at": delivery_timestamp(),
                 "path": path,
                 "error": error[:300],
                 "attempts": existing.get("attempts", 0) + 1,
             }
+            if parts is None:
+                parts = existing.get("parts")
+            if isinstance(parts, dict):
+                record["parts"] = snapshot(parts)
+            undelivered[chapter_str] = record
             # A new failure supersedes an earlier resolution.
             resolved = entry.get("resolved_deliveries")
             if isinstance(resolved, dict):
