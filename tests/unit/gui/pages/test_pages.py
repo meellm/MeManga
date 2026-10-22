@@ -1368,6 +1368,153 @@ class TestSettingsPage:
         app_window._pages["settings"]._import(replace=True)
         assert app_window.config.get("manga", []) == []
 
+    # ── About (issue #343) ──
+
+    @pytest.fixture
+    def about_stubs(self, monkeypatch):
+        """Fixed About data; records the thread the slow checks ran on."""
+        from memanga import doctor
+        check_threads = []
+        monkeypatch.setattr(doctor, "about_basics", lambda: {
+            "version": "9.9.9", "install_mode": "frozen", "frozen": True,
+            "python": "3.12.1 (CPython)", "os": "Windows-11-10.0.22631-SP0",
+            "machine": "AMD64", "qt": "6.7.2 (PySide6 6.7.2)",
+            "playwright": "1.48.0",
+        })
+
+        def checks():
+            check_threads.append(threading.get_ident())
+            return {
+                "keyring": {"available": True, "plaintext": False,
+                            "backend": "keyring.backends.Windows.WinVaultKeyring"},
+                "browsers": {"status": "ok",
+                             "installed": {"firefox": True, "chromium": False}},
+            }
+        monkeypatch.setattr(doctor, "about_checks", checks)
+        return check_threads
+
+    @staticmethod
+    def _wait_for(qapp, predicate):
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not predicate():
+            qapp.processEvents()
+            time.sleep(0.01)
+        qapp.processEvents()
+
+    def test_about_tab_is_listed_and_switches(self, app_window, qapp, about_stubs):
+        page = app_window._pages["settings"]
+        assert "about" in page._tab_buttons
+        page._switch_tab("about")
+        assert not page._about_scroll.isHidden()
+        assert page._general_scroll.isHidden()
+        assert page._advanced_scroll.isHidden()
+
+    def test_about_checks_wait_for_first_visit(self, app_window, qapp, about_stubs):
+        # Building Settings at startup must not start Playwright.
+        page = app_window._pages["settings"]
+        page._switch_tab("general")
+        page._switch_tab("advanced")
+        qapp.processEvents()
+        assert about_stubs == []
+        assert page._about_info is None
+
+    def test_about_rows_fill_in_from_background_checks(
+            self, app_window, qapp, about_stubs):
+        page = app_window._pages["settings"]
+        main_thread = threading.get_ident()
+        page._switch_tab("about")
+        # Basics show at once; the slow rows say they are still checking.
+        assert page._about_values["MeManga"].text() == "9.9.9"
+        assert page._about_values["Frozen"].text() == "yes"
+
+        browsers = page._about_values["Browsers"]
+        self._wait_for(qapp, lambda: browsers.text() != "Checking…")
+        assert browsers.text() == "firefox installed, chromium missing"
+        assert page._about_values["Keyring"].text() == (
+            "keyring.backends.Windows.WinVaultKeyring (available)")
+        assert page._about_values["Install"].accessibleName() == (
+            "Install: packaged app")
+        assert about_stubs and all(t != main_thread for t in about_stubs)
+
+        # A second visit reuses the result instead of probing again.
+        page._switch_tab("general")
+        page._switch_tab("about")
+        qapp.processEvents()
+        assert len(about_stubs) == 1
+
+    def test_copy_diagnostics_puts_summary_on_clipboard(
+            self, app_window, qapp, about_stubs):
+        from PySide6.QtGui import QGuiApplication
+        page = app_window._pages["settings"]
+        page._switch_tab("about")
+        self._wait_for(qapp, lambda: page._about_values["Browsers"].text() != "Checking…")
+
+        page._copy_about_btn.click()
+        copied = QGuiApplication.clipboard().text()
+        assert copied.splitlines()[0] == "MeManga: 9.9.9"
+        assert "Frozen: yes" in copied
+        assert "Browsers: firefox installed, chromium missing" in copied
+        assert "Keyring: keyring.backends.Windows.WinVaultKeyring (available)" in copied
+        assert page._copy_about_btn.text() == "Copied"
+        page._reset_copy_about_label()
+        assert page._copy_about_btn.text() == "Copy diagnostics"
+
+    def test_copy_diagnostics_waits_for_pending_checks(
+            self, app_window, qapp, about_stubs, monkeypatch):
+        # Copying while the checks run would paste "Checking…" rows.
+        from PySide6.QtGui import QGuiApplication
+        from memanga import doctor
+        finished_checks = doctor.about_checks
+        release = threading.Event()
+
+        def slow_checks():
+            release.wait(2.0)
+            return finished_checks()
+        monkeypatch.setattr(doctor, "about_checks", slow_checks)
+
+        page = app_window._pages["settings"]
+        assert not page._copy_about_btn.isEnabled()
+        clipboard = QGuiApplication.clipboard()
+        clipboard.setText("before")
+        try:
+            page._switch_tab("about")
+            qapp.processEvents()
+            assert page._about_values["Browsers"].text() == "Checking…"
+            assert not page._copy_about_btn.isEnabled()
+            page._copy_about_btn.click()
+            page._copy_about()
+            assert clipboard.text() == "before"
+            assert page._copy_about_btn.text() == "Copy diagnostics"
+        finally:
+            release.set()
+
+        self._wait_for(qapp, page._copy_about_btn.isEnabled)
+        assert page._copy_about_btn.isEnabled()
+        page._copy_about_btn.click()
+        copied = clipboard.text()
+        assert "Checking…" not in copied
+        assert "Browsers: firefox installed, chromium missing" in copied
+
+    def test_copy_diagnostics_available_after_failed_checks(
+            self, app_window, qapp, about_stubs, monkeypatch):
+        from PySide6.QtGui import QGuiApplication
+        from memanga import doctor
+
+        def failed_checks():
+            raise RuntimeError("probe crashed")
+        monkeypatch.setattr(doctor, "about_checks", failed_checks)
+
+        page = app_window._pages["settings"]
+        page._switch_tab("about")
+        self._wait_for(qapp, page._copy_about_btn.isEnabled)
+        assert page._copy_about_btn.isEnabled()
+
+        page._copy_about_btn.click()
+        copied = QGuiApplication.clipboard().text()
+        assert "Browsers: could not be checked" in copied
+        assert "Keyring: none (unavailable)" in copied
+        assert "probe crashed" not in copied
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Detail (requires a manga in config)

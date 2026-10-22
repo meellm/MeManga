@@ -28,7 +28,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -689,6 +689,157 @@ def check_browsers(config=None, state=None, launch: bool = False) -> CheckResult
             return CheckResult("browsers", FAIL, "Browser launch failed: " + ", ".join(broken), details)
         return CheckResult("browsers", OK, f"Launched {names}", details)
     return CheckResult("browsers", OK, f"Installed: {names}", details)
+
+
+# ============================================================================
+# About summary (issue #343)
+# ============================================================================
+#
+# What the desktop app's Settings → About shows and copies for a bug
+# report. Unlike the check details above, it is an allowlist: versions,
+# platform and yes/no status only, never a path, a user or host name, an
+# address, a secret or error text.
+
+CHECKING = "Checking…"
+
+_INSTALL_LABELS = {
+    "frozen": "packaged app",
+    "editable": "editable install",
+    "source": "source checkout",
+    "installed": "installed package",
+    "unknown": "unknown",
+}
+
+
+def _package_version(name: str) -> Optional[str]:
+    from importlib import metadata
+    try:
+        return metadata.version(name)
+    except Exception:
+        return None
+
+
+def _qt_version() -> Optional[str]:
+    """Qt runtime and PySide6 versions; None without the GUI extra."""
+    try:
+        import PySide6
+        from PySide6.QtCore import qVersion
+        return f"{qVersion()} (PySide6 {PySide6.__version__})"
+    except Exception:
+        return None
+
+
+def about_basics() -> Dict[str, Any]:
+    """Fast About fields: versions, install mode and platform."""
+    package_dir = Path(__file__).resolve().parent
+    try:
+        mode = _install_mode(package_dir, _distribution_info(package_dir))
+    except Exception:
+        mode = "unknown"
+    return {
+        "version": __version__,
+        "install_mode": mode,
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "python": f"{platform.python_version()} ({platform.python_implementation()})",
+        "os": platform.platform(),
+        "machine": platform.machine(),
+        "qt": _qt_version(),
+        "playwright": _package_version("playwright"),
+    }
+
+
+def _about_keyring() -> Dict[str, Any]:
+    try:
+        info = _keyring_backend()
+    except Exception:
+        info = {}
+    return {
+        "available": bool(info.get("available")),
+        "backend": info.get("backend"),
+        "plaintext": bool(info.get("plaintext")),
+    }
+
+
+def _about_browsers() -> Dict[str, Any]:
+    try:
+        probe = _probe_browsers(launch=False)
+    except ImportError:
+        return {"status": "playwright_missing", "installed": {}}
+    except Exception:
+        return {"status": "error", "installed": {}}
+    return {
+        "status": "ok",
+        "installed": {name: bool(probe.get(name, {}).get("installed"))
+                      for name in REQUIRED_BROWSERS},
+    }
+
+
+def about_checks() -> Dict[str, Any]:
+    """Slow About fields: keyring backend and Playwright browsers.
+
+    Starts the Playwright driver, so run it off the GUI thread. Never
+    raises.
+    """
+    return {"keyring": _about_keyring(), "browsers": _about_browsers()}
+
+
+def _yes_no(value) -> str:
+    return "yes" if value else "no"
+
+
+def _browsers_text(browsers) -> str:
+    if not browsers:
+        return CHECKING
+    status = browsers.get("status")
+    if status == "playwright_missing":
+        return "Playwright is not installed"
+    if status != "ok":
+        return "could not be checked"
+    installed = browsers.get("installed", {})
+    return ", ".join(f"{name} {'installed' if installed.get(name) else 'missing'}"
+                     for name in REQUIRED_BROWSERS)
+
+
+def _keyring_text(keyring_info) -> str:
+    if not keyring_info:
+        return CHECKING
+    backend = keyring_info.get("backend") or "none"
+    if keyring_info.get("plaintext"):
+        state = "plain text file"
+    elif keyring_info.get("available"):
+        state = "available"
+    else:
+        state = "unavailable"
+    return f"{backend} ({state})"
+
+
+def about_rows(info: Dict[str, Any]) -> List[Tuple[str, str]]:
+    """``(label, value)`` pairs for display and copying, in order.
+
+    ``info`` is :func:`about_basics` merged with :func:`about_checks`;
+    fields from checks that have not finished read "Checking…".
+    """
+    mode = info.get("install_mode") or "unknown"
+    return [
+        ("MeManga", str(info.get("version") or "unknown")),
+        ("Install", _INSTALL_LABELS.get(mode, mode)),
+        ("Frozen", _yes_no(info.get("frozen"))),
+        ("Python", str(info.get("python") or "unknown")),
+        ("OS", str(info.get("os") or "unknown")),
+        ("Architecture", str(info.get("machine") or "unknown")),
+        ("Qt", str(info.get("qt") or "not installed")),
+        ("Playwright", str(info.get("playwright") or "not installed")),
+        ("Browsers", _browsers_text(info.get("browsers"))),
+        ("Keyring", _keyring_text(info.get("keyring"))),
+    ]
+
+
+def format_about(info: Dict[str, Any]) -> str:
+    """Plain-text About summary that is safe to paste into a bug report."""
+    from .output import redact_diagnostic
+    text = "\n".join(f"{label}: {value}" for label, value in about_rows(info))
+    # Only allowlisted fields go in; redact anyway as a safety net.
+    return redact_diagnostic(text, limit=None)
 
 
 # ============================================================================

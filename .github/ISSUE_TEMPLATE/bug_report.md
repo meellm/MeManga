@@ -22,7 +22,8 @@ A short description of the expected behaviour.
 
 ## Environment
 
-- MeManga version (`memanga --version`, or the desktop app's window title):
+- MeManga version (`memanga --version`; in the desktop app, Settings →
+  About → Copy diagnostics and paste it here):
 - OS + version:
 - Build type: prebuilt release exe / `python build.py` / `python -m memanga`
 - Source / manga the bug involves (if applicable):
