@@ -3,7 +3,7 @@
 Covers:
   - send_to_kindle wraps SMTP correctly + attaches the file
   - split_pdf chunks large PDFs under Kindle's attachment limit
-  - test_email_config verifies SMTP credentials without sending
+  - check_email_config verifies SMTP credentials without sending
   - EmailError raised on bad config / missing file
 """
 
@@ -51,8 +51,8 @@ def _call_send(cfg, pdf_path):
 
 
 def _call_test_cfg(cfg):
-    from memanga.emailer import test_email_config
-    return test_email_config(
+    from memanga.emailer import check_email_config
+    return check_email_config(
         sender_email=cfg.get("sender_email", ""),
         smtp_server=cfg.get("smtp_server", "smtp.gmail.com"),
         smtp_port=cfg.get("smtp_port", 587),
@@ -537,7 +537,7 @@ class TestSplitDelivery:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# test_email_config — verify credentials without delivery
+# check_email_config — verify credentials without delivery
 # ─────────────────────────────────────────────────────────────────────
 
 

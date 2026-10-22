@@ -11,6 +11,7 @@ import shutil
 import smtplib
 import ssl
 import tempfile
+import warnings
 from contextlib import contextmanager
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -681,7 +682,7 @@ def smtp_login(
         pass
 
 
-def test_email_config(
+def check_email_config(
     sender_email: str,
     smtp_server: str,
     smtp_port: int,
@@ -702,6 +703,27 @@ def test_email_config(
         return True
     except Exception:
         return False
+
+
+def test_email_config(
+    sender_email: str,
+    smtp_server: str,
+    smtp_port: int,
+    app_password: str,
+    timeout: Optional[float] = None,
+) -> bool:
+    """Deprecated: use check_email_config."""
+    warnings.warn(
+        "test_email_config is deprecated; use check_email_config",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return check_email_config(sender_email, smtp_server, smtp_port,
+                              app_password, timeout=timeout)
+
+
+# Not a test: keep pytest from collecting it when a test module imports it.
+test_email_config.__test__ = False
 
 
 # Issue #365: a real delivery test. Logging in proves neither the Kindle

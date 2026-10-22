@@ -81,7 +81,7 @@ class TestSendEmail:
 class TestEmailConfigCheck:
     def test_starttls_uses_ssl_context(self):
         import ssl
-        from memanga.emailer import test_email_config as check_config
+        from memanga.emailer import check_email_config as check_config
         smtp = MagicMock()
         smtp.__enter__ = MagicMock(return_value=smtp)
         smtp.__exit__ = MagicMock(return_value=False)
@@ -92,3 +92,24 @@ class TestEmailConfigCheck:
         assert isinstance(ctx, ssl.SSLContext)
         method_names = [call[0] for call in smtp.method_calls]
         assert method_names.index("starttls") < method_names.index("login")
+
+
+class TestDeprecatedConfigCheckName:
+    """Issue #245: the old ``test_email_config`` name still works but is
+    not collected by pytest."""
+
+    def test_old_name_warns_and_delegates(self):
+        from memanga import emailer
+        with patch.object(emailer, "check_email_config",
+                          return_value=True) as check:
+            with pytest.warns(DeprecationWarning, match="check_email_config"):
+                assert emailer.test_email_config(
+                    "sender", "smtp.example.test", 587, "abc", timeout=3,
+                ) is True
+        check.assert_called_once_with("sender", "smtp.example.test", 587,
+                                      "abc", timeout=3)
+
+    def test_old_name_is_marked_not_a_test(self):
+        from memanga import emailer
+        assert emailer.test_email_config.__test__ is False
+        assert getattr(emailer.check_email_config, "__test__", True) is True
