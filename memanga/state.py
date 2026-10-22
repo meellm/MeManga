@@ -630,9 +630,10 @@ class State:
 
     # ── Notifications: state.notifications ─────────────────────────────
 
-    def add_notification(self, ntype: str, message: str) -> None:
+    def add_notification(self, ntype: str, message: str,
+                         details: Optional[str] = None) -> None:
         """See :meth:`NotificationStore.add`."""
-        self.notifications.add(ntype, message)
+        self.notifications.add(ntype, message, details)
 
     def get_notifications(self, limit: int = 20) -> List[Dict[str, Any]]:
         """See :meth:`NotificationStore.get_recent`."""

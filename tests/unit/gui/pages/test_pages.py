@@ -11,6 +11,19 @@ import time
 import pytest
 
 
+def _dialog_recorder(opened):
+    """Stand-in for ErrorDetailsDialog that records instead of blocking."""
+    class _Dialog:
+        def __init__(self, parent, details, summary="", title="Error details",
+                     **kwargs):
+            self._args = dict(details=details, summary=summary, title=title,
+                              **kwargs)
+
+        def exec(self):
+            opened.append(self._args)
+    return _Dialog
+
+
 # Every page should at least be navigable.
 ALL_PAGES = ["library", "downloads", "search", "notifications", "sources",
              "settings"]
@@ -156,6 +169,31 @@ class TestLibraryPage:
 
 
 class TestDownloadsPage:
+    def test_check_error_toast_is_short_and_redacted(
+            self, app_window, qapp, monkeypatch, isolated_home):
+        # Issue #342: the toast is a summary pointing to Notifications.
+        from memanga.gui.pages import downloads as downloads_mod
+        toasts = []
+        monkeypatch.setattr(downloads_mod, "Toast",
+                            lambda parent, text, kind="info", **k:
+                            toasts.append((text, kind)))
+        page = app_window._pages["downloads"]
+        title = f"{isolated_home}/Manga/Title " + "t" * 80
+        error = ("HTTPSConnectionPool(host='127.0.0.1', port=9): Max retries "
+                 "exceeded password=hunter22 (Caused by NewConnectionError("
+                 "'Connection refused'))")
+        page._on_check_error({"title": title, "error": error})
+
+        (text, kind), = toasts
+        assert kind == "error"
+        assert text.startswith("Error: ~/Manga/")
+        assert text.endswith("(details in Notifications)")
+        assert str(isolated_home) not in text and "hunter22" not in text
+        assert len(text) < 140
+
+        page._on_check_error({"title": "T", "error": error, "request_id": 1})
+        assert len(toasts) == 1
+
     def test_stats_cards_built(self, app_window, qapp):
         app_window.show_page("downloads"); qapp.processEvents()
         page = app_window._pages["downloads"]
@@ -211,6 +249,71 @@ class TestSearchPage:
         app_window.show_page("search"); qapp.processEvents()
         assert app_window._pages["search"]._search_entry is not None
 
+    def test_source_failures_open_on_request(self, app_window, qapp,
+                                              monkeypatch):
+        # Issue #342: why sources failed is one click away, redacted and
+        # whole, and is never turned into notifications.
+        from memanga.gui.pages import search as search_mod
+        opened = []
+        monkeypatch.setattr(search_mod, "ErrorDetailsDialog",
+                            _dialog_recorder(opened))
+        page = app_window._pages["search"]
+        assert page._failures_btn.isHidden()
+        before = len(app_window.app_state.get_notifications())
+        cause = ("SSLError: HTTPSConnectionPool(host='a.test', port=443): "
+                 "Max retries exceeded with url: /search?q=x&token=abc123 "
+                 "(Caused by SSLError(SSLCertVerificationError(1, "
+                 "'certificate verify failed: certificate has expired')))")
+        page._on_source_failed({"source": "a.test", "seq": -1, "error": cause})
+        page._on_source_failed({"source": "b.test", "seq": -1,
+                                "error": "RuntimeError: blocked (HTTP 403)"})
+
+        assert not page._failures_btn.isHidden()
+        assert page._failures_btn.accessibleName()
+        page._failures_btn.click()
+        text = opened[0]["details"]
+        assert "certificate has expired" in text
+        assert "b.test: RuntimeError: blocked (HTTP 403)" in text
+        assert "abc123" not in text
+        assert opened[0]["summary"] == "2 sources failed in this search."
+        assert opened[0]["complete"] is True
+        assert len(app_window.app_state.get_notifications()) == before
+
+    def test_long_source_failures_are_bounded_and_marked_partial(
+            self, app_window, qapp, monkeypatch):
+        # Issue #342: a long cause is kept whole up to the per-source
+        # bound; past it the cut is marked and the dialog says partial.
+        from memanga.gui.pages import search as search_mod
+        opened = []
+        monkeypatch.setattr(search_mod, "ErrorDetailsDialog",
+                            _dialog_recorder(opened))
+        page = app_window._pages["search"]
+        within = "a" * 15_000 + " CAUSE: certificate has expired"
+        beyond = "b" * (search_mod.SOURCE_ERROR_MAX_CHARS + 50) + " LOST TAIL"
+        page._on_source_failed({"source": "a.test", "seq": -1, "error": within})
+        page._on_source_failed({"source": "b.test", "seq": -1, "error": beyond})
+        page._failures_btn.click()
+
+        args = opened[0]
+        assert "a.test: " + within in args["details"]
+        assert "LOST TAIL" not in args["details"]
+        assert "more characters cut]" in args["details"]
+        assert args["complete"] is False
+        assert "1 of these errors is shortened" in args["notice"]
+
+    def test_search_failure_total_is_bounded(self, app_window, qapp):
+        from memanga.gui.pages import search as search_mod
+        page = app_window._pages["search"]
+        error = "c" * search_mod.SOURCE_ERROR_MAX_CHARS
+        sources = search_mod.SEARCH_ERRORS_MAX_CHARS // len(error) + 2
+        for i in range(sources):
+            page._on_source_failed({"source": f"s{i}.test", "seq": -1,
+                                    "error": error})
+        kept = sum(len(e) for _, e in page._sources_failed)
+        assert page._failures_kept_chars == search_mod.SEARCH_ERRORS_MAX_CHARS
+        assert kept < search_mod.SEARCH_ERRORS_MAX_CHARS + 100 * sources
+        assert page._failures_cut == 2
+
     def test_empty_query_does_nothing(self, app_window, qapp):
         page = app_window._pages["search"]
         page._search_entry.setText("")
@@ -251,6 +354,69 @@ class TestNotificationsPage:
         page = app_window._pages["notifications"]
         page._set_filter("downloads")
         assert page._filter_kind == "downloads"
+
+    def test_error_details_open_from_the_row(self, app_window, qapp,
+                                             monkeypatch):
+        # Issue #342: a shortened error has a keyboard-reachable Details
+        # button that opens the complete error.
+        from PySide6.QtCore import Qt
+        from memanga.gui.pages import notifications as page_mod
+        full = ("All sources failed for 'T': src.test: HTTPSConnectionPool("
+                "host='127.0.0.1', port=9): Max retries exceeded with url: /x "
+                "(Caused by NewConnectionError('Connection refused'))")
+        app_window.app_state.add_notification(
+            "error", "Check failed: T - All sources failed for 'T': src.test…",
+            details=full)
+        app_window.app_state.add_notification("download", "Saved <b>Ch. 1</b>")
+        opened = []
+        monkeypatch.setattr(page_mod, "ErrorDetailsDialog",
+                            _dialog_recorder(opened))
+
+        page = app_window._pages["notifications"]
+        page._refresh()
+        rows = page.findChildren(page_mod.NotificationRow)
+        error_row = next(r for r in rows if r._details == full)
+        assert all(r._details_btn is None for r in rows if not r._details)
+        btn = error_row._details_btn
+        assert btn.text() == "Details"
+        assert "details" in btn.accessibleName().lower()
+        assert btn.focusPolicy() & Qt.FocusPolicy.TabFocus
+        btn.click()
+        assert len(opened) == 1
+        assert opened[0]["details"] == full
+        assert opened[0]["summary"] == (
+            "Check failed: T - All sources failed for 'T': src.test…")
+        assert opened[0]["complete"] is True
+
+        # Messages are shown literally, never as rich text.
+        from PySide6.QtWidgets import QLabel
+        texts = [lbl for lbl in page.findChildren(QLabel)
+                 if lbl.text() == "Saved <b>Ch. 1</b>"]
+        assert texts and texts[0].textFormat() == Qt.TextFormat.PlainText
+
+
+    def test_long_error_details_open_whole_from_side_file(
+            self, app_window, qapp, monkeypatch):
+        # Issue #342: an error past the inline preview still opens whole,
+        # actionable tail included.
+        from memanga.gui.pages import notifications as page_mod
+        from memanga.output import DETAIL_MAX_CHARS
+        full = "x" * (DETAIL_MAX_CHARS + 300) + " CAUSE: certificate expired"
+        app_window.app_state.add_notification("error", "Failed: T - x…",
+                                              details=full)
+        opened = []
+        monkeypatch.setattr(page_mod, "ErrorDetailsDialog",
+                            _dialog_recorder(opened))
+
+        page = app_window._pages["notifications"]
+        page._refresh()
+        row = next(r for r in page.findChildren(page_mod.NotificationRow)
+                   if r._notif.get("details_chars"))
+        row._details_btn.click()
+
+        assert opened[0]["details"] == full
+        assert opened[0]["complete"] is True
+        assert opened[0]["total_chars"] == len(full)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -420,6 +586,79 @@ class TestSettingsPage:
         assert page._test_label.text() == "Success!"
         assert "MEMANGA_SMTP_PASSWORD_FILE" in page._test_label.toolTip()
         assert "file-pw" not in page._test_label.toolTip()
+
+    def test_smtp_test_failure_keeps_full_redacted_detail(
+            self, app_window, qapp, smtp_logins, monkeypatch):
+        # Issue #342: a short label; the full server reply on hover and
+        # in Notifications, without the password or the address.
+        import smtplib
+        from memanga import output
+        monkeypatch.setattr(output, "_secrets", set())
+        reply = ("Connection closed after credentials typed-pw-1234 for "
+                 "sender@example.invalid: 421 4.7.0 Try again later, closing "
+                 "connection. See https://help.example.invalid/smtp")
+
+        class FailingSMTP:
+            def __init__(self, *a, **k):
+                pass
+
+            def ehlo(self):
+                pass
+
+            def starttls(self, **k):
+                pass
+
+            def login(self, user, password):
+                raise smtplib.SMTPServerDisconnected(reply)
+
+            def quit(self):
+                pass
+
+        monkeypatch.setattr(smtplib, "SMTP", FailingSMTP)
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw-1234")
+        page._test_email()
+
+        label = page._test_label.text()
+        assert label.startswith("Failed: ") and label.endswith("…")
+        note = app_window.app_state.get_notifications()[0]
+        assert note["message"].startswith("Email test failed - ")
+        assert note["details"].endswith("See https://help.example.invalid/smtp")
+        assert "help.example.invalid/smtp" in page._test_label.toolTip()
+        for text in (label, page._test_label.toolTip(), note["message"],
+                     note["details"]):
+            assert "typed-pw-1234" not in text
+            assert "sender@example.invalid" not in text
+
+    def test_error_toast_short_with_full_redacted_notification(
+            self, app_window, qapp, monkeypatch, isolated_home, caplog):
+        # Issue #342: cron/task/export/import failures toast a summary;
+        # the whole error goes to Notifications and the log.
+        import logging
+        from memanga.gui.pages import settings as settings_mod
+        toasts = []
+        monkeypatch.setattr(settings_mod, "Toast",
+                            lambda parent, text, kind="info", **k:
+                            toasts.append((text, kind)))
+        target = isolated_home / "Exports" / "memanga_export.json"
+        error = OSError(13, "Permission denied while writing the export "
+                        "file; check the folder permissions", str(target))
+        page = app_window._pages["settings"]
+
+        with caplog.at_level(logging.ERROR, logger="memanga.gui.pages.settings"):
+            page._error_toast("Export failed", error)
+
+        (text, kind), = toasts
+        assert kind == "error"
+        assert text.startswith("Export failed: ")
+        assert text.endswith("(details in Notifications)")
+        note = app_window.app_state.get_notifications()[0]
+        assert note["message"].startswith("Export failed - ")
+        assert "~" in note["details"]
+        assert note["details"].endswith("memanga_export.json'")
+        for shown in (text, note["message"], note["details"]):
+            assert str(isolated_home) not in shown
+        assert any("Export failed" in r.getMessage() for r in caplog.records)
 
     def test_smtp_test_reports_unusable_override(
             self, app_window, qapp, smtp_logins, monkeypatch, tmp_path):

@@ -88,6 +88,9 @@ class ModalDialog(QDialog):
         close_btn.setIcon(icon("x_close", T.tokens()["text.t_2"], 14))
         close_btn.setFixedSize(28, 28)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Icon-only: give screen readers and tooltips a name.
+        close_btn.setAccessibleName("Close")
+        close_btn.setToolTip("Close")
         close_btn.clicked.connect(self.reject)
         head_l.addWidget(close_btn)
         panel_l.addWidget(head)

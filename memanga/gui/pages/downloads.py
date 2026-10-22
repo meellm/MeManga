@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from .base import BasePage
 from .. import theme as T
+from ..components.error_details import summarize_error
 from ..components.progress_item import ProgressItem
 from ..components.toast import Toast
 
@@ -519,7 +520,10 @@ class DownloadsPage(BasePage):
             return
         title = data.get("title", "")
         error = data.get("error", "Unknown error")
-        Toast(self, f"Error: {title}: {error[:50]}", kind="error")
+        # Issue #342: the app records the full error in Notifications.
+        Toast(self, f"Error: {summarize_error(title, 40)}: "
+                    f"{summarize_error(error, 50)} (details in Notifications)",
+              kind="error")
 
     def _on_check_complete(self, data):
         if data.get("request_id") is not None:

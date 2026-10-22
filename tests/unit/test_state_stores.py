@@ -446,6 +446,146 @@ class TestSchemaCompatibility:
             "error_count", "last_error", "last_error_msg", "status", "latency_ms"}
         assert data["last_check"] == data["check_history"][0]["timestamp"]
 
+    def test_notification_details_are_optional_and_redacted(self, state):
+        # Issue #342: the full error behind a short message, never a secret.
+        state.notifications.add("error", "Check failed: X - short…",
+                                details="boom password=hunter22 at end")
+        state.notifications.add("error", "plain")
+        state.notifications.add("error", "blank", details="")
+        s = _reload(state)
+        blank, plain, detailed = s.get_notifications()
+        assert detailed["details"] == "boom password=*** at end"
+        assert "details" not in plain
+        assert "details" not in blank
+
+    def test_long_details_kept_whole_in_a_private_side_file(self, state):
+        # Issue #342: the actionable tail after the inline preview is not
+        # lost; state.json keeps only the preview and a file name.
+        import os
+        from memanga.output import DETAIL_MAX_CHARS
+        error = "x" * (DETAIL_MAX_CHARS + 500) + " token=abc123 CAUSE: refused"
+        state.notifications.add("error", "Failed: T - x…", details=error)
+        state.flush()
+
+        note = json.loads(state.state_path.read_text())["notifications"][0]
+        assert len(note["details"]) == DETAIL_MAX_CHARS
+        assert note["details_chars"] > DETAIL_MAX_CHARS
+        assert "/" not in note["details_file"] and "\\" not in note["details_file"]
+
+        text, complete = state.notifications.full_details(note)
+        assert complete
+        assert text.endswith("token=*** CAUSE: refused")
+        assert "abc123" not in text
+        path = state.config_dir / "error-details" / note["details_file"]
+        if os.name == "posix":
+            assert path.stat().st_mode & 0o077 == 0
+
+    def test_runaway_details_are_bounded_and_flagged(self, state, monkeypatch):
+        from memanga.state_stores import NotificationStore
+        monkeypatch.setattr(NotificationStore, "FULL_DETAILS_MAX_CHARS", 6000)
+        state.notifications.add("error", "m", details="y" * 9000)
+        note = state.get_notifications()[0]
+        text, complete = state.notifications.full_details(note)
+        assert len(text) == 6000
+        assert not complete
+
+    def test_missing_or_foreign_side_file_falls_back_to_preview(self, state):
+        from memanga.output import DETAIL_MAX_CHARS
+        state.notifications.add("error", "m", details="z" * (DETAIL_MAX_CHARS + 1))
+        note = state.get_notifications()[0]
+        (state.config_dir / "error-details" / note["details_file"]).unlink()
+        text, complete = state.notifications.full_details(note)
+        assert text == note["details"] and not complete
+
+        outside = state.config_dir / "secret.txt"
+        outside.write_text("not for the dialog", encoding="utf-8")
+        forged = dict(note, details_file="../secret.txt")
+        text, complete = state.notifications.full_details(forged)
+        assert text == note["details"] and not complete
+
+    def test_side_files_go_with_their_notifications(self, state, monkeypatch):
+        from memanga.output import DETAIL_MAX_CHARS
+        from memanga.state_stores import NotificationStore
+        folder = state.config_dir / "error-details"
+        monkeypatch.setattr(NotificationStore, "MAX_NOTIFICATIONS", 2)
+        long = "w" * (DETAIL_MAX_CHARS + 1)
+        state.notifications.add("error", "a", details=long)
+        state.notifications.add("error", "b", details=long)
+        assert len(list(folder.glob("*.txt"))) == 2
+        state.notifications.add("error", "c", details="short")
+        # "a" dropped off the capped log, and its file with it.
+        assert len(list(folder.glob("*.txt"))) == 1
+        state.notifications.clear()
+        assert list(folder.glob("*.txt")) == []
+
+    def test_only_newest_long_errors_keep_a_side_file(self, state,
+                                                      monkeypatch):
+        # Bounded disk use: older long errors keep their preview and are
+        # then reported as partial, never as complete.
+        from memanga.output import DETAIL_MAX_CHARS
+        from memanga.state_stores import NotificationStore
+        monkeypatch.setattr(NotificationStore, "MAX_DETAIL_FILES", 1)
+        folder = state.config_dir / "error-details"
+        long = "v" * (DETAIL_MAX_CHARS + 10)
+        state.notifications.add("error", "old", details=long + " OLD")
+        state.notifications.add("error", "new", details=long + " NEW")
+
+        assert len(list(folder.glob("*.txt"))) == 1
+        new, old = state.get_notifications()
+        assert "details_file" not in old
+        text, complete = state.notifications.full_details(old)
+        assert not complete and text == old["details"]
+        text, complete = state.notifications.full_details(new)
+        assert complete and text.endswith(" NEW")
+
+    def test_concurrent_add_cannot_lose_a_new_side_file(self, state,
+                                                        monkeypatch):
+        # A cap-drop prune from another thread must not delete the side
+        # file of an entry still being added (issue #342 review).
+        import threading
+        from memanga.output import DETAIL_MAX_CHARS
+        from memanga.state_stores import NotificationStore
+        from memanga.state_stores import notifications as notif_mod
+        monkeypatch.setattr(NotificationStore, "MAX_NOTIFICATIONS", 2)
+        long = "u" * (DETAIL_MAX_CHARS + 10)
+        state.notifications.add("error", "oldest", details=long)
+        state.notifications.add("error", "short", details="x")
+
+        writing, release = threading.Event(), threading.Event()
+        real_write = notif_mod.atomic_write_text
+
+        def slow_write(path, text, *a, **k):
+            real_write(path, text, *a, **k)
+            writing.set()
+            release.wait(5)
+        monkeypatch.setattr(notif_mod, "atomic_write_text", slow_write)
+
+        adder = threading.Thread(target=state.notifications.add,
+                                 args=("error", "A", long + " A-TAIL"))
+        adder.start()
+        assert writing.wait(5)
+        other = threading.Thread(target=state.notifications.add,
+                                 args=("error", "B", "short"))
+        other.start()
+        other.join(0.3)  # blocked on the state lock while A writes
+        release.set()
+        adder.join(5)
+        other.join(5)
+        assert not adder.is_alive() and not other.is_alive()
+
+        a = next(n for n in state.get_notifications() if n["message"] == "A")
+        text, complete = state.notifications.full_details(a)
+        assert complete and text.endswith(" A-TAIL")
+
+    def test_source_health_keeps_the_whole_redacted_error(self, state):
+        error = ("HTTPSConnectionPool(host='127.0.0.1', port=9): Max retries "
+                 "exceeded with url: /x?token=abc123 (Caused by "
+                 "NewConnectionError('Connection refused'))")
+        state.source_health.update("src.test", False, error)
+        msg = state.source_health.get("src.test")["last_error_msg"]
+        assert msg.endswith("Connection refused'))")
+        assert "abc123" not in msg
+
     def test_caps_unchanged(self, state):
         from memanga.state_stores import ActivityStore, NotificationStore
         assert NotificationStore.MAX_NOTIFICATIONS == 100

@@ -9,8 +9,18 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from .base import BasePage
 from .. import theme as T
+from ..components.error_details import ErrorDetailsDialog
 from ..components.search_result import SearchResultRow
 from ..components.toast import Toast
+from ...output import redact_diagnostic
+
+# Issue #342: why sources failed is kept for the current search only.
+# Each source's redacted error is kept whole up to SOURCE_ERROR_MAX_CHARS
+# and one search's errors up to SEARCH_ERRORS_MAX_CHARS in total, so a
+# search over every source holds at most that much text in memory.
+# Anything beyond is cut where marked, and the details view says so.
+SOURCE_ERROR_MAX_CHARS = 20_000
+SEARCH_ERRORS_MAX_CHARS = 100_000
 
 # Broken-source list and source-selection logic are shared with the
 # CLI's `memanga search` — single source of truth in memanga.search.
@@ -35,6 +45,8 @@ class SearchPage(BasePage):
         self._sources_total = 0
         self._sources_done = 0
         self._sources_failed: list[tuple[str, str]] = []
+        self._failures_kept_chars = 0
+        self._failures_cut = 0
         # The worker tags every event with the search generation seq
         # it belongs to. We track the seq of the CURRENT search here
         # and drop events whose seq doesn't match — that's how we
@@ -140,9 +152,23 @@ class SearchPage(BasePage):
         hero_l.addWidget(bar_wrap)
 
         # Status / hint under the input
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
         self._status_label = QLabel("Type a title and press Enter to search.")
         self._status_label.setProperty("role", "hint")
-        hero_l.addWidget(self._status_label)
+        status_row.addWidget(self._status_label)
+        # Issue #342: why sources failed, on request, for this search
+        # only -- one button rather than a notification per source.
+        self._failures_btn = QPushButton("Failure details")
+        self._failures_btn.setProperty("variant", "ghost")
+        self._failures_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._failures_btn.setToolTip("Show why sources failed in this search")
+        self._failures_btn.setAccessibleName("Show search failure details")
+        self._failures_btn.clicked.connect(self._show_failures)
+        self._failures_btn.hide()
+        status_row.addWidget(self._failures_btn)
+        status_row.addStretch(1)
+        hero_l.addLayout(status_row)
 
         layout.addWidget(hero)
         layout.addSpacing(8)
@@ -187,6 +213,9 @@ class SearchPage(BasePage):
         self._results.clear()
         self._sources_done = 0
         self._sources_failed = []
+        self._failures_kept_chars = 0
+        self._failures_cut = 0
+        self._failures_btn.hide()
 
         # Refuse the request locally when we know we're offline,
         # rather than handing it to the worker just to have it
@@ -291,10 +320,50 @@ class SearchPage(BasePage):
         if self._is_stale(data):
             return
         self._sources_done += 1
-        self._sources_failed.append(
-            (data.get("source", "?"), data.get("error", "")[:80])
-        )
+        self._sources_failed.append((
+            data.get("source", "?"),
+            self._keep_failure(data.get("error", "") or "Unknown error"),
+        ))
+        self._failures_btn.show()
         self._update_progress_label()
+
+    def _keep_failure(self, error) -> str:
+        """The redacted error, whole within the per-source and per-search
+        bounds; a cut is marked in the text and counted."""
+        safe = redact_diagnostic(error, limit=None)
+        room = max(0, min(SOURCE_ERROR_MAX_CHARS,
+                          SEARCH_ERRORS_MAX_CHARS - self._failures_kept_chars))
+        if len(safe) > room:
+            more = len(safe) - room
+            safe = f"{safe[:room].rstrip()}… [{more} more characters cut]"
+            self._failures_cut += 1
+            self._failures_kept_chars += room
+        else:
+            self._failures_kept_chars += len(safe)
+        return safe
+
+    def failure_details_text(self) -> str:
+        """Every failed source of the current search with its error."""
+        return "\n\n".join(f"{source}: {error}"
+                           for source, error in self._sources_failed)
+
+    def _show_failures(self):
+        if not self._sources_failed:
+            return
+        n = len(self._sources_failed)
+        cut = self._failures_cut
+        notice = None
+        if cut:
+            notice = (
+                f"{cut} of these errors {'is' if cut == 1 else 'are'} shortened "
+                f"where marked: a search keeps up to "
+                f"{SOURCE_ERROR_MAX_CHARS:,} characters per source and "
+                f"{SEARCH_ERRORS_MAX_CHARS:,} in total.")
+        ErrorDetailsDialog(
+            self, self.failure_details_text(),
+            summary=f"{n} source{'s' if n != 1 else ''} failed in this search.",
+            title="Search failures", complete=not cut, notice=notice,
+        ).exec()
 
     def _update_progress_label(self):
         done = self._sources_done

@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import logging
 import logging.handlers
+import os
 import re
 import sys
 
@@ -111,7 +112,10 @@ class TestRedaction:
         ("api-key=K-1", "api-key=***"),
         ("Authorization: Bearer abc.def", "Authorization: *** ***"),
         ("bearer abc.def", "bearer ***"),
-        ("https://me:s3cret@host/x", "https://me:***@host/x"),
+        ("https://me:s3cret@host/x", "https://***@host/x"),
+        ("https://private-user@host/x?q=1", "https://***@host/x?q=1"),
+        ("ssh://git@host:22/repo", "ssh://***@host:22/repo"),
+        ("https://host/path?a=b@c", "https://host/path?a=b@c"),
     ])
     def test_common_shapes_are_masked(self, text, expected):
         assert output.redact(text) == expected
@@ -130,6 +134,60 @@ class TestRedaction:
         line = output.RedactingFormatter("%(message)s").format(record)
         assert "tb-secret-value" not in line
         assert "auth failed for ***" in line
+
+
+class TestRedactDiagnostic:
+    """Issue #342: error text the desktop app stores, shows and copies."""
+
+    @pytest.fixture(autouse=True)
+    def _no_registered_secrets(self, monkeypatch):
+        monkeypatch.setattr(output, "_secrets", set())
+
+    def test_reuses_log_redaction(self):
+        output.register_secret("app-pass-1234")
+        text = output.redact_diagnostic(
+            "login app-pass-1234 failed; token=abc; https://u:pw@h.test/x")
+        assert "app-pass-1234" not in text
+        assert "abc" not in text
+        assert ":pw@" not in text
+        assert "https://***@h.test/x" in text
+
+    def test_masks_email_local_part_keeps_domain(self):
+        text = output.redact_diagnostic(
+            "(553, b'5.7.1 <reader.one+kindle@example.com>: Sender rejected')")
+        assert "reader.one" not in text
+        assert "***@example.com" in text
+
+    def test_home_directory_shown_as_tilde(self, isolated_home):
+        target = isolated_home / "Downloads" / "MeManga" / "ch1.pdf"
+        text = output.redact_diagnostic(
+            f"[Errno 13] Permission denied: {str(target)!r} ({target})")
+        assert str(isolated_home) not in text
+        assert "~" in text
+        assert "Downloads" in text and "ch1.pdf" in text
+
+    def test_other_directories_stay(self, isolated_home):
+        sibling = f"{isolated_home}-other{os.sep}file"
+        assert output.redact_diagnostic(sibling) == sibling
+
+    def test_keeps_actionable_text_whole(self):
+        error = ("All sources failed for 'Issue 342 Repro': mangapill.com: "
+                 "HTTPSConnectionPool(host='127.0.0.1', port=9): Max retries "
+                 "exceeded with url: /manga/issue-342-repro (Caused by "
+                 "NewConnectionError(\"HTTPSConnection(host='127.0.0.1', "
+                 "port=9): Failed to establish a new connection: [Errno 111] "
+                 "Connection refused\"))")
+        assert output.redact_diagnostic(error) == error
+
+    def test_long_text_is_bounded_with_a_note(self):
+        text = output.redact_diagnostic("x" * 5000, limit=100)
+        assert text.startswith("x" * 100)
+        assert text.endswith("… [4900 more characters cut]")
+        assert output.redact_diagnostic("x" * 5000, limit=None) == "x" * 5000
+
+    def test_none_and_exceptions(self):
+        assert output.redact_diagnostic(None) == ""
+        assert output.redact_diagnostic(RuntimeError(" boom ")) == "boom"
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -4,7 +4,9 @@ Download progress bar widget.
 
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QProgressBar
 from PySide6.QtCore import Qt
+from ...output import redact_diagnostic
 from .. import theme as T
+from .error_details import detail_tooltip, summarize_error
 
 
 class ProgressItem(QFrame):
@@ -25,6 +27,7 @@ class ProgressItem(QFrame):
         top.addWidget(title_label, 1)
 
         self._status_label = QLabel("Waiting...")
+        self._status_label.setTextFormat(Qt.TextFormat.PlainText)
         self._status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
         top.addWidget(self._status_label)
 
@@ -58,5 +61,9 @@ class ProgressItem(QFrame):
         self._status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.SUCCESS};")
 
     def set_error(self, error: str):
-        self._status_label.setText(f"Error: {error[:40]}")
+        # Issue #342: short label; the whole (redacted) error on hover,
+        # for screen readers, and in the Notifications entry.
+        self._status_label.setText(f"Error: {summarize_error(error, 40)}")
+        self._status_label.setToolTip(detail_tooltip(error))
+        self._status_label.setAccessibleDescription(redact_diagnostic(error))
         self._status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
