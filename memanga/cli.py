@@ -57,7 +57,8 @@ from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
 from .emailer import send_to_kindle, smtp_timeout
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
-                               DeliveryStatus, PipelineOptions)
+                               DeliveryStatus, PipelineOptions,
+                               manga_auto_downloads)
 from .output import (LOG_FILE_NAME, LOG_LEVEL_ENV, RICH_MARKUP,
                      configure_logging, ensure_utf8_streams,
                      invalid_log_level_env, is_plain_console,
@@ -1594,24 +1595,29 @@ def _process_chapter(pipeline: ChapterPipeline, manga, chapter):
 
 
 def _check_summary_line(dry_run, checked, new, downloaded, failed,
-                        errored, unconfirmed, undelivered=0) -> str:
+                        errored, unconfirmed, undelivered=0, manual=0) -> str:
     """The single plain-text summary of a `check` run (issue #226).
 
     When something is left to do it ends with ``; next: <action>``
     (issue #372), so a cron run that hides warnings still says what to
     run. Unconfirmed chapters and failed chapters never occur in the same
-    run: the first only happens when nothing is downloaded.
+    run: the first only happens when nothing is downloaded. ``manual``
+    counts new chapters of manual-mode manga that were only listed
+    (#341); they are not part of ``new``.
     """
     if dry_run:
         line = f"Dry run: {new} chapter(s) available for download"
     elif new == 0:
-        line = "Summary: no new chapters found"
+        line = ("Summary: no chapters to download" if manual
+                else "Summary: no new chapters found")
     else:
         line = (f"Summary: {downloaded}/{new} chapters downloaded, "
                 f"{failed} failed")
         if undelivered:
             line += f", {undelivered} not sent to Kindle"
     line += f"; checked {checked} manga, {errored} could not be checked"
+    if manual:
+        line += f", {manual} chapter(s) of manual-mode manga not downloaded"
     if unconfirmed:
         line += (f", {unconfirmed} chapter(s) need confirmation"
                  "; next: rerun with --download")
@@ -1634,6 +1640,14 @@ def _warn_undelivered(count: int) -> None:
         )
 
 
+def _quoted_title(title: str) -> str:
+    """``title`` quoted for a command line on this platform."""
+    if sys.platform == "win32":
+        return subprocess.list2cmdline([title])
+    import shlex
+    return shlex.quote(title)
+
+
 def cmd_check(args):
     """Check for new chapters and download them.
 
@@ -1645,6 +1659,11 @@ def cmd_check(args):
         prompting.
       - otherwise: ask per chapter on a terminal. Without a terminal, or
         with ``--quiet``, nothing is downloaded and the run exits 1.
+
+    Without a TARGET, manual-mode manga (#341) are checked and their new
+    chapters listed, but never downloaded unless the user is asked per
+    chapter, like the desktop app's background check. Naming the manga
+    downloads it as usual.
     """
     manga_list = config.get("manga", [])
     
@@ -1695,6 +1714,8 @@ def cmd_check(args):
     total_unconfirmed = 0
     # Saved chapters whose Kindle delivery failed (#360).
     total_undelivered = 0
+    # New chapters of manual-mode manga, listed but not downloaded (#341).
+    total_manual = 0
 
     # Partial-chapter tolerance (issue #86). Config is the source of truth;
     # `check` flags can override it for a single run.
@@ -1784,7 +1805,20 @@ def cmd_check(args):
                 if not suspicious:
                     console.print("  [dim]└─ No new chapters[/dim]")
                 continue
-            
+
+            # Manual mode (#341): a library-wide run that would not ask
+            # per chapter only lists them. A dry run previews that run.
+            if (not args.title and not manga_auto_downloads(manga)
+                    and (dry_run or download or not can_prompt)):
+                console.print(
+                    f"  [cyan]└─ {len(new_chapters)} new chapter(s) — manual mode, "
+                    f"not downloaded. Download with: memanga check "
+                    f"{_esc(_quoted_title(title))} --download[/cyan]",
+                    soft_wrap=True,
+                )
+                total_manual += len(new_chapters)
+                continue
+
             console.print(f"  [green]└─ {len(new_chapters)} new chapter(s)![/green]")
             total_new += len(new_chapters)
             
@@ -1848,18 +1882,22 @@ def cmd_check(args):
         console.print(_check_summary_line(
             dry_run, total_checked, total_new, total_downloaded,
             total_failed, total_errored, total_unconfirmed,
-            total_undelivered,
+            total_undelivered, total_manual,
         ), markup=False)
     else:
         console.print()
         if total_new == 0:
-            console.print("[dim]No new chapters found.[/dim]")
+            if not total_manual:
+                console.print("[dim]No new chapters found.[/dim]")
         elif dry_run:
             console.print(f"[yellow]📊 Dry run: {total_new} chapter(s) available for download[/yellow]")
         else:
             console.print(f"[green]📊 Summary: {total_downloaded}/{total_new} chapters downloaded[/green]")
             if delivery_mode == "local":
                 console.print(f"[dim]📁 Downloads: {_esc(download_dir)}[/dim]")
+        if total_manual:
+            console.print(f"[cyan]📋 {total_manual} chapter(s) of manual-mode manga "
+                          "not downloaded[/cyan]")
     if total_failed > 0:
         _diagnostic(
             logging.WARNING,
@@ -3471,14 +3509,37 @@ def cmd_send(args):
             "'email' with a Kindle address. See 'memanga config email'.[/red]"
         )
 
+    # Records are keyed by the title they were saved under, which may
+    # differ in case from the tracked entry (targets match that way too).
+    tracked = config.get("manga", [])
+    manga_by_title = {m["title"]: m for m in tracked}
+    manga_by_key = {}
+    for m in tracked:
+        manga_by_key.setdefault(m["title"].casefold(), m)
     sent = 0
     attempted = 0
+    opted_out = 0
     for manga_title, chapters in sorted(pending.items()):
+        manga = (manga_by_title.get(manga_title)
+                 or manga_by_key.get(manga_title.casefold()))
+        if manga is not None and not pipeline.delivers_to_kindle(manga):
+            # The manga opted out of Kindle delivery (#341): nothing is
+            # sent and its records stay until the user decides.
+            quoted = _esc(_quoted_title(manga_title))
+            console.print(
+                f"  [dim]Skipped {_esc(manga_title)}: Kindle delivery is off for "
+                f"this manga ({len(chapters)} chapter(s) kept). Turn it on with "
+                f"'memanga update {quoted} --kindle' or forget them with "
+                f"'memanga send --pending --clear {quoted}'.[/dim]",
+                soft_wrap=True,
+            )
+            opted_out += len(chapters)
+            continue
         for chapter_num in sorted(chapters, key=chapter_order_key):
             console.print(f"  [dim]{_esc(manga_title)} Chapter {_esc(chapter_num)}[/dim]")
             attempted += 1
             try:
-                status = pipeline.redeliver(manga_title, chapter_num)
+                status = pipeline.redeliver(manga_title, chapter_num, manga)
             finally:
                 # Like `check` (#230): a send that went out must stay recorded.
                 _checkpoint_state()
@@ -3487,6 +3548,9 @@ def cmd_send(args):
 
     console.print()
     console.print(f"[green]📊 Send summary: {sent}/{attempted} chapters sent to Kindle[/green]")
+    if opted_out:
+        console.print(f"[dim]{opted_out} chapter(s) skipped: Kindle delivery is "
+                      "off for their manga[/dim]")
     if sent < attempted:
         return EXIT_PARTIAL
 

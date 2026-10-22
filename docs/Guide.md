@@ -410,10 +410,13 @@ run add -t "Blue Lock" -u "https://mangadex.org/title/uuid-here" --status on-hol
 
 `--kindle` and `--no-kindle` cannot be combined. `--mode` and the Kindle
 toggle are the same per-manga settings shown on the desktop app's manga page,
-and both are honored by the desktop app (the Kindle toggle only matters when
-email delivery is enabled). CLI `check --download` and cron currently still
-process every `reading` manga regardless of these per-manga mode and Kindle
-settings. Omitted flags are not written to `config.yaml`, so the defaults
+and the command line honors them the same way (the Kindle toggle only matters
+when email delivery is enabled). A `manual` manga is checked and its new
+chapters are listed, but a `check` of every manga that doesn't ask per
+chapter (`--download`, cron's `check --auto --quiet`) never downloads them;
+`check "Title" --download` or answering the per-chapter question does. With
+the Kindle toggle off, chapters are saved but never emailed, by `check`,
+`failed retry` or `send --pending`. Omitted flags are not written to `config.yaml`, so the defaults
 above apply. Invalid values are rejected before any config is saved. These
 flags also work with `add -i`, which does not ask for them. Output format
 stays global (`config`, or `check --format`); there is no per-manga format.
@@ -532,7 +535,7 @@ The manga is a title or `#N` from `run list`. The older `-t "One Piece"`
 | Mode | How to pick it | What happens |
 |------|----------------|--------------|
 | Check only | `--dry-run` (`-n`) | Lists the chapters a download run would fetch, with the same backup-delay and suspicious-batch rules. Nothing is downloaded, emailed or post-processed, and nothing is saved: no check history or last-check time, no backup-delay clock, no suspicious-batch record or notification, and a held batch stays held. `--dry-run` wins over `--download` and its aliases. |
-| Download | `--download` (aliases `-a`/`--auto` and `-y`/`--yes`) | Downloads every new chapter without asking. |
+| Download | `--download` (aliases `-a`/`--auto` and `-y`/`--yes`) | Downloads every new chapter without asking. Without a manga name, `manual`-mode manga are only listed, like in the desktop app. |
 | Ask | neither flag | On a terminal, asks once per chapter. Without a terminal (cron, pipes, CI), or with `--quiet`, it downloads nothing and exits `1` with a hint. |
 
 `--auto` and `--yes` keep working and are not deprecated; existing cron
@@ -1064,7 +1067,7 @@ run edit "One Piece" --status on-hold --mode manual --no-kindle
 | `--kindle` / `--no-kindle` | per-manga Kindle toggle on or off |
 
 These are the same per-manga settings `add` accepts (see above), with the
-same desktop-app-only effect of `--mode` and the Kindle toggle. Output format
+same effect of `--mode` and the Kindle toggle. Output format
 stays global (`config`, or `check --format`); there is no per-manga format.
 
 ### Combining changes

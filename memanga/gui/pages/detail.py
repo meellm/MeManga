@@ -1263,6 +1263,10 @@ class DetailPage(BasePage):
         the same way `memanga send --pending` does."""
         if not self._manga:
             return
+        from ...chapter_pipeline import manga_sends_to_kindle
+        if not manga_sends_to_kindle(self._manga):
+            Toast(self, "Kindle delivery is off for this manga", kind="error")
+            return
         kindle_cfg = self._kindle_settings()
         if not kindle_cfg:
             Toast(self, "Turn on Kindle email delivery in Settings first", kind="error")

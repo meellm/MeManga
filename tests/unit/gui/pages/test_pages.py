@@ -1694,6 +1694,23 @@ class TestDetailPage:
         assert calls == []
         assert app_window.app_state.failures.get_undelivered(sample_manga["title"])
 
+    def test_send_refused_when_manga_opted_out(
+            self, app_window, qapp, sample_manga, tmp_path, monkeypatch):
+        # Issue #341: per-manga Kindle opt-out wins over global email.
+        monkeypatch.setattr("memanga.config.get_app_password", lambda cfg: "pw")
+        app_window.config.set("delivery.mode", "email")
+        app_window.config.set("email.kindle_email", "reader@example.com")
+        app_window.config.set("email.sender_email", "sender@example.com")
+        manga = {**sample_manga, "send_to_kindle": False}
+        page = self._undelivered_page(app_window, qapp, manga, tmp_path)
+        calls = []
+        app_window.worker.send_pending = lambda *a, **kw: calls.append(a)
+
+        page._send_pending("8")
+
+        assert calls == []
+        assert app_window.app_state.failures.get_undelivered(manga["title"])
+
 
 class TestDownloadsQueueing:
     """Issue #50: an explicit "Download All" / "Download from chapter"
@@ -1742,6 +1759,21 @@ class TestDownloadsQueueing:
             "results": [self._result(sample_manga, "1", "2")],
         })
         assert queued == []
+
+    def test_background_sweep_queues_entry_without_mode(self, app_window,
+                                                        qapp, sample_manga):
+        # Issue #341: shared policy; an older entry with no mode is auto.
+        manga = {k: v for k, v in sample_manga.items() if k != "mode"}
+        app_window.config.set("manga", [manga])
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+
+        queued = []
+        app_window.worker.download_chapter = (
+            lambda **kw: queued.append(str(kw["chapter"].number))
+        )
+        page._on_check_complete({"results": [self._result(manga, "1", "2")]})
+        assert queued == ["1", "2"]
 
     def test_correlated_check_complete_does_not_toast_manual_results(
             self, app_window, qapp, sample_manga, mocker):
