@@ -337,9 +337,22 @@ class TestDelivery:
         outcome = pipeline.process(SINGLE, _primary())
 
         assert outcome.delivery is DeliveryStatus.SENT
+        assert outcome.local_copy_deleted is True
         assert not pdf.exists()
         assert pipeline.reporter.events[-1] == ("deleted_after_send",)
         assert state.is_chapter_downloaded(TITLE, "71")
+
+    def test_sent_without_delete_keeps_local_copy(self, state, tmp_path, pdf):
+        downloads = _Downloads({("primary.test", False): pdf})
+        pipeline = _pipeline(state, tmp_path, downloads, sent=[],
+                             delivery_mode="email", email=EMAIL)
+
+        outcome = pipeline.process(SINGLE, _primary())
+
+        assert outcome.delivery is DeliveryStatus.SENT
+        assert outcome.local_copy_deleted is False
+        assert pdf.exists()
+        assert state.get_download_history()[0]["deleted_after_send"] is False
 
     def test_email_failure_keeps_file_and_still_counts_as_saved(
             self, state, tmp_path, pdf):
@@ -495,11 +508,16 @@ class TestDeleteFailure:
         outcome = pipeline.process(SINGLE, _primary())
 
         assert outcome.delivery is DeliveryStatus.SENT
+        assert outcome.local_copy_deleted is False
         assert pdf.exists()
         assert pipeline.reporter.events[-2:] == [
             ("email_sent",), ("delete_failed", "in use"),
         ]
         assert state.is_chapter_downloaded(TITLE, "71")
+        # Issue #338: the history says sent, not deleted.
+        entry = state.get_download_history()[0]
+        assert entry["kindle_sent"] is True
+        assert entry["deleted_after_send"] is False
 
 
 class TestDownloadHistory:
@@ -527,6 +545,7 @@ class TestDownloadHistory:
         assert not entry["from_backup"]
         assert not entry["partial"]
         assert not entry["kindle_sent"]
+        assert entry["deleted_after_send"] is False
         assert entry["timestamp"]
 
     def test_backup_complete_sent_and_deleted_keeps_measured_size(
@@ -549,6 +568,8 @@ class TestDownloadHistory:
         assert entry["from_backup"]
         assert not entry["partial"]
         assert entry["kindle_sent"]
+        # Issue #338: the history records that the local copy is gone.
+        assert entry["deleted_after_send"] is True
         assert entry["size_mb"] == 0.5
 
     def test_failed_delivery_is_not_marked_sent(self, state, tmp_path, pdf):
@@ -559,7 +580,9 @@ class TestDownloadHistory:
 
         pipeline.process(SINGLE, _primary())
 
-        assert not self._entry(state)["kindle_sent"]
+        entry = self._entry(state)
+        assert not entry["kindle_sent"]
+        assert entry["deleted_after_send"] is False
 
     def test_backup_partial_is_logged_as_partial(self, state, tmp_path, pdf):
         downloads = _Downloads({
@@ -722,6 +745,47 @@ class TestUndeliveredChapters:
         assert pipeline.reporter.events[-2:] == [("email_sent",),
                                                  ("deleted_after_send",)]
         assert state.is_chapter_downloaded(TITLE, "71")
+        # Issue #338: the download's history entry now says sent and
+        # deleted; no second entry is logged.
+        history = state.get_download_history()
+        assert len(history) == 1
+        assert (history[0]["path"], history[0]["kindle_sent"],
+                history[0]["deleted_after_send"]) == (str(pdf), True, True)
+
+    def test_redeliver_without_delete_marks_history_sent_only(
+            self, state, tmp_path, pdf):
+        pipeline = self._failed_delivery(state, tmp_path, pdf)
+        assert state.get_download_history()[0]["kindle_sent"] is False
+        pipeline.send = lambda **kwargs: None
+
+        status = pipeline.redeliver(TITLE, "71")
+
+        assert status is DeliveryStatus.SENT
+        assert pdf.exists()
+        history = state.get_download_history()
+        assert len(history) == 1
+        assert (history[0]["kindle_sent"],
+                history[0]["deleted_after_send"]) == (True, False)
+
+    def test_redeliver_with_failed_delete_marks_history_sent_not_deleted(
+            self, state, tmp_path, pdf, monkeypatch):
+        pipeline = self._failed_delivery(state, tmp_path, pdf,
+                                         delete_after_send=True)
+        pipeline.send = lambda **kwargs: None
+        real_unlink = type(pdf).unlink
+
+        def refuse(self, *args, **kwargs):
+            if self == pdf:
+                raise PermissionError("in use")
+            return real_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(type(pdf), "unlink", refuse)
+        status = pipeline.redeliver(TITLE, "71")
+
+        assert status is DeliveryStatus.SENT
+        assert pdf.exists()
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, False)
 
     def test_redeliver_failure_keeps_file_and_counts_attempt(
             self, state, tmp_path, pdf):
@@ -738,6 +802,9 @@ class TestUndeliveredChapters:
         assert pdf.exists()
         record = state.failures.get_undelivered(TITLE)["71"]
         assert (record["error"], record["attempts"]) == ("Mailbox full", 2)
+        # The history entry still says not sent and not deleted.
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (False, False)
 
     def test_redeliver_missing_file_is_reported_not_sent(
             self, state, tmp_path, pdf):
@@ -817,6 +884,9 @@ class TestPerMangaPolicy:
         assert state.failures.get_all_undelivered() == {}
         assert state.is_chapter_downloaded(TITLE, "71")
         assert ("email_sending",) not in pipeline.reporter.events
+        # #338: History says neither sent nor deleted.
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (False, False)
 
     def test_missing_field_still_sends(self, state, tmp_path, pdf):
         downloads = _Downloads({("primary.test", False): pdf})
@@ -839,6 +909,7 @@ class TestPerMangaPolicy:
 
     def test_redeliver_skips_opted_out_manga_and_keeps_record(
             self, state, tmp_path, pdf):
+        state.add_download_history(TITLE, "71", "pdf", str(pdf), 0.1)
         state.failures.add_undelivered(TITLE, "71", str(pdf), "SMTP down")
         before = state.failures.get_undelivered(TITLE)
         sent = []
@@ -853,6 +924,9 @@ class TestPerMangaPolicy:
         assert sent == []
         assert pdf.exists()
         assert state.failures.get_undelivered(TITLE) == before
+        # #338: the history entry is left unsent and not deleted.
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (False, False)
 
     def test_redeliver_with_tracked_manga_still_sends(
             self, state, tmp_path, pdf):

@@ -440,7 +440,8 @@ class TestSchemaCompatibility:
         assert data["search_history"] == ["query"]
         assert set(data["download_history"][0]) == {
             "title", "chapter", "format", "path", "size_mb", "kindle_sent",
-            "source", "from_backup", "partial", "timestamp"}
+            "source", "from_backup", "partial", "deleted_after_send",
+            "timestamp"}
         assert set(data["check_history"][0]) == {"timestamp", "new_chapters", "downloaded"}
         assert set(data["source_health"]["src.test"]) == {
             "error_count", "last_error", "last_error_msg", "status", "latency_ms"}
@@ -701,6 +702,36 @@ class TestCliFlow:
         assert s.get_manga_state("Old") == {}
         assert s.get_downloaded_chapters("New") == ["1"]
         assert s.get_last_chapter("New") is None
+
+    def test_mark_download_sent_updates_only_the_unsent_entry(self, state):
+        # Issue #338: a later successful send updates the chapter's own
+        # history entry; other entries keep what they said.
+        a = state.activity
+        a.add_download("T", "1", "pdf", "old.pdf", 1, True)
+        a.add_download("T", "1", "pdf", "c1.pdf", 1)
+        a.add_download("T", "2", "pdf", "c2.pdf", 1)
+        a.add_download("U", "1", "pdf", "u1.pdf", 1)
+
+        assert a.mark_download_sent("T", "1", "other.pdf") is False
+        assert a.mark_download_sent("T", "1", "c1.pdf",
+                                    deleted_after_send=True) is True
+        assert a.mark_download_sent("T", "1", "c1.pdf") is False
+
+        s = _reload(state)
+        status = {h["path"]: (h["kindle_sent"], h["deleted_after_send"])
+                  for h in s.get_download_history()}
+        assert status == {"old.pdf": (True, False), "c1.pdf": (True, True),
+                          "c2.pdf": (False, False), "u1.pdf": (False, False)}
+
+    def test_mark_download_sent_keeps_old_entries_compatible(self, state):
+        # An entry logged before #338 has no deleted_after_send key.
+        state.activity.add_download("T", "1", "pdf", "c1.pdf", 1)
+        with state._locked() as data:
+            data["download_history"][0].pop("deleted_after_send")
+
+        assert state.activity.mark_download_sent("T", "1") is True
+        entry = _reload(state).get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, False)
 
 
 class TestGuiFlow:

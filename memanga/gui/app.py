@@ -531,7 +531,22 @@ class MeMangaApp(QMainWindow):
         self.events.publish("check_complete_silent", {})
 
     def _on_kindle_sent(self, data):
-        self.app_state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")
+        # Issue #338: with delete-after-send on, say what happened to the
+        # local copy. A copy that couldn't be deleted is a warning with
+        # the reason behind Details; the chapter was still sent.
+        local_copy = data.get("local_copy")
+        if local_copy == "kept":
+            # Title and chapter, like the send-failure notification: the
+            # short prefix leaves no room for a long file name.
+            label = f"{data.get('title', '')} Ch. {data.get('chapter', '')}"
+            notify_error(self, f"Sent to Kindle; local copy not deleted: {label}",
+                         data.get("delete_error") or "Unknown error",
+                         ntype="warn")
+            return
+        message = f"Sent to Kindle: {data.get('path', '').split('/')[-1]}"
+        if local_copy == "deleted":
+            message += " — local copy deleted"
+        self.app_state.add_notification("kindle", message)
         self.events.publish("notification_added", {})
 
     def _on_kindle_error(self, data):

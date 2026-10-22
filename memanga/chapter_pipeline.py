@@ -77,6 +77,8 @@ class ChapterOutcome:
     delivery: DeliveryStatus = DeliveryStatus.NOT_REQUESTED
     # Only when delivery FAILED: why it failed.
     delivery_error: Optional[str] = None
+    # Only when SENT: the local copy was deleted afterwards (#338).
+    local_copy_deleted: bool = False
     # Only for FAILED: why the primary and (when tried) backup failed.
     error: Optional[str] = None
     backup_error: Optional[str] = None
@@ -381,9 +383,10 @@ class ChapterPipeline:
         # Measured before delivery, which may delete the local copy.
         size_mb = _size_mb(path)
         # Delivery runs before the chapter is marked downloaded (#86).
-        delivery, delivery_error = self._deliver(path, manga)
+        delivery, delivery_error, deleted = self._deliver(path, manga)
         outcome = replace(outcome, delivery=delivery,
-                          delivery_error=delivery_error)
+                          delivery_error=delivery_error,
+                          local_copy_deleted=deleted)
         # The chapter is saved either way; one that didn't reach the
         # Kindle stays on record until it does (#360).
         self._record_delivery(title, chapter.number, path, delivery,
@@ -400,6 +403,7 @@ class ChapterPipeline:
             source=source,
             from_backup=from_backup,
             partial=outcome.status is ChapterStatus.PARTIAL,
+            deleted_after_send=deleted,
         )
         return outcome
 
@@ -411,10 +415,11 @@ class ChapterPipeline:
         a download, so delete-after-send still only happens once the send
         succeeded. The record is cleared when the chapter is sent and
         kept, with the new error and attempt, when it fails again or its
-        file is gone. With email delivery not configured, or ``manga``
-        (the tracked entry, when there is one) opted out of Kindle
-        delivery, nothing is sent and the record is left as it is
-        (``NOT_REQUESTED``).
+        file is gone. A send also updates the chapter's download-history
+        entry: sent, and whether the local copy was deleted (#338). With
+        email delivery not configured, or ``manga`` (the tracked entry,
+        when there is one) opted out of Kindle delivery, nothing is sent
+        and the record is left as it is (``NOT_REQUESTED``).
         """
         chapter = str(chapter)
         record = self.state.failures.get_undelivered(title).get(chapter)
@@ -430,7 +435,10 @@ class ChapterPipeline:
             self.reporter.email_failed(error)
             status, delivery_error = DeliveryStatus.FAILED, str(error)
         else:
-            status, delivery_error = self._deliver(path, manga)
+            status, delivery_error, deleted = self._deliver(path, manga)
+            if status is DeliveryStatus.SENT:
+                self.state.activity.mark_download_sent(
+                    title, chapter, recorded, deleted_after_send=deleted)
         self._record_delivery(title, chapter, recorded, status, delivery_error)
         return status
 
@@ -453,17 +461,17 @@ class ChapterPipeline:
         return opts.delivery_mode == "email" and bool(opts.email.get("kindle_email"))
 
     def _deliver(self, path: Path, manga: Optional[Dict[str, Any]] = None
-                 ) -> Tuple[DeliveryStatus, Optional[str]]:
+                 ) -> Tuple[DeliveryStatus, Optional[str], bool]:
         """Send to Kindle when email delivery is configured and ``manga``
-        takes part in it. Returns the status and, when it FAILED, the
-        error text."""
+        takes part in it. Returns the status, the error text when it
+        FAILED, and whether the local copy was deleted after sending."""
         opts = self.options
         email = opts.email
         if not self.delivers_to_kindle(manga):
-            return DeliveryStatus.NOT_REQUESTED, None
+            return DeliveryStatus.NOT_REQUESTED, None, False
         if path.is_dir():
             self.reporter.email_skipped_folder(path)
-            return DeliveryStatus.SKIPPED_FOLDER, None
+            return DeliveryStatus.SKIPPED_FOLDER, None, False
         self.reporter.email_sending(path)
         # The chapter is already saved, so no delivery problem may undo
         # that: besides EmailError, preparing the attachment (reading or
@@ -483,8 +491,10 @@ class ChapterPipeline:
             raise
         except Exception as error:
             self.reporter.email_failed(error)
-            return DeliveryStatus.FAILED, str(error) or type(error).__name__
+            return (DeliveryStatus.FAILED, str(error) or type(error).__name__,
+                    False)
         self.reporter.email_sent(path)
+        deleted = False
         if opts.delete_after_send:
             # The chapter reached the Kindle; a copy that can't be deleted
             # stays on disk rather than failing the chapter.
@@ -493,5 +503,6 @@ class ChapterPipeline:
             except OSError as error:
                 self.reporter.delete_failed(path, error)
             else:
+                deleted = True
                 self.reporter.deleted_after_send(path)
-        return DeliveryStatus.SENT, None
+        return DeliveryStatus.SENT, None, deleted

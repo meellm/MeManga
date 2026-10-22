@@ -530,11 +530,13 @@ class State:
     def add_download_history(self, title: str, chapter: str, fmt: str,
                              path: str = "", size_mb: float = 0, kindle_sent: bool = False,
                              *, source: Optional[str] = None, from_backup: bool = False,
-                             partial: bool = False) -> None:
+                             partial: bool = False,
+                             deleted_after_send: bool = False) -> None:
         """See :meth:`ActivityStore.add_download`."""
         self.activity.add_download(title, chapter, fmt, path, size_mb, kindle_sent,
                                    source=source, from_backup=from_backup,
-                                   partial=partial)
+                                   partial=partial,
+                                   deleted_after_send=deleted_after_send)
 
     def get_download_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         """See :meth:`ActivityStore.get_download_history`."""

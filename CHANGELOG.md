@@ -188,6 +188,15 @@ All notable changes are recorded here. Format loosely follows
   removed in the next release.
 
 ### Fixed
+- #338 With `delivery.delete_after_send` on, the desktop app now says
+  what happened to the local copy after a Kindle send: "Sent to Kindle:
+  <file> — local copy deleted", or a warning with the reason when the
+  file could not be deleted (the chapter was still sent and the file is
+  kept). The download history records whether the local copy was
+  deleted, and the History tab shows "Sent" or "Sent · deleted" for
+  chapters that went to the Kindle, including chapters sent later with
+  Send or `memanga send --pending`. Files are still only deleted after a
+  successful send.
 - #341 The command line now honors the per-manga mode and Kindle settings
   of the desktop app. `check --download` (and cron's `check --auto
   --quiet`) without a manga name lists the new chapters of `manual`-mode
