@@ -604,6 +604,175 @@ class TestSettingsPage:
         assert smtp_logins == [("sender@example.invalid", "typed-pw")]
         assert page._test_label.text() == "Success!"
 
+    @pytest.fixture
+    def smtp_sends(self, smtp_logins, monkeypatch):
+        """On top of smtp_logins: record each message sent."""
+        import smtplib
+        sent = []
+        monkeypatch.setattr(smtplib.SMTP, "send_message",
+                            lambda self, msg: sent.append(msg), raising=False)
+        return sent
+
+    def test_check_login_sends_nothing(self, app_window, qapp, smtp_sends,
+                                       smtp_logins):
+        # Issue #339: the quick check stays login-only, and says so.
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._entry_kindle_email.setText("reader@kindle.example.invalid")
+        page._test_email()
+        assert smtp_logins == [("sender@example.invalid", "typed-pw")]
+        assert smtp_sends == []
+        assert page._login_test_btn.text() == "Check Login"
+        assert "Sends nothing" in page._login_test_btn.toolTip()
+
+    @pytest.mark.parametrize("width", [1100, 800])
+    def test_email_test_hint_is_not_clipped(self, app_window, qapp, width):
+        # The wrapped hint gets the height its text needs and sits
+        # between the checkbox and the test buttons without overlap.
+        app_window.resize(width, 1000)
+        app_window.show()
+        app_window.show_page("settings")
+        page = app_window._pages["settings"]
+        page._switch_tab("email")
+        for _ in range(5):
+            qapp.processEvents()
+
+        hint = page._test_hint
+        assert hint.wordWrap()
+        assert hint.height() >= hint.heightForWidth(hint.width())
+        assert hint.height() > hint.fontMetrics().lineSpacing() * 2
+        check = page._delete_after_check.geometry()
+        buttons = page._login_test_btn.geometry()
+        assert check.bottom() < hint.geometry().top()
+        assert hint.geometry().bottom() < buttons.top()
+
+    def test_email_test_hint_shrinks_when_widened(self, app_window, qapp):
+        # The hint's height follows its width both ways: narrowing and
+        # then widening gives back the height the text needs, not the
+        # tallest height it ever had.
+        app_window.show()
+        app_window.show_page("settings")
+        page = app_window._pages["settings"]
+        page._switch_tab("email")
+        hint = page._test_hint
+        heights = {}
+        for width in (1100, 800, 1500, 1100):
+            app_window.resize(width, 1000)
+            for _ in range(5):
+                qapp.processEvents()
+            need = hint.heightForWidth(hint.width())
+            assert need <= hint.height() <= need + 1
+            assert hint.minimumHeight() == 0
+            assert hint.geometry().bottom() < page._login_test_btn.geometry().top()
+            heights.setdefault(width, []).append(hint.height())
+        assert heights[1500][0] < heights[800][0]
+        assert heights[1100][0] == heights[1100][1]
+
+    def test_email_tab_fits_minimum_window_width(self, app_window, qapp):
+        # At the 900 px minimum window width the whole Email tab, the
+        # guidance and a long test result fit in the viewport (the tab
+        # never scrolls horizontally), and still do after a resize.
+        from PySide6.QtCore import QPoint
+        app_window.show()
+        app_window.show_page("settings")
+        page = app_window._pages["settings"]
+        page._switch_tab("email")
+        page._show_test_status(
+            "Test PDF accepted; check your Kindle", "green")
+        viewport = page._email_scroll.viewport()
+        for width in (900, 1500, 900):
+            app_window.resize(width, 1000)
+            for _ in range(5):
+                qapp.processEvents()
+            assert page._email_scroll.widget().width() <= viewport.width()
+            for widget in (page._entry_kindle_email, page._password_entry,
+                           page._test_hint, page._login_test_btn,
+                           page._send_test_btn, page._test_label):
+                right = widget.mapTo(viewport, QPoint(widget.width(), 0)).x()
+                assert right <= viewport.width()
+            for label in (page._test_hint, page._test_label):
+                assert label.height() >= label.heightForWidth(label.width())
+            assert (page._test_hint.geometry().bottom()
+                    < page._login_test_btn.geometry().top())
+            assert (page._login_test_btn.geometry().bottom()
+                    < page._test_label.geometry().top())
+
+    def test_send_test_pdf_uses_typed_settings(
+            self, app_window, qapp, smtp_sends, smtp_logins):
+        # Issue #365 / #339: a real test document to the typed address.
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._entry_kindle_email.setText(" reader@kindle.example.invalid ")
+        page._send_test_email()
+
+        assert smtp_logins == [("sender@example.invalid", "typed-pw")]
+        (msg,) = smtp_sends
+        assert msg["To"] == "reader@kindle.example.invalid"
+        (attachment,) = msg.get_payload()
+        assert attachment.get_content_type() == "application/pdf"
+        assert attachment.get_payload(decode=True).startswith(b"%PDF-")
+        assert page._test_label.text() == "Test PDF accepted; check your Kindle"
+        assert "does not prove" in page._test_label.toolTip()
+        note = app_window.app_state.get_notifications()[0]
+        assert note["type"] == "kindle"
+        assert "does not prove" in note["details"]
+        assert page._send_test_btn.isEnabled()
+        assert page._login_test_btn.isEnabled()
+
+    def test_send_test_pdf_uses_active_override(
+            self, app_window, qapp, smtp_sends, smtp_logins, monkeypatch,
+            tmp_path):
+        # Issue #247: the password delivery will actually use.
+        secret = tmp_path / "smtp_password"
+        secret.write_text("file-pw\n", encoding="utf-8")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(secret))
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._entry_kindle_email.setText("reader@kindle.example.invalid")
+        page._send_test_email()
+        assert smtp_logins == [("sender@example.invalid", "file-pw")]
+        assert len(smtp_sends) == 1
+
+    def test_send_test_pdf_needs_kindle_email(
+            self, app_window, qapp, smtp_sends, smtp_logins):
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._entry_kindle_email.setText("")
+        page._send_test_email()
+        assert page._test_label.text() == "Fill Kindle email"
+        assert smtp_logins == [] and smtp_sends == []
+        assert page._send_test_btn.isEnabled()
+
+    def test_send_test_pdf_failure_is_redacted_and_reenables(
+            self, app_window, qapp, smtp_logins, monkeypatch):
+        import smtplib
+        from memanga import output
+        monkeypatch.setattr(output, "_secrets", set())
+
+        def refuse(self, msg):
+            raise smtplib.SMTPRecipientsRefused(
+                {"reader@kindle.example.invalid":
+                 (550, b"5.1.1 no such user, password typed-pw-4321")})
+        monkeypatch.setattr(smtplib.SMTP, "send_message", refuse,
+                            raising=False)
+        monkeypatch.setattr(smtplib.SMTP, "close", lambda self: None,
+                            raising=False)
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw-4321")
+        page._entry_kindle_email.setText("reader@kindle.example.invalid")
+        page._send_test_email()
+
+        assert page._test_label.text().startswith("Failed: ")
+        note = app_window.app_state.get_notifications()[0]
+        assert note["message"].startswith("Email test failed - ")
+        assert "550 5.1.1 no such user" in note["details"]
+        for text in (page._test_label.text(), page._test_label.toolTip(),
+                     note["message"], note["details"]):
+            assert "typed-pw-4321" not in text
+            assert "reader@kindle.example.invalid" not in text
+        assert page._send_test_btn.isEnabled()
+        assert page._login_test_btn.isEnabled()
+
     def test_smtp_test_uses_active_override(
             self, app_window, qapp, smtp_logins, monkeypatch, tmp_path):
         # Issue #247: test the password delivery will actually use.

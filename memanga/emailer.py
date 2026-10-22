@@ -5,12 +5,14 @@ Automatically splits large PDFs that exceed Gmail's 25MB limit.
 """
 
 import hashlib
+import io
 import logging
 import shutil
 import smtplib
 import ssl
 import tempfile
 from contextlib import contextmanager
+from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
@@ -465,29 +467,37 @@ def _remove_split_parts(pdf_path: Path, parts: List[Path]) -> None:
 def _kindle_message(pdf_path: Path, kindle_email: str, sender_email: str,
                     subject: str) -> MIMEMultipart:
     """The email carrying ``pdf_path`` (PDF or EPUB) as its attachment."""
-    msg = MIMEMultipart()
-    msg["From"] = sender_email
-    msg["To"] = kindle_email
-    msg["Subject"] = subject
-    
     # Detect MIME type based on extension
     suffix = pdf_path.suffix.lower()
     mime_types = {
         '.epub': ('application', 'epub+zip'),
     }
     mime_main, mime_sub = mime_types.get(suffix, ('application', 'pdf'))
-    
-    # Attach file
+
     with open(pdf_path, "rb") as f:
-        part = MIMEBase(mime_main, mime_sub)
-        part.set_payload(f.read())
-        encoders.encode_base64(part)
-        part.add_header(
-            "Content-Disposition",
-            "attachment",
-            filename=pdf_path.name,
-        )
-        msg.attach(part)
+        data = f.read()
+    return _attachment_message(data, pdf_path.name, mime_main, mime_sub,
+                               kindle_email, sender_email, subject)
+
+
+def _attachment_message(data: bytes, filename: str, mime_main: str,
+                        mime_sub: str, kindle_email: str, sender_email: str,
+                        subject: str) -> MIMEMultipart:
+    """The email carrying ``data`` as the attachment ``filename``."""
+    msg = MIMEMultipart()
+    msg["From"] = sender_email
+    msg["To"] = kindle_email
+    msg["Subject"] = subject
+
+    part = MIMEBase(mime_main, mime_sub)
+    part.set_payload(data)
+    encoders.encode_base64(part)
+    part.add_header(
+        "Content-Disposition",
+        "attachment",
+        filename=filename,
+    )
+    msg.attach(part)
     return msg
 
 
@@ -679,7 +689,9 @@ def test_email_config(
     timeout: Optional[float] = None,
 ) -> bool:
     """
-    Test if email configuration works.
+    Check that the sender can log in to the SMTP server. Connection
+    check only: nothing is sent, so the Kindle address and Amazon's
+    approved sender list are not tested (see send_test_document).
     
     Returns:
         True if connection successful
@@ -690,3 +702,103 @@ def test_email_config(
         return True
     except Exception:
         return False
+
+
+# Issue #365: a real delivery test. Logging in proves neither the Kindle
+# address nor that Amazon accepts mail from the sender, so the test sends
+# a tiny PDF the same way delivery sends chapters.
+TEST_DOCUMENT_NAME = "MeManga-test.pdf"
+TEST_DOCUMENT_SUBJECT = "MeManga test document"
+TEST_DELIVERY_NOTE = (
+    "The mail server accepted the test PDF. That does not prove it reached "
+    "your Kindle: Amazon delivers it only if the sender address is on your "
+    "Approved Personal Document E-mail List. In a few minutes, look for "
+    f"\"{TEST_DOCUMENT_SUBJECT}\" in your Kindle library or on Amazon's "
+    "Manage Your Content and Devices page. If Amazon rejects it, it usually "
+    "emails the sender address."
+)
+
+
+def _pdf_text(text: str) -> str:
+    """``text`` as a PDF literal string (Latin-1 safe, special characters
+    escaped)."""
+    text = text.encode("latin-1", "replace").decode("latin-1")
+    for char in ("\\", "(", ")"):
+        text = text.replace(char, "\\" + char)
+    return f"({text})"
+
+
+def build_test_pdf(stamp: str) -> bytes:
+    """A minimal valid one-page PDF identifying a MeManga test sent at
+    ``stamp``. It uses only the standard Helvetica font, so it embeds
+    nothing."""
+    lines = [
+        (24, TEST_DOCUMENT_SUBJECT),
+        (12, f"Sent {stamp}"),
+        (12, "If you can read this on your Kindle, email delivery works."),
+    ]
+    ops = ["BT", "72 720 Td"]
+    for size, line in lines:
+        ops += [f"/F1 {size} Tf", f"{_pdf_text(line)} Tj", f"0 -{size * 2} Td"]
+    ops.append("ET")
+
+    pdf = pikepdf.new()
+    try:
+        page = pdf.add_blank_page(page_size=(612, 792)).obj
+        page.Resources = pikepdf.Dictionary(Font=pikepdf.Dictionary(
+            F1=pikepdf.Dictionary(
+                Type=pikepdf.Name.Font,
+                Subtype=pikepdf.Name.Type1,
+                BaseFont=pikepdf.Name.Helvetica,
+                Encoding=pikepdf.Name.WinAnsiEncoding,
+            )))
+        page.Contents = pdf.make_stream("\n".join(ops).encode("latin-1"))
+        pdf.docinfo["/Title"] = f"{TEST_DOCUMENT_SUBJECT} {stamp}"
+        buffer = io.BytesIO()
+        pdf.save(buffer)
+    finally:
+        pdf.close()
+    return buffer.getvalue()
+
+
+def send_test_document(
+    kindle_email: str,
+    sender_email: str,
+    smtp_server: str,
+    smtp_port: int,
+    app_password: str,
+    timeout: Optional[float] = None,
+    now: Optional[datetime] = None,
+) -> str:
+    """Email a tiny test PDF to ``kindle_email`` over the same SMTP
+    session as delivery (STARTTLS, login, bounded by ``timeout``).
+
+    Returns the subject sent once the mail server accepted the message.
+    Acceptance is not proof that Amazon delivered it (TEST_DELIVERY_NOTE).
+
+    Raises:
+        EmailError: a setting is missing; or an EmailError subclass from
+            smtp_session when connecting, logging in or sending fails
+            (the password never appears in the message).
+    """
+    kindle_email = (kindle_email or "").strip()
+    sender_email = (sender_email or "").strip()
+    missing = [label for label, value in (
+        ("Kindle email", kindle_email), ("sender email", sender_email),
+        ("SMTP server", (smtp_server or "").strip()),
+        ("app password", app_password),
+    ) if not value]
+    if missing:
+        raise EmailError("Missing " + ", ".join(missing))
+    register_secret(app_password)
+
+    stamp = (now or datetime.now()).strftime("%Y-%m-%d %H:%M")
+    subject = f"{TEST_DOCUMENT_SUBJECT} {stamp}"
+    msg = _attachment_message(build_test_pdf(stamp), TEST_DOCUMENT_NAME,
+                              "application", "pdf", kindle_email,
+                              sender_email, subject)
+    with smtp_session(sender_email, smtp_server.strip(), smtp_port,
+                      app_password, timeout=timeout) as server:
+        server.send_message(msg)
+    logger.info("Test document accepted by the mail server")
+    return subject
