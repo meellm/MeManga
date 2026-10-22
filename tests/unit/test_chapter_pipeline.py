@@ -10,7 +10,8 @@ import pytest
 
 from memanga.chapter_pipeline import (ChapterPipeline, ChapterReporter,
                                       ChapterStatus, DeliveryStatus,
-                                      PipelineOptions)
+                                      PipelineOptions, manga_auto_downloads,
+                                      manga_sends_to_kindle)
 from memanga.downloader import ChapterWithSource, DownloaderError
 from memanga.emailer import EmailError
 from memanga.scrapers.base import Chapter
@@ -774,6 +775,95 @@ class TestUndeliveredChapters:
 
         assert pipeline.redeliver(TITLE, "71") is DeliveryStatus.NOT_REQUESTED
         assert sent == []
+
+
+class TestPerMangaPolicy:
+    """Issue #341: per-manga mode and Kindle settings, shared by the CLI
+    and the desktop app; missing fields keep the old behavior."""
+
+    @pytest.mark.parametrize("manga, expected", [
+        ({}, True),
+        ({"mode": "auto"}, True),
+        ({"mode": None}, True),
+        ({"mode": "manual"}, False),
+    ])
+    def test_auto_downloads(self, manga, expected):
+        assert manga_auto_downloads(manga) is expected
+
+    @pytest.mark.parametrize("manga, expected", [
+        ({}, True),
+        ({"send_to_kindle": True}, True),
+        ({"send_to_kindle": False}, False),
+    ])
+    def test_sends_to_kindle(self, manga, expected):
+        assert manga_sends_to_kindle(manga) is expected
+
+    def test_opted_out_manga_is_saved_but_never_sent(
+            self, state, tmp_path, pdf):
+        downloads = _Downloads({("primary.test", False): pdf})
+        sent = []
+        pipeline = _pipeline(state, tmp_path, downloads, sent=sent,
+                             delivery_mode="email", email=EMAIL,
+                             delete_after_send=True)
+
+        outcome = pipeline.process({**SINGLE, "send_to_kindle": False},
+                                   _primary())
+
+        assert outcome.status is ChapterStatus.COMPLETE
+        assert outcome.delivery is DeliveryStatus.NOT_REQUESTED
+        assert sent == []
+        # Nothing was sent, so nothing is deleted or left to resend.
+        assert pdf.exists()
+        assert state.failures.get_all_undelivered() == {}
+        assert state.is_chapter_downloaded(TITLE, "71")
+        assert ("email_sending",) not in pipeline.reporter.events
+
+    def test_missing_field_still_sends(self, state, tmp_path, pdf):
+        downloads = _Downloads({("primary.test", False): pdf})
+        sent = []
+        pipeline = _pipeline(state, tmp_path, downloads, sent=sent,
+                             delivery_mode="email", email=EMAIL)
+
+        outcome = pipeline.process(SINGLE, _primary())
+
+        assert outcome.delivery is DeliveryStatus.SENT
+        assert sent == [pdf]
+
+    def test_delivers_to_kindle_checks_the_manga(self, state, tmp_path):
+        pipeline = _pipeline(state, tmp_path, _Downloads({}),
+                             delivery_mode="email", email=EMAIL)
+
+        assert pipeline.delivers_to_kindle()
+        assert pipeline.delivers_to_kindle(SINGLE)
+        assert not pipeline.delivers_to_kindle({**SINGLE, "send_to_kindle": False})
+
+    def test_redeliver_skips_opted_out_manga_and_keeps_record(
+            self, state, tmp_path, pdf):
+        state.failures.add_undelivered(TITLE, "71", str(pdf), "SMTP down")
+        before = state.failures.get_undelivered(TITLE)
+        sent = []
+        pipeline = _pipeline(state, tmp_path, _Downloads({}), sent=sent,
+                             delivery_mode="email", email=EMAIL,
+                             delete_after_send=True)
+
+        status = pipeline.redeliver(TITLE, "71",
+                                    {**SINGLE, "send_to_kindle": False})
+
+        assert status is DeliveryStatus.NOT_REQUESTED
+        assert sent == []
+        assert pdf.exists()
+        assert state.failures.get_undelivered(TITLE) == before
+
+    def test_redeliver_with_tracked_manga_still_sends(
+            self, state, tmp_path, pdf):
+        state.failures.add_undelivered(TITLE, "71", str(pdf), "SMTP down")
+        sent = []
+        pipeline = _pipeline(state, tmp_path, _Downloads({}), sent=sent,
+                             delivery_mode="email", email=EMAIL)
+
+        assert pipeline.redeliver(TITLE, "71", SINGLE) is DeliveryStatus.SENT
+        assert sent == [pdf]
+        assert state.failures.get_undelivered(TITLE) == {}
 
 
 class TestSmtpTimeout:

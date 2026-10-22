@@ -533,6 +533,8 @@ class DownloadsPage(BasePage):
         # Such a request must queue the resolved chapters regardless of mode;
         # the background sweep only auto-queues auto-mode manga.
         queue_all = data.get("queue_all", False)
+        # One mode policy for the CLI and the app (#341).
+        from ...chapter_pipeline import manga_auto_downloads
 
         # Manual-mode manga surface their badge + per-chapter Download buttons
         # on the Detail page and are not auto-queued by the background sweep —
@@ -542,7 +544,7 @@ class DownloadsPage(BasePage):
         else:
             to_queue = [
                 r for r in results
-                if r["manga"].get("mode", "auto") == "auto" and r.get("chapters")
+                if manga_auto_downloads(r["manga"]) and r.get("chapters")
             ]
 
         if not to_queue:
@@ -555,7 +557,7 @@ class DownloadsPage(BasePage):
             # waiting for the user to download from the Detail page".
             manual_with_new = sum(
                 len(r["chapters"]) for r in results
-                if r["manga"].get("mode", "auto") == "manual" and r.get("chapters")
+                if not manga_auto_downloads(r["manga"]) and r.get("chapters")
             )
             if manual_with_new:
                 Toast(
@@ -581,7 +583,7 @@ class DownloadsPage(BasePage):
         for r in to_queue:
             manga = r["manga"]
             m_title = manga.get("title", "")
-            is_auto = manga.get("mode", "auto") == "auto"
+            is_auto = manga_auto_downloads(manga)
             for ch in r["chapters"]:
                 # Issue #15: never re-queue a chapter that's already on
                 # disk. Belt-and-suspenders against any caller that

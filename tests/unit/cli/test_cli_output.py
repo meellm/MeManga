@@ -126,6 +126,25 @@ class TestPlainOutput:
          "Summary: 1/2 chapters downloaded, 1 failed, 1 not sent to Kindle; "
          "checked 1 manga, 0 could not be checked; "
          "next: run 'memanga failed' for details"),
+        # Issue #341: chapters of manual-mode manga are only listed; that
+        # is intended, so there is no next command for them.
+        ((False, 2, 0, 0, 0, 0, 0, 0, 3),
+         "Summary: no chapters to download; checked 2 manga, "
+         "0 could not be checked, 3 chapter(s) of manual-mode manga "
+         "not downloaded"),
+        ((False, 2, 1, 1, 0, 0, 0, 0, 3),
+         "Summary: 1/1 chapters downloaded, 0 failed; checked 2 manga, "
+         "0 could not be checked, 3 chapter(s) of manual-mode manga "
+         "not downloaded"),
+        ((False, 2, 1, 0, 0, 0, 1, 0, 3),
+         "Summary: 0/1 chapters downloaded, 0 failed; checked 2 manga, "
+         "0 could not be checked, 3 chapter(s) of manual-mode manga "
+         "not downloaded, 1 chapter(s) need confirmation; "
+         "next: rerun with --download"),
+        ((True, 2, 1, 0, 0, 0, 0, 0, 3),
+         "Dry run: 1 chapter(s) available for download; checked 2 manga, "
+         "0 could not be checked, 3 chapter(s) of manual-mode manga "
+         "not downloaded"),
     ])
     def test_summary_line_next_action(self, counts, expected):
         """#372: the line ends with what to do next, only when needed."""

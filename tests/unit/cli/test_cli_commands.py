@@ -3809,6 +3809,67 @@ class TestSendPending:
         assert run_cli("send", "--pending") == 0
         assert "No chapters are waiting" in capsys.readouterr().out
 
+    def test_kindle_opt_out_is_skipped_and_kept(
+            self, run_cli, config, email, pending, sends, capsys):
+        """#341: a manga with `send_to_kindle: false` is never emailed by
+        the retry path; its record stays and the others still go out."""
+        sent, _ = sends
+        manga = config.get("manga")
+        manga[0]["send_to_kindle"] = False  # Berserk
+        config.set("manga", manga)
+        config.save()
+        capsys.readouterr()
+
+        assert run_cli("send", "--pending") == 0
+
+        assert sent == [pending["Vinland Saga"]]
+        out = capsys.readouterr().out
+        assert "Skipped Berserk: Kindle delivery is off" in out
+        assert "memanga update Berserk --kindle" in out
+        assert "1/1 chapters sent" in out
+        records = _disk_state().failures.get_all_undelivered()
+        assert list(records) == ["Berserk"]
+        assert records["Berserk"]["1"]["attempts"] == 1
+        assert pending["Berserk"].exists()
+
+    def test_kindle_opt_out_matches_title_in_any_case(
+            self, run_cli, config, email, cli_state, sends, tmp_path, capsys):
+        """A record saved as "berserk" belongs to the tracked "Berserk";
+        its opt-out applies and nothing is sent."""
+        sent, _ = sends
+        manga = config.get("manga")
+        manga[0]["send_to_kindle"] = False  # Berserk
+        config.set("manga", manga)
+        config.save()
+        path = tmp_path / "berserk-1.pdf"
+        path.write_bytes(b"pdf")
+        cli_state.failures.add_undelivered("berserk", "1", str(path), "SMTP down")
+        cli_state.save()
+        capsys.readouterr()
+
+        assert run_cli("send", "--pending") == 0
+
+        assert sent == []
+        assert "Skipped berserk: Kindle delivery is off" in capsys.readouterr().out
+        records = _disk_state().failures.get_all_undelivered()
+        assert list(records) == ["berserk"]
+        assert records["berserk"]["1"]["attempts"] == 1
+        assert records["berserk"]["1"]["path"] == str(path)
+        assert path.exists()
+
+    def test_untracked_title_keeps_legacy_delivery(
+            self, run_cli, config, email, pending, sends):
+        """A record whose manga is no longer tracked has no policy to
+        honor; it is sent as before."""
+        sent, _ = sends
+        config.set("manga", [m for m in config.get("manga")
+                             if m["title"] != "Berserk"])
+        config.save()
+
+        assert run_cli("send", "--pending") == 0
+
+        assert sorted(sent) == sorted(pending.values())
+
     @pytest.mark.parametrize("resolve", [["send", "--pending"],
                                          ["send", "--pending", "--clear"]])
     def test_old_backup_does_not_requeue_resolved_delivery(
@@ -5454,6 +5515,124 @@ class TestCheckModes:
         self._stdin(monkeypatch, False)
         assert cli.cmd_check(argparse.Namespace(title="Alpha")) == 1
         assert calls["download"] == []
+
+    @staticmethod
+    def _policy(config, title, **fields):
+        """Set desktop-app policy fields on one seeded manga."""
+        manga = config.get("manga")
+        for entry in manga:
+            if entry["title"] == title:
+                entry.update(fields)
+        config.set("manga", manga)
+        config.save()
+
+    @pytest.mark.parametrize("tty", [False, True])
+    @pytest.mark.parametrize("flags", [
+        ["--auto", "--quiet"], ["--download"], ["--yes", "--all"],
+    ])
+    def test_auto_run_lists_but_never_downloads_manual_manga(
+            self, run_cli, config, seeded, calls, monkeypatch, capsys,
+            flags, tty):
+        """#341: the scheduled `check --auto --quiet` honors the desktop
+        app's manual mode; auto-mode manga still download."""
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, tty)
+        capsys.readouterr()
+
+        assert run_cli("check", *flags) == 0
+
+        assert calls["download"] == [("Beta", "5"), ("Beta", "6")]
+        assert len(calls["email"]) == 2
+        assert calls["prompt"] == []
+        captured = capsys.readouterr()
+        assert "manual mode, not downloaded" in captured.out
+        assert "memanga check Alpha --download" in captured.out
+        assert ("Summary: 2/2 chapters downloaded, 0 failed; checked 2 manga, "
+                "0 could not be checked, 2 chapter(s) of manual-mode manga "
+                "not downloaded") in captured.out
+        assert captured.err == ""
+        assert _disk_state().get_failed_chapters("Alpha") == {}
+
+    def test_only_manual_manga_is_not_a_failure(
+            self, run_cli, config, seeded, calls, monkeypatch, capsys):
+        self._policy(config, "Alpha", mode="manual")
+        self._policy(config, "Beta", mode="manual")
+        self._stdin(monkeypatch, False)
+        capsys.readouterr()
+
+        assert run_cli("check", "--auto", "--quiet") == 0
+
+        assert calls["download"] == calls["email"] == []
+        out = capsys.readouterr().out
+        assert "Summary: no chapters to download" in out
+        assert "4 chapter(s) of manual-mode manga not downloaded" in out
+
+    def test_unconfirmed_count_leaves_out_manual_manga(
+            self, run_cli, config, seeded, calls, monkeypatch, capsys):
+        """`--download` would not fetch them either, so they are not
+        reported as needing confirmation."""
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, False)
+        capsys.readouterr()
+
+        assert run_cli("check") == 1
+
+        assert calls["download"] == []
+        assert "skipped 2 chapter(s) that need confirmation" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("argv", [("Alpha",), ("-t", "Alpha"), ("#1",)])
+    def test_named_manual_manga_downloads(self, run_cli, config, seeded,
+                                          calls, monkeypatch, argv):
+        """Naming the manga is an explicit request."""
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, False)
+
+        assert run_cli("check", *argv, "--download") == 0
+
+        assert calls["download"] == [("Alpha", "5"), ("Alpha", "6")]
+
+    def test_prompt_still_offers_manual_manga(self, run_cli, config, seeded,
+                                              calls, monkeypatch):
+        """Asking per chapter on a terminal is an explicit request too."""
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, True)
+
+        assert run_cli("check") == 0
+
+        assert len(calls["prompt"]) == 4
+        assert sorted(calls["download"]) == [
+            ("Alpha", "5"), ("Alpha", "6"), ("Beta", "5"), ("Beta", "6")]
+
+    def test_dry_run_previews_manual_hold(self, run_cli, config, seeded,
+                                          calls, monkeypatch, capsys):
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, False)
+        capsys.readouterr()
+
+        assert run_cli("check", "--dry-run") == 0
+
+        out = capsys.readouterr().out
+        assert out.count("[DRY RUN]") == 2
+        assert "Dry run: 2 chapter(s) available for download" in out
+        assert "2 chapter(s) of manual-mode manga not downloaded" in out
+        assert calls["download"] == []
+
+    def test_kindle_opt_out_saves_without_sending(
+            self, run_cli, config, seeded, calls, monkeypatch, capsys):
+        """#341: `send_to_kindle: false` wins over global email delivery;
+        the chapter is saved and nothing is left to resend."""
+        self._policy(config, "Alpha", send_to_kindle=False)
+        self._stdin(monkeypatch, False)
+
+        assert run_cli("check", "--auto", "--quiet") == 0
+
+        assert sorted(calls["download"]) == [
+            ("Alpha", "5"), ("Alpha", "6"), ("Beta", "5"), ("Beta", "6")]
+        assert sorted(p.name for p in calls["email"]) == [
+            "Beta-5.pdf", "Beta-6.pdf"]
+        state = _disk_state()
+        assert state.failures.get_all_undelivered() == {}
+        assert state.is_chapter_downloaded("Alpha", "5")
 
     def test_help_describes_modes(self, run_cli, capsys):
         assert run_cli("check", "--help") == 0
