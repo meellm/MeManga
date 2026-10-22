@@ -188,6 +188,13 @@ All notable changes are recorded here. Format loosely follows
   removed in the next release.
 
 ### Fixed
+- #362 Chapters saved as CBZ or ZIP are no longer emailed to the Kindle,
+  which rejects them; only PDF and EPUB are sent, and image folders stay
+  unsent as before. The chapter is still saved and kept, and the command
+  line and the desktop app both say why it was not sent. With Kindle
+  delivery on, `check` warns once before downloading in such a format,
+  and `config set`, `config edit`, interactive `config`, `doctor` and
+  Settings warn when the delivery mode and output format conflict.
 - #338 With `delivery.delete_after_send` on, the desktop app now says
   what happened to the local copy after a Kindle send: "Sent to Kindle:
   <file> — local copy deleted", or a warning with the reason when the

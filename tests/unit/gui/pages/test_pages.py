@@ -523,6 +523,37 @@ class TestSettingsPage:
         assert app_window.config.get("email.app_password") == ""
         assert toasts == [("Settings saved", {"kind": "success"})]
 
+    @pytest.mark.parametrize("fmt", ["cbz", "zip", "jpg"])
+    def test_save_kindle_with_unsupported_format_warns(
+            self, app_window, qapp, toasts, fmt):
+        # Issue #362: the settings are saved, but the user learns that
+        # chapters in this format won't reach the Kindle.
+        page = app_window._pages["settings"]
+        page._radio_email.setChecked(True)
+        page._format_combo.setCurrentText(fmt)
+        page._save()
+
+        cfg = app_window.config
+        assert (cfg.delivery_mode, cfg.output_format) == ("email", fmt)
+        assert len(toasts) == 1
+        message, kw = toasts[0]
+        assert kw.get("kind") == "warning"
+        assert message.startswith("Settings saved.")
+        assert "can't be sent to Kindle" in message
+        assert "PDF or EPUB" in message
+
+    @pytest.mark.parametrize("email, fmt", [
+        (True, "pdf"), (True, "epub"), (False, "cbz"),
+    ])
+    def test_save_without_kindle_format_conflict_reports_success(
+            self, app_window, qapp, toasts, email, fmt):
+        page = app_window._pages["settings"]
+        (page._radio_email if email else page._radio_local).setChecked(True)
+        page._format_combo.setCurrentText(fmt)
+        page._save()
+
+        assert toasts == [("Settings saved", {"kind": "success"})]
+
     @pytest.fixture
     def smtp_logins(self, monkeypatch):
         """Run the SMTP test synchronously against a fake server and

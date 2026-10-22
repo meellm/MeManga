@@ -188,7 +188,7 @@ Hit **Re-check health** to ping every enabled source and see their status.
    when it works.
 4. On the Detail page of any manga, toggle **Send to Kindle after download**.
 
-PDFs over 18 MB are split automatically; EPUB / CBZ files can't be split so they fail-loud with a size warning.
+Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs over 18 MB are split automatically; EPUB files can't be split so they fail-loud with a size warning.
 
 ---
 

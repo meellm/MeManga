@@ -74,15 +74,16 @@ class GuiChapterReporter(ChapterReporter):
         elif outcome.from_backup:
             logger.info("Completed from backup: %s", self._label())
 
-    def email_skipped_folder(self, path: Path):
-        logger.warning("Kindle skipped (image folders cannot be emailed): %s", path)
-        # Issue #340: tell the user, as the CLI does, rather than only
-        # logging it.
+    def email_skipped_format(self, path: Path, reason: str):
+        logger.warning("Kindle skipped (%s): %s", reason, path)
+        # Issues #340, #362: tell the user, as the CLI does, rather than
+        # only logging it.
         self._events.publish("kindle_skipped", {
             "task_id": self._task_id,
             "title": self._title,
             "chapter": self._chapter.number,
             "path": str(path),
+            "reason": reason,
         })
 
     def _publish_sent(self, path: Path, **local_copy):

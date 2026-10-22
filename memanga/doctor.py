@@ -33,7 +33,7 @@ import yaml
 from . import __version__
 from .config import AppPasswordError, app_password_override, get_app_password
 from .cron import is_managed_line
-from .emailer import EmailAuthError, smtp_login
+from .emailer import EmailAuthError, kindle_format_error, smtp_login
 
 SCHEMA_VERSION = 1
 
@@ -351,6 +351,7 @@ def check_email(config, state=None) -> CheckResult:
         "smtp_server": config.get("email.smtp_server", "smtp.gmail.com"),
         "smtp_port": config.get("email.smtp_port", 587),
         "app_password_set": bool(get_app_password(config)),
+        "output_format": config.output_format,
     }
     missing = [
         label for label, key in (
@@ -361,6 +362,14 @@ def check_email(config, state=None) -> CheckResult:
     ]
     if missing:
         return CheckResult("email", FAIL, "Email delivery is missing: " + ", ".join(missing), details)
+    # Issue #362: chapters in this format are saved but never sent.
+    unsupported = kindle_format_error(config.output_format)
+    if unsupported:
+        return CheckResult("email", WARNING,
+                           "Email delivery is configured, but chapters won't be "
+                           f"sent: {unsupported} Set delivery.output_format to "
+                           "pdf or epub.",
+                           details)
     return CheckResult("email", OK, "Email delivery is configured", details)
 
 

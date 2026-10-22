@@ -23,12 +23,26 @@ from ... import doctor
 from ..components.error_details import detail_tooltip, notify_error, summarize_error
 from ..components.toast import Toast
 from ...backup import EXPORT_VERSION, BackupVersionError, validate_backup
+from ...emailer import kindle_format_error
 from ...cron import (build_cron_line, build_task_command, managed_lines,
                      read_crontab,
                      remove_managed_lines, replace_managed_line,
                      source_checkout_root, unmanaged_memanga_lines)
 
 logger = logging.getLogger(__name__)
+
+
+def _kindle_format_toast_text(config):
+    """Settings-saved notice when Send to Kindle is chosen with an output
+    format Kindle doesn't accept (issue #362), else None. The settings
+    are still saved: the format works for local downloads."""
+    if config.delivery_mode != "email":
+        return None
+    reason = kindle_format_error(config.output_format)
+    if not reason:
+        return None
+    return (f"{reason}\nChapters will be saved but not sent to Kindle;\n"
+            "choose PDF or EPUB to send them.")
 
 
 def _plaintext_password_toast_text(config_path) -> str:
@@ -374,7 +388,7 @@ class SettingsPage(BasePage):
         self._format_combo.currentTextChanged.connect(lambda _: self._refresh_filename_preview())
         format_row.addWidget(self._format_combo)
 
-        hint = QLabel("pdf/epub = e-reader  |  cbz/zip = archive")
+        hint = QLabel("pdf/epub = e-reader, Kindle  |  cbz/zip/images = local only")
         hint.setProperty("role", "hint")
         format_row.addWidget(hint, 1)
         f.addLayout(format_row)
@@ -1103,9 +1117,15 @@ class SettingsPage(BasePage):
             )
 
         cfg.save()
+        kindle_notice = _kindle_format_toast_text(cfg)
         if password_in_config:
             # Issue #247: no keyring, so say where the password went.
-            Toast(self, _plaintext_password_toast_text(cfg.config_path),
+            text = _plaintext_password_toast_text(cfg.config_path)
+            if kindle_notice:
+                text += "\n\n" + kindle_notice
+            Toast(self, text, kind="warning", duration=10000)
+        elif kindle_notice:
+            Toast(self, "Settings saved.\n" + kindle_notice,
                   kind="warning", duration=10000)
         else:
             Toast(self, "Settings saved", kind="success")

@@ -58,8 +58,8 @@ class _Recorder(ChapterReporter):
     def saved(self, outcome):
         self.events.append(("saved", outcome.status, outcome.from_backup))
 
-    def email_skipped_folder(self, path):
-        self.events.append(("email_skipped_folder",))
+    def email_skipped_format(self, path, reason):
+        self.events.append(("email_skipped_format", reason))
 
     def email_sending(self, path):
         self.events.append(("email_sending",))
@@ -119,8 +119,9 @@ def _pipeline(state, tmp_path, downloads, backup=None, sent=None, **opts):
             # Delivery happens before the chapter is marked downloaded.
             assert not state.is_chapter_downloaded(TITLE, "71")
 
+    opts.setdefault("output_format", "pdf")
     return ChapterPipeline(
-        options=PipelineOptions(download_dir=tmp_path, output_format="pdf", **opts),
+        options=PipelineOptions(download_dir=tmp_path, **opts),
         state=state,
         reporter=_Recorder(),
         download=downloads,
@@ -435,8 +436,86 @@ class TestDelivery:
 
         outcome = pipeline.process(SINGLE, _primary())
 
-        assert outcome.delivery is DeliveryStatus.SKIPPED_FOLDER
+        assert outcome.delivery is DeliveryStatus.SKIPPED_FORMAT
         assert sent == []
+        assert pipeline.reporter.events[-1] == (
+            "email_skipped_format",
+            "Image folders can't be sent to Kindle; only PDF and EPUB can.")
+        assert state.failures.get_all_undelivered() == {}
+
+    @pytest.mark.parametrize("suffix", ["pdf", "epub", "PDF"])
+    def test_kindle_formats_are_sent(self, state, tmp_path, suffix):
+        # Issue #362: PDF and EPUB are what Send to Kindle accepts.
+        path = tmp_path / f"chapter.{suffix}"
+        path.write_bytes(b"data")
+        sent = []
+        downloads = _Downloads({("primary.test", False): path})
+        pipeline = _pipeline(state, tmp_path, downloads, sent=sent,
+                             delivery_mode="email", email=EMAIL,
+                             output_format=suffix.lower())
+
+        outcome = pipeline.process(SINGLE, _primary())
+
+        assert outcome.delivery is DeliveryStatus.SENT
+        assert sent == [path]
+
+    @pytest.mark.parametrize("suffix", ["cbz", "zip", "CBZ"])
+    def test_archives_are_saved_but_not_sent(self, state, tmp_path, suffix):
+        # Issue #362: Kindle rejects CBZ and ZIP, so they are never
+        # emailed; the chapter is saved, kept and not left undelivered,
+        # and delete-after-send never removes it.
+        path = tmp_path / f"chapter.{suffix}"
+        path.write_bytes(b"PK")
+        sent = []
+        downloads = _Downloads({("primary.test", False): path})
+        pipeline = _pipeline(state, tmp_path, downloads, sent=sent,
+                             delivery_mode="email", email=EMAIL,
+                             output_format=suffix.lower(),
+                             delete_after_send=True)
+
+        outcome = pipeline.process(SINGLE, _primary())
+
+        assert outcome.delivery is DeliveryStatus.SKIPPED_FORMAT
+        assert outcome.saved
+        assert sent == []
+        assert path.exists()
+        assert pipeline.reporter.events[-1] == (
+            "email_skipped_format",
+            f"{suffix.upper()} files can't be sent to Kindle; "
+            "only PDF and EPUB can.")
+        assert state.is_chapter_downloaded(TITLE, "71")
+        assert state.failures.get_all_undelivered() == {}
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (False, False)
+
+    @pytest.mark.parametrize("fmt, expected", [
+        ("pdf", None),
+        ("epub", None),
+        ("cbz", "CBZ files can't be sent to Kindle; only PDF and EPUB can."),
+        ("zip", "ZIP files can't be sent to Kindle; only PDF and EPUB can."),
+        ("jpg", "Image folders (JPG) can't be sent to Kindle; "
+                "only PDF and EPUB can."),
+        ("png", "Image folders (PNG) can't be sent to Kindle; "
+                "only PDF and EPUB can."),
+        ("webp", "Image folders (WEBP) can't be sent to Kindle; "
+                 "only PDF and EPUB can."),
+    ])
+    def test_run_level_format_check(self, state, tmp_path, fmt, expected):
+        # Issue #362: lets a front end warn before anything is downloaded.
+        pipeline = _pipeline(state, tmp_path, _Downloads({}),
+                             delivery_mode="email", email=EMAIL,
+                             output_format=fmt)
+        assert pipeline.kindle_format_error() == expected
+
+    def test_run_level_format_check_needs_kindle_delivery(
+            self, state, tmp_path):
+        local = _pipeline(state, tmp_path, _Downloads({}),
+                          output_format="cbz")
+        no_address = _pipeline(state, tmp_path, _Downloads({}),
+                               delivery_mode="email", email={},
+                               output_format="cbz")
+        assert local.kindle_format_error() is None
+        assert no_address.kindle_format_error() is None
 
     def test_local_delivery_never_emails(self, state, tmp_path, pdf):
         sent = []
@@ -834,6 +913,24 @@ class TestUndeliveredChapters:
         assert status is DeliveryStatus.NOT_REQUESTED
         assert sent == []
         assert state.failures.get_undelivered(TITLE) == before
+
+    def test_redeliver_unsupported_record_is_skipped_and_kept(
+            self, state, tmp_path):
+        # Issue #362: a CBZ recorded before the format rule existed is
+        # not sent again; its record stays until the user clears it.
+        cbz = tmp_path / "chapter.cbz"
+        cbz.write_bytes(b"PK")
+        state.failures.add_undelivered(TITLE, "71", str(cbz), "SMTP down")
+        sent = []
+        pipeline = _pipeline(state, tmp_path, _Downloads({}), sent=sent,
+                             delivery_mode="email", email=EMAIL)
+
+        status = pipeline.redeliver(TITLE, "71")
+
+        assert status is DeliveryStatus.SKIPPED_FORMAT
+        assert sent == []
+        assert cbz.exists()
+        assert state.failures.get_undelivered(TITLE)["71"]["path"] == str(cbz)
 
     def test_redeliver_unknown_chapter_sends_nothing(self, state, tmp_path):
         sent = []

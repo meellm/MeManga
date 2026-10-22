@@ -1083,12 +1083,40 @@ class TestSharedChapterPipeline:
         assert events[-2][1] == {
             "task_id": "Vinland Saga:71", "title": "Vinland Saga",
             "chapter": "71", "path": str(folder),
+            "reason": "Image folders can't be sent to Kindle; "
+                      "only PDF and EPUB can.",
         }
         assert "kindle_sent" not in self._names(events)
         assert "kindle_error" not in self._names(events)
         assert sent == []
         assert (folder / f"001.{fmt}").exists()
         assert state.is_chapter_downloaded("Vinland Saga", "71")
+
+    @pytest.mark.parametrize("fmt", ["cbz", "zip"])
+    def test_archive_skips_kindle_with_event(
+            self, worker, event_bus, state, monkeypatch, tmp_path, fmt):
+        # Issue #362: Kindle rejects CBZ and ZIP. The GUI skips them like
+        # image folders, says why, and keeps the file and the chapter.
+        archive = tmp_path / f"Vinland Saga - Chapter 71.{fmt}"
+        archive.write_bytes(b"PK")
+        sent = []
+
+        events = self._run(
+            worker, event_bus, state, monkeypatch,
+            lambda manga, chapter, *a, **k: archive,
+            lambda **kw: sent.append(kw),
+            output_format=fmt,
+            kindle_cfg=dict(self._KINDLE), delete_after_send=True)
+
+        assert self._names(events)[-2:] == ["kindle_skipped", "download_complete"]
+        assert events[-2][1]["reason"] == (
+            f"{fmt.upper()} files can't be sent to Kindle; only PDF and EPUB can.")
+        assert "kindle_sent" not in self._names(events)
+        assert "kindle_error" not in self._names(events)
+        assert sent == []
+        assert archive.exists()
+        assert state.is_chapter_downloaded("Vinland Saga", "71")
+        assert state.failures.get_all_undelivered() == {}
 
     def test_kindle_failure_keeps_file_and_chapter(
             self, worker, event_bus, state, monkeypatch, tmp_path):

@@ -68,6 +68,36 @@ EMAIL_ATTACHMENT_LIMIT = 25 * 1024 * 1024
 MAX_ATTACHMENT_SIZE = 18 * 1024 * 1024  # 18MB raw (~24MB after base64)
 
 
+# Issue #362: the output formats Send to Kindle accepts by email. CBZ and
+# ZIP archives and image folders (JPG/PNG/WEBP) are rejected by Amazon, so
+# they are never sent. Every delivery path asks the two functions below.
+KINDLE_FORMATS = ("pdf", "epub")
+IMAGE_FOLDER_FORMATS = ("jpg", "png", "webp")
+
+
+def _kindle_reason(label: str) -> str:
+    return f"{label} can't be sent to Kindle; only PDF and EPUB can."
+
+
+def kindle_format_error(output_format: str) -> Optional[str]:
+    """None when chapters saved as ``output_format`` can be sent to
+    Kindle, else why they can't (one sentence, no markup)."""
+    fmt = str(output_format).strip().lower().lstrip(".")
+    if fmt in KINDLE_FORMATS:
+        return None
+    if fmt in IMAGE_FOLDER_FORMATS:
+        return _kindle_reason(f"Image folders ({fmt.upper()})")
+    return _kindle_reason(f"{fmt.upper() or 'Unknown'} files")
+
+
+def kindle_file_error(path: Path) -> Optional[str]:
+    """None when the saved chapter at ``path`` can be sent to Kindle,
+    else why not. Image formats save a folder of pages (#340)."""
+    if path.is_dir():
+        return _kindle_reason("Image folders")
+    return kindle_format_error(path.suffix)
+
+
 def _format_mb(size: int) -> str:
     """Format a byte count as MiB for user-facing messages."""
     return f"{size / (1024 * 1024):.1f}MB"
@@ -151,7 +181,9 @@ def send_to_kindle(
     Send a PDF or EPUB to Kindle via email.
     
     Automatically splits large PDFs that exceed Gmail's limit.
-    EPUB files are sent as-is (Kindle handles them natively).
+    EPUB files are sent as-is (Kindle handles them natively). Any other
+    file (CBZ, ZIP, ...) or a folder is refused before anything is sent
+    (issue #362).
     
     Args:
         pdf_path: Path to the PDF or EPUB file
@@ -172,6 +204,10 @@ def send_to_kindle(
     """
     if not pdf_path.exists():
         raise EmailError(f"File not found: {pdf_path}")
+
+    unsupported = kindle_file_error(pdf_path)
+    if unsupported:
+        raise EmailError(unsupported)
     
     if not kindle_email or not sender_email:
         raise EmailError("Email addresses not configured")
@@ -181,12 +217,12 @@ def send_to_kindle(
     # Issue #226: never let the password reach a log line.
     register_secret(app_password)
     
-    # Check file type - only split PDFs, send EPUBs/CBZs/ZIPs as-is
+    # Check file type - only split PDFs, send EPUBs as-is
     suffix = pdf_path.suffix.lower()
-    is_single_file = suffix in ('.epub', '.cbz', '.zip')
+    is_single_file = suffix == '.epub'
 
     if is_single_file:
-        # EPUB/CBZ: check size (cannot split these formats)
+        # EPUB: check size (cannot be split)
         file_size = pdf_path.stat().st_size
         if file_size > MAX_ATTACHMENT_SIZE:
             fmt = suffix.lstrip('.').upper()
@@ -262,8 +298,6 @@ def _send_single_email(
     suffix = pdf_path.suffix.lower()
     mime_types = {
         '.epub': ('application', 'epub+zip'),
-        '.cbz': ('application', 'vnd.comicbook+zip'),
-        '.zip': ('application', 'zip'),
     }
     mime_main, mime_sub = mime_types.get(suffix, ('application', 'pdf'))
     

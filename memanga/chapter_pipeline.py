@@ -23,7 +23,7 @@ from .chapters import ChapterWithSource
 from .downloader import (DEFAULT_PAGE_RETRIES, DownloaderError,
                          _find_chapter_on_backup, _get_sources_from_manga,
                          download_chapter)
-from .emailer import send_to_kindle
+from .emailer import kindle_file_error, kindle_format_error, send_to_kindle
 
 
 class ChapterStatus(Enum):
@@ -39,7 +39,9 @@ class DeliveryStatus(Enum):
 
     NOT_REQUESTED = "not_requested"    # local delivery, no Kindle address,
                                        # or the manga opted out (#341)
-    SKIPPED_FOLDER = "skipped_folder"  # image folders cannot be emailed
+    SKIPPED_FORMAT = "skipped_format"  # Kindle doesn't accept the saved
+                                       # format: CBZ, ZIP or an image
+                                       # folder (#340, #362)
     SENT = "sent"
     FAILED = "failed"                  # the file stays on disk and an
                                        # undelivered record is kept (#360)
@@ -145,8 +147,9 @@ class ChapterReporter:
     def saved(self, outcome: ChapterOutcome):
         """A chapter was saved (complete or partial), before delivery."""
 
-    def email_skipped_folder(self, path: Path):
-        """``path`` is an image folder, which cannot be emailed."""
+    def email_skipped_format(self, path: Path, reason: str):
+        """``path`` is not sent: Kindle doesn't accept its format
+        (``reason`` says which, as a plain sentence)."""
 
     def email_sending(self, path: Path):
         """About to send ``path`` to Kindle."""
@@ -452,6 +455,14 @@ class ChapterPipeline:
         elif status is DeliveryStatus.SENT:
             self.state.failures.clear_undelivered(title, chapter, reason="sent")
 
+    def kindle_format_error(self) -> Optional[str]:
+        """Why this run's chapters won't reach the Kindle although Kindle
+        delivery is on, or None (#362). Lets a front end warn once,
+        before anything is downloaded."""
+        if not self.delivers_to_kindle():
+            return None
+        return kindle_format_error(self.options.output_format)
+
     def delivers_to_kindle(self, manga: Optional[Dict[str, Any]] = None) -> bool:
         """True when this run sends saved chapters to a Kindle address
         and, given ``manga``, that manga has not opted out (#341)."""
@@ -469,9 +480,10 @@ class ChapterPipeline:
         email = opts.email
         if not self.delivers_to_kindle(manga):
             return DeliveryStatus.NOT_REQUESTED, None, False
-        if path.is_dir():
-            self.reporter.email_skipped_folder(path)
-            return DeliveryStatus.SKIPPED_FOLDER, None, False
+        unsupported = kindle_file_error(path)
+        if unsupported:
+            self.reporter.email_skipped_format(path, unsupported)
+            return DeliveryStatus.SKIPPED_FORMAT, None, False
         self.reporter.email_sending(path)
         # The chapter is already saved, so no delivery problem may undo
         # that: besides EmailError, preparing the attachment (reading or

@@ -892,6 +892,83 @@ class TestCheckCommand:
         # Either returns 0 (success) or a small int — should not crash.
         assert rc in (0, 1)
 
+    def _kindle_check(self, run_cli, config, monkeypatch, tmp_path, capsys,
+                      output_format, *argv):
+        """`check --download` in email mode with two new chapters; returns
+        (exit code, files sent, stderr seen before the first download,
+        stderr after it)."""
+        from memanga import cli
+
+        config.set("delivery.mode", "email")
+        config.set("delivery.output_format", output_format)
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [{"title": "Vinland Saga", "status": "reading",
+                              "source": "primary.test",
+                              "url": "https://primary.test/vs"}])
+        config.save()
+        chapters = [types.SimpleNamespace(
+            number=n, title="", url=f"https://primary.test/c/{n}",
+            source="primary.test", is_backup=False) for n in ("71", "72")]
+        sent, before = [], []
+
+        def fake_download(manga, chapter, output_dir, fmt, **kwargs):
+            if not before:
+                before.append(capsys.readouterr().err)
+            if fmt in ("jpg", "png", "webp"):
+                path = tmp_path / f"Chapter {chapter.number}"
+                path.mkdir()
+                return path
+            path = tmp_path / f"{chapter.number}.{fmt}"
+            path.write_bytes(b"data")
+            return path
+
+        monkeypatch.setattr(cli, "check_for_updates", lambda *a, **k: chapters)
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+        monkeypatch.setattr(cli, "send_to_kindle",
+                            lambda **kw: sent.append(kw["pdf_path"].name))
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+        rc = run_cli("check", "--download", *argv)
+        return rc, sent, before[0], capsys.readouterr().err
+
+    @pytest.mark.parametrize("fmt", ["cbz", "zip", "jpg"])
+    def test_kindle_unsupported_format_warns_once_before_download(
+            self, run_cli, config, monkeypatch, tmp_path, capsys, fmt):
+        # Issue #362: chapters are saved, never emailed, and the run says
+        # why before anything is downloaded.
+        from memanga import cli
+
+        rc, sent, before, after = self._kindle_check(
+            run_cli, config, monkeypatch, tmp_path, capsys, fmt)
+
+        assert rc == 0
+        assert sent == []
+        assert before.count("can't be sent to Kindle; only PDF and EPUB can.") == 1
+        assert "Chapters are saved but not sent to Kindle" in before
+        assert "--format pdf or epub" in before
+        assert "Chapters are saved but not sent to Kindle" not in after
+        assert cli.state.is_chapter_downloaded("Vinland Saga", "72")
+        assert cli.state.failures.get_all_undelivered() == {}
+
+    def test_kindle_format_override_is_checked_too(
+            self, run_cli, config, monkeypatch, tmp_path, capsys):
+        rc, sent, before, _ = self._kindle_check(
+            run_cli, config, monkeypatch, tmp_path, capsys, "pdf",
+            "--format", "cbz")
+        assert rc == 0
+        assert sent == []
+        assert "CBZ files can't be sent to Kindle" in before
+
+    @pytest.mark.parametrize("fmt", ["pdf", "epub"])
+    def test_kindle_format_sends_without_warning(
+            self, run_cli, config, monkeypatch, tmp_path, capsys, fmt):
+        rc, sent, before, after = self._kindle_check(
+            run_cli, config, monkeypatch, tmp_path, capsys, fmt)
+        assert rc == 0
+        assert sent == [f"71.{fmt}", f"72.{fmt}"]
+        assert "can't be sent to Kindle" not in before + after
+
     def test_backup_success_in_email_mode_sends_before_marking_downloaded(
             self, run_cli, config, monkeypatch, tmp_path):
         """Issue #86 regression: backup recovery must still run Kindle
@@ -1354,6 +1431,22 @@ class TestConfigActions:
         capsys.readouterr()
         assert run_cli("config", "get", "email.smtp_port") == 0
         assert capsys.readouterr().out == "465\n"
+
+    def test_set_warns_when_kindle_and_format_conflict(self, run_cli, config,
+                                                       capsys):
+        # Issue #362: the value is saved (it works for local downloads),
+        # with a warning that such chapters won't be sent to Kindle.
+        assert run_cli("config", "set", "delivery.output_format", "cbz") == 0
+        assert "Kindle" not in capsys.readouterr().err  # local mode
+        assert run_cli("config", "set", "delivery.mode", "email") == 0
+        err = capsys.readouterr().err
+        assert "CBZ files can't be sent to Kindle; only PDF and EPUB can." in err
+        assert "set delivery.output_format to pdf or epub" in err
+        assert run_cli("config", "set", "delivery.output_format", "zip") == 0
+        assert "ZIP files can't be sent to Kindle" in capsys.readouterr().err
+        assert config.get("delivery.output_format") == "zip"
+        assert run_cli("config", "set", "delivery.output_format", "epub") == 0
+        assert "Kindle" not in capsys.readouterr().err
 
     @pytest.mark.parametrize("key,value", [
         ("delivery.output_format", "mobi"),
