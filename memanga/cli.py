@@ -55,7 +55,8 @@ from .state import State
 from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
 from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
-from .emailer import kindle_format_error, send_to_kindle, smtp_timeout
+from .emailer import (TEST_DELIVERY_NOTE, EmailError, kindle_format_error,
+                      send_test_document, send_to_kindle, smtp_timeout)
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
                                DeliveryStatus, PipelineOptions,
                                manga_auto_downloads)
@@ -2254,8 +2255,12 @@ def _config_email(args):
                   f"{smtp_timeout(config.get('email.smtp_timeout')):g} seconds")
     table.add_row("App password", "set" if password_set else "[red]not set[/red]")
     console.print(table)
+    if getattr(args, "send_test", False):
+        return _send_test_document()
     if not args.test:
-        console.print("[dim]Pass --test to try logging in to the SMTP server.[/dim]")
+        console.print("[dim]Pass --test for a quick SMTP login check (sends "
+                      "nothing), or --send-test to email a small test PDF to "
+                      "your Kindle.[/dim]")
         return
 
     with console.status("[dim]Logging in to the SMTP server...[/dim]"):
@@ -2264,6 +2269,33 @@ def _config_email(args):
         console.print(f"[green]✅ {_esc(result.message)}[/green]")
         return
     return _error(f"[red]❌ {_esc(result.message)}[/red]")
+
+
+def _send_test_document():
+    """`config email --send-test` (issue #365): email a tiny PDF to the
+    configured Kindle address with the password delivery uses."""
+    try:
+        app_password_override()
+    except AppPasswordError as e:
+        return _error(f"[red]❌ App password from the environment is "
+                      f"unusable: {_esc(e)}[/red]")
+    try:
+        with console.status("[dim]Sending a test PDF to your Kindle...[/dim]"):
+            subject = send_test_document(
+                config.get("email.kindle_email"),
+                config.get("email.sender_email"),
+                config.get("email.smtp_server", "smtp.gmail.com"),
+                config.get("email.smtp_port", 587),
+                get_app_password(config),
+                timeout=config.get("email.smtp_timeout"),
+            )
+    except EmailError as e:
+        return _error(f"[red]❌ Test PDF not sent: {_esc(e)}[/red]")
+    except (TypeError, ValueError) as e:
+        return _error(f"[red]❌ Test PDF not sent: invalid SMTP setting "
+                      f"({_esc(e)})[/red]")
+    console.print(f"[green]✅ Sent \"{_esc(subject)}\"[/green]")
+    console.print(f"[dim]{_esc(TEST_DELIVERY_NOTE)}[/dim]")
 
 
 _CONFIG_ACTIONS = {
@@ -4248,8 +4280,14 @@ Examples:
         "edit", help="Open config.yaml in $VISUAL or $EDITOR, then check it")
     p_cfg_email = config_actions.add_parser(
         "email", help="Show email delivery settings (app password masked)")
-    p_cfg_email.add_argument("--test", action="store_true",
-                             help="Log in to the configured SMTP server (network)")
+    email_test = p_cfg_email.add_mutually_exclusive_group()
+    email_test.add_argument("--test", action="store_true",
+                            help="Connection check only: log in to the "
+                                 "configured SMTP server; sends nothing (network)")
+    email_test.add_argument("--send-test", action="store_true",
+                            help="Email a small test PDF to the configured "
+                                 "Kindle address (network). Mail server "
+                                 "acceptance does not prove Kindle delivery")
     
     # cron
     p_cron = subparsers.add_parser("cron", help="Manage cron job")

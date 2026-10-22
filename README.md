@@ -184,8 +184,12 @@ Hit **Re-check health** to ping every enabled source and see their status.
 2. Add your Gmail address to your 
    [Amazon "Approved Personal Document E-mail List"](https://www.amazon.com/hz/mycd/myx#/home/settings/payment).
 3. In **Settings → Kindle / Email**, paste your Kindle email, sender Gmail,
-   and the App Password. Hit "Test" — you'll get a "Test email sent" toast
-   when it works.
+   and the App Password. **Check Login** only signs in to the mail server and
+   sends nothing. **Send Test PDF** emails a one-page test PDF to your Kindle
+   (`memanga config email --send-test` does the same from the command line).
+   The mail server accepting it does not prove delivery: Amazon delivers it
+   only when the sender is on the approved list, so look for
+   "MeManga test document" in your Kindle library after a few minutes.
 4. On the Detail page of any manga, toggle **Send to Kindle after download**.
 
 Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs over 18 MB are split automatically and the parts are sent in one mail session; EPUB files can't be split so they fail-loud with a size warning.
@@ -298,7 +302,7 @@ For a host cron job, run Compose from the repository directory:
 | `doctor [--json] [--check NAME] [--smtp] [--launch-browsers]` | Diagnose install, paths, browsers, email, keyring, scheduler and source health |
 | `config` | Interactive settings editor |
 | `config show [--json]` / `config get KEY` / `config set KEY VALUE` | Show, read or change settings without prompts; values are checked before saving and the app password stays masked |
-| `config path` / `config edit` / `config email [--test]` | Print the config file path, open it in `$VISUAL`/`$EDITOR` and check it, show email settings (`--test` logs in to SMTP) |
+| `config path` / `config edit` / `config email [--test \| --send-test]` | Print the config file path, open it in `$VISUAL`/`$EDITOR` and check it, show email settings (`--test` only logs in to SMTP; `--send-test` emails a small test PDF to the Kindle) |
 | `cron install [--time 06:00]` | Schedule a daily `check --auto --quiet` job (`--auto` is an alias of `--download`) |
 | `cron status` / `cron remove` | Inspect / uninstall the cron job |
 | `sources` | List all 319 supported domains, marking which ones are healthy |

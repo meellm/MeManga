@@ -929,6 +929,16 @@ Each step of talking to the SMTP server (connecting, logging in, sending, loggin
 
 ### Step 4 — Test it
 
+Send a one-page test PDF to your Kindle first:
+
+```bash
+run config email --send-test
+```
+
+`--test` instead only logs in to the SMTP server and sends nothing. In the desktop app, use **Send Test PDF** (or **Check Login**) in **Settings → Kindle / Email**. When the mail server accepts the test PDF, Amazon still delivers it only if the sender address is on your Approved Personal Document E-mail List. Look for "MeManga test document" in your Kindle library after a few minutes. If Amazon rejects it, it usually emails the sender address.
+
+Then check for real chapters:
+
 ```bash
 run check --download
 ```

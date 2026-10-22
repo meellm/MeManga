@@ -1709,6 +1709,7 @@ class TestConfigActions:
         assert "sender@example.com" in out
         assert "file-secret" not in out
         assert "--test" in out
+        assert "--send-test" in out
 
     @pytest.mark.parametrize("status,rc", [("ok", 0), ("fail", 1)])
     def test_email_test_uses_smtp_check(self, run_cli, monkeypatch, capsys,
@@ -1724,6 +1725,97 @@ class TestConfigActions:
         assert seen == {"live": True}
         captured = capsys.readouterr()
         assert "stub result" in (captured.out if rc == 0 else captured.err)
+
+    @pytest.fixture
+    def fake_smtp(self, monkeypatch):
+        """smtplib.SMTP replaced so nothing is sent; records each call."""
+        import smtplib
+        calls = []
+
+        class FakeSMTP:
+            def __init__(self, host, port, timeout=None):
+                calls.append(("connect", host, port, timeout))
+
+            def starttls(self, **k):
+                calls.append(("starttls",))
+
+            def login(self, user, password):
+                calls.append(("login", user, password))
+
+            def send_message(self, msg):
+                calls.append(("send", msg))
+
+            def quit(self):
+                calls.append(("quit",))
+
+            def close(self):
+                pass
+        monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+        return calls
+
+    def _configure_email(self, config, monkeypatch):
+        from memanga import cli
+        config.set("email.kindle_email", "reader@kindle.example.invalid")
+        config.set("email.sender_email", "sender@example.invalid")
+        config.set("email.smtp_server", "smtp.example.invalid")
+        config.set("email.smtp_port", 2525)
+        config.set("email.smtp_timeout", 9)
+        config.save()
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "send-test-pw")
+
+    def test_email_send_test_sends_a_pdf_to_the_kindle(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp):
+        # Issue #365: a real delivery test with the configured settings.
+        self._configure_email(config, monkeypatch)
+        assert run_cli("config", "email", "--send-test") == 0
+
+        assert fake_smtp[0] == ("connect", "smtp.example.invalid", 2525, 9)
+        assert ("login", "sender@example.invalid", "send-test-pw") in fake_smtp
+        (msg,) = [c[1] for c in fake_smtp if c[0] == "send"]
+        assert msg["To"] == "reader@kindle.example.invalid"
+        (attachment,) = msg.get_payload()
+        assert attachment.get_content_type() == "application/pdf"
+        assert attachment.get_payload(decode=True).startswith(b"%PDF-")
+        out = " ".join(capsys.readouterr().out.split())
+        assert "MeManga test document" in out
+        assert "does not prove it reached your Kindle" in out
+        assert "send-test-pw" not in out
+
+    def test_email_send_test_reports_smtp_failure(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp):
+        import smtplib
+        self._configure_email(config, monkeypatch)
+
+        def refuse(self, msg):
+            raise smtplib.SMTPRecipientsRefused(
+                {"reader@kindle.example.invalid": (550, b"5.1.1 no such user")})
+        monkeypatch.setattr(smtplib.SMTP, "send_message", refuse)
+        assert run_cli("config", "email", "--send-test") == 1
+        err = capsys.readouterr().err
+        assert "Test PDF not sent" in err
+        assert "550 5.1.1 no such user" in err
+
+    def test_email_send_test_needs_settings(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp):
+        from memanga import cli
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "")
+        assert run_cli("config", "email", "--send-test") == 1
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Missing Kindle email, sender email, app password" in err
+        assert fake_smtp == []
+
+    def test_email_send_test_reports_unusable_override(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp, tmp_path):
+        self._configure_email(config, monkeypatch)
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE",
+                           str(tmp_path / "missing"))
+        assert run_cli("config", "email", "--send-test") == 1
+        assert "unusable" in capsys.readouterr().err
+        assert fake_smtp == []
+
+    def test_email_test_and_send_test_are_exclusive(self, run_cli, capsys):
+        assert run_cli("config", "email", "--test", "--send-test") == 2
+        assert "not allowed with" in capsys.readouterr().err
 
     # ── compatibility ──
 

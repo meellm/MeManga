@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QFileDialog, QButtonGroup, QSizePolicy, QSpinBox,
     QAbstractSpinBox,
 )
-from PySide6.QtCore import Qt, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QEvent, QObject, QTimer, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 from .base import BasePage
 from .. import theme as T
@@ -64,6 +64,54 @@ class _EmailTestSignals(QObject):
 
 class _AboutSignals(QObject):
     checked = Signal(object)  # doctor.about_checks() result
+
+
+class _WrappingLabel(QLabel):
+    """A word-wrapped label whose size hints carry the height its text
+    needs at its current width. The tab layouts are top-aligned, which
+    sizes them from sizeHint() and ignores heightForWidth(), so a long
+    wrapped text would otherwise be clipped and overlap the next row.
+
+    The hints are overridden instead of setting a minimum height:
+    QLabel.heightForWidth() never returns less than minimumHeight(), so
+    the height could then only grow when the label gets wider."""
+
+    def __init__(self, text: str = "", parent=None):
+        super().__init__(text, parent)
+        self.setWordWrap(True)
+        self._text_height = 0
+
+    def _fit_height(self) -> None:
+        height = self.heightForWidth(self.width())
+        if height != self._text_height:
+            self._text_height = height
+            self.updateGeometry()
+
+    def _with_text_height(self, size):
+        if self._text_height > 0:
+            size.setHeight(self._text_height)
+        return size
+
+    def sizeHint(self):
+        return self._with_text_height(super().sizeHint())
+
+    def minimumSizeHint(self):
+        return self._with_text_height(super().minimumSizeHint())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_height()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        # A style sheet can change the font after the first resize.
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._fit_height()
+
+    def setText(self, text):
+        super().setText(text)
+        # A status line can change its text without changing width.
+        self._fit_height()
 
 
 class SettingsPage(BasePage):
@@ -313,7 +361,9 @@ class SettingsPage(BasePage):
         row.addWidget(lbl)
 
         entry = QLineEdit()
-        entry.setMinimumWidth(280)
+        # Narrow enough for the Email tab to fit the 900 px minimum
+        # window width; the entry still stretches when there is room.
+        entry.setMinimumWidth(160)
         if placeholder:
             entry.setPlaceholderText(placeholder)
         if password:
@@ -521,14 +571,15 @@ class SettingsPage(BasePage):
 
         self._password_entry = QLineEdit()
         self._password_entry.setMinimumHeight(36)
-        self._password_entry.setFixedWidth(220)
+        self._password_entry.setMinimumWidth(160)
+        self._password_entry.setMaximumWidth(220)
         self._password_entry.setEchoMode(QLineEdit.EchoMode.Password)
         pw_row.addWidget(self._password_entry)
 
-        pw_hint = QLabel("(leave blank to keep)")
+        # Wraps instead of widening the tab past a narrow window.
+        pw_hint = _WrappingLabel("(leave blank to keep)")
         pw_hint.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        pw_row.addWidget(pw_hint)
-        pw_row.addStretch()
+        pw_row.addWidget(pw_hint, 1)
         f.addLayout(pw_row)
 
         # Delete after send
@@ -538,21 +589,47 @@ class SettingsPage(BasePage):
 
         f.addSpacing(T.PAD_SM)
 
-        # Test connection
-        test_row = QHBoxLayout()
-        test_btn = QPushButton("Test Connection")
-        test_btn.setMinimumHeight(36)
-        test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        test_btn.clicked.connect(self._test_email)
-        test_row.addWidget(test_btn)
+        # Issue #365 / #339: a quick login check, and a real test that
+        # sends a tiny PDF to the Kindle address.
+        self._test_hint = _WrappingLabel(
+            "Check Login only signs in to the mail server and sends nothing. "
+            "Send Test PDF emails a one-page PDF to the Kindle address above. "
+            "If the mail server accepts it, Amazon still delivers it only "
+            "when the sender is on your Approved Personal Document E-mail "
+            "List, so look for it in your Kindle library after a few minutes."
+        )
+        self._test_hint.setProperty("role", "hint")
+        f.addWidget(self._test_hint)
 
-        self._test_label = QLabel("")
+        test_row = QHBoxLayout()
+        self._login_test_btn = QPushButton("Check Login")
+        self._login_test_btn.setToolTip(
+            "Log in to the SMTP server with these settings. Sends nothing.")
+        self._login_test_btn.setAccessibleDescription(
+            "Logs in to the SMTP server only; no email is sent.")
+        self._send_test_btn = QPushButton("Send Test PDF")
+        self._send_test_btn.setToolTip(
+            "Email a small test PDF to the Kindle address above.")
+        self._send_test_btn.setAccessibleDescription(
+            "Emails a one-page test PDF to the Kindle address. Amazon "
+            "delivers it only if the sender address is approved.")
+        for btn, slot in ((self._login_test_btn, self._test_email),
+                          (self._send_test_btn, self._send_test_email)):
+            btn.setMinimumHeight(36)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(slot)
+            test_row.addWidget(btn)
+
+        test_row.addStretch()
+        f.addLayout(test_row)
+
+        # Its own wrapping line below the buttons, so a long result
+        # stays readable in a narrow window.
+        self._test_label = _WrappingLabel("")
         # Shows a server's reply: never render it as HTML.
         self._test_label.setTextFormat(Qt.TextFormat.PlainText)
         self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt;")
-        test_row.addWidget(self._test_label)
-        test_row.addStretch()
-        f.addLayout(test_row)
+        f.addWidget(self._test_label)
 
         # Save button lives in the shared sticky bar at the bottom of
         # the right pane (always visible regardless of scroll position).
@@ -1198,57 +1275,70 @@ class SettingsPage(BasePage):
 
         self._refresh_filename_preview()
 
-    def _test_email(self):
-        self._test_label.setText("Testing...")
-        self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-
+    def _email_test_inputs(self, need_kindle: bool):
+        """The typed settings for an email test as ``(kindle, sender,
+        server, port, password, override)``, ``override`` being
+        app_password_override()'s result; or None after showing what is
+        missing."""
+        self._test_label.setToolTip("")
+        kindle = self._entry_kindle_email.text().strip()
         sender = self._entry_sender_email.text().strip()
         smtp_server = self._entry_smtp_server.text().strip()
         smtp_port = self._entry_smtp_port.text().strip()
         pw = self._password_entry.text().strip()
 
+        if need_kindle and not kindle:
+            self._show_test_status("Fill Kindle email", T.ERROR)
+            return None
         if not sender or not smtp_server:
-            self._test_label.setText("Fill sender + server")
-            self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
-            return
+            self._show_test_status("Fill sender + server", T.ERROR)
+            return None
         # Issue #247: test the password delivery will use. An injected
         # one wins over the typed field, as it does when sending.
         from ...config import (AppPasswordError, app_password_override,
                                get_app_password)
-        self._test_label.setToolTip("")
         try:
             override = app_password_override()
         except AppPasswordError as e:
-            self._test_label.setText("Password variable unusable")
+            self._show_test_status("Password variable unusable", T.ERROR)
             self._test_label.setToolTip(str(e))
-            self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
-            return
+            return None
         if override:
             pw = override[1]
-            self._test_label.setText(f"Testing password from {override[0]}...")
             self._test_label.setToolTip(
                 f"{override[0]} is set, so it is used instead of the "
                 "password field, as when sending.")
         elif not pw:
             pw = get_app_password(self.app.config)
         if not pw:
-            self._test_label.setText("No password")
-            self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
-            return
+            self._show_test_status("No password", T.ERROR)
+            return None
 
         # Issue #342: the password must not reach the error details.
         from ...output import register_secret
         register_secret(pw)
+        return kindle, sender, smtp_server, smtp_port, pw, override
 
-        # Issue #361: the same bounded login as delivery and doctor.
-        timeout = self.app.config.get("email.smtp_timeout")
+    def _show_test_status(self, text: str, color) -> None:
+        self._test_label.setText(text)
+        self._test_label.setStyleSheet(
+            f"font-size: {T.FONT_SIZE_XS}pt; color: {color};")
+
+    def _set_email_tests_enabled(self, enabled: bool) -> None:
+        # One test at a time: a double click must not send twice.
+        self._login_test_btn.setEnabled(enabled)
+        self._send_test_btn.setEnabled(enabled)
+
+    def _run_email_test(self, action, success: str, success_detail: str = ""):
+        """Run ``action()`` off the UI thread and report its outcome."""
+        self._set_email_tests_enabled(False)
 
         def _test():
-            from ...emailer import EmailAuthError, EmailTimeoutError, smtp_login
+            from ...emailer import EmailAuthError, EmailTimeoutError
             try:
-                smtp_login(sender, smtp_server, int(smtp_port), pw,
-                           timeout=timeout)
-                self._email_test_signals.result.emit("Success!", "success", "")
+                action()
+                self._email_test_signals.result.emit(
+                    success, "success", success_detail)
             except EmailAuthError as e:
                 self._email_test_signals.result.emit("Auth failed", "error", str(e))
             except EmailTimeoutError as e:
@@ -1259,14 +1349,58 @@ class SettingsPage(BasePage):
 
         threading.Thread(target=_test, daemon=True).start()
 
+    def _test_email(self):
+        """Check Login: sign in to the SMTP server; nothing is sent."""
+        self._show_test_status("Testing...", T.FG_MUTED)
+        inputs = self._email_test_inputs(need_kindle=False)
+        if inputs is None:
+            return
+        _, sender, smtp_server, smtp_port, pw, override = inputs
+        if override:
+            self._test_label.setText(f"Testing password from {override[0]}...")
+
+        # Issue #361: the same bounded login as delivery and doctor.
+        timeout = self.app.config.get("email.smtp_timeout")
+
+        def _login():
+            from ...emailer import smtp_login
+            smtp_login(sender, smtp_server, int(smtp_port), pw,
+                       timeout=timeout)
+        self._run_email_test(_login, "Success!")
+
+    def _send_test_email(self):
+        """Send Test PDF (issue #365): email a tiny PDF to the typed
+        Kindle address the way delivery sends chapters."""
+        self._show_test_status("Sending test PDF...", T.FG_MUTED)
+        inputs = self._email_test_inputs(need_kindle=True)
+        if inputs is None:
+            return
+        kindle, sender, smtp_server, smtp_port, pw, override = inputs
+        if override:
+            self._test_label.setText(
+                f"Sending test PDF with password from {override[0]}...")
+        timeout = self.app.config.get("email.smtp_timeout")
+
+        from ...emailer import TEST_DELIVERY_NOTE
+
+        def _send():
+            from ...emailer import send_test_document
+            send_test_document(kindle, sender, smtp_server, int(smtp_port),
+                               pw, timeout=timeout)
+        self._run_email_test(_send, "Test PDF accepted; check your Kindle",
+                             TEST_DELIVERY_NOTE)
+
     @Slot(str, str, str)
     def _set_email_test_result(self, text: str, kind: str, detail: str = ""):
+        self._set_email_tests_enabled(True)
         color = T.SUCCESS if kind == "success" else T.ERROR
-        self._test_label.setText(text)
-        self._test_label.setStyleSheet(
-            f"font-size: {T.FONT_SIZE_XS}pt; color: {color};"
-        )
-        if detail:
+        self._show_test_status(text, color)
+        if detail and kind == "success":
+            # Issue #365: what acceptance means, also in Notifications.
+            self._test_label.setToolTip(detail_tooltip(detail))
+            notify_error(self.app, "Test PDF accepted by the mail server",
+                         detail, ntype="kindle")
+        elif detail:
             # Issue #342: the server's full reply, on hover and in
             # Notifications (keyboard and screen-reader reachable).
             self._test_label.setToolTip(detail_tooltip(detail))
