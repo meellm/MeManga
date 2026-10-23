@@ -15,11 +15,7 @@ import tempfile
 import warnings
 from contextlib import contextmanager
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email.mime.text import MIMEText
-from email import encoders
-from email.utils import encode_rfc2231
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional
 import pikepdf
@@ -547,7 +543,7 @@ def _remove_split_parts(pdf_path: Path, parts: List[Path]) -> None:
 
 
 def _kindle_message(pdf_path: Path, kindle_email: str, sender_email: str,
-                    subject: str) -> MIMEMultipart:
+                    subject: str) -> EmailMessage:
     """The email carrying ``pdf_path`` (PDF or EPUB) as its attachment."""
     # Detect MIME type based on extension
     suffix = pdf_path.suffix.lower()
@@ -564,22 +560,18 @@ def _kindle_message(pdf_path: Path, kindle_email: str, sender_email: str,
 
 def _attachment_message(data: bytes, filename: str, mime_main: str,
                         mime_sub: str, kindle_email: str, sender_email: str,
-                        subject: str) -> MIMEMultipart:
-    """The email carrying ``data`` as the attachment ``filename``."""
-    msg = MIMEMultipart()
+                        subject: str) -> EmailMessage:
+    """The email carrying ``data`` as the attachment ``filename``: a
+    multipart/mixed message with one base64 part (email.policy.default)."""
+    msg = EmailMessage()
     msg["From"] = sender_email
     msg["To"] = kindle_email
     msg["Subject"] = subject
-
-    part = MIMEBase(mime_main, mime_sub)
-    part.set_payload(data)
-    encoders.encode_base64(part)
-    part.add_header(
-        "Content-Disposition",
-        "attachment",
-        filename=filename,
-    )
-    msg.attach(part)
+    # add_attachment() sets MIME-Version on the child part; preserve it on
+    # the outer message too.
+    msg["MIME-Version"] = "1.0"
+    msg.add_attachment(data, maintype=mime_main, subtype=mime_sub,
+                       filename=filename)
     return msg
 
 
