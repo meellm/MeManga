@@ -192,7 +192,7 @@ Hit **Re-check health** to ping every enabled source and see their status.
    "MeManga test document" in your Kindle library after a few minutes.
 4. On the Detail page of any manga, toggle **Send to Kindle after download**.
 
-Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs over 18 MB are split automatically and the parts are sent in one mail session; EPUB files can't be split so they fail-loud with a size warning.
+Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs too large for one email (over 18 MB with the default 25 MB email size limit, `email.max_email_mb`) are split automatically and the parts are sent in one mail session; EPUB files can't be split so they fail-loud with a size warning. See the [Guide](docs/Guide.md#email-size-limit) to match the limit to your mail provider.
 
 ---
 

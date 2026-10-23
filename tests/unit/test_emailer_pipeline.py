@@ -183,6 +183,152 @@ class TestSendToKindle:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Email size limit (issue #363): email.max_email_mb drives both checks
+# ─────────────────────────────────────────────────────────────────────
+
+
+MB = 1024 * 1024
+
+
+class TestEmailSizeLimit:
+    def test_default_keeps_the_18mb_raw_limit(self):
+        from memanga.emailer import (EMAIL_ATTACHMENT_LIMIT,
+                                     MAX_ATTACHMENT_SIZE, email_size_limit,
+                                     raw_attachment_limit)
+        assert email_size_limit() == EMAIL_ATTACHMENT_LIMIT == 25 * MB
+        assert raw_attachment_limit(EMAIL_ATTACHMENT_LIMIT) \
+            == MAX_ATTACHMENT_SIZE == 18 * MB
+
+    def test_bounds_match_config_schema(self, isolated_home):
+        from memanga.config import CONFIG_KEYS, Config
+        from memanga.emailer import (DEFAULT_EMAIL_SIZE_MB, MAX_EMAIL_SIZE_MB,
+                                     MIN_EMAIL_SIZE_MB)
+        spec = CONFIG_KEYS["email.max_email_mb"]
+        assert (spec["min"], spec["max"]) == (MIN_EMAIL_SIZE_MB,
+                                              MAX_EMAIL_SIZE_MB)
+        assert Config().get("email.max_email_mb") == DEFAULT_EMAIL_SIZE_MB
+
+    @pytest.mark.parametrize("value, expected_mb", [
+        (None, 25), (20, 20), (10, 10), (50, 50), (35.5, 35.5),
+        # Unusable hand-edited values fall back to the default.
+        (9, 25), (51, 25), (0, 25), (-20, 25), (True, 25), ("20", 25),
+        (float("nan"), 25), (float("inf"), 25), (10**400, 25),
+    ])
+    def test_email_size_limit(self, value, expected_mb):
+        from memanga.emailer import email_size_limit
+        assert email_size_limit(value) == int(expected_mb * MB)
+
+    def test_raw_limit_leaves_room_for_base64_and_headers(self):
+        import base64
+        from memanga.emailer import raw_attachment_limit
+        for mb in (10, 20, 25, 50):
+            raw = raw_attachment_limit(mb * MB)
+            # base64 body in 76-character lines with CRLF line ends
+            encoded = len(base64.encodebytes(b"0" * raw)) * 78 // 77
+            assert encoded < mb * MB
+            assert mb * MB - encoded > 64 * 1024  # room for headers
+
+    def test_configured_limit_rejects_large_epub(self, good_cfg, tmp_path):
+        from memanga.emailer import EmailError, send_to_kindle
+        epub = tmp_path / "large.epub"
+        epub.write_bytes(b"0" * (15 * MB))
+
+        with patch("smtplib.SMTP") as smtp:
+            with pytest.raises(EmailError) as exc_info:
+                send_to_kindle(pdf_path=epub, max_email_mb=20, **good_cfg)
+
+        msg = str(exc_info.value)
+        assert "EPUB file is 15.0MB" in msg
+        assert "14.4MB safe raw attachment limit" in msg
+        assert "20.0MB encoded email cap" in msg
+        assert "base64 encoded" in msg
+        smtp.assert_not_called()
+
+    def test_configured_limit_lets_larger_epub_through(self, good_cfg,
+                                                      tmp_path):
+        from memanga.emailer import send_to_kindle
+        epub = tmp_path / "big.epub"
+        epub.write_bytes(b"0" * (19 * MB))
+        smtp = _make_smtp_mock()
+
+        with patch("smtplib.SMTP", return_value=smtp):
+            assert send_to_kindle(pdf_path=epub, max_email_mb=50,
+                                  **good_cfg) is True
+        smtp.send_message.assert_called_once()
+
+    @pytest.mark.parametrize("max_email_mb, expected", [
+        (None, 18 * MB), (20, 20 * MB * 72 // 100), (999, 18 * MB)])
+    def test_configured_limit_sets_the_pdf_part_size(
+            self, good_cfg, tiny_pdf, max_email_mb, expected):
+        from memanga.emailer import send_to_kindle
+        split = MagicMock(return_value=[tiny_pdf])
+        with patch("memanga.emailer.split_pdf", split):
+            with patch("smtplib.SMTP", return_value=_make_smtp_mock()):
+                send_to_kindle(pdf_path=tiny_pdf, max_email_mb=max_email_mb,
+                               **good_cfg)
+
+        split.assert_called_once_with(tiny_pdf, max_size=expected)
+
+    def test_oversized_single_page_pdf_is_refused(self, good_cfg, tmp_path,
+                                                  split_tmp, monkeypatch):
+        # A one-page PDF can't be split, so it must not reach SMTP over
+        # the limit.
+        import os
+        pikepdf = pytest.importorskip("pikepdf")
+        from memanga import emailer
+        pdf_path = tmp_path / "page.pdf"
+        with pikepdf.new() as pdf:
+            page = pdf.add_blank_page(page_size=(595, 842))
+            page.obj.Contents = pdf.make_stream(os.urandom(4000))
+            pdf.save(pdf_path, compress_streams=False)
+        monkeypatch.setattr(emailer, "raw_attachment_limit",
+                            lambda email_limit: 1000)
+
+        with patch("smtplib.SMTP") as smtp:
+            with pytest.raises(emailer.EmailError) as exc_info:
+                emailer.send_to_kindle(pdf_path=pdf_path, **good_cfg)
+
+        msg = str(exc_info.value)
+        assert msg.startswith("PDF file is ")
+        assert "safe raw attachment limit" in msg
+        assert "25.0MB encoded email cap" in msg
+        assert "can't be split any smaller" in msg
+        assert not isinstance(exc_info.value, emailer.EmailPartError)
+        smtp.assert_not_called()
+        assert pdf_path.exists()
+        assert list(split_tmp.iterdir()) == []
+
+    def test_oversized_part_after_split_is_refused_and_cleaned_up(
+            self, good_cfg, three_part_pdf, split_tmp, monkeypatch):
+        from memanga import emailer
+        monkeypatch.setattr(emailer, "raw_attachment_limit",
+                            lambda email_limit: 1000)
+
+        with patch("smtplib.SMTP") as smtp:
+            with pytest.raises(emailer.EmailError) as exc_info:
+                emailer.send_to_kindle(pdf_path=three_part_pdf, **good_cfg)
+
+        assert str(exc_info.value).startswith("PDF part 1 of 3 is ")
+        assert not isinstance(exc_info.value, emailer.EmailPartError)
+        smtp.assert_not_called()
+        assert three_part_pdf.exists()
+        assert list(split_tmp.iterdir()) == []
+
+    def test_split_log_names_configured_limits(self, good_cfg, tiny_pdf,
+                                              caplog):
+        from memanga.emailer import send_to_kindle
+        with caplog.at_level(logging.INFO, logger="memanga.emailer"):
+            with patch("memanga.emailer.split_pdf",
+                       return_value=[tiny_pdf, tiny_pdf]):
+                with patch("smtplib.SMTP", return_value=_make_smtp_mock()):
+                    send_to_kindle(pdf_path=tiny_pdf, max_email_mb=20,
+                                   **good_cfg)
+
+        assert "14.4MB safe raw attachment limit" in caplog.text
+        assert "encoded email cap is 20.0MB" in caplog.text
+
+
+# ─────────────────────────────────────────────────────────────────────
 # split_pdf — chunk huge PDFs under the attachment limit
 # ─────────────────────────────────────────────────────────────────────
 
@@ -253,7 +399,8 @@ def three_part_pdf(tmp_path, monkeypatch):
     _write_three_page_pdf(path)
     real_split = emailer.split_pdf
     monkeypatch.setattr(emailer, "split_pdf",
-                        lambda pdf_path: real_split(pdf_path, max_size=6000))
+                        lambda pdf_path, max_size=None: real_split(
+                            pdf_path, max_size=6000))
     return path
 
 
@@ -377,6 +524,23 @@ class TestSplitDelivery:
                     progress=dict(error.progress, **change))
 
         assert _subjects(smtp) == SUBJECTS
+
+    def test_progress_records_the_configured_part_limit(
+            self, good_cfg, three_part_pdf, split_tmp):
+        # Issue #363: a changed email.max_email_mb is a different split,
+        # so a retry under the new limit sends every part.
+        from memanga.emailer import MAX_ATTACHMENT_SIZE, EmailPartError
+        error, _ = _failed_on_part_two(good_cfg, three_part_pdf)
+        assert error.progress["part_limit"] == MAX_ATTACHMENT_SIZE
+
+        smtp = _make_smtp_mock()
+        smtp.send_message.side_effect = [
+            None, smtplib.SMTPDataError(554, b"5.7.1 rejected")]
+        with pytest.raises(EmailPartError) as exc_info:
+            _send_split(good_cfg, three_part_pdf, smtp,
+                        progress=error.progress, max_email_mb=20)
+        assert exc_info.value.progress["part_limit"] == 20 * 1024 * 1024 * 72 // 100
+        assert _subjects(smtp) == SUBJECTS[:2]
 
     def test_rewritten_file_resends_every_part(self, good_cfg, three_part_pdf,
                                                split_tmp):

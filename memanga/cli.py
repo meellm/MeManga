@@ -56,8 +56,9 @@ from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check
 from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
 from .email_settings import EmailSettings
-from .emailer import (TEST_DELIVERY_NOTE, EmailError, kindle_file_error,
-                      kindle_format_error, send_test_document, send_to_kindle,
+from .emailer import (TEST_DELIVERY_NOTE, EmailError, email_size_limit,
+                      kindle_file_error, kindle_format_error,
+                      raw_attachment_limit, send_test_document, send_to_kindle,
                       smtp_timeout)
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
                                DeliveryStatus, PipelineOptions,
@@ -2257,6 +2258,10 @@ def _config_email(args):
     table.add_row("SMTP port", _esc(settings.smtp_port))
     table.add_row("SMTP timeout",
                   f"{smtp_timeout(settings.smtp_timeout):g} seconds")
+    email_limit = email_size_limit(settings.max_email_mb)
+    table.add_row("Email size limit",
+                  f"{email_limit / 2**20:g} MB (files up to "
+                  f"{raw_attachment_limit(email_limit) / 2**20:.1f} MB)")
     table.add_row("App password", "set" if password_set else "[red]not set[/red]")
     console.print(table)
     if getattr(args, "send_test", False):

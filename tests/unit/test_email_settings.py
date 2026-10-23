@@ -34,7 +34,7 @@ class TestFromConfig:
         assert settings == EmailSettings(
             kindle_email="", sender_email="",
             smtp_server="smtp.gmail.com", smtp_port=587,
-            smtp_timeout=60, app_password="")
+            smtp_timeout=60, max_email_mb=25, app_password="")
 
     def test_defaults_when_keys_are_missing(self, config, no_keyring):
         # A hand-edited config without the SMTP keys keeps the usual ones.
@@ -45,6 +45,7 @@ class TestFromConfig:
         assert settings.smtp_server == DEFAULT_SMTP_SERVER == "smtp.gmail.com"
         assert settings.smtp_port == DEFAULT_SMTP_PORT == 587
         assert settings.smtp_timeout is None  # the emailer default applies
+        assert settings.max_email_mb is None
         assert settings.sender_email == ""
 
     def test_reads_the_smtp_settings(self, config, no_keyring):
@@ -52,6 +53,7 @@ class TestFromConfig:
         config.set("email.smtp_server", "smtp.example.invalid")
         config.set("email.smtp_port", 2525)
         config.set("email.smtp_timeout", 9)
+        config.set("email.max_email_mb", 20)
         config.set("email.app_password", "config-pw")
 
         settings = EmailSettings.from_config(config)
@@ -60,7 +62,7 @@ class TestFromConfig:
             kindle_email="reader@kindle.example.invalid",
             sender_email="sender@example.invalid",
             smtp_server="smtp.example.invalid", smtp_port=2525,
-            smtp_timeout=9, app_password="config-pw")
+            smtp_timeout=9, max_email_mb=20, app_password="config-pw")
 
     def test_values_are_kept_as_configured(self, config, no_keyring):
         # The emailer validates when sending, so a bad port fails that

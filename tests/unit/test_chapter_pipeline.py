@@ -1174,6 +1174,29 @@ class TestSmtpTimeout:
         assert outcome.delivery is DeliveryStatus.SENT
         assert [c["timeout"] for c in calls] == [expected]
 
+    @pytest.mark.parametrize("email, expected", [
+        (replace(EMAIL, max_email_mb=20), 20),
+        (EMAIL, None),  # unset: the emailer default applies
+    ])
+    def test_delivery_passes_configured_email_size_limit(
+            self, state, tmp_path, pdf, email, expected):
+        # Issue #363: delivery honours email.max_email_mb.
+        calls = []
+        pipeline = ChapterPipeline(
+            options=PipelineOptions(download_dir=tmp_path, output_format="pdf",
+                                    delivery_mode="email", email=email),
+            state=state,
+            reporter=_Recorder(),
+            download=_Downloads({("primary.test", False): pdf}),
+            find_backup=lambda manga, number, state: None,
+            send=lambda **kwargs: calls.append(kwargs),
+            app_password=lambda: "pw",
+        )
+
+        pipeline.process(SINGLE, _primary())
+
+        assert [c["max_email_mb"] for c in calls] == [expected]
+
     def test_delivery_passes_the_smtp_settings(self, state, tmp_path, pdf):
         # Issue #296: every setting comes from the one EmailSettings.
         calls = []

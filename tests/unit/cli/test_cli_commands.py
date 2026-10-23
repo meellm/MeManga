@@ -1710,6 +1710,8 @@ class TestConfigActions:
         assert "file-secret" not in out
         assert "--test" in out
         assert "--send-test" in out
+        # Issue #363: the default email size limit and the file size it allows.
+        assert "25 MB (files up to 18.0 MB)" in out
 
     @pytest.mark.parametrize("status,rc", [("ok", 0), ("fail", 1)])
     def test_email_test_uses_smtp_check(self, run_cli, monkeypatch, capsys,

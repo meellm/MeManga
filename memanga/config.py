@@ -305,6 +305,7 @@ class Config:
                 "smtp_server": "smtp.gmail.com",
                 "smtp_port": 587,
                 "smtp_timeout": 60,  # seconds per SMTP operation
+                "max_email_mb": 25,  # mail provider's email size limit
                 "app_password": "",
             },
             "cron": {
@@ -639,6 +640,8 @@ CONFIG_KEYS = {
     "email.smtp_server": {"kind": "str", "required": True},
     "email.smtp_port": {"kind": "int", "min": 1, "max": 65535},
     "email.smtp_timeout": {"kind": "int", "min": 1, "max": 600},
+    # Bounds match MIN/MAX_EMAIL_SIZE_MB in emailer.py.
+    "email.max_email_mb": {"kind": "int", "min": 10, "max": 50},
     "email.app_password": {"kind": "str", "secret": True},
     "cron.enabled": {"kind": "bool", "read_only": "memanga cron install/remove"},
     "cron.time": {"kind": "time", "read_only": "memanga cron install --time HH:MM"},
