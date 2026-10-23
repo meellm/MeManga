@@ -297,6 +297,7 @@ For a host cron job, run Compose from the repository directory:
 | `check [TITLE] [--dry-run \| --download] [--from N] [--safe]` | Look for new chapters (`TITLE` can also be given as `-t TITLE`). `--dry-run` only lists them; `--download` (aliases `--auto`, `--yes`) downloads without prompting; otherwise it asks on a terminal and downloads nothing without one |
 | `path TITLE` / `open TITLE` | Print a manga's download folder (only the path, for scripts) or open it in the file manager; a manga with nothing downloaded yet exits `1` |
 | `failed [list [TARGET]] [--json]` / `failed retry [TARGET]` / `failed clear [TARGET]` | List, re-download or forget failed and partial chapters; TARGET goes after the action and is a title or `#N`, matched like `check TITLE`. `--retry` / `--clear` are aliases of `retry` / `clear` |
+| `send TARGET CHAPTER... [--dry-run] [--yes]` | Send downloaded chapters to the Kindle (again) from their saved files; several chapters ask first unless `--yes`, `--dry-run` only shows what would be sent |
 | `send --pending [TARGET] [--list \| --clear]` | Send chapters that were saved but never reached the Kindle again; `--list` only lists them, `--clear` forgets the records (the files stay) |
 | `status [--json]` | Show config dir, download dir, manga count, last check time |
 | `doctor [--json] [--check NAME] [--smtp] [--launch-browsers]` | Diagnose install, paths, browsers, email, keyring, scheduler and source health |
@@ -407,6 +408,29 @@ file is only deleted after it was sent. When a split PDF fails partway,
 the parts the mail server already accepted are not sent again, unless
 the file or the Kindle address changed since. `send --pending --clear
 [TARGET]` forgets the records without sending.
+
+To send chapters you already have again, name them:
+
+```bash
+python -m memanga send "Solo Leveling" 12 --dry-run   # which file would go
+python -m memanga send "Solo Leveling" 12 13 --yes    # send both
+```
+
+Every chapter must be a downloaded chapter of the manga, or nothing is
+sent. The saved file is taken from the manga's download folder (a PDF
+or EPUB is preferred when there are several copies; a chapter still on
+the `--pending` list uses its recorded file) and nothing is downloaded.
+A file whose name could also belong to another downloaded chapter (an
+older name such as `Chapter 2.0` when chapters `2` and `2.0` both
+exist) is only used when the download history says it is this
+chapter's. A chapter whose file is missing or can't be told apart, or
+saved in a format the Kindle doesn't accept (CBZ, ZIP, image folders),
+is reported while the others are still sent, and the command exits `3`.
+Sending more than one chapter asks first; `--yes` skips the question
+and is required in scripts and cron jobs. When the email fails, the
+chapter goes on the `--pending` list like a failed delivery during
+`check`; for a split PDF the parts the mail server already accepted are
+not sent again.
 
 ### Diagnose setup problems
 

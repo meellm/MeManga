@@ -947,6 +947,8 @@ When a new chapter is found and downloaded, MeManga sends it to your Kindle auto
 
 If sending fails, the chapter stays downloaded, its file is kept and it is listed as not sent to Kindle until it is: run `run send --pending` to send it again (`--list` only lists, `--clear` forgets the records), or use **Send** next to the chapter in the desktop app's chapter list.
 
+To send a chapter you already have again, for example after a reset of the Kindle, run `run send "Title" 12` (several chapters at once ask first; `--yes` skips that, `--dry-run` only shows which file each chapter would send). It uses the saved file in the manga's download folder and never downloads anything.
+
 A split PDF is sent part by part over one mail session, stopping at the first part that fails. The error names that part and the parts the mail server already accepted; a retry of the unchanged file to the same Kindle address sends only the remaining parts; otherwise every part is sent again. "Accepted" means your mail server took the email, not that the Kindle has it yet.
 
 ### Switch back to local downloads
@@ -1324,6 +1326,8 @@ run import - --replace --yes < memanga_export.json
 | `run failed clear` | Forget every listed chapter (`--clear` is an alias) |
 | `run failed clear "Title"` | Forget one manga's records only |
 | `run failed --json` | Failed and partial chapters as JSON (listing only) |
+| `run send "Title" 12 13` | Send downloaded chapters to Kindle (again); several chapters ask first unless `--yes` |
+| `run send "Title" 12 --dry-run` | Show the file each chapter would send, sending nothing |
 | `run send --pending` | Send every chapter whose Kindle delivery failed again |
 | `run send --pending --list "Title"` | List them (title or `#N`), sending nothing |
 | `run send --pending --clear` | Forget them; the files stay |

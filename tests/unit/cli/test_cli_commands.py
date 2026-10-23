@@ -4179,6 +4179,456 @@ class TestSendPending:
         assert _disk_state().failures.get_all_undelivered() == {}
 
 
+class TestSendChapters:
+    """Issue #355: `send TARGET CHAPTER...` sends downloaded chapters to
+    Kindle again from their saved files."""
+
+    @pytest.fixture(autouse=True)
+    def wide_console(self, monkeypatch):
+        from rich.console import Console
+        from memanga import cli
+        monkeypatch.setattr(cli, "console", Console(width=250))
+        monkeypatch.setattr(cli, "err_console", Console(width=250, stderr=True))
+
+    @pytest.fixture
+    def downloads(self, tmp_path):
+        return tmp_path / "downloads"
+
+    @pytest.fixture
+    def email(self, config, downloads, monkeypatch):
+        from memanga import cli
+        config.set("delivery.mode", "email")
+        config.set("delivery.download_dir", str(downloads))
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [
+            {"title": t, "source": "mangadex.org",
+             "url": f"https://mangadex.org/title/{i}/x", "status": "reading"}
+            for i, t in enumerate(("Berserk", "Berserk Deluxe", "Vinland Saga"))
+        ])
+        config.save()
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+    @pytest.fixture
+    def saved(self, cli_state, downloads):
+        """Save Berserk chapters as downloads do; returns a function
+        ``save(chapter, suffix=".pdf", history=True)`` -> path."""
+        def save(chapter, suffix=".pdf", history=True):
+            from memanga.downloader.naming import _format_chapter_number
+            path = (downloads / "Berserk"
+                    / f"Berserk - Chapter {_format_chapter_number(chapter)}{suffix}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"data")
+            cli_state.add_downloaded_chapter("Berserk", chapter)
+            if history:
+                cli_state.add_download_history("Berserk", chapter, suffix[1:],
+                                               path=str(path))
+            cli_state.save()
+            return path
+        return save
+
+    @pytest.fixture
+    def sends(self, monkeypatch):
+        """Fake sender; paths in `fail` raise. Returns (sent, fail)."""
+        from memanga import cli
+        from memanga.emailer import EmailError
+        sent, fail = [], set()
+
+        def _send(**kwargs):
+            if kwargs["pdf_path"] in fail:
+                raise EmailError("Mailbox full")
+            sent.append(kwargs["pdf_path"])
+
+        monkeypatch.setattr(cli, "send_to_kindle", _send)
+        return sent, fail
+
+    def test_sends_one_chapter_with_configured_settings(
+            self, run_cli, config, email, saved, monkeypatch, capsys):
+        from memanga import cli
+        config.set("email.smtp_server", "smtp.example.test")
+        config.set("email.smtp_port", 2525)
+        config.save()
+        path = saved("1")
+        calls = []
+        monkeypatch.setattr(cli, "send_to_kindle", lambda **kw: calls.append(kw))
+
+        assert run_cli("send", "Berserk", "1") == 0
+
+        (call,) = calls
+        assert (call["pdf_path"], call["kindle_email"], call["smtp_server"],
+                call["smtp_port"], call["app_password"]) == (
+            path, "reader@example.com", "smtp.example.test", 2525, "pw")
+        assert "1/1 chapters sent" in capsys.readouterr().out
+        assert path.exists()
+        state = _disk_state()
+        assert state.get_download_history()[0]["kindle_sent"] is True
+        assert state.failures.get_all_undelivered() == {}
+
+    def test_already_sent_chapter_is_sent_again(self, run_cli, email, saved, sends):
+        sent, _ = sends
+        path = saved("1")
+        assert run_cli("send", "Berserk", "1") == 0
+        assert run_cli("send", "Berserk", "1") == 0
+        assert sent == [path, path]
+        assert len(_disk_state().get_download_history()) == 1
+
+    def test_found_without_history_and_number_forms_match(
+            self, run_cli, email, saved, sends):
+        sent, _ = sends
+        path = saved("2.5", history=False)
+        assert run_cli("send", "#1", "2.50") == 0
+        assert sent == [path]
+
+    def test_delete_after_send(self, run_cli, config, email, saved, sends):
+        config.set("delivery.delete_after_send", True)
+        config.save()
+        path = saved("1")
+        assert run_cli("send", "Berserk", "1") == 0
+        assert not path.exists()
+        assert _disk_state().get_download_history()[0]["deleted_after_send"] is True
+
+    def test_dry_run_sends_and_writes_nothing(
+            self, run_cli, email, saved, sends, capsys):
+        from pathlib import Path
+        sent, _ = sends
+        path = saved("1")
+        saved("2")
+        state_file = Path.home() / ".config" / "memanga" / "state.json"
+        before = state_file.read_bytes()
+        capsys.readouterr()
+
+        assert run_cli("send", "Berserk", "1", "2", "--dry-run") == 0
+
+        out = capsys.readouterr().out
+        assert path.name in out
+        assert "Dry run: 2/2 chapter(s) would be sent" in out
+        assert sent == []
+        assert state_file.read_bytes() == before
+        assert path.exists()
+
+    def test_dry_run_takes_no_config_lock(self):
+        from memanga import cli
+        parser = cli.build_parser()
+        args = parser.parse_args(["send", "Berserk", "1", "--dry-run"])
+        assert cli._needs_config_lock(args) is False
+        assert cli._needs_config_lock(parser.parse_args(["send", "Berserk", "1"]))
+
+    def test_dry_run_reports_problems_with_exit_3(
+            self, run_cli, email, cli_state, sends, capsys):
+        sent, _ = sends
+        cli_state.add_downloaded_chapter("Berserk", "1")
+        cli_state.save()
+        assert run_cli("send", "Berserk", "1", "--dry-run") == 3
+        assert "No saved file was found" in capsys.readouterr().out
+        assert sent == []
+
+    @pytest.mark.parametrize("target", ["Nope", "Bers"])
+    def test_unknown_or_ambiguous_target_sends_nothing(
+            self, run_cli, email, saved, sends, target):
+        sent, _ = sends
+        saved("1")
+        assert run_cli("send", target, "1") == 1
+        assert sent == []
+
+    def test_any_unknown_chapter_sends_nothing(
+            self, run_cli, email, saved, sends, capsys):
+        sent, _ = sends
+        saved("1")
+        assert run_cli("send", "Berserk", "1", "9", "--yes") == 1
+        err = capsys.readouterr().err
+        assert "Not downloaded:" in err and "9" in err
+        assert "Nothing was sent" in err
+        assert sent == []
+
+    def test_ambiguous_chapter_sends_nothing(
+            self, run_cli, email, cli_state, sends, capsys):
+        sent, _ = sends
+        for chapter in ("5", "5.0"):
+            cli_state.add_downloaded_chapter("Berserk", chapter)
+        cli_state.save()
+        assert run_cli("send", "Berserk", "05") == 1
+        assert "Ambiguous chapter:" in capsys.readouterr().err
+        assert sent == []
+
+    def test_missing_file_is_reported_and_others_still_sent(
+            self, run_cli, email, saved, cli_state, sends, capsys):
+        sent, _ = sends
+        path = saved("1")
+        cli_state.add_downloaded_chapter("Berserk", "2")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "1", "2", "--yes") == 3
+
+        assert sent == [path]
+        captured = capsys.readouterr()
+        assert "No saved file was found" in captured.out + captured.err
+        assert "1/2 chapters sent" in captured.out
+        # A chapter that couldn't be sent here is not queued as pending.
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+    def test_kindle_format_is_preferred_and_cbz_only_is_refused(
+            self, run_cli, email, saved, sends, capsys):
+        sent, _ = sends
+        saved("1", ".cbz")
+        pdf = saved("1", ".pdf")
+        saved("2", ".cbz")
+
+        assert run_cli("send", "Berserk", "1") == 0
+        assert sent == [pdf]
+
+        capsys.readouterr()
+        assert run_cli("send", "Berserk", "2") == 3
+        assert sent == [pdf]
+        assert "CBZ" in capsys.readouterr().out
+
+    def test_history_path_outside_the_manga_folder_is_ignored(
+            self, run_cli, email, cli_state, sends, tmp_path):
+        sent, _ = sends
+        outside = tmp_path / "elsewhere" / "Berserk - Chapter 0001.000.pdf"
+        outside.parent.mkdir()
+        outside.write_bytes(b"data")
+        cli_state.add_downloaded_chapter("Berserk", "1")
+        cli_state.add_download_history("Berserk", "1", "pdf", path=str(outside))
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "1") == 3
+        assert sent == []
+
+    def test_symlinked_manga_folder_is_refused(
+            self, run_cli, email, cli_state, downloads, sends, tmp_path, capsys):
+        sent, _ = sends
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "Berserk - Chapter 0001.000.pdf").write_bytes(b"data")
+        downloads.mkdir()
+        try:
+            (downloads / "Berserk").symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks are not available")
+        cli_state.add_downloaded_chapter("Berserk", "1")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "1") == 1
+        assert "Refusing to send" in capsys.readouterr().err
+        assert sent == []
+
+    def test_send_failure_exits_3_and_is_recorded_pending(
+            self, run_cli, config, email, saved, sends):
+        sent, fail = sends
+        config.set("delivery.delete_after_send", True)
+        config.save()
+        path = saved("1")
+        fail.add(path)
+
+        assert run_cli("send", "Berserk", "1") == 3
+
+        assert path.exists()
+        state = _disk_state()
+        record = state.failures.get_undelivered("Berserk")["1"]
+        assert (record["path"], record["error"], record["attempts"]) == (
+            str(path), "Mailbox full", 1)
+        assert state.get_download_history()[0]["kindle_sent"] is False
+
+    def test_split_pdf_retry_skips_the_accepted_part(
+            self, run_cli, email, saved, monkeypatch):
+        """#364 through `send TARGET CHAPTER`: part 1 is accepted, part 2
+        fails; the next send of the chapter only sends parts 2 and 3."""
+        from memanga import cli
+        from memanga.emailer import EmailPartError
+        saved("1")
+        calls, mailed = [], []
+
+        def transport(**kwargs):
+            """Mails parts 1-3, skipping accepted ones; the first call
+            fails at part 2."""
+            progress = kwargs["progress"] or {"total": 3, "accepted": []}
+            accepted = list(progress["accepted"])
+            calls.append(list(accepted))
+            for part in (1, 2, 3):
+                if part in accepted:
+                    continue
+                if part == 2 and len(calls) == 1:
+                    raise EmailPartError(2, 3, {"total": 3, "accepted": accepted},
+                                         "554 rejected")
+                mailed.append(part)
+                accepted.append(part)
+                kwargs["on_part_sent"](part, 3)
+
+        monkeypatch.setattr(cli, "send_to_kindle", transport)
+
+        assert run_cli("send", "Berserk", "1") == 3
+        assert mailed == [1]
+        record = _disk_state().failures.get_undelivered("Berserk")["1"]
+        assert record["parts"] == {"total": 3, "accepted": [1]}
+
+        assert run_cli("send", "Berserk", "1") == 0
+        assert calls == [[], [1]]
+        assert mailed == [1, 2, 3]
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+    @pytest.mark.parametrize("chapter,other,name", [
+        ("2", "2.0", "Berserk - Chapter 2.0.pdf"),
+        ("2.0", "2", "Berserk - Chapter 2.0.pdf"),
+        ("12 Part 1", "12.01", "Berserk - Chapter 12.01.pdf"),
+        ("12.01", "12 Part 1", "Berserk - Chapter 12.01.pdf"),
+    ])
+    def test_name_shared_with_another_chapter_is_not_sent(
+            self, run_cli, email, cli_state, downloads, sends, capsys, caplog,
+            chapter, other, name):
+        """The preferred file of `chapter` is missing; an older name that
+        `other` could have been saved under is not sent for it."""
+        sent, _ = sends
+        shared = downloads / "Berserk" / name
+        shared.parent.mkdir(parents=True)
+        shared.write_bytes(b"data")
+        for label in (chapter, other):
+            cli_state.add_downloaded_chapter("Berserk", label)
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", chapter) == 3
+
+        assert sent == []
+        # The table shows the file; its status cell is cut to the column
+        # width, so the reason is checked in the per-chapter diagnostic.
+        assert name in capsys.readouterr().out
+        assert [r.getMessage() for r in caplog.records
+                if r.name == "memanga.cli" and r.levelname == "ERROR"] == [
+            f"Chapter {chapter} of Berserk not sent: The saved file's name "
+            "could also belong to another chapter, so it is not sent"]
+
+    def test_shared_name_is_sent_when_the_history_says_whose(
+            self, run_cli, email, cli_state, downloads, sends):
+        sent, _ = sends
+        shared = downloads / "Berserk" / "Berserk - Chapter 2.0.pdf"
+        shared.parent.mkdir(parents=True)
+        shared.write_bytes(b"data")
+        cli_state.add_downloaded_chapter("Berserk", "2")
+        cli_state.add_downloaded_chapter("Berserk", "2.0")
+        cli_state.add_download_history("Berserk", "2", "pdf", path=str(shared))
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "2.0") == 3
+        assert sent == []
+        assert run_cli("send", "Berserk", "2") == 0
+        assert sent == [shared]
+
+    def test_older_name_is_used_when_no_other_chapter_shares_it(
+            self, run_cli, email, cli_state, downloads, sends):
+        sent, _ = sends
+        legacy = downloads / "Berserk" / "Berserk - Chapter 2.0.pdf"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"data")
+        cli_state.add_downloaded_chapter("Berserk", "2")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "2") == 0
+        assert sent == [legacy]
+
+    def test_pending_chapter_goes_through_its_record(
+            self, run_cli, email, cli_state, sends, tmp_path):
+        """A chapter on the undelivered list is sent from its recorded
+        file, like `send --pending`, and its record is cleared."""
+        sent, _ = sends
+        path = tmp_path / "recorded.pdf"
+        path.write_bytes(b"pdf")
+        cli_state.add_downloaded_chapter("Berserk", "3")
+        cli_state.failures.add_undelivered("berserk", "3", str(path), "SMTP down")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "3") == 0
+
+        assert sent == [path]
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+    def test_pending_chapter_failure_counts_the_attempt(
+            self, run_cli, email, cli_state, sends, tmp_path):
+        sent, fail = sends
+        path = tmp_path / "recorded.pdf"
+        path.write_bytes(b"pdf")
+        fail.add(path)
+        cli_state.add_downloaded_chapter("Berserk", "3")
+        cli_state.failures.add_undelivered("Berserk", "3", str(path), "SMTP down")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "3") == 3
+
+        record = _disk_state().failures.get_undelivered("Berserk")["3"]
+        assert (record["attempts"], record["error"]) == (2, "Mailbox full")
+
+    def test_several_chapters_need_yes_without_a_terminal(
+            self, run_cli, email, saved, sends, capsys):
+        sent, _ = sends
+        one, two = saved("1"), saved("2")
+
+        assert run_cli("send", "Berserk", "1", "2") == 1
+        assert "pass --yes" in capsys.readouterr().err
+        assert sent == []
+
+        assert run_cli("send", "Berserk", "2", "1", "--yes") == 0
+        assert sent == [two, one]
+
+    @pytest.mark.parametrize("answer,expected", [(True, 2), (False, 0)])
+    def test_several_chapters_ask_on_a_terminal(
+            self, run_cli, email, saved, sends, monkeypatch, answer, expected):
+        from memanga import cli
+        sent, _ = sends
+        saved("1")
+        saved("2")
+        prompts = []
+        monkeypatch.setattr("memanga.cli._stdin_is_tty", lambda: True)
+        monkeypatch.setattr(cli.Confirm, "ask",
+                            lambda prompt, *a, **k: prompts.append(prompt) or answer)
+
+        assert run_cli("send", "Berserk", "1", "2") == 0
+
+        assert len(prompts) == 1 and "Send 2 chapters" in prompts[0]
+        assert len(sent) == expected
+
+    def test_one_chapter_never_asks(self, run_cli, email, saved, sends, monkeypatch):
+        from memanga import cli
+        sent, _ = sends
+        saved("1")
+        monkeypatch.setattr("memanga.cli._stdin_is_tty", lambda: True)
+        monkeypatch.setattr(cli.Confirm, "ask", lambda *a, **k: pytest.fail("asked"))
+        assert run_cli("send", "Berserk", "1") == 0
+        assert len(sent) == 1
+
+    def test_local_delivery_is_an_error(
+            self, run_cli, config, email, saved, sends, capsys):
+        sent, _ = sends
+        config.set("delivery.mode", "local")
+        config.save()
+        saved("1")
+        assert run_cli("send", "Berserk", "1", "--dry-run") == 1
+        assert "not set up" in capsys.readouterr().err
+        assert sent == []
+
+    def test_kindle_opt_out_is_an_error(
+            self, run_cli, config, email, saved, sends, capsys):
+        sent, _ = sends
+        manga = config.get("manga")
+        manga[0]["send_to_kindle"] = False  # Berserk
+        config.set("manga", manga)
+        config.save()
+        path = saved("1")
+        assert run_cli("send", "Berserk", "1") == 1
+        assert "memanga update Berserk --kindle" in capsys.readouterr().err
+        assert sent == []
+        assert path.exists()
+
+    @pytest.mark.parametrize("argv", [
+        ["send", "Berserk"],
+        ["send", "--list", "Berserk", "1"],
+        ["send", "--clear", "Berserk", "1"],
+        ["send", "--pending", "Berserk", "1"],
+        ["send", "--pending", "--dry-run"],
+        ["send", "--pending", "--yes"],
+        ["send", "Berserk", "1", "--list", "--dry-run"],
+    ])
+    def test_usage_errors(self, run_cli, email, argv):
+        assert run_cli(*argv) == 2
+
+
 class TestDoctorCommand:
     def test_unusable_password_variable_is_readable(self, run_cli, config, cli_state,
                                                     monkeypatch, tmp_path, capsys):
