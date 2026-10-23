@@ -509,5 +509,5 @@ class TestDownloadKwargsPropagation:
         assert call["kindle_cfg"] == EmailSettings(
             kindle_email="reader@example.com",
             sender_email="sender@example.com",
-            smtp_timeout=60, app_password="pw")
+            smtp_timeout=60, max_email_mb=25, app_password="pw")
         assert call["delete_after_send"] is False

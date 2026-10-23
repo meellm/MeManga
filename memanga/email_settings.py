@@ -22,9 +22,10 @@ class EmailSettings:
 
     Values are kept as configured; the emailer checks them when it sends,
     so a bad setting fails that chapter's delivery (and is recorded as
-    undelivered) rather than the whole run. ``smtp_timeout`` None means
-    the emailer's default. ``app_password`` None means it was not looked
-    up here: the caller supplies it when sending.
+    undelivered) rather than the whole run. ``smtp_timeout`` and
+    ``max_email_mb`` None mean the emailer's default. ``app_password``
+    None means it was not looked up here: the caller supplies it when
+    sending.
     """
 
     kindle_email: str = ""
@@ -32,6 +33,7 @@ class EmailSettings:
     smtp_server: str = DEFAULT_SMTP_SERVER
     smtp_port: int = DEFAULT_SMTP_PORT
     smtp_timeout: Optional[float] = None
+    max_email_mb: Optional[float] = None
     # Never part of the repr, so it cannot reach a log line that way.
     app_password: Optional[str] = field(default=None, repr=False)
 
@@ -47,6 +49,7 @@ class EmailSettings:
             smtp_server=cfg.get("email.smtp_server", DEFAULT_SMTP_SERVER),
             smtp_port=cfg.get("email.smtp_port", DEFAULT_SMTP_PORT),
             smtp_timeout=cfg.get("email.smtp_timeout"),
+            max_email_mb=cfg.get("email.max_email_mb"),
             app_password=get_app_password(cfg) if resolve_password else None,
         )
 

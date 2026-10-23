@@ -1862,7 +1862,7 @@ class TestDetailPage:
                 kindle_email="reader@example.com",
                 sender_email="sender@example.com",
                 smtp_server="smtp.example.test", smtp_port=2525,
-                smtp_timeout=60, app_password="pw")
+                smtp_timeout=60, max_email_mb=25, app_password="pw")
         else:
             assert call["kindle_cfg"] is None
 
@@ -2015,7 +2015,7 @@ class TestDownloadsQueueing:
             sample_manga["title"]: EmailSettings(
                 kindle_email="reader@example.com",
                 sender_email="sender@example.com",
-                smtp_timeout=60, app_password="pw"),
+                smtp_timeout=60, max_email_mb=25, app_password="pw"),
             "Opted Out": None,
         }
 

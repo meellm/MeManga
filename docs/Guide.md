@@ -927,6 +927,23 @@ The app password is stored in your system keyring when available. If the keyring
 
 Each step of talking to the SMTP server (connecting, logging in, sending, logging out) waits at most 60 seconds, so an unreachable or stalled server ends with a timeout error instead of hanging `check`. Change the limit with `memanga config set email.smtp_timeout SECONDS` (1 to 600).
 
+#### Email size limit
+
+Mail providers limit how large an email or its attachments may be, and attachments grow by about a third when they are encoded for email. `email.max_email_mb` is the email size MeManga keeps under (25 by default, a conservative choice). MeManga sends a file only when it is at most 72% of that (files up to 18 MB by default). Larger PDFs are split into parts of that size. A PDF that still has a part over the limit, such as a single very large page, is refused, and so are larger EPUB files, because they can't be split. Change it with `memanga config set email.max_email_mb MB` (10 to 50). `memanga config email` shows the current limit.
+
+In this setting 1 MB is 1,048,576 bytes. Providers usually don't say whether their "MB" means that or 1,000,000 bytes, or whether they measure the encoded email or the original attachments. To stay safe, set a value a little below the published number, for example 19 for a provider that states 20 MB, and lower it further if the provider still rejects large emails. No value can guarantee that a provider accepts an email when it doesn't say how it measures.
+
+Published limits as of October 2026 (they change, and work or school accounts may be set differently by their administrator):
+
+| Sender | Published limit | Suggested setting |
+|---|---|---|
+| [Gmail](https://support.google.com/mail/answer/6584) | 25 MB in total for attachments | 25 (default) |
+| [Outlook.com](https://support.microsoft.com/topic/8c698842-b462-4a4c-8d53-5c5dd04f77ef) | 20 MB email, attachments included | 19 |
+| [iCloud Mail](https://support.apple.com/en-us/102198) | 20 MB per message (Mail Drop links don't apply to SMTP) | 19 |
+| [Fastmail](https://www.fastmail.help/hc/en-us/articles/1500000277382) | 70 MB email, about 50 MB attachment | 50 |
+
+Send to Kindle has its own limit on what it accepts by email. Amazon's help says to send [a total size of 50 MB or less](https://www.amazon.com/gp/help/customer/display.html?nodeId=G7NECT4B4ZWHQ8WV) per email, without saying whether that counts the files or the encoded email; the setting stops at 50 for that reason. The smaller of your provider's limit and Amazon's applies.
+
 ### Step 4 — Test it
 
 Send a one-page test PDF to your Kindle first:
@@ -943,7 +960,7 @@ Then check for real chapters:
 run check --download
 ```
 
-When a new chapter is found and downloaded, MeManga sends it to your Kindle automatically. If the PDF exceeds 23MB, it's automatically split into smaller parts.
+When a new chapter is found and downloaded, MeManga sends it to your Kindle automatically. If the PDF is too large for one email (see [Email size limit](#email-size-limit)), it's automatically split into smaller parts.
 
 If sending fails, the chapter stays downloaded, its file is kept and it is listed as not sent to Kindle until it is: run `run send --pending` to send it again (`--list` only lists, `--clear` forgets the records), or use **Send** next to the chapter in the desktop app's chapter list.
 
@@ -961,8 +978,8 @@ Set delivery mode to `local`. Downloaded chapters will be saved to the download 
 
 ### Note on formats and email
 
-- **PDF:** Auto-splits if over 23MB. Best choice for email delivery.
-- **EPUB:** Sent as-is. Kindle supports EPUB natively. Cannot be split — if over 25MB, switch to PDF.
+- **PDF:** Auto-splits if too large for one email (over 18MB by default; see [Email size limit](#email-size-limit)). Best choice for email delivery.
+- **EPUB:** Sent as-is. Kindle supports EPUB natively. Cannot be split — if over the same limit, switch to PDF.
 - **CBZ:** Kindle does not support CBZ, so it is never emailed: the chapter is saved but not sent. Use PDF or EPUB for email delivery.
 - **ZIP:** Kindle does not support ZIP either; saved but not sent, like CBZ.
 - **JPG/PNG/WEBP:** Cannot be emailed (saved as image folders). Use PDF or EPUB for email delivery.

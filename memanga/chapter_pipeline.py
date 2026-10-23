@@ -536,6 +536,7 @@ class ChapterPipeline:
                 smtp_port=email.smtp_port,
                 app_password=self.app_password(),
                 timeout=email.smtp_timeout,
+                max_email_mb=email.max_email_mb,
                 progress=progress,
                 on_part_sent=lambda part, total: self.reporter.email_part_sent(
                     path, part, total),

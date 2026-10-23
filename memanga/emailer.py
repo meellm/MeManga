@@ -1,7 +1,8 @@
 """
 Email handler for MeManga - sends PDFs to Kindle
 
-Automatically splits large PDFs that exceed Gmail's 25MB limit.
+Automatically splits PDFs too large for the mail provider's email size
+limit (email.max_email_mb, 25MB by default).
 """
 
 import hashlib
@@ -92,10 +93,18 @@ DEFAULT_SMTP_TIMEOUT = 60
 MAX_SMTP_TIMEOUT = 600
 
 
-# Gmail's attachment cap is 25MB after email encoding. Base64 adds roughly
-# 33%, so keep raw files lower to stay under the encoded cap.
-EMAIL_ATTACHMENT_LIMIT = 25 * 1024 * 1024
-MAX_ATTACHMENT_SIZE = 18 * 1024 * 1024  # 18MB raw (~24MB after base64)
+# Issue #363: mail providers cap the size of a whole email after encoding
+# (email.max_email_mb; see CONFIG_KEYS in config.py). Base64 in 76-character
+# lines turns 57 raw bytes into 78, so a raw file may use about 73% of the
+# cap; RAW_ATTACHMENT_PERCENT leaves the rest for headers and MIME parts.
+# Send to Kindle takes at most 50MB per email, hence the upper bound.
+DEFAULT_EMAIL_SIZE_MB = 25
+MIN_EMAIL_SIZE_MB = 10
+MAX_EMAIL_SIZE_MB = 50
+RAW_ATTACHMENT_PERCENT = 72
+_MB = 1024 * 1024
+EMAIL_ATTACHMENT_LIMIT = DEFAULT_EMAIL_SIZE_MB * _MB
+MAX_ATTACHMENT_SIZE = 18 * _MB  # 72% of 25MB raw (~24.6MB after base64)
 # split_pdf writes the parts to a temp folder with this name prefix.
 SPLIT_DIR_PREFIX = "memanga_split_"
 
@@ -133,6 +142,24 @@ def kindle_file_error(path: Path) -> Optional[str]:
 def _format_mb(size: int) -> str:
     """Format a byte count as MiB for user-facing messages."""
     return f"{size / (1024 * 1024):.1f}MB"
+
+
+def email_size_limit(value=None) -> int:
+    """The email size cap in bytes: ``value`` MB when it is a number from
+    MIN_EMAIL_SIZE_MB to MAX_EMAIL_SIZE_MB, else DEFAULT_EMAIL_SIZE_MB
+    (unset or hand-edited config)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        value = DEFAULT_EMAIL_SIZE_MB
+    # NaN fails the comparison and infinities are out of range.
+    elif not MIN_EMAIL_SIZE_MB <= value <= MAX_EMAIL_SIZE_MB:
+        value = DEFAULT_EMAIL_SIZE_MB
+    return int(value * _MB)
+
+
+def raw_attachment_limit(email_limit: int) -> int:
+    """The largest file, in bytes, that still fits in an email of at most
+    ``email_limit`` bytes once base64 encoded."""
+    return email_limit * RAW_ATTACHMENT_PERCENT // 100
 
 
 def split_pdf(pdf_path: Path, max_size: int = MAX_ATTACHMENT_SIZE) -> List[Path]:
@@ -222,11 +249,12 @@ def send_to_kindle(
     timeout: Optional[float] = None,
     progress: Optional[Mapping[str, Any]] = None,
     on_part_sent: Optional[Callable[[int, int], None]] = None,
+    max_email_mb: Optional[float] = None,
 ) -> bool:
     """
     Send a PDF or EPUB to Kindle via email.
     
-    Automatically splits large PDFs that exceed Gmail's limit.
+    Automatically splits PDFs too large for the email size limit.
     EPUB files are sent as-is (Kindle handles them natively). Any other
     file (CBZ, ZIP, ...) or a folder is refused before anything is sent
     (issue #362).
@@ -252,6 +280,9 @@ def send_to_kindle(
             address are unchanged; otherwise every part is sent.
         on_part_sent: Called with ``(part, total)`` after the mail server
             accepted each part of a split PDF.
+        max_email_mb: The mail provider's email size limit in MB (issue
+            #363); files must fit under it once encoded. Defaults to
+            DEFAULT_EMAIL_SIZE_MB.
     
     Returns:
         True if sent successfully (every part accepted by the mail server)
@@ -278,18 +309,20 @@ def send_to_kindle(
     # Check file type - only split PDFs, send EPUBs as-is
     suffix = pdf_path.suffix.lower()
     is_single_file = suffix == '.epub'
+    email_limit = email_size_limit(max_email_mb)
+    raw_limit = raw_attachment_limit(email_limit)
 
     if is_single_file:
         # EPUB: check size (cannot be split)
         file_size = pdf_path.stat().st_size
-        if file_size > MAX_ATTACHMENT_SIZE:
+        if file_size > raw_limit:
             fmt = suffix.lstrip('.').upper()
             raise EmailError(
                 f"{fmt} file is {_format_mb(file_size)}, exceeding MeManga's "
-                f"{_format_mb(MAX_ATTACHMENT_SIZE)} safe raw attachment limit. "
+                f"{_format_mb(raw_limit)} safe raw attachment limit. "
                 f"Email attachments are base64 encoded, so the raw file must "
                 f"stay below this limit to fit under the "
-                f"{_format_mb(EMAIL_ATTACHMENT_LIMIT)} encoded email cap. "
+                f"{_format_mb(email_limit)} encoded email cap. "
                 f"{fmt} files cannot be split. Use PDF format instead "
                 f"(set in 'memanga config')."
             )
@@ -297,15 +330,19 @@ def send_to_kindle(
         is_split = False
     else:
         # PDF: check if needs splitting
-        parts = split_pdf(pdf_path)
+        parts = split_pdf(pdf_path, max_size=raw_limit)
         is_split = len(parts) > 1
+        try:
+            _check_part_sizes(parts, raw_limit, email_limit)
+        except BaseException:
+            _remove_split_parts(pdf_path, parts)
+            raise
         
         if is_split:
             logger.info(
                 "Split into %d parts (exceeded %s safe raw attachment limit; "
                 "encoded email cap is %s)",
-                len(parts), _format_mb(MAX_ATTACHMENT_SIZE),
-                _format_mb(EMAIL_ATTACHMENT_LIMIT),
+                len(parts), _format_mb(raw_limit), _format_mb(email_limit),
             )
     
     try:
@@ -315,7 +352,7 @@ def send_to_kindle(
                 on_part_sent, kindle_email=kindle_email,
                 sender_email=sender_email, smtp_server=smtp_server,
                 smtp_port=smtp_port, app_password=app_password,
-                timeout=timeout,
+                timeout=timeout, part_limit=raw_limit,
             )
         else:
             _send_single_email(
@@ -332,6 +369,29 @@ def send_to_kindle(
         _remove_split_parts(pdf_path, parts)
     
     return True
+
+
+def _check_part_sizes(parts: List[Path], raw_limit: int,
+                      email_limit: int) -> None:
+    """Raise EmailError when a PDF part is still over ``raw_limit``:
+    split_pdf leaves a single page larger than the limit as it is
+    (issue #363)."""
+    total = len(parts)
+    for number, part in enumerate(parts, start=1):
+        size = part.stat().st_size
+        if size <= raw_limit:
+            continue
+        label = (f"PDF part {number} of {total}" if total > 1
+                 else "PDF file")
+        raise EmailError(
+            f"{label} is {_format_mb(size)}, exceeding MeManga's "
+            f"{_format_mb(raw_limit)} safe raw attachment limit. "
+            f"Email attachments are base64 encoded, so the raw file must "
+            f"stay below this limit to fit under the "
+            f"{_format_mb(email_limit)} encoded email cap. "
+            f"It can't be split any smaller because one page is larger "
+            f"than this limit; nothing was sent."
+        )
 
 
 # What must match for an earlier attempt's accepted parts to count.
@@ -357,10 +417,12 @@ def _file_sha256(path: Path) -> Optional[str]:
 
 
 def _split_progress(pdf_path: Path, total: int, kindle_email: str,
-                    earlier: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    """Delivery progress of ``pdf_path`` split into ``total`` parts for
-    ``kindle_email``: the parts ``earlier`` recorded as accepted when it
-    describes the same file content, split and recipient, else none.
+                    earlier: Optional[Mapping[str, Any]],
+                    part_limit: int = MAX_ATTACHMENT_SIZE) -> Dict[str, Any]:
+    """Delivery progress of ``pdf_path`` split into ``total`` parts of at
+    most ``part_limit`` bytes for ``kindle_email``: the parts ``earlier``
+    recorded as accepted when it describes the same file content, split
+    and recipient, else none.
 
     The file is identified by its SHA-256 (plus size and mtime) and the
     recipient by the SHA-256 of the address, so the address itself is not
@@ -374,7 +436,7 @@ def _split_progress(pdf_path: Path, total: int, kindle_email: str,
         "source_mtime_ns": stat.st_mtime_ns,
         "source_sha256": _file_sha256(pdf_path),
         "recipient_sha256": _sha256(kindle_email.strip().encode("utf-8")),
-        "part_limit": MAX_ATTACHMENT_SIZE,
+        "part_limit": part_limit,
     }
     if not isinstance(earlier, Mapping):
         return current
@@ -406,10 +468,12 @@ def _send_parts(
     smtp_port: int,
     app_password: str,
     timeout: Optional[float],
+    part_limit: int = MAX_ATTACHMENT_SIZE,
 ) -> None:
     """Send the parts of a split PDF not yet accepted, over one session."""
     total = len(parts)
-    progress = _split_progress(pdf_path, total, kindle_email, earlier)
+    progress = _split_progress(pdf_path, total, kindle_email, earlier,
+                               part_limit)
     accepted = progress["accepted"]
     pending = [n for n in range(1, total + 1) if n not in accepted]
     if accepted:
