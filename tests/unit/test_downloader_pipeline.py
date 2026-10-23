@@ -1145,3 +1145,114 @@ class TestRenameMangaDownloads:
         assert (new_dir / "New - Chapter 1.cbz").read_text() == "one"
         assert (new_dir / "New - Chapter 2.cbz").read_text() == "two"
         assert not old_dir.exists()
+
+
+class TestFindChapterDownloads:
+    """Issue #355: `send TARGET CHAPTER` finds a chapter's saved copies
+    only where the downloader writes them, under the names it uses."""
+
+    @staticmethod
+    def _find(tmp_path, chapter, **kwargs):
+        from memanga.downloader.folders import find_chapter_downloads
+        return find_chapter_downloads(tmp_path, "Berserk", chapter, **kwargs)
+
+    @staticmethod
+    def _save(tmp_path, name, folder="Berserk"):
+        path = tmp_path / folder / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"data")
+        return path
+
+    def test_current_name_with_every_one_file_format(self, tmp_path):
+        cbz = self._save(tmp_path, "Berserk - Chapter 0012.000.cbz")
+        pdf = self._save(tmp_path, "Berserk - Chapter 0012.000.pdf")
+        assert self._find(tmp_path, "12") == [pdf, cbz]
+
+    def test_older_label_forms_are_found(self, tmp_path):
+        old = self._save(tmp_path, "Berserk - Chapter 12.pdf")
+        part = self._save(tmp_path, "Berserk - Chapter 12.01.epub")
+        assert self._find(tmp_path, "12") == [old]
+        assert self._find(tmp_path, "12 Part 1") == [part]
+
+    def test_image_folder_is_found(self, tmp_path):
+        folder = tmp_path / "Berserk" / "Chapter 0012.000"
+        folder.mkdir(parents=True)
+        assert self._find(tmp_path, "12") == [folder]
+
+    def test_configured_template_and_source(self, tmp_path):
+        custom = self._save(tmp_path, "0012.000 [mangadex.org].pdf")
+        found = self._find(tmp_path, "12", templates=["{chapter} [{source}]"],
+                           sources=["mangadex.org"])
+        assert found == [custom]
+
+    def test_no_loose_matches(self, tmp_path):
+        self._save(tmp_path, "Berserk - Chapter 0012.000.pdf")
+        self._save(tmp_path, "Berserk - Chapter 1 bonus.pdf")
+        assert self._find(tmp_path, "1") == []
+
+    def test_recorded_path_comes_first_only_inside_the_folder(self, tmp_path):
+        renamed = self._save(tmp_path, "renamed.pdf")
+        current = self._save(tmp_path, "Berserk - Chapter 0012.000.pdf")
+        outside = self._save(tmp_path, "elsewhere.pdf", folder="Other")
+        nested = self._save(tmp_path, "nested.pdf", folder="Berserk/deeper")
+        found = self._find(tmp_path, "12",
+                           recorded=[str(outside), str(nested), str(renamed)])
+        assert found == [renamed, current]
+
+    def test_symlinked_file_is_never_returned(self, tmp_path):
+        target = self._save(tmp_path, "secret.pdf", folder="Other")
+        link = tmp_path / "Berserk" / "Berserk - Chapter 0012.000.pdf"
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks are not available")
+        assert self._find(tmp_path, "12", recorded=[str(link)]) == []
+
+    def test_symlinked_manga_folder_is_refused(self, tmp_path):
+        from memanga.downloader import UnsafeDownloadPathError
+        real = tmp_path / "real"
+        self._save(tmp_path, "Berserk - Chapter 0012.000.pdf", folder="real")
+        try:
+            (tmp_path / "Berserk").symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks are not available")
+        with pytest.raises(UnsafeDownloadPathError):
+            self._find(tmp_path, "12")
+
+    def test_no_download_folder(self, tmp_path):
+        assert self._find(tmp_path, "12") == []
+
+    @pytest.mark.parametrize("chapter,other,name", [
+        ("2", "2.0", "Berserk - Chapter 2.0.pdf"),
+        ("2.0", "2", "Berserk - Chapter 2.0.pdf"),
+        ("12 Part 1", "12.01", "Berserk - Chapter 12.01.pdf"),
+        ("12.01", "12 Part 1", "Berserk - Chapter 12.01.pdf"),
+    ])
+    def test_name_another_chapter_could_have_is_left_out(
+            self, tmp_path, chapter, other, name):
+        shared = self._save(tmp_path, name)
+        assert self._find(tmp_path, chapter) == [shared]
+        assert self._find(tmp_path, chapter, others=[chapter, other]) == []
+
+    def test_current_name_is_kept_beside_another_chapter(self, tmp_path):
+        current = self._save(tmp_path, "Berserk - Chapter 0002.000.pdf")
+        self._save(tmp_path, "Berserk - Chapter 2.0.pdf")
+        assert self._find(tmp_path, "2", others=["2.0"]) == [current]
+
+    def test_recorded_name_belongs_to_its_chapter(self, tmp_path):
+        shared = self._save(tmp_path, "Berserk - Chapter 2.0.pdf")
+        assert self._find(tmp_path, "2", others=["2.0"],
+                          recorded=[str(shared)]) == [shared]
+        assert self._find(tmp_path, "2.0", others=["2"],
+                          claimed=[str(shared)]) == []
+
+    def test_name_recorded_for_another_chapter_is_left_out(self, tmp_path):
+        renamed = self._save(tmp_path, "renamed.pdf")
+        assert self._find(tmp_path, "2", recorded=[str(renamed)],
+                          claimed=[str(renamed)]) == []
+
+    def test_no_source_is_always_tried(self, tmp_path):
+        bare = self._save(tmp_path, "0012.000 [].pdf")
+        assert self._find(tmp_path, "12", templates=["{chapter} [{source}]"],
+                          sources=["mangadex.org"]) == [bare]

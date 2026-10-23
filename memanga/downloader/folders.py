@@ -3,9 +3,13 @@
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, List, Optional
 
-from .naming import _sanitize_filename
+from .naming import (DEFAULT_NAMING_TEMPLATE, _chapter_base_name,
+                     _chapter_filename_labels, _sanitize_filename)
+
+# Extensions download_chapter gives one-file chapters.
+_CHAPTER_FILE_SUFFIXES = (".pdf", ".epub", ".cbz", ".zip")
 
 
 def rename_manga_downloads(download_dir, old_title: str, new_title: str) -> bool:
@@ -91,6 +95,93 @@ def find_manga_downloads(download_dir, title: str) -> Optional[Path]:
     if target.resolve(strict=True).parent != root.resolve(strict=True):
         raise UnsafeDownloadPathError(f"{target} is outside {root}")
     return target
+
+
+def _chapter_file_names(title: str, chapter: str, templates: List[str],
+                        sources: List[str]) -> List[str]:
+    """Names download_chapter writes, or older versions wrote, for
+    ``chapter`` with each of ``templates`` and ``sources``."""
+    labels = _chapter_filename_labels(str(chapter))
+    bases = []
+    for label in labels:
+        for template in templates:
+            for source in sources:
+                bases.append(_chapter_base_name(template, title, label, source))
+                # Older versions cut the whole name at the length cap.
+                bases.append(_sanitize_filename(
+                    template.replace("{title}", title)
+                            .replace("{chapter}", label)
+                            .replace("{source}", source)))
+    names = []
+    for base in dict.fromkeys(bases):
+        names.extend(f"{base}{suffix}" for suffix in _CHAPTER_FILE_SUFFIXES)
+    names.extend(f"Chapter {label}" for label in labels)
+    return names
+
+
+def find_chapter_downloads(download_dir, title: str, chapter: str, *,
+                           templates: Iterable[str] = (),
+                           sources: Iterable[str] = (),
+                           recorded: Iterable[str] = (),
+                           others: Iterable[str] = (),
+                           claimed: Iterable[str] = ()) -> List[Path]:
+    """Saved copies of one chapter, best match first (issue #355).
+
+    Only entries directly inside the manga's managed folder count (see
+    ``find_manga_downloads``; its ``UnsafeDownloadPathError`` propagates).
+    ``recorded`` are paths from the download history, newest first; one
+    elsewhere is ignored. Then come the names download_chapter writes for
+    this chapter with ``templates`` (the default template is always
+    tried) and ``sources`` (for ``{source}``; no source is always
+    tried), in the current and older label forms: a file per one-file
+    format, or an image format's ``Chapter <label>`` folder.
+
+    A file must belong to this chapter. ``others`` are the manga's other
+    chapter labels and ``claimed`` the history paths of those chapters: a
+    name another chapter could have been saved under ("2.0" is an older
+    name of chapter "2" and of chapter "2.0") is left out unless the
+    history records it for this chapter, and a name recorded for another
+    chapter is always left out. Nothing is matched loosely, and symlinks
+    are never returned.
+    """
+    folder = find_manga_downloads(download_dir, title)
+    if folder is None:
+        return []
+    resolved_folder = folder.resolve()
+
+    def in_folder(paths):
+        names = []
+        for path in paths:
+            path = Path(path)
+            try:
+                if path.parent.resolve() == resolved_folder:
+                    names.append(path.name)
+            except OSError:
+                continue
+        return names
+
+    chapter = str(chapter)
+    templates = list(dict.fromkeys([*templates, DEFAULT_NAMING_TEMPLATE]))
+    sources = list(dict.fromkeys([*sources, ""]))
+    claimed_names = set(in_folder(claimed))
+    shared = set(claimed_names)
+    for other in dict.fromkeys(str(o) for o in others):
+        if other != chapter:
+            shared.update(_chapter_file_names(title, other, templates, sources))
+    names = [name for name in in_folder(recorded) if name not in claimed_names]
+    names += [name for name in _chapter_file_names(title, chapter, templates, sources)
+              if name not in shared]
+
+    found = []
+    for name in dict.fromkeys(names):
+        if not name or name in (".", "..") or "/" in name or "\\" in name:
+            continue
+        candidate = folder / name
+        if candidate.is_symlink() or candidate in found:
+            continue
+        if candidate.is_file() or candidate.is_dir():
+            found.append(candidate)
+    return found
 
 
 def delete_manga_downloads(download_dir, title: str) -> Optional[Path]:

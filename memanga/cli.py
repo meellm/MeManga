@@ -56,8 +56,9 @@ from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check
 from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
 from .email_settings import EmailSettings
-from .emailer import (TEST_DELIVERY_NOTE, EmailError, kindle_format_error,
-                      send_test_document, send_to_kindle, smtp_timeout)
+from .emailer import (TEST_DELIVERY_NOTE, EmailError, kindle_file_error,
+                      kindle_format_error, send_test_document, send_to_kindle,
+                      smtp_timeout)
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
                                DeliveryStatus, PipelineOptions,
                                manga_auto_downloads)
@@ -268,7 +269,7 @@ def _needs_config_lock(args) -> bool:
     if args.command == "failed":
         return _failed_action(args) != "list"
     if args.command == "send":
-        return not args.list
+        return not (args.list or args.dry_run)
     if args.command == "cron":
         return args.action != "status"
     if args.command == "search":
@@ -3519,14 +3520,235 @@ def _local_time_text(value) -> str:
     return when.strftime("%Y-%m-%d %H:%M")
 
 
-def cmd_send(args):
-    """Send saved chapters to Kindle again (issue #360).
+_KINDLE_NOT_SET_UP = (
+    "[red]Kindle delivery is not set up: the delivery mode must be "
+    "'email' with a Kindle address. See 'memanga config email'.[/red]"
+)
 
-    `send --pending [TARGET]` resends every chapter whose Kindle delivery
-    failed, through the same delivery step as `check`, so delete-after-send
-    still only removes a file once it was sent. `--list` only lists them
-    and `--clear` forgets the records; the files stay on disk.
+
+@dataclass(frozen=True)
+class _SendItem:
+    """One chapter of `send TARGET CHAPTER...` (issue #355)."""
+
+    chapter: str
+    path: Optional[Path]
+    # Why it can't be sent, or None.
+    problem: Optional[str]
+    # The title its undelivered record is kept under (#360), or None.
+    record_title: Optional[str] = None
+
+
+def _undelivered_records(title: str) -> Dict[str, Any]:
+    """Undelivered records of ``title`` by chapter, as (record title,
+    record). Records match the tracked title in any case, like
+    `send --pending TARGET`; one under the exact title wins."""
+    key = title.casefold()
+    pending = state.failures.get_all_undelivered()
+    records = {}
+    for record_title in sorted(pending, key=lambda t: t != title):
+        if record_title.casefold() != key:
+            continue
+        for chapter, info in pending[record_title].items():
+            records.setdefault(str(chapter), (record_title, info))
+    return records
+
+
+def _send_item(manga, chapter: str, record, known) -> _SendItem:
+    """The file to send for ``chapter`` of ``manga`` (issue #355).
+
+    A chapter on the undelivered list uses its record's file, as
+    `send --pending` does. Any other is looked up only in the manga's
+    download folder (see find_chapter_downloads), never under a name
+    that could belong to another of the ``known`` chapters; a copy in a
+    format Kindle accepts wins over one it doesn't. Raises
+    UnsafeDownloadPathError when that folder can't be used safely.
     """
+    from .downloader.folders import find_chapter_downloads
+
+    if record is not None:
+        record_title, info = record
+        recorded = str(info.get("path") or "")
+        path = Path(recorded) if recorded else None
+        if path is None or not path.is_file():
+            problem = f"The saved file is no longer there: {recorded or '(unknown)'}"
+        else:
+            problem = kindle_file_error(path)
+        return _SendItem(chapter, path, problem, record_title)
+
+    title = manga["title"]
+    key = title.casefold()
+    recorded, claimed = [], []
+    for entry in state.get_download_history(limit=state.activity.MAX_DOWNLOADS):
+        if str(entry.get("title", "")).casefold() != key or not entry.get("path"):
+            continue
+        if str(entry.get("chapter")) == chapter:
+            recorded.append(str(entry["path"]))
+        else:
+            claimed.append(str(entry["path"]))
+    template = config.get("delivery.naming_template")
+    sources = [src.get("source") for src in _get_sources_from_manga(manga)]
+    sources.append(manga.get("source"))
+    lookup = dict(
+        templates=[template] if isinstance(template, str) and template else [],
+        sources=[s for s in sources if isinstance(s, str) and s],
+        recorded=recorded,
+    )
+    candidates = find_chapter_downloads(
+        config.download_dir, title, chapter,
+        others=known, claimed=claimed, **lookup)
+    if not candidates:
+        shared = find_chapter_downloads(config.download_dir, title, chapter,
+                                        **lookup)
+        if shared:
+            return _SendItem(
+                chapter, shared[0],
+                "The saved file's name could also belong to another chapter, "
+                "so it is not sent")
+        return _SendItem(chapter, None,
+                         "No saved file was found in the download folder")
+    for path in candidates:
+        if kindle_file_error(path) is None:
+            return _SendItem(chapter, path, None)
+    return _SendItem(chapter, candidates[0], kindle_file_error(candidates[0]))
+
+
+def _send_chapters(args):
+    """`send TARGET CHAPTER...`: send saved chapters to Kindle (#355).
+
+    Every CHAPTER must name a downloaded chapter (or one on the
+    undelivered list) of the tracked TARGET, and Kindle delivery must be
+    on for it, before anything is sent. A chapter whose file is missing
+    or in a format Kindle doesn't accept is reported while the others
+    are still sent. Sending several chapters asks first, unless --yes;
+    --dry-run only shows what would be sent and writes nothing. Chapters
+    are sent again even when an earlier send worked, and nothing is
+    downloaded.
+    """
+    from .downloader import UnsafeDownloadPathError
+
+    manga_list = config.get("manga", [])
+    if not manga_list:
+        return _error("[yellow]No manga tracked.[/yellow]")
+    manga, _, candidates = _find_manga(args.target, manga_list)
+    if not manga:
+        return _target_error(args.target, candidates)
+    title = manga["title"]
+
+    records = _undelivered_records(title)
+    known = [str(ch) for ch in state.get_downloaded_chapters(title)] + list(records)
+    chapters, unknown, ambiguous = _chapter_lookup(args.chapters, known)
+    if unknown or ambiguous:
+        for token in unknown:
+            err_console.print(
+                f"[red]Not downloaded:[/red] {_esc(token)} is not a downloaded "
+                f"chapter of {_esc(title)}"
+            )
+        for token, matches in ambiguous.items():
+            err_console.print(
+                f"[red]Ambiguous chapter:[/red] {_esc(token)} matches "
+                f"{_chapter_list_text(matches)}; give the exact label"
+            )
+        err_console.print("[dim]Nothing was sent.[/dim]")
+        return EXIT_ERROR
+
+    pipeline = _chapter_pipeline()
+    if not pipeline.delivers_to_kindle():
+        return _error(_KINDLE_NOT_SET_UP)
+    if not pipeline.delivers_to_kindle(manga):
+        quoted = _esc(_quoted_title(title))
+        return _error(
+            f"[red]Kindle delivery is off for {_esc(title)}.[/red] Turn it on "
+            f"with 'memanga update {quoted} --kindle'."
+        )
+
+    try:
+        items = [_send_item(manga, ch, records.get(ch), known) for ch in chapters]
+    except (UnsafeDownloadPathError, OSError) as e:
+        return _error(
+            f"[red]Refusing to send from the download folder of "
+            f"{_esc(title)}:[/red] {_esc(e)}"
+        )
+    # A chapter on the undelivered list is always tried, so its record
+    # counts the attempt as `send --pending` would.
+    to_send = [item for item in items if item.record_title or not item.problem]
+    ask = len(to_send) > 1 and not args.yes and not args.dry_run
+    if ask and not _stdin_is_tty():
+        return _non_interactive_error(
+            f"refusing to send {len(to_send)} chapters of '{title}' without "
+            "confirmation; pass --yes (or --dry-run to preview)"
+        )
+
+    table = _table(
+        title=f"📧 Send to Kindle: {_esc(title)}",
+        box=box.ROUNDED,
+        show_lines=True,
+    )
+    table.add_column("Chapter", style="yellow", justify="center")
+    table.add_column("File", style="green", no_wrap=False, max_width=50)
+    table.add_column("Status", no_wrap=False, max_width=50)
+    for item in items:
+        if item.problem:
+            status = f"[red]{_esc(item.problem)}[/red]"
+        elif item.record_title:
+            status = "ready (not sent to Kindle yet)"
+        else:
+            status = "ready"
+        table.add_row(_esc(item.chapter),
+                      _esc(item.path.name if item.path else "—"), status)
+    console.print(table)
+    console.print()
+
+    problems = sum(1 for item in items if item.problem)
+    if args.dry_run:
+        console.print(
+            f"Dry run: {len(items) - problems}/{len(items)} chapter(s) would be "
+            "sent to Kindle; nothing was sent"
+        )
+        return EXIT_PARTIAL if problems else None
+
+    if ask and not Confirm.ask(
+            f"Send {len(to_send)} chapters of [cyan]{_esc(title)}[/cyan] to Kindle?"):
+        return None
+
+    sent = 0
+    for item in items:
+        console.print(f"  [dim]{_esc(title)} Chapter {_esc(item.chapter)}[/dim]")
+        if item.problem and not item.record_title:
+            _diagnostic(
+                logging.ERROR,
+                f"     [red]❌ Not sent: {_esc(item.problem)}[/red]",
+                "Chapter %s of %s not sent: %s", item.chapter, title, item.problem,
+            )
+            continue
+        try:
+            if item.record_title:
+                status = pipeline.redeliver(item.record_title, item.chapter, manga)
+            else:
+                status = pipeline.send_saved(title, item.chapter, item.path, manga)
+        finally:
+            # Like `check` (#230): a send that went out must stay recorded.
+            _checkpoint_state()
+        if status is DeliveryStatus.SENT:
+            sent += 1
+
+    console.print()
+    console.print(f"[green]📊 Send summary: {sent}/{len(items)} chapters sent to Kindle[/green]")
+    if sent < len(items):
+        return EXIT_PARTIAL
+
+
+def cmd_send(args):
+    """Send saved chapters to Kindle again (issues #360, #355).
+
+    `send TARGET CHAPTER...` sends chapters of a tracked manga that are
+    already saved; see `_send_chapters`. `send --pending [TARGET]` resends
+    every chapter whose Kindle delivery failed, through the same delivery
+    step as `check`, so delete-after-send still only removes a file once
+    it was sent. `--list` only lists them and `--clear` forgets the
+    records; the files stay on disk.
+    """
+    if not args.pending:
+        return _send_chapters(args)
     pending = state.failures.get_all_undelivered()
     title = None
     if args.target:
@@ -3579,10 +3801,7 @@ def cmd_send(args):
 
     pipeline = _chapter_pipeline()
     if not pipeline.delivers_to_kindle():
-        return _error(
-            "[red]Kindle delivery is not set up: the delivery mode must be "
-            "'email' with a Kindle address. See 'memanga config email'.[/red]"
-        )
+        return _error(_KINDLE_NOT_SET_UP)
 
     # Records are keyed by the title they were saved under, which may
     # differ in case from the tracked entry (targets match that way too).
@@ -3975,6 +4194,7 @@ Examples:
   memanga check "Solo Leveling"         # Check one manga (same as -t)
   memanga check --download              # Download new chapters, no prompts
   memanga check --dry-run               # Only list new chapters
+  memanga send "Solo Leveling" 12       # Send a downloaded chapter to Kindle
   memanga send --pending                # Resend chapters Kindle never got
   memanga edit "#1" --status on-hold    # Change a manga's status
   memanga read "Solo Leveling" 1 2      # Mark chapters read (unread undoes)
@@ -4374,35 +4594,54 @@ Examples:
             p_action.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                                   help="Machine-readable JSON output")
 
-    # send (issue #360)
+    # send (issues #360, #355)
     p_send = subparsers.add_parser(
         "send",
-        help="Send chapters whose Kindle delivery failed again",
+        help="Send downloaded chapters to Kindle",
         description=(
-            "Send saved chapters to Kindle again.\n\n"
+            "Send saved chapters to Kindle.\n\n"
+            "  send TARGET CHAPTER...           send these downloaded chapters\n"
+            "  send TARGET CHAPTER... --dry-run only show what would be sent\n"
             "  send --pending [TARGET]          send every chapter whose Kindle\n"
             "                                   delivery failed\n"
             "  send --pending --list [TARGET]   only list them\n"
             "  send --pending --clear [TARGET]  forget the records; the files stay\n\n"
-            "A chapter that was saved but could not be emailed stays on this list\n"
-            "until it is sent. 'delivery.delete_after_send' removes a file only\n"
-            "after it was sent. TARGET is a title or '#N' from 'memanga list',\n"
-            "matched like 'check -t'; without it every manga is included.\n\n"
-            "Exit codes: 0 success or nothing to send; 1 the target was not found\n"
-            "or Kindle delivery is not set up; 2 usage error; 3 some chapters\n"
-            "could not be sent."
+            "CHAPTER is a downloaded chapter's number or label, e.g. 12 or 10.5.\n"
+            "Every CHAPTER is checked before anything is sent; its saved file is\n"
+            "taken from the manga's download folder, and nothing is downloaded.\n"
+            "A chapter is sent again even if an earlier send worked. Sending more\n"
+            "than one chapter asks first; --yes skips that, and is required when\n"
+            "no one can answer.\n\n"
+            "A chapter that was saved but could not be emailed stays on the\n"
+            "--pending list until it is sent. 'delivery.delete_after_send' removes\n"
+            "a file only after it was sent. TARGET is a title or '#N' from\n"
+            "'memanga list', matched like 'check -t'; with --pending and no\n"
+            "TARGET every manga is included.\n\n"
+            "Exit codes: 0 success, nothing to send, or sending was declined at\n"
+            "the question; 1 the target or a chapter was not found or is\n"
+            "ambiguous, Kindle delivery is not set up, or several chapters were\n"
+            "given without --yes and no one can answer; 2 usage error; 3 some\n"
+            "chapters could not be sent (with --dry-run: would not be sent)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p_send.add_argument("target", nargs="?", metavar="TARGET",
-                        help="Title or #N from 'memanga list' (default: every manga)")
-    p_send.add_argument("--pending", action="store_true", required=True,
+                        help="Title or #N from 'memanga list' (with --pending, "
+                             "default: every manga)")
+    p_send.add_argument("chapters", nargs="*", metavar="CHAPTER",
+                        help="Downloaded chapter number or label, e.g. 12 or 10.5")
+    p_send.add_argument("--pending", action="store_true",
                         help="Chapters whose Kindle delivery failed")
     send_mode = p_send.add_mutually_exclusive_group()
     send_mode.add_argument("--list", action="store_true",
-                           help="Only list them; send nothing")
+                           help="With --pending: only list them; send nothing")
     send_mode.add_argument("--clear", action="store_true",
-                           help="Forget the records without sending; the files stay")
+                           help="With --pending: forget the records without "
+                                "sending; the files stay")
+    send_mode.add_argument("--dry-run", action="store_true",
+                           help="Only show what would be sent; send nothing")
+    p_send.add_argument("-y", "--yes", action="store_true",
+                        help="Send several chapters without asking")
     p_send.set_defaults(func=cmd_send)
 
     # doctor (issue #250)
@@ -4484,6 +4723,21 @@ def _main():
             _subparser(parser, args.command).error("give CHAPTER arguments or --all, not both")
         if not args.all and not args.chapters:
             _subparser(parser, args.command).error("give at least one CHAPTER, or --all")
+
+    if args.command == "send":
+        p_send = _subparser(parser, "send")
+        if args.pending:
+            if args.chapters:
+                p_send.error("CHAPTER cannot be combined with --pending")
+            if args.dry_run:
+                p_send.error("--dry-run cannot be combined with --pending; use --list")
+            if args.yes:
+                p_send.error("--yes cannot be combined with --pending")
+        else:
+            if args.list or args.clear:
+                p_send.error("--list and --clear need --pending")
+            if not args.target or not args.chapters:
+                p_send.error("give TARGET and at least one CHAPTER, or --pending")
 
     if args.command == "config" and args.config_action:
         legacy = [flag for flag, value in (

@@ -7,6 +7,19 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #355 `memanga send TARGET CHAPTER...` sends downloaded chapters to the
+  Kindle again from their saved files, with the configured email
+  settings and `delivery.delete_after_send`. Every chapter is checked
+  before anything is sent. Files are taken from the manga's download
+  folder, never through a symlink (a chapter still on the `--pending`
+  list uses its recorded file, as `send --pending` does), and nothing is
+  downloaded. A file whose name could also belong to another downloaded
+  chapter is only used when the download history says it is this
+  chapter's. A missing or unclear file, or a format the Kindle doesn't
+  accept, is reported per chapter while the others are still sent (exit
+  `3`). A failed email puts the chapter on the `--pending` list, keeping
+  the parts of a split PDF that were already accepted. Several chapters
+  ask first unless `--yes`, and `--dry-run` shows what would be sent.
 - #360 A chapter that was saved but could not be sent to the Kindle is
   no longer only a log line. It stays downloaded, its file is kept and it
   is recorded as not sent until a send succeeds. `memanga send --pending

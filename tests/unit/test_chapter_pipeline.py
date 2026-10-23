@@ -1213,3 +1213,121 @@ class TestSmtpTimeout:
 
         assert outcome.delivery is DeliveryStatus.NOT_REQUESTED
         assert sent == []
+
+
+class TestSendSaved:
+    """Issue #355: sending an already saved chapter on request uses the
+    same delivery step as a download and never adds a pending record."""
+
+    def _saved(self, state, tmp_path, pdf, sent, **opts):
+        """A chapter downloaded with local delivery, then a pipeline that
+        emails; returns that pipeline. ``sent`` collects the sent paths,
+        or is the error every send raises."""
+        downloads = _Downloads({("primary.test", False): pdf})
+        _pipeline(state, tmp_path, downloads).process(SINGLE, _primary())
+        pipeline = _pipeline(state, tmp_path, _Downloads({}),
+                             delivery_mode="email", email=EMAIL, **opts)
+
+        def send(**kwargs):
+            if isinstance(sent, Exception):
+                raise sent
+            sent.append(kwargs["pdf_path"])
+
+        pipeline.send = send
+        return pipeline
+
+    def test_sends_marks_history_and_keeps_the_file(self, state, tmp_path, pdf):
+        sent = []
+        pipeline = self._saved(state, tmp_path, pdf, sent)
+
+        assert pipeline.send_saved(TITLE, "71", pdf, SINGLE) is DeliveryStatus.SENT
+
+        assert sent == [pdf]
+        assert pdf.exists()
+        history = state.get_download_history()
+        assert len(history) == 1
+        assert (history[0]["kindle_sent"], history[0]["deleted_after_send"]) == (True, False)
+        assert state.failures.get_all_undelivered() == {}
+
+    def test_delete_after_send_deletes_once_sent(self, state, tmp_path, pdf):
+        sent = []
+        pipeline = self._saved(state, tmp_path, pdf, sent, delete_after_send=True)
+
+        assert pipeline.send_saved(TITLE, "71", pdf, SINGLE) is DeliveryStatus.SENT
+
+        assert not pdf.exists()
+        assert state.get_download_history()[0]["deleted_after_send"] is True
+
+    def test_already_sent_chapter_is_sent_again(self, state, tmp_path, pdf):
+        sent = []
+        pipeline = self._saved(state, tmp_path, pdf, sent)
+        pipeline.send_saved(TITLE, "71", pdf, SINGLE)
+
+        assert pipeline.send_saved(TITLE, "71", pdf, SINGLE) is DeliveryStatus.SENT
+
+        assert sent == [pdf, pdf]
+        assert len(state.get_download_history()) == 1
+
+    def test_failure_keeps_the_file_and_records_it_undelivered(
+            self, state, tmp_path, pdf):
+        pipeline = self._saved(state, tmp_path, pdf, EmailError("Mailbox full"),
+                               delete_after_send=True)
+
+        assert pipeline.send_saved(TITLE, "71", pdf, SINGLE) is DeliveryStatus.FAILED
+
+        assert pdf.exists()
+        record = state.failures.get_undelivered(TITLE)["71"]
+        assert (record["path"], record["error"], record["attempts"]) == (
+            str(pdf), "Mailbox full", 1)
+        assert state.get_download_history()[0]["kindle_sent"] is False
+        assert pipeline.reporter.events[-1][0] == "email_failed"
+
+    def test_failed_part_is_kept_and_a_later_send_skips_accepted_parts(
+            self, state, tmp_path, pdf):
+        """#364 on this path: part 1 accepted, part 2 failed; the next
+        send passes that progress on and the record is cleared."""
+        progress = {"total": 3, "accepted": [1], "source_size": 4,
+                    "source_mtime_ns": 1, "part_limit": 18 * 1024 * 1024}
+        pipeline = self._saved(state, tmp_path, pdf, EmailPartError(
+            2, 3, dict(progress), "SMTP error from smtp.test:587: 554 rejected"))
+
+        assert pipeline.send_saved(TITLE, "71", pdf, SINGLE) is DeliveryStatus.FAILED
+        assert state.failures.get_undelivered(TITLE)["71"]["parts"] == progress
+
+        calls = []
+        pipeline.send = lambda **kwargs: calls.append(kwargs["progress"])
+        assert pipeline.send_saved(TITLE, "71", pdf, SINGLE) is DeliveryStatus.SENT
+
+        assert calls == [progress]
+        assert state.failures.get_undelivered(TITLE) == {}
+        assert state.get_download_history()[0]["kindle_sent"] is True
+
+    def test_progress_of_another_file_is_not_reused(self, state, tmp_path, pdf):
+        other = tmp_path / "other.pdf"
+        other.write_bytes(b"%PDF")
+        state.failures.add_undelivered(TITLE, "71", str(other), "SMTP down",
+                                       parts={"total": 3, "accepted": [1]})
+        calls = []
+        pipeline = self._saved(state, tmp_path, pdf, calls)
+        pipeline.send = lambda **kwargs: calls.append(kwargs["progress"])
+
+        assert pipeline.send_saved(TITLE, "71", pdf, SINGLE) is DeliveryStatus.SENT
+        assert calls == [None]
+
+    def test_unsupported_format_is_not_sent(self, state, tmp_path):
+        cbz = tmp_path / "chapter.cbz"
+        cbz.write_bytes(b"PK")
+        sent = []
+        pipeline = _pipeline(state, tmp_path, _Downloads({}), sent=sent,
+                             delivery_mode="email", email=EMAIL)
+
+        assert pipeline.send_saved(TITLE, "71", cbz, SINGLE) is DeliveryStatus.SKIPPED_FORMAT
+        assert sent == []
+
+    def test_opted_out_manga_is_not_sent(self, state, tmp_path, pdf):
+        sent = []
+        pipeline = self._saved(state, tmp_path, pdf, sent)
+        manga = dict(SINGLE, send_to_kindle=False)
+
+        assert pipeline.send_saved(TITLE, "71", pdf, manga) is DeliveryStatus.NOT_REQUESTED
+        assert sent == []

@@ -450,6 +450,33 @@ class ChapterPipeline:
                               parts)
         return status
 
+    def send_saved(self, title: str, chapter: str, path: Path,
+                   manga: Optional[Dict[str, Any]] = None) -> DeliveryStatus:
+        """Send the saved chapter file ``path`` on the user's request (#355).
+
+        The same delivery step as a download: Kindle formats only, the
+        configured email settings, delete-after-send once it was sent, and
+        nothing when delivery is off or ``manga`` opted out. A send marks
+        the chapter's download-history entry sent (#338). A failed send is
+        recorded as undelivered (#360), like a failed delivery after a
+        download, with the parts of a split PDF the mail server accepted
+        (#364); a later send of the same file skips those parts, and a
+        send clears the record.
+        """
+        chapter = str(chapter)
+        path = Path(path)
+        record = self.state.failures.get_undelivered(title).get(chapter)
+        progress = None
+        if record is not None and str(record.get("path") or "") == str(path):
+            progress = record.get("parts")
+        status, error, deleted, parts = self._deliver(path, manga,
+                                                      progress=progress)
+        if status is DeliveryStatus.SENT:
+            self.state.activity.mark_download_sent(
+                title, chapter, str(path), deleted_after_send=deleted)
+        self._record_delivery(title, chapter, path, status, error, parts)
+        return status
+
     def _record_delivery(self, title, chapter, path, status,
                          error, parts=None) -> None:
         """Keep the undelivered record in step with a delivery attempt.
