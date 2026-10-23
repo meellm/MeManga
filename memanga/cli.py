@@ -55,6 +55,7 @@ from .state import State
 from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
 from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
+from .email_settings import EmailSettings
 from .emailer import (TEST_DELIVERY_NOTE, EmailError, kindle_format_error,
                       send_test_document, send_to_kindle, smtp_timeout)
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
@@ -1545,7 +1546,8 @@ def _chapter_pipeline(output_format=None, max_retries=DEFAULT_PAGE_RETRIES,
         allow_partial=allow_partial,
         partial_threshold=partial_threshold,
         delivery_mode=config.delivery_mode,
-        email=config.get("email", {}),
+        # The password is looked up only when a chapter is sent.
+        email=EmailSettings.from_config(config, resolve_password=False),
         delete_after_send=config.get("delivery.delete_after_send", False),
     )
     # Bind the collaborators imported here rather than the pipeline's
@@ -1964,6 +1966,7 @@ def cmd_check(args):
 
 def _status_payload() -> Dict[str, Any]:
     """`status --json` payload. Never includes the SMTP password."""
+    email = EmailSettings.from_config(config, resolve_password=False)
     return {
         "schema_version": JSON_SCHEMA_VERSION,
         "paths": {
@@ -1979,10 +1982,10 @@ def _status_payload() -> Dict[str, Any]:
             "delete_after_send": bool(config.get("delivery.delete_after_send", False)),
         },
         "email": {
-            "kindle_email": config.get("email.kindle_email") or None,
-            "sender_email": config.get("email.sender_email") or None,
-            "smtp_server": config.get("email.smtp_server", "smtp.gmail.com"),
-            "smtp_port": config.get("email.smtp_port", 587),
+            "kindle_email": email.kindle_email or None,
+            "sender_email": email.sender_email or None,
+            "smtp_server": email.smtp_server,
+            "smtp_port": email.smtp_port,
         },
         "post_processing": {
             "enabled": bool(config.get("delivery.post_processing.enabled")),
@@ -2240,19 +2243,19 @@ def _config_edit(args):
 
 
 def _config_email(args):
+    settings = EmailSettings.from_config(config, resolve_password=False)
     password_set = bool(get_app_password(config))
     table = _table(title="Email delivery", box=box.SIMPLE, show_header=False)
     table.add_column(style="dim", width=18)
     table.add_column(style="white")
     table.add_row("Delivery mode", _esc(config.delivery_mode))
-    for label, key in (("Kindle email", "email.kindle_email"),
-                       ("Sender email", "email.sender_email")):
-        value = config.get(key)
+    for label, value in (("Kindle email", settings.kindle_email),
+                         ("Sender email", settings.sender_email)):
         table.add_row(label, _esc(value) if value else "[red]not set[/red]")
-    table.add_row("SMTP server", _esc(config.get("email.smtp_server", "smtp.gmail.com")))
-    table.add_row("SMTP port", _esc(config.get("email.smtp_port", 587)))
+    table.add_row("SMTP server", _esc(settings.smtp_server))
+    table.add_row("SMTP port", _esc(settings.smtp_port))
     table.add_row("SMTP timeout",
-                  f"{smtp_timeout(config.get('email.smtp_timeout')):g} seconds")
+                  f"{smtp_timeout(settings.smtp_timeout):g} seconds")
     table.add_row("App password", "set" if password_set else "[red]not set[/red]")
     console.print(table)
     if getattr(args, "send_test", False):
@@ -2279,15 +2282,16 @@ def _send_test_document():
     except AppPasswordError as e:
         return _error(f"[red]❌ App password from the environment is "
                       f"unusable: {_esc(e)}[/red]")
+    settings = EmailSettings.from_config(config, resolve_password=False)
     try:
         with console.status("[dim]Sending a test PDF to your Kindle...[/dim]"):
             subject = send_test_document(
-                config.get("email.kindle_email"),
-                config.get("email.sender_email"),
-                config.get("email.smtp_server", "smtp.gmail.com"),
-                config.get("email.smtp_port", 587),
+                settings.kindle_email,
+                settings.sender_email,
+                settings.smtp_server,
+                settings.smtp_port,
                 get_app_password(config),
-                timeout=config.get("email.smtp_timeout"),
+                timeout=settings.smtp_timeout,
             )
     except EmailError as e:
         return _error(f"[red]❌ Test PDF not sent: {_esc(e)}[/red]")

@@ -1827,6 +1827,45 @@ class TestDetailPage:
 
         assert queued == ["7"]
 
+    @pytest.mark.parametrize("send_to_kindle", [True, False])
+    def test_download_passes_shared_email_settings(
+            self, app_window, qapp, sample_manga, monkeypatch, send_to_kindle):
+        # Issue #296: the Detail page builds its delivery settings with
+        # the shared helper; a manga that opted out sends nothing.
+        from memanga.email_settings import EmailSettings
+        monkeypatch.setattr("memanga.email_settings.get_app_password",
+                            lambda cfg: "pw")
+        cfg = app_window.config
+        cfg.set("delivery.mode", "email")
+        cfg.set("email.kindle_email", "reader@example.com")
+        cfg.set("email.sender_email", "sender@example.com")
+        cfg.set("email.smtp_server", "smtp.example.test")
+        cfg.set("email.smtp_port", 2525)
+        manga = {**sample_manga, "send_to_kindle": send_to_kindle}
+        title = manga["title"]
+        cfg.set("manga", [manga])
+        app_window.app_state.set_available_chapters(title, [{
+            "number": "7", "title": "", "source": "mangadex.org",
+            "source_url": "https://mangadex.org/title/abc/test-manga",
+            "url": "https://mangadex.org/chapter/7", "is_backup": False,
+        }])
+        app_window.show_page("detail", manga=manga); qapp.processEvents()
+        page = app_window._pages["detail"]
+        calls = []
+        app_window.worker.download_chapter = lambda **kw: calls.append(kw)
+
+        page._download_chapter(app_window.app_state.get_available_chapters(title)[0])
+
+        (call,) = calls
+        if send_to_kindle:
+            assert call["kindle_cfg"] == EmailSettings(
+                kindle_email="reader@example.com",
+                sender_email="sender@example.com",
+                smtp_server="smtp.example.test", smtp_port=2525,
+                smtp_timeout=60, app_password="pw")
+        else:
+            assert call["kindle_cfg"] is None
+
     @staticmethod
     def _undelivered_page(app_window, qapp, sample_manga, tmp_path):
         title = sample_manga["title"]
@@ -1850,7 +1889,8 @@ class TestDetailPage:
         # Issue #360: a chapter that never reached the Kindle says so and
         # can be sent again from its row.
         from PySide6.QtWidgets import QLabel
-        monkeypatch.setattr("memanga.config.get_app_password", lambda cfg: "pw")
+        monkeypatch.setattr("memanga.email_settings.get_app_password",
+                            lambda cfg: "pw")
         app_window.config.set("delivery.mode", "email")
         app_window.config.set("email.kindle_email", "reader@example.com")
         app_window.config.set("email.sender_email", "sender@example.com")
@@ -1861,8 +1901,8 @@ class TestDetailPage:
         calls = []
         app_window.worker.send_pending = (
             lambda manga, number, state, kindle_cfg, **kw:
-            calls.append((manga["title"], number, kindle_cfg["kindle_email"],
-                          kindle_cfg["app_password"])))
+            calls.append((manga["title"], number, kindle_cfg.kindle_email,
+                          kindle_cfg.app_password)))
         self._send_button(page).click()
         qapp.processEvents()
 
@@ -1897,7 +1937,8 @@ class TestDetailPage:
     def test_send_refused_when_manga_opted_out(
             self, app_window, qapp, sample_manga, tmp_path, monkeypatch):
         # Issue #341: per-manga Kindle opt-out wins over global email.
-        monkeypatch.setattr("memanga.config.get_app_password", lambda cfg: "pw")
+        monkeypatch.setattr("memanga.email_settings.get_app_password",
+                            lambda cfg: "pw")
         app_window.config.set("delivery.mode", "email")
         app_window.config.set("email.kindle_email", "reader@example.com")
         app_window.config.set("email.sender_email", "sender@example.com")
@@ -1943,6 +1984,57 @@ class TestDownloadsQueueing:
             "queue_all": True,
         })
         assert queued == ["1", "2"]
+
+    def test_queued_jobs_carry_shared_email_settings(
+            self, app_window, qapp, sample_manga, monkeypatch):
+        # Issue #296: one settings object per job when email delivery
+        # applies; None for a manga that opted out (#341).
+        from memanga.email_settings import EmailSettings
+        monkeypatch.setattr("memanga.email_settings.get_app_password",
+                            lambda cfg: "pw")
+        cfg = app_window.config
+        cfg.set("delivery.mode", "email")
+        cfg.set("email.kindle_email", "reader@example.com")
+        cfg.set("email.sender_email", "sender@example.com")
+        opted_out = {**sample_manga, "title": "Opted Out",
+                     "send_to_kindle": False}
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+
+        queued = {}
+        app_window.worker.download_chapter = (
+            lambda **kw: queued.__setitem__(kw["manga"]["title"],
+                                            kw["kindle_cfg"]))
+        page._on_check_complete({
+            "results": [self._result(sample_manga, "1"),
+                        self._result(opted_out, "1")],
+            "queue_all": True,
+        })
+
+        assert queued == {
+            sample_manga["title"]: EmailSettings(
+                kindle_email="reader@example.com",
+                sender_email="sender@example.com",
+                smtp_timeout=60, app_password="pw"),
+            "Opted Out": None,
+        }
+
+    def test_queued_jobs_stay_local_without_email_delivery(
+            self, app_window, qapp, sample_manga):
+        app_window.config.set("email.kindle_email", "reader@example.com")
+        assert app_window.config.delivery_mode == "local"
+        app_window.show_page("downloads"); qapp.processEvents()
+        page = app_window._pages["downloads"]
+
+        queued = []
+        app_window.worker.download_chapter = (
+            lambda **kw: queued.append(kw["kindle_cfg"]))
+        page._on_check_complete({
+            "results": [self._result(sample_manga, "1")],
+            "queue_all": True,
+        })
+
+        assert queued == [None]
 
     def test_background_sweep_does_not_queue_manual_manga(self, app_window,
                                                           qapp, sample_manga):

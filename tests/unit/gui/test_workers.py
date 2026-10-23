@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 import pytest
 
+from memanga.email_settings import EmailSettings
+
 
 @pytest.fixture
 def worker(event_bus):
@@ -903,11 +905,14 @@ class TestSharedChapterPipeline:
 
     _MANGA = {"title": "Vinland Saga", "source": "primary.test",
               "url": "https://primary.test/vs"}
-    _KINDLE = {
-        "kindle_email": "reader@example.com",
-        "sender_email": "sender@example.com",
-        "app_password": "secret",
-    }
+    _KINDLE = EmailSettings(
+        kindle_email="reader@example.com",
+        sender_email="sender@example.com",
+        smtp_server="smtp.example.test",
+        smtp_port=2525,
+        smtp_timeout=9,
+        app_password="secret",
+    )
 
     def _chapter(self):
         from memanga.downloader import ChapterWithSource
@@ -996,7 +1001,7 @@ class TestSharedChapterPipeline:
         events = self._run(
             worker, event_bus, state, monkeypatch,
             lambda manga, chapter, *a, **k: pdf, fake_send,
-            kindle_cfg=dict(self._KINDLE), delete_after_send=True)
+            kindle_cfg=self._KINDLE, delete_after_send=True)
 
         assert self._names(events)[-2:] == ["kindle_sent", "download_complete"]
         # Issue #338: one event says it was sent and the copy deleted.
@@ -1007,6 +1012,8 @@ class TestSharedChapterPipeline:
         assert "kindle_skipped" not in self._names(events)
         assert sent[0]["pdf_path"] == pdf
         assert sent[0]["app_password"] == "secret"
+        assert (sent[0]["smtp_server"], sent[0]["smtp_port"],
+                sent[0]["timeout"]) == ("smtp.example.test", 2525, 9)
         assert not pdf.exists()
         assert state.is_chapter_downloaded("Vinland Saga", "71")
         entry = state.get_download_history()[0]
@@ -1020,7 +1027,7 @@ class TestSharedChapterPipeline:
         events = self._run(
             worker, event_bus, state, monkeypatch,
             lambda manga, chapter, *a, **k: pdf, lambda **kw: None,
-            kindle_cfg=dict(self._KINDLE))
+            kindle_cfg=self._KINDLE)
 
         assert self._names(events)[-2:] == ["kindle_sent", "download_complete"]
         # No deletion was asked for, so the event says nothing about it.
@@ -1048,7 +1055,7 @@ class TestSharedChapterPipeline:
         events = self._run(
             worker, event_bus, state, monkeypatch,
             lambda manga, chapter, *a, **k: pdf, lambda **kw: None,
-            kindle_cfg=dict(self._KINDLE), delete_after_send=True)
+            kindle_cfg=self._KINDLE, delete_after_send=True)
 
         assert self._names(events)[-2:] == ["kindle_sent", "download_complete"]
         assert self._names(events).count("kindle_sent") == 1
@@ -1077,7 +1084,7 @@ class TestSharedChapterPipeline:
             lambda manga, chapter, *a, **k: folder,
             lambda **kw: sent.append(kw),
             output_format=fmt,
-            kindle_cfg=dict(self._KINDLE), delete_after_send=True)
+            kindle_cfg=self._KINDLE, delete_after_send=True)
 
         assert self._names(events)[-2:] == ["kindle_skipped", "download_complete"]
         assert events[-2][1] == {
@@ -1106,7 +1113,7 @@ class TestSharedChapterPipeline:
             lambda manga, chapter, *a, **k: archive,
             lambda **kw: sent.append(kw),
             output_format=fmt,
-            kindle_cfg=dict(self._KINDLE), delete_after_send=True)
+            kindle_cfg=self._KINDLE, delete_after_send=True)
 
         assert self._names(events)[-2:] == ["kindle_skipped", "download_complete"]
         assert events[-2][1]["reason"] == (
@@ -1130,7 +1137,7 @@ class TestSharedChapterPipeline:
         events = self._run(
             worker, event_bus, state, monkeypatch,
             lambda manga, chapter, *a, **k: pdf, fake_send,
-            kindle_cfg=dict(self._KINDLE), delete_after_send=True)
+            kindle_cfg=self._KINDLE, delete_after_send=True)
 
         assert self._names(events)[-2:] == ["kindle_error", "download_complete"]
         assert events[-2][1]["error"] == "SMTP down"
@@ -1154,7 +1161,7 @@ class TestSharedChapterPipeline:
             event_bus.subscribe(name, lambda d, n=name: events.append((n, d)))
 
         worker.send_pending(manga or self._MANGA, "71", state,
-                            dict(self._KINDLE), **kwargs)
+                            self._KINDLE, **kwargs)
 
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
@@ -1185,6 +1192,8 @@ class TestSharedChapterPipeline:
         assert events[-1][1]["sent"] is True
         assert sent[0]["pdf_path"] == pdf
         assert sent[0]["app_password"] == "secret"
+        assert (sent[0]["smtp_server"], sent[0]["smtp_port"],
+                sent[0]["timeout"]) == ("smtp.example.test", 2525, 9)
         assert not pdf.exists()
         assert state.failures.get_undelivered("Vinland Saga") == {}
         assert state.is_chapter_downloaded("Vinland Saga", "71")
@@ -1267,7 +1276,7 @@ class TestSharedChapterPipeline:
         events = self._run(
             worker, event_bus, state, monkeypatch,
             lambda manga, chapter, *a, **k: pdf, fake_send,
-            kindle_cfg=dict(self._KINDLE), delete_after_send=True)
+            kindle_cfg=self._KINDLE, delete_after_send=True)
 
         assert self._names(events)[-2:] == ["kindle_error", "download_complete"]
         assert events[-2][1]["error"] == "No space left on device"

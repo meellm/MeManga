@@ -6,6 +6,8 @@ records each outcome leaves behind are checked as written.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from memanga.chapter_pipeline import (ChapterPipeline, ChapterReporter,
@@ -13,6 +15,7 @@ from memanga.chapter_pipeline import (ChapterPipeline, ChapterReporter,
                                       PipelineOptions, manga_auto_downloads,
                                       manga_sends_to_kindle)
 from memanga.downloader import ChapterWithSource, DownloaderError
+from memanga.email_settings import EmailSettings
 from memanga.emailer import EmailError, EmailPartError
 from memanga.scrapers.base import Chapter
 
@@ -26,7 +29,8 @@ WITH_BACKUP = {
         {"source": "backup.test", "url": "https://backup.test/vs"},
     ],
 }
-EMAIL = {"kindle_email": "reader@example.com", "sender_email": "sender@example.com"}
+EMAIL = EmailSettings(kindle_email="reader@example.com",
+                      sender_email="sender@example.com")
 
 
 def _primary(number="71"):
@@ -515,7 +519,7 @@ class TestDelivery:
         local = _pipeline(state, tmp_path, _Downloads({}),
                           output_format="cbz")
         no_address = _pipeline(state, tmp_path, _Downloads({}),
-                               delivery_mode="email", email={},
+                               delivery_mode="email", email=EmailSettings(),
                                output_format="cbz")
         assert local.kindle_format_error() is None
         assert no_address.kindle_format_error() is None
@@ -1147,7 +1151,7 @@ class TestPerMangaPolicy:
 
 class TestSmtpTimeout:
     @pytest.mark.parametrize("email, expected", [
-        (dict(EMAIL, smtp_timeout=15), 15),
+        (replace(EMAIL, smtp_timeout=15), 15),
         (EMAIL, None),  # unset: the emailer default applies
     ])
     def test_delivery_passes_configured_timeout(self, state, tmp_path, pdf,
@@ -1169,3 +1173,43 @@ class TestSmtpTimeout:
 
         assert outcome.delivery is DeliveryStatus.SENT
         assert [c["timeout"] for c in calls] == [expected]
+
+    def test_delivery_passes_the_smtp_settings(self, state, tmp_path, pdf):
+        # Issue #296: every setting comes from the one EmailSettings.
+        calls = []
+        email = replace(EMAIL, smtp_server="smtp.example.test", smtp_port=2525)
+        pipeline = ChapterPipeline(
+            options=PipelineOptions(download_dir=tmp_path, output_format="pdf",
+                                    delivery_mode="email", email=email),
+            state=state,
+            reporter=_Recorder(),
+            download=_Downloads({("primary.test", False): pdf}),
+            find_backup=lambda manga, number, state: None,
+            send=lambda **kwargs: calls.append(kwargs),
+            app_password=lambda: "pw",
+        )
+
+        pipeline.process(SINGLE, _primary())
+
+        (call,) = calls
+        assert {key: call[key] for key in (
+            "kindle_email", "sender_email", "smtp_server", "smtp_port",
+            "app_password")} == {
+            "kindle_email": "reader@example.com",
+            "sender_email": "sender@example.com",
+            "smtp_server": "smtp.example.test",
+            "smtp_port": 2525,
+            "app_password": "pw",
+        }
+
+    def test_default_settings_never_email(self, state, tmp_path, pdf):
+        # No Kindle address: email mode alone does not deliver.
+        sent = []
+        pipeline = _pipeline(state, tmp_path,
+                             _Downloads({("primary.test", False): pdf}),
+                             sent=sent, delivery_mode="email")
+
+        outcome = pipeline.process(SINGLE, _primary())
+
+        assert outcome.delivery is DeliveryStatus.NOT_REQUESTED
+        assert sent == []

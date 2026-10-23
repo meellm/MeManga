@@ -23,6 +23,7 @@ from .chapters import ChapterWithSource
 from .downloader import (DEFAULT_PAGE_RETRIES, DownloaderError,
                          _find_chapter_on_backup, _get_sources_from_manga,
                          download_chapter)
+from .email_settings import EmailSettings, manga_sends_to_kindle
 from .emailer import (EmailPartError, kindle_file_error, kindle_format_error,
                       send_to_kindle)
 
@@ -59,7 +60,7 @@ class PipelineOptions:
     allow_partial: bool = False
     partial_threshold: float = 0.0
     delivery_mode: str = "local"
-    email: Dict[str, Any] = field(default_factory=dict)
+    email: EmailSettings = field(default_factory=EmailSettings)
     delete_after_send: bool = False
     # ``None`` uses the downloader's default file name.
     naming_template: Optional[str] = None
@@ -109,12 +110,6 @@ def manga_auto_downloads(manga: Dict[str, Any]) -> bool:
     entries), means automatic.
     """
     return manga.get("mode") != "manual"
-
-
-def manga_sends_to_kindle(manga: Dict[str, Any]) -> bool:
-    """Whether ``manga`` takes part in Kindle delivery (#341). A missing
-    ``send_to_kindle`` (older entries) means it does."""
-    return bool(manga.get("send_to_kindle", True))
 
 
 def chapter_source(manga: Dict[str, Any], chapter) -> str:
@@ -480,7 +475,7 @@ class ChapterPipeline:
         opts = self.options
         if manga is not None and not manga_sends_to_kindle(manga):
             return False
-        return opts.delivery_mode == "email" and bool(opts.email.get("kindle_email"))
+        return opts.delivery_mode == "email" and bool(opts.email.kindle_email)
 
     def _deliver(self, path: Path, manga: Optional[Dict[str, Any]] = None,
                  progress: Optional[Dict[str, Any]] = None
@@ -508,12 +503,12 @@ class ChapterPipeline:
         try:
             self.send(
                 pdf_path=path,
-                kindle_email=email["kindle_email"],
-                sender_email=email["sender_email"],
-                smtp_server=email.get("smtp_server", "smtp.gmail.com"),
-                smtp_port=email.get("smtp_port", 587),
+                kindle_email=email.kindle_email,
+                sender_email=email.sender_email,
+                smtp_server=email.smtp_server,
+                smtp_port=email.smtp_port,
                 app_password=self.app_password(),
-                timeout=email.get("smtp_timeout"),
+                timeout=email.smtp_timeout,
                 progress=progress,
                 on_part_sent=lambda part, total: self.reporter.email_part_sent(
                     path, part, total),

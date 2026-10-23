@@ -3960,6 +3960,31 @@ class TestSendPending:
         assert records["Berserk"]["1"]["attempts"] == 2
         assert records["Berserk"]["1"]["error"] == "Mailbox full"
 
+    def test_sends_with_the_configured_smtp_settings(
+            self, run_cli, config, email, pending, monkeypatch):
+        # Issue #296: the CLI reads delivery settings through the shared
+        # EmailSettings, and looks the password up only when sending.
+        from memanga import cli
+        config.set("email.smtp_server", "smtp.example.test")
+        config.set("email.smtp_port", 2525)
+        config.set("email.smtp_timeout", 9)
+        config.save()
+        lookups, calls = [], []
+        monkeypatch.setattr(cli, "get_app_password",
+                            lambda cfg: lookups.append(cfg) or "pw")
+        monkeypatch.setattr(cli, "send_to_kindle",
+                            lambda **kw: calls.append(kw))
+
+        assert run_cli("send", "--pending", "vinland saga") == 0
+
+        (call,) = calls
+        assert (call["kindle_email"], call["sender_email"],
+                call["smtp_server"], call["smtp_port"], call["timeout"],
+                call["app_password"]) == (
+            "reader@example.com", "sender@example.com",
+            "smtp.example.test", 2525, 9, "pw")
+        assert len(lookups) == 1
+
     def test_target_limits_to_one_manga(self, run_cli, email, pending, sends):
         sent, _ = sends
         assert run_cli("send", "--pending", "vinland saga") == 0
