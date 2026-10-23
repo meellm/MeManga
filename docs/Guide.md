@@ -927,6 +927,39 @@ The app password is stored in your system keyring when available. If the keyring
 
 Each step of talking to the SMTP server (connecting, logging in, sending, logging out) waits at most 60 seconds, so an unreachable or stalled server ends with a timeout error instead of hanging `check`. Change the limit with `memanga config set email.smtp_timeout SECONDS` (1 to 600).
 
+#### Other mail providers and encryption
+
+The steps above use Gmail, but any provider that lets you send with SMTP and a password (usually an app password) works. Set the server and port with `memanga config set email.smtp_server HOST` and `memanga config set email.smtp_port PORT`, or in **Settings → Kindle / Email** in the desktop app, and use your provider's address as the sender.
+
+The connection to the mail server is always encrypted. `email.smtp_tls` says how:
+
+| Value | What MeManga does | Usual port |
+|---|---|---|
+| `auto` (default) | Implicit TLS on port 465, STARTTLS on any other port | — |
+| `starttls` | Connects, then switches to TLS with STARTTLS before logging in | 587 |
+| `implicit` | Starts TLS as soon as it connects (providers often call this "SSL/TLS") | 465 |
+
+Both modes check the server's certificate and host name and need TLS 1.2 or later. There is no unencrypted mode: a server that doesn't offer STARTTLS is reported as an error, and the password is never sent in plain text. With the standard ports `auto` is right. Set the value yourself only when your provider uses implicit TLS on a port other than 465, for example `memanga config set email.smtp_tls implicit`. The desktop app has no control for it, but its **Check Login** and **Send Test PDF** use the setting, and with `auto` the port you type. `memanga config email` shows what will be used.
+
+Settings published by the providers as of October 2026 (they change, so check the linked page if a login fails):
+
+| Provider | Server | Port and encryption | Password |
+|---|---|---|---|
+| [Gmail / Google Workspace](https://knowledge.workspace.google.com/admin/gmail/send-email-from-a-printer-scanner-or-app) | `smtp.gmail.com` | 587 (STARTTLS) or 465 (implicit TLS) | [App password](https://support.google.com/accounts/answer/185833); needs 2-Step Verification |
+| [iCloud Mail](https://support.apple.com/en-ie/102525) | `smtp.mail.me.com` | 587 (STARTTLS) | App-specific password; use your full iCloud address as the sender |
+| [Fastmail](https://www.fastmail.help/hc/en-us/articles/1500000279921-IMAP-POP-and-SMTP) | `smtp.fastmail.com` | 465 (implicit TLS) or 587 (STARTTLS) | App password; your normal password doesn't work |
+| [Microsoft 365](https://learn.microsoft.com/en-us/exchange/mail-flow-best-practices/how-to-set-up-a-multifunction-device-or-application-to-send-email-using-microsoft-365-or-office-365) (work or school) | `smtp.office365.com` | 587 (STARTTLS) only | Mailbox password, only if your administrator allows it (see below) |
+| [Outlook.com](https://support.microsoft.com/en-us/outlook/pop-imap-and-smtp-settings-for-outlook-com) (Outlook, Hotmail, Live) | `smtp-mail.outlook.com` | 587 (STARTTLS) | Not supported (see below) |
+
+Microsoft accounts are a special case:
+
+- **Outlook.com** personal accounts require sign-in with OAuth2 ("Modern Auth"), according to Microsoft. MeManga logs in only with a password, so these accounts are expected to fail with an authentication error even when the server and port are right. Use a sender address at another provider.
+- **Microsoft 365** work or school accounts can send with a password only when SMTP AUTH is turned on for the mailbox. It is off by default for organizations created after January 2020, and it doesn't work with Microsoft Entra ID security defaults. Microsoft has also scheduled the end of password (Basic) sign-in for SMTP AUTH and recommends OAuth, so this may stop working; ask your administrator. Port 465 isn't supported; use 587.
+
+For another provider or your own server, use the server and port it publishes. "SSL/TLS" or port 465 means implicit TLS, and "STARTTLS" or port 587 means STARTTLS. Port 25 is meant for mail servers relaying to each other and is often blocked by internet providers. [RFC 8314](https://www.rfc-editor.org/rfc/rfc8314) recommends implicit TLS on port 465 for sending mail, with STARTTLS on 587 still widely used; both are equally safe here.
+
+If the encryption doesn't match the port, the login fails. On ports 25, 465 and 587 the error then says which setting to change. STARTTLS on an implicit TLS port usually ends in a timeout, because the server waits for TLS while MeManga waits for the server's greeting. Implicit TLS on a STARTTLS port usually fails at once with an SSL error such as "wrong version number".
+
 #### Email size limit
 
 Mail providers limit how large an email or its attachments may be, and attachments grow by about a third when they are encoded for email. `email.max_email_mb` is the email size MeManga keeps under (25 by default, a conservative choice). MeManga sends a file only when it is at most 72% of that (files up to 18 MB by default). Larger PDFs are split into parts of that size. A PDF that still has a part over the limit, such as a single very large page, is refused, and so are larger EPUB files, because they can't be split. Change it with `memanga config set email.max_email_mb MB` (10 to 50). `memanga config email` shows the current limit.
@@ -1416,7 +1449,7 @@ last.
 `status --json` has the keys `paths` (`config_dir`, `config`, `state`),
 `manga_count`, `output_format`, `delivery` (`mode`, `download_dir`,
 `delete_after_send`), `email` (`kindle_email`, `sender_email`,
-`smtp_server`, `smtp_port`), `post_processing` (`enabled`,
+`smtp_server`, `smtp_port`, `smtp_tls`), `post_processing` (`enabled`,
 `fail_on_error`), `partial_chapters` (`enabled`, `threshold_percent`),
 `cron` (`enabled`, `time`) and `last_check` (ISO timestamp or `null`).
 The email app password is never included.

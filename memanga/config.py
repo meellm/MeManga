@@ -304,6 +304,8 @@ class Config:
                 "sender_email": "",
                 "smtp_server": "smtp.gmail.com",
                 "smtp_port": 587,
+                # "auto": implicit TLS on port 465, STARTTLS otherwise
+                "smtp_tls": "auto",
                 "smtp_timeout": 60,  # seconds per SMTP operation
                 "max_email_mb": 25,  # mail provider's email size limit
                 "app_password": "",
@@ -639,6 +641,9 @@ CONFIG_KEYS = {
     "email.sender_email": {"kind": "str"},
     "email.smtp_server": {"kind": "str", "required": True},
     "email.smtp_port": {"kind": "int", "min": 1, "max": 65535},
+    # Choices match SMTP_TLS_MODES in emailer.py.
+    "email.smtp_tls": {"kind": "choice",
+                       "choices": ("auto", "starttls", "implicit")},
     "email.smtp_timeout": {"kind": "int", "min": 1, "max": 600},
     # Bounds match MIN/MAX_EMAIL_SIZE_MB in emailer.py.
     "email.max_email_mb": {"kind": "int", "min": 10, "max": 50},

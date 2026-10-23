@@ -9,7 +9,8 @@ import pytest
 
 from memanga import config as config_mod
 from memanga.email_settings import (DEFAULT_SMTP_PORT, DEFAULT_SMTP_SERVER,
-                                    EmailSettings, kindle_delivery_settings,
+                                    DEFAULT_SMTP_TLS, EmailSettings,
+                                    kindle_delivery_settings,
                                     manga_sends_to_kindle)
 
 
@@ -33,7 +34,7 @@ class TestFromConfig:
 
         assert settings == EmailSettings(
             kindle_email="", sender_email="",
-            smtp_server="smtp.gmail.com", smtp_port=587,
+            smtp_server="smtp.gmail.com", smtp_port=587, smtp_tls="auto",
             smtp_timeout=60, max_email_mb=25, app_password="")
 
     def test_defaults_when_keys_are_missing(self, config, no_keyring):
@@ -44,6 +45,8 @@ class TestFromConfig:
 
         assert settings.smtp_server == DEFAULT_SMTP_SERVER == "smtp.gmail.com"
         assert settings.smtp_port == DEFAULT_SMTP_PORT == 587
+        # Issue #366: configs written before smtp_tls existed choose by port.
+        assert settings.smtp_tls == DEFAULT_SMTP_TLS == "auto"
         assert settings.smtp_timeout is None  # the emailer default applies
         assert settings.max_email_mb is None
         assert settings.sender_email == ""
@@ -52,6 +55,7 @@ class TestFromConfig:
         _email_on(config)
         config.set("email.smtp_server", "smtp.example.invalid")
         config.set("email.smtp_port", 2525)
+        config.set("email.smtp_tls", "implicit")
         config.set("email.smtp_timeout", 9)
         config.set("email.max_email_mb", 20)
         config.set("email.app_password", "config-pw")
@@ -62,6 +66,7 @@ class TestFromConfig:
             kindle_email="reader@kindle.example.invalid",
             sender_email="sender@example.invalid",
             smtp_server="smtp.example.invalid", smtp_port=2525,
+            smtp_tls="implicit",
             smtp_timeout=9, max_email_mb=20, app_password="config-pw")
 
     def test_values_are_kept_as_configured(self, config, no_keyring):

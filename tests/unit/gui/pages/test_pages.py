@@ -604,6 +604,24 @@ class TestSettingsPage:
         assert smtp_logins == [("sender@example.invalid", "typed-pw")]
         assert page._test_label.text() == "Success!"
 
+    def test_check_login_on_port_465_uses_implicit_tls(
+            self, app_window, qapp, smtp_logins, monkeypatch):
+        # Issue #366: with the default email.smtp_tls (auto), the typed
+        # port picks the TLS mode, the same way delivery does.
+        import smtplib
+        from unittest.mock import MagicMock
+        factory = MagicMock()
+        monkeypatch.setattr(smtplib, "SMTP_SSL", factory)
+        page = app_window._pages["settings"]
+        self._fill_smtp_test(page, "typed-pw")
+        page._entry_smtp_port.setText("465")
+        page._test_email()
+        assert smtp_logins == []  # no plain connection
+        assert factory.call_args.args == ("smtp.example.invalid", 465)
+        factory.return_value.login.assert_called_once_with(
+            "sender@example.invalid", "typed-pw")
+        assert page._test_label.text() == "Success!"
+
     @pytest.fixture
     def smtp_sends(self, smtp_logins, monkeypatch):
         """On top of smtp_logins: record each message sent."""

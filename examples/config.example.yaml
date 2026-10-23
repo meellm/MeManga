@@ -52,6 +52,7 @@ email:
   sender_email: ""        # your-email@gmail.com
   smtp_server: smtp.gmail.com
   smtp_port: 587
+  smtp_tls: auto          # auto (465 = implicit TLS, else STARTTLS), starttls or implicit
   app_password: ""        # Gmail App Password (NOT your regular password)
 
 # Cron settings

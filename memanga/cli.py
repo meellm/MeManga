@@ -59,7 +59,7 @@ from .email_settings import EmailSettings
 from .emailer import (TEST_DELIVERY_NOTE, EmailError, email_size_limit,
                       kindle_file_error, kindle_format_error,
                       raw_attachment_limit, send_test_document, send_to_kindle,
-                      smtp_timeout)
+                      smtp_timeout, smtp_tls_mode)
 from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
                                DeliveryStatus, PipelineOptions,
                                manga_auto_downloads)
@@ -1988,6 +1988,7 @@ def _status_payload() -> Dict[str, Any]:
             "sender_email": email.sender_email or None,
             "smtp_server": email.smtp_server,
             "smtp_port": email.smtp_port,
+            "smtp_tls": email.smtp_tls,
         },
         "post_processing": {
             "enabled": bool(config.get("delivery.post_processing.enabled")),
@@ -2256,6 +2257,7 @@ def _config_email(args):
         table.add_row(label, _esc(value) if value else "[red]not set[/red]")
     table.add_row("SMTP server", _esc(settings.smtp_server))
     table.add_row("SMTP port", _esc(settings.smtp_port))
+    table.add_row("SMTP security", _smtp_tls_label(settings))
     table.add_row("SMTP timeout",
                   f"{smtp_timeout(settings.smtp_timeout):g} seconds")
     email_limit = email_size_limit(settings.max_email_mb)
@@ -2280,6 +2282,23 @@ def _config_email(args):
     return _error(f"[red]❌ {_esc(result.message)}[/red]")
 
 
+_SMTP_TLS_NAMES = {"starttls": "STARTTLS", "implicit": "implicit TLS"}
+
+
+def _smtp_tls_label(settings) -> str:
+    """The email.smtp_tls row of `config email`: the setting and, for
+    auto, what it picks for the configured port (issue #366)."""
+    try:
+        mode = smtp_tls_mode(settings.smtp_tls, settings.smtp_port)
+    except EmailError:
+        return (f"[red]{_esc(settings.smtp_tls)} (invalid; use auto, "
+                f"starttls or implicit)[/red]")
+    value = settings.smtp_tls
+    if value is None or str(value).strip().lower() == "auto":
+        return f"auto ({_SMTP_TLS_NAMES[mode]} on port {_esc(settings.smtp_port)})"
+    return _SMTP_TLS_NAMES[mode]
+
+
 def _send_test_document():
     """`config email --send-test` (issue #365): email a tiny PDF to the
     configured Kindle address with the password delivery uses."""
@@ -2298,6 +2317,7 @@ def _send_test_document():
                 settings.smtp_port,
                 get_app_password(config),
                 timeout=settings.smtp_timeout,
+                smtp_tls=settings.smtp_tls,
             )
     except EmailError as e:
         return _error(f"[red]❌ Test PDF not sent: {_esc(e)}[/red]")

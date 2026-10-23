@@ -426,15 +426,19 @@ def check_keyring(config, state=None) -> CheckResult:
 
 
 def _smtp_login(server: str, port: int, user: str, password: str,
-                timeout=None) -> None:
-    """Log in the way delivery does (SMTP + STARTTLS). Raises on failure."""
-    smtp_login(user, server, port, password, timeout=timeout)
+                timeout=None, smtp_tls=None) -> None:
+    """Log in the way delivery does (implicit TLS or STARTTLS, per
+    email.smtp_tls). Raises on failure."""
+    smtp_login(user, server, port, password, timeout=timeout,
+               smtp_tls=smtp_tls)
 
 
 def check_smtp(config, state=None, live: bool = False) -> CheckResult:
     server = config.get("email.smtp_server", "smtp.gmail.com")
     port = config.get("email.smtp_port", 587)
-    details = {"smtp_server": server, "smtp_port": port, "live": live}
+    smtp_tls = config.get("email.smtp_tls", "auto")
+    details = {"smtp_server": server, "smtp_port": port,
+               "smtp_tls": smtp_tls, "live": live}
 
     if not live:
         return CheckResult("smtp", SKIP, "Login test not run; pass --smtp to try it", details)
@@ -446,7 +450,8 @@ def check_smtp(config, state=None, live: bool = False) -> CheckResult:
 
     try:
         _smtp_login(server, int(port), sender, password,
-                    timeout=config.get("email.smtp_timeout"))
+                    timeout=config.get("email.smtp_timeout"),
+                    smtp_tls=smtp_tls)
     except EmailAuthError:
         return CheckResult("smtp", FAIL,
                            "SMTP authentication failed; check the sender email and app password",

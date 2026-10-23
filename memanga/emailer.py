@@ -92,6 +92,18 @@ DEFAULT_SMTP_TIMEOUT = 60
 # Upper bound of email.smtp_timeout (see CONFIG_KEYS in config.py).
 MAX_SMTP_TIMEOUT = 600
 
+# Issue #366: how the connection is secured (email.smtp_tls; see
+# CONFIG_KEYS in config.py). "starttls" connects in plain SMTP and
+# upgrades with STARTTLS before logging in (port 587); "implicit" starts
+# TLS before the SMTP greeting (RFC 8314 implicit TLS, port 465). "auto"
+# uses implicit TLS on port 465 and STARTTLS on any other port. Both
+# check the certificate and host name, and there is no cleartext mode.
+SMTP_TLS_MODES = ("auto", "starttls", "implicit")
+DEFAULT_SMTP_TLS = "auto"
+IMPLICIT_TLS_PORT = 465
+# Ports where implicit TLS is almost certainly the wrong choice.
+STARTTLS_PORTS = (25, 587)
+
 
 # Issue #363: mail providers cap the size of a whole email after encoding
 # (email.max_email_mb; see CONFIG_KEYS in config.py). Base64 in 76-character
@@ -250,6 +262,7 @@ def send_to_kindle(
     progress: Optional[Mapping[str, Any]] = None,
     on_part_sent: Optional[Callable[[int, int], None]] = None,
     max_email_mb: Optional[float] = None,
+    smtp_tls: Optional[str] = None,
 ) -> bool:
     """
     Send a PDF or EPUB to Kindle via email.
@@ -269,7 +282,7 @@ def send_to_kindle(
         kindle_email: Kindle email address (xxx@kindle.com)
         sender_email: Sender email address (must be whitelisted in Amazon)
         smtp_server: SMTP server (e.g., smtp.gmail.com)
-        smtp_port: SMTP port (usually 587 for TLS)
+        smtp_port: SMTP port (usually 587 for STARTTLS, 465 for implicit TLS)
         app_password: App password for email account
         subject: Email subject (optional, defaults to filename)
         timeout: Seconds each SMTP operation may wait (defaults to
@@ -283,6 +296,8 @@ def send_to_kindle(
         max_email_mb: The mail provider's email size limit in MB (issue
             #363); files must fit under it once encoded. Defaults to
             DEFAULT_EMAIL_SIZE_MB.
+        smtp_tls: How the connection is secured, one of SMTP_TLS_MODES
+            (issue #366). Defaults to "auto" (see smtp_tls_mode).
     
     Returns:
         True if sent successfully (every part accepted by the mail server)
@@ -352,7 +367,7 @@ def send_to_kindle(
                 on_part_sent, kindle_email=kindle_email,
                 sender_email=sender_email, smtp_server=smtp_server,
                 smtp_port=smtp_port, app_password=app_password,
-                timeout=timeout, part_limit=raw_limit,
+                timeout=timeout, part_limit=raw_limit, smtp_tls=smtp_tls,
             )
         else:
             _send_single_email(
@@ -364,6 +379,7 @@ def send_to_kindle(
                 app_password=app_password,
                 subject=subject or pdf_path.stem,
                 timeout=timeout,
+                smtp_tls=smtp_tls,
             )
     finally:
         _remove_split_parts(pdf_path, parts)
@@ -469,6 +485,7 @@ def _send_parts(
     app_password: str,
     timeout: Optional[float],
     part_limit: int = MAX_ATTACHMENT_SIZE,
+    smtp_tls: Optional[str] = None,
 ) -> None:
     """Send the parts of a split PDF not yet accepted, over one session."""
     total = len(parts)
@@ -486,7 +503,7 @@ def _send_parts(
     failed: Optional[int] = pending[0]
     try:
         with smtp_session(sender_email, smtp_server, smtp_port, app_password,
-                          timeout=timeout) as server:
+                          timeout=timeout, smtp_tls=smtp_tls) as server:
             for number in pending:
                 failed = number
                 part_path = parts[number - 1]
@@ -575,6 +592,7 @@ def _send_single_email(
     app_password: str,
     subject: str,
     timeout: Optional[float] = None,
+    smtp_tls: Optional[str] = None,
 ) -> bool:
     """Send a single file (PDF or EPUB) via email."""
     msg = _kindle_message(pdf_path, kindle_email, sender_email, subject)
@@ -582,7 +600,7 @@ def _send_single_email(
     # Send
     try:
         with smtp_session(sender_email, smtp_server, smtp_port, app_password,
-                          timeout=timeout) as server:
+                          timeout=timeout, smtp_tls=smtp_tls) as server:
             server.send_message(msg)
         return True
     except EmailError:
@@ -603,6 +621,60 @@ def smtp_timeout(value=None) -> float:
     if not 0 < value <= MAX_SMTP_TIMEOUT:
         return DEFAULT_SMTP_TIMEOUT
     return value
+
+
+def _port_number(port) -> Optional[int]:
+    try:
+        return int(port)
+    except (TypeError, ValueError):
+        return None
+
+
+def smtp_tls_mode(value=None, port=None) -> str:
+    """How to secure a connection to ``port``: "starttls" or "implicit".
+
+    ``value`` is email.smtp_tls. "auto" or unset picks implicit TLS on
+    port 465 (RFC 8314) and STARTTLS on any other port. Raises EmailError
+    for anything outside SMTP_TLS_MODES rather than guessing, so a typo
+    never changes how the password is protected.
+    """
+    mode = DEFAULT_SMTP_TLS if value is None else value
+    if isinstance(mode, str):
+        mode = mode.strip().lower()
+    if mode not in SMTP_TLS_MODES:
+        raise EmailError(
+            f"Invalid email.smtp_tls {value!r}: expected one of "
+            + ", ".join(SMTP_TLS_MODES))
+    if mode == "auto":
+        return ("implicit" if _port_number(port) == IMPLICIT_TLS_PORT
+                else "starttls")
+    return mode
+
+
+def _with_tls_hint(message: str, mode: str, port) -> str:
+    """``message``, plus a hint when the connection failed on a port that
+    normally uses the other TLS mode (the usual cause of a hang on 465)."""
+    port = _port_number(port)
+    if mode == "starttls" and port == IMPLICIT_TLS_PORT:
+        hint = (f"Port {port} normally uses implicit TLS, but "
+                f"email.smtp_tls is starttls; set it to auto or implicit.")
+    elif mode == "implicit" and port in STARTTLS_PORTS:
+        hint = (f"Port {port} normally uses STARTTLS, but "
+                f"email.smtp_tls is implicit; set it to auto or starttls.")
+    else:
+        return message
+    return f"{message.rstrip('.')}. {hint}"
+
+
+def _tls_context() -> ssl.SSLContext:
+    """The TLS settings of every SMTP connection: certificate and host
+    name checked, and at least TLS 1.2 (RFC 8314). The default context
+    may leave the floor to the platform, which can allow older versions;
+    a stricter platform floor is kept."""
+    context = ssl.create_default_context()
+    if context.minimum_version < ssl.TLSVersion.TLSv1_2:
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
 
 
 def _caused_by_timeout(error: BaseException) -> bool:
@@ -654,8 +726,9 @@ def _smtp_reply(error: BaseException) -> str:
 
 
 def _smtp_error(error: BaseException, server: str, port, timeout: float,
-                password: str) -> EmailError:
-    """Map an smtplib/socket failure to the matching EmailError."""
+                password: str, mode: str = "starttls") -> EmailError:
+    """Map an smtplib/socket failure to the matching EmailError. ``mode``
+    is the TLS mode used (see smtp_tls_mode)."""
     detail = _smtp_reply(error)
     if password:
         detail = detail.replace(password, "****")
@@ -665,16 +738,18 @@ def _smtp_error(error: BaseException, server: str, port, timeout: float,
             f"SMTP authentication failed. Check email/password. "
             f"Server replied: {detail}")
     if _caused_by_timeout(error):
-        return EmailTimeoutError(
-            f"SMTP server {where} did not respond within {timeout:g} seconds")
+        return EmailTimeoutError(_with_tls_hint(
+            f"SMTP server {where} did not respond within {timeout:g} seconds",
+            mode, port))
     # SMTPException subclasses OSError, so only the socket-level errors
     # and the two smtplib connection errors count as connection failures;
     # any other SMTPException is a server reply.
     if (isinstance(error, (smtplib.SMTPConnectError,
                            smtplib.SMTPServerDisconnected))
             or not isinstance(error, smtplib.SMTPException)):
-        return EmailConnectionError(
-            f"Connection to SMTP server {where} failed: {detail}")
+        return EmailConnectionError(_with_tls_hint(
+            f"Connection to SMTP server {where} failed: {detail}",
+            mode, port))
     return EmailProviderError(f"SMTP error from {where}: {detail}",
                               _smtp_code(error), _refused_recipients(error))
 
@@ -701,9 +776,15 @@ def smtp_session(
     smtp_port: int,
     app_password: str,
     timeout: Optional[float] = None,
+    smtp_tls: Optional[str] = None,
 ) -> Iterator[smtplib.SMTP]:
-    """Connect, upgrade with STARTTLS (certificate and host name checked)
-    and log in; yield the logged-in connection.
+    """Connect over TLS (certificate and host name checked) and log in;
+    yield the logged-in connection.
+
+    Issue #366: ``smtp_tls`` (email.smtp_tls, see smtp_tls_mode) picks
+    implicit TLS from the first byte (SMTP_SSL, port 465) or a plain
+    connection upgraded with STARTTLS before login (port 587). A server
+    that does not offer STARTTLS is an error, never a cleartext login.
 
     Issue #361: shared by delivery, the Settings test and ``doctor``.
     Every socket operation waits at most ``timeout`` seconds. smtplib
@@ -713,17 +794,23 @@ def smtp_session(
     succeeded is ignored: the server already accepted the message.
     """
     timeout = smtp_timeout(timeout)
+    mode = smtp_tls_mode(smtp_tls, smtp_port)
     register_secret(app_password)
     smtp = None
     polite = False
     try:
-        smtp = smtplib.SMTP(smtp_server, int(smtp_port), timeout=timeout)
-        smtp.starttls(context=ssl.create_default_context())
+        if mode == "implicit":
+            smtp = smtplib.SMTP_SSL(smtp_server, int(smtp_port),
+                                    timeout=timeout, context=_tls_context())
+        else:
+            smtp = smtplib.SMTP(smtp_server, int(smtp_port), timeout=timeout)
+            smtp.starttls(context=_tls_context())
         smtp.login(sender_email, app_password)
         yield smtp
         polite = True
     except (smtplib.SMTPException, OSError) as e:
-        error = _smtp_error(e, smtp_server, smtp_port, timeout, app_password)
+        error = _smtp_error(e, smtp_server, smtp_port, timeout, app_password,
+                            mode)
         # The server answered, so the connection still works.
         polite = isinstance(error, (EmailAuthError, EmailProviderError))
         raise error from e
@@ -738,11 +825,12 @@ def smtp_login(
     smtp_port: int,
     app_password: str,
     timeout: Optional[float] = None,
+    smtp_tls: Optional[str] = None,
 ) -> None:
     """Log in the way delivery does, then log out. Raises an EmailError
     subclass on failure."""
     with smtp_session(sender_email, smtp_server, smtp_port, app_password,
-                      timeout=timeout):
+                      timeout=timeout, smtp_tls=smtp_tls):
         pass
 
 
@@ -752,6 +840,7 @@ def check_email_config(
     smtp_port: int,
     app_password: str,
     timeout: Optional[float] = None,
+    smtp_tls: Optional[str] = None,
 ) -> bool:
     """
     Check that the sender can log in to the SMTP server. Connection
@@ -763,7 +852,7 @@ def check_email_config(
     """
     try:
         smtp_login(sender_email, smtp_server, smtp_port, app_password,
-                   timeout=timeout)
+                   timeout=timeout, smtp_tls=smtp_tls)
         return True
     except Exception:
         return False
@@ -855,9 +944,11 @@ def send_test_document(
     app_password: str,
     timeout: Optional[float] = None,
     now: Optional[datetime] = None,
+    smtp_tls: Optional[str] = None,
 ) -> str:
     """Email a tiny test PDF to ``kindle_email`` over the same SMTP
-    session as delivery (STARTTLS, login, bounded by ``timeout``).
+    session as delivery (TLS per ``smtp_tls``, login, bounded by
+    ``timeout``).
 
     Returns the subject sent once the mail server accepted the message.
     Acceptance is not proof that Amazon delivered it (TEST_DELIVERY_NOTE).
@@ -884,7 +975,8 @@ def send_test_document(
                               "application", "pdf", kindle_email,
                               sender_email, subject)
     with smtp_session(sender_email, smtp_server.strip(), smtp_port,
-                      app_password, timeout=timeout) as server:
+                      app_password, timeout=timeout,
+                      smtp_tls=smtp_tls) as server:
         server.send_message(msg)
     logger.info("Test document accepted by the mail server")
     return subject
