@@ -7,6 +7,18 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #366 Email can be sent over implicit TLS (port 465) as well as
+  STARTTLS (port 587). The new `email.smtp_tls` setting is `auto` by
+  default (implicit TLS on port 465, STARTTLS on any other port), or
+  `starttls` / `implicit` to choose. Both check the server certificate
+  and need TLS 1.2 or later, and there is still no unencrypted mode. Delivery, `config email
+  --test` / `--send-test`, `doctor --smtp` and the desktop app's email
+  tests all use it; `config email` and `status --json` show it. A
+  connection that fails because the encryption doesn't match the port
+  now says which setting to change, instead of only timing out. The
+  guide lists SMTP settings for Gmail, iCloud Mail, Fastmail, Microsoft
+  365 and Outlook.com, including the Microsoft accounts that can't use a
+  password.
 - #355 `memanga send TARGET CHAPTER...` sends downloaded chapters to the
   Kindle again from their saved files, with the configured email
   settings and `delivery.delete_after_send`. Every chapter is checked

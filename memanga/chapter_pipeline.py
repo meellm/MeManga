@@ -534,6 +534,7 @@ class ChapterPipeline:
                 sender_email=email.sender_email,
                 smtp_server=email.smtp_server,
                 smtp_port=email.smtp_port,
+                smtp_tls=email.smtp_tls,
                 app_password=self.app_password(),
                 timeout=email.smtp_timeout,
                 max_email_mb=email.max_email_mb,

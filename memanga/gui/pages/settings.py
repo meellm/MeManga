@@ -1361,11 +1361,13 @@ class SettingsPage(BasePage):
 
         # Issue #361: the same bounded login as delivery and doctor.
         timeout = self.app.config.get("email.smtp_timeout")
+        # Issue #366: "auto" picks implicit TLS for a typed port 465.
+        smtp_tls = self.app.config.get("email.smtp_tls")
 
         def _login():
             from ...emailer import smtp_login
             smtp_login(sender, smtp_server, int(smtp_port), pw,
-                       timeout=timeout)
+                       timeout=timeout, smtp_tls=smtp_tls)
         self._run_email_test(_login, "Success!")
 
     def _send_test_email(self):
@@ -1380,13 +1382,14 @@ class SettingsPage(BasePage):
             self._test_label.setText(
                 f"Sending test PDF with password from {override[0]}...")
         timeout = self.app.config.get("email.smtp_timeout")
+        smtp_tls = self.app.config.get("email.smtp_tls")
 
         from ...emailer import TEST_DELIVERY_NOTE
 
         def _send():
             from ...emailer import send_test_document
             send_test_document(kindle, sender, smtp_server, int(smtp_port),
-                               pw, timeout=timeout)
+                               pw, timeout=timeout, smtp_tls=smtp_tls)
         self._run_email_test(_send, "Test PDF accepted; check your Kindle",
                              TEST_DELIVERY_NOTE)
 

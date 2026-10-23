@@ -1200,7 +1200,8 @@ class TestSmtpTimeout:
     def test_delivery_passes_the_smtp_settings(self, state, tmp_path, pdf):
         # Issue #296: every setting comes from the one EmailSettings.
         calls = []
-        email = replace(EMAIL, smtp_server="smtp.example.test", smtp_port=2525)
+        email = replace(EMAIL, smtp_server="smtp.example.test", smtp_port=2525,
+                        smtp_tls="implicit")
         pipeline = ChapterPipeline(
             options=PipelineOptions(download_dir=tmp_path, output_format="pdf",
                                     delivery_mode="email", email=email),
@@ -1217,11 +1218,12 @@ class TestSmtpTimeout:
         (call,) = calls
         assert {key: call[key] for key in (
             "kindle_email", "sender_email", "smtp_server", "smtp_port",
-            "app_password")} == {
+            "smtp_tls", "app_password")} == {
             "kindle_email": "reader@example.com",
             "sender_email": "sender@example.com",
             "smtp_server": "smtp.example.test",
             "smtp_port": 2525,
+            "smtp_tls": "implicit",  # issue #366
             "app_password": "pw",
         }
 

@@ -1432,6 +1432,13 @@ class TestConfigActions:
         assert run_cli("config", "get", "email.smtp_port") == 0
         assert capsys.readouterr().out == "465\n"
 
+    def test_set_smtp_tls(self, run_cli, config, capsys):
+        # Issue #366.
+        assert run_cli("config", "get", "email.smtp_tls") == 0
+        assert capsys.readouterr().out == "auto\n"
+        assert run_cli("config", "set", "email.smtp_tls", "IMPLICIT") == 0
+        assert config.get("email.smtp_tls") == "implicit"
+
     def test_set_warns_when_kindle_and_format_conflict(self, run_cli, config,
                                                        capsys):
         # Issue #362: the value is saved (it works for local downloads),
@@ -1452,6 +1459,7 @@ class TestConfigActions:
         ("delivery.output_format", "mobi"),
         ("email.smtp_port", "abc"),
         ("email.smtp_port", "0"),
+        ("email.smtp_tls", "none"),
         ("partial_chapters.threshold_percent", "150"),
         ("delivery.mode", "fax"),
     ])
@@ -1712,6 +1720,24 @@ class TestConfigActions:
         assert "--send-test" in out
         # Issue #363: the default email size limit and the file size it allows.
         assert "25 MB (files up to 18.0 MB)" in out
+        # Issue #366: the default picks STARTTLS for port 587.
+        assert "auto (STARTTLS on port 587)" in out
+
+    @pytest.mark.parametrize("port, tls, shown", [
+        (465, "auto", "auto (implicit TLS on port 465)"),
+        (2465, "implicit", "implicit TLS"),
+        (465, "starttls", "STARTTLS"),
+        (587, "ssl", "ssl (invalid; use auto, starttls or implicit)"),
+    ])
+    def test_email_shows_tls_mode(self, run_cli, config, capsys, port, tls,
+                                  shown):
+        # "ssl" can only come from a hand edit; `config set` refuses it.
+        config.set("email.smtp_port", port)
+        config.set("email.smtp_tls", tls)
+        config.save()
+        assert run_cli("config", "email") == 0
+        out = " ".join(capsys.readouterr().out.split())
+        assert f"SMTP security {shown}" in out
 
     @pytest.mark.parametrize("status,rc", [("ok", 0), ("fail", 1)])
     def test_email_test_uses_smtp_check(self, run_cli, monkeypatch, capsys,
@@ -1782,6 +1808,24 @@ class TestConfigActions:
         assert "MeManga test document" in out
         assert "does not prove it reached your Kindle" in out
         assert "send-test-pw" not in out
+
+    def test_email_send_test_uses_implicit_tls_on_port_465(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp):
+        # Issue #366: the test PDF is sent the way delivery would send it.
+        from unittest.mock import MagicMock
+        import smtplib
+        self._configure_email(config, monkeypatch)
+        config.set("email.smtp_port", 465)
+        config.save()
+        factory = MagicMock()
+        monkeypatch.setattr(smtplib, "SMTP_SSL", factory)
+        assert run_cli("config", "email", "--send-test") == 0
+        assert fake_smtp == []  # no plain connection, no STARTTLS
+        assert factory.call_args.args == ("smtp.example.invalid", 465)
+        assert factory.call_args.kwargs["timeout"] == 9
+        factory.return_value.login.assert_called_once_with(
+            "sender@example.invalid", "send-test-pw")
+        factory.return_value.send_message.assert_called_once()
 
     def test_email_send_test_reports_smtp_failure(
             self, run_cli, config, monkeypatch, capsys, fake_smtp):
@@ -3239,6 +3283,7 @@ class TestStatusJson:
         assert payload["delivery"]["mode"] == "email"
         assert payload["email"]["kindle_email"] == "me@kindle.com"
         assert payload["email"]["sender_email"] is None
+        assert payload["email"]["smtp_tls"] == "auto"  # issue #366
         assert payload["cron"] == {"enabled": True, "time": "07:30"}
         assert payload["post_processing"]["enabled"] is False
         assert payload["last_check"] is None

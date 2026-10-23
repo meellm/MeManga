@@ -361,6 +361,9 @@ class TestConfigKeys:
         ("delivery.delete_after_send", "yes", True),
         ("gui.auto_check", "off", False),
         ("email.smtp_port", "587", 587),
+        ("email.smtp_tls", "Implicit", "implicit"),
+        ("email.smtp_tls", "starttls", "starttls"),
+        ("email.smtp_tls", "auto", "auto"),
         ("email.smtp_timeout", "30", 30),
         ("email.max_email_mb", "20", 20),
         ("partial_chapters.threshold_percent", "12.5", 12.5),
@@ -380,6 +383,10 @@ class TestConfigKeys:
         ("email.smtp_port", "0"),
         ("email.smtp_port", "70000"),
         ("email.smtp_port", "5.5"),
+        # Issue #366: no cleartext mode, and no guessing at other names.
+        ("email.smtp_tls", "none"),
+        ("email.smtp_tls", "ssl"),
+        ("email.smtp_tls", ""),
         ("email.smtp_timeout", "0"),
         ("email.smtp_timeout", "601"),
         ("email.max_email_mb", "9"),
@@ -412,6 +419,8 @@ class TestConfigKeys:
     @pytest.mark.parametrize("key,value", [
         ("email.smtp_port", "587"),
         ("email.smtp_port", True),
+        ("email.smtp_tls", "tls"),
+        ("email.smtp_tls", 465),
         ("delivery.delete_after_send", "yes"),
         ("delivery.output_format", "mobi"),
         ("cron.time", 450),  # unquoted 7:30 in YAML 1.1

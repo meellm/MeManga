@@ -1,9 +1,10 @@
 """Shared SMTP session (issue #361): bounded timeouts, error mapping and
-cleanup for delivery, the Settings test and `doctor`.
+cleanup for delivery, the Settings test and `doctor`. Issue #366: the
+choice between STARTTLS and implicit TLS.
 
-Most tests replace ``smtplib.SMTP`` with a mock. The timeout regression
-uses a real loopback listener that accepts the connection but never
-sends the SMTP greeting, with a sub-second timeout.
+Most tests replace ``smtplib.SMTP`` / ``smtplib.SMTP_SSL`` with a mock.
+The timeout regressions use a real loopback listener that accepts the
+connection but never sends the SMTP greeting, with a sub-second timeout.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import smtplib
 import socket
 import ssl
+import threading
 import time
 from contextlib import closing
 from unittest.mock import MagicMock, patch
@@ -18,10 +20,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from memanga.emailer import (DEFAULT_SMTP_TIMEOUT, MAX_SMTP_TIMEOUT,
-                             EmailAuthError, EmailConnectionError, EmailError,
+                             SMTP_TLS_MODES, EmailAuthError,
+                             EmailConnectionError, EmailError,
                              EmailProviderError, EmailTimeoutError,
-                             send_to_kindle, smtp_login, smtp_session,
-                             smtp_timeout)
+                             send_test_document, send_to_kindle, smtp_login,
+                             smtp_session, smtp_timeout, smtp_tls_mode)
 from memanga.emailer import check_email_config
 
 SERVER = "smtp.example.invalid"
@@ -204,6 +207,8 @@ class TestSessionFlow:
         assert isinstance(ctx, ssl.SSLContext)
         assert ctx.verify_mode == ssl.CERT_REQUIRED
         assert ctx.check_hostname is True
+        # Issue #366: RFC 8314 asks for TLS 1.2 or later.
+        assert ctx.minimum_version >= ssl.TLSVersion.TLSv1_2
         smtp.login.assert_called_once_with("sender@example.invalid", "test-app-password")
 
     @pytest.mark.parametrize("quit_error", [
@@ -357,3 +362,261 @@ class TestErrorMapping:
         monkeypatch.setattr(emailer, "register_secret", registered.append)
         _login(password="app-pw-5678")
         assert registered == ["app-pw-5678"]
+
+
+@pytest.fixture
+def ssl_factory():
+    """smtplib.SMTP_SSL replaced by a mock returning a mock connection."""
+    with patch("smtplib.SMTP_SSL", return_value=MagicMock()) as factory:
+        yield factory
+
+
+@pytest.fixture
+def greeting_port():
+    """A loopback port that greets in plain SMTP, as a STARTTLS port
+    does, then waits."""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(4)
+    srv.settimeout(10)
+    done = threading.Event()
+    conns = []
+
+    def serve():
+        try:
+            conn, _ = srv.accept()
+        except OSError:
+            return
+        conns.append(conn)
+        try:
+            conn.sendall(b"220 smtp.example.invalid ESMTP ready\r\n")
+        except OSError:
+            pass
+        done.wait(10)
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield srv.getsockname()[1]
+    finally:
+        done.set()
+        thread.join(5)
+        for conn in conns:
+            conn.close()
+        srv.close()
+
+
+class TestTlsMode:
+    """Issue #366: implicit TLS (port 465) or STARTTLS (port 587)."""
+
+    @pytest.mark.parametrize("value, port, expected", [
+        (None, 465, "implicit"),
+        ("auto", 465, "implicit"),
+        ("auto", "465", "implicit"),
+        ("auto", 587, "starttls"),
+        ("auto", 25, "starttls"),
+        ("auto", 2525, "starttls"),
+        (None, None, "starttls"),
+        ("starttls", 465, "starttls"),
+        ("implicit", 587, "implicit"),
+        (" Implicit ", 2465, "implicit"),
+        ("STARTTLS", 587, "starttls"),
+    ])
+    def test_mode_for_setting_and_port(self, value, port, expected):
+        assert smtp_tls_mode(value, port) == expected
+
+    def test_modes_match_config_schema(self):
+        from memanga.config import CONFIG_KEYS
+        assert CONFIG_KEYS["email.smtp_tls"]["choices"] == SMTP_TLS_MODES
+
+    @pytest.mark.parametrize("platform_floor, expected", [
+        # Unset by the platform: raised to the RFC 8314 floor.
+        (ssl.TLSVersion.MINIMUM_SUPPORTED, ssl.TLSVersion.TLSv1_2),
+        # A stricter platform policy is never lowered.
+        (ssl.TLSVersion.TLSv1_3, ssl.TLSVersion.TLSv1_3),
+    ])
+    @pytest.mark.parametrize("tls, port", [("starttls", 587),
+                                           ("implicit", 465)])
+    def test_both_modes_get_the_tls_floor(self, smtp_factory, ssl_factory,
+                                          smtp, monkeypatch, platform_floor,
+                                          expected, tls, port):
+        from memanga import emailer
+        made = ssl.create_default_context
+
+        def platform_context(*a, **k):
+            ctx = made(*a, **k)
+            ctx.minimum_version = platform_floor
+            return ctx
+        monkeypatch.setattr(emailer.ssl, "create_default_context",
+                            platform_context)
+        _login(port=port, smtp_tls=tls)
+        if tls == "implicit":
+            ctx = ssl_factory.call_args.kwargs["context"]
+        else:
+            ctx = smtp.starttls.call_args.kwargs["context"]
+        assert ctx.minimum_version == expected
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+
+    @pytest.mark.parametrize("value", ["ssl", "tls", "none", "", True, 465])
+    def test_invalid_mode_is_refused_before_connecting(
+            self, smtp_factory, ssl_factory, value):
+        # Never guess: a typo must not change how the password travels.
+        with pytest.raises(EmailError, match="email.smtp_tls") as exc_info:
+            _login(port=465, smtp_tls=value)
+        assert "auto, starttls, implicit" in str(exc_info.value)
+        smtp_factory.assert_not_called()
+        ssl_factory.assert_not_called()
+
+    def test_port_465_uses_implicit_tls_by_default(self, smtp_factory,
+                                                   ssl_factory):
+        _login(port=465)
+        smtp_factory.assert_not_called()
+        args, kwargs = ssl_factory.call_args
+        assert args == (SERVER, 465)
+        assert kwargs["timeout"] == DEFAULT_SMTP_TIMEOUT
+        ctx = kwargs["context"]
+        assert isinstance(ctx, ssl.SSLContext)
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname is True
+        assert ctx.minimum_version >= ssl.TLSVersion.TLSv1_2
+        conn = ssl_factory.return_value
+        names = [call[0] for call in conn.method_calls]
+        assert "starttls" not in names
+        assert names.index("login") < names.index("quit")
+        conn.login.assert_called_once_with("sender@example.invalid",
+                                           "test-app-password")
+
+    @pytest.mark.parametrize("port", [587, 25, 2525])
+    def test_other_ports_keep_starttls(self, smtp_factory, ssl_factory, smtp,
+                                       port):
+        _login(port=port)
+        ssl_factory.assert_not_called()
+        smtp_factory.assert_called_once_with(SERVER, port,
+                                             timeout=DEFAULT_SMTP_TIMEOUT)
+        smtp.starttls.assert_called_once()
+
+    def test_implicit_setting_on_another_port(self, smtp_factory, ssl_factory):
+        _login(port=2465, smtp_tls="implicit", timeout=7)
+        smtp_factory.assert_not_called()
+        assert ssl_factory.call_args.args == (SERVER, 2465)
+        assert ssl_factory.call_args.kwargs["timeout"] == 7
+
+    def test_starttls_setting_on_port_465(self, smtp_factory, ssl_factory,
+                                          smtp):
+        _login(port=465, smtp_tls="starttls")
+        ssl_factory.assert_not_called()
+        smtp_factory.assert_called_once_with(SERVER, 465,
+                                             timeout=DEFAULT_SMTP_TIMEOUT)
+        smtp.starttls.assert_called_once()
+
+    def test_missing_starttls_never_logs_in_unencrypted(self, smtp):
+        smtp.starttls.side_effect = smtplib.SMTPNotSupportedError(
+            "STARTTLS extension not supported by server.")
+        with pytest.raises(EmailProviderError):
+            _login(port=587)
+        smtp.login.assert_not_called()
+
+    def test_delivery_uses_implicit_tls(self, smtp_factory, ssl_factory, pdf):
+        assert _send(pdf, port=465) is True
+        smtp_factory.assert_not_called()
+        ssl_factory.return_value.send_message.assert_called_once()
+
+    def test_split_delivery_uses_the_mode(self, smtp_factory, ssl_factory,
+                                          pdf, tmp_path, monkeypatch):
+        from memanga import emailer
+        parts = []
+        for number in (1, 2):
+            part = tmp_path / f"ch_part{number}.pdf"
+            part.write_bytes(pdf.read_bytes())
+            parts.append(part)
+        monkeypatch.setattr(emailer, "split_pdf",
+                            lambda path, max_size: parts)
+        assert _send(pdf, port=2465, smtp_tls="implicit") is True
+        smtp_factory.assert_not_called()
+        ssl_factory.assert_called_once()  # one session for both parts
+        assert ssl_factory.return_value.send_message.call_count == 2
+
+    def test_login_check_and_test_document_pass_the_mode(self, smtp_factory,
+                                                         ssl_factory):
+        assert check_email_config("sender@example.invalid", SERVER, 2465,
+                                  "test-app-password",
+                                  smtp_tls="implicit") is True
+        send_test_document("reader@kindle.example.invalid",
+                           "sender@example.invalid", SERVER, 2465,
+                           "test-app-password", smtp_tls="implicit")
+        smtp_factory.assert_not_called()
+        assert ssl_factory.call_count == 2
+        ssl_factory.return_value.send_message.assert_called_once()
+
+    @pytest.mark.parametrize("error, expected, text", [
+        (ssl.SSLCertVerificationError(
+            1, "certificate verify failed: Hostname mismatch"),
+         EmailConnectionError, "certificate verify failed"),
+        (ssl.SSLError(1, "[SSL: WRONG_VERSION_NUMBER] wrong version number"),
+         EmailConnectionError, "wrong version number"),
+        (TimeoutError("_ssl.c:1011: The handshake operation timed out"),
+         EmailTimeoutError, f"{SERVER}:465"),
+        (ConnectionRefusedError(111, "Connection refused"),
+         EmailConnectionError, f"{SERVER}:465"),
+    ])
+    def test_implicit_tls_failures_map_to_structured_errors(
+            self, error, expected, text):
+        with patch("smtplib.SMTP_SSL", side_effect=error):
+            with pytest.raises(expected) as exc_info:
+                _login(port=465)
+        assert text in str(exc_info.value)
+        assert exc_info.value.__cause__ is error
+        assert "normally uses" not in str(exc_info.value)
+
+    def test_auth_failure_over_implicit_tls_ends_politely(self, ssl_factory):
+        conn = ssl_factory.return_value
+        conn.login.side_effect = smtplib.SMTPAuthenticationError(535, b"bad")
+        with pytest.raises(EmailAuthError):
+            _login(port=465)
+        conn.quit.assert_called_once()
+
+    def test_starttls_on_port_465_says_how_to_fix_it(self):
+        # The reported failure: a server on 465 waits for TLS, smtplib
+        # waits for a greeting, and the user only saw a timeout.
+        with patch("smtplib.SMTP", side_effect=TimeoutError("timed out")):
+            with pytest.raises(EmailTimeoutError) as exc_info:
+                _login(port=465, smtp_tls="starttls")
+        assert str(exc_info.value) == (
+            f"SMTP server {SERVER}:465 did not respond within 60 seconds. "
+            "Port 465 normally uses implicit TLS, but email.smtp_tls is "
+            "starttls; set it to auto or implicit.")
+
+    def test_implicit_tls_on_port_587_says_how_to_fix_it(self):
+        error = ssl.SSLError(1, "[SSL: WRONG_VERSION_NUMBER] wrong version number")
+        with patch("smtplib.SMTP_SSL", side_effect=error):
+            with pytest.raises(EmailConnectionError) as exc_info:
+                _login(port=587, smtp_tls="implicit")
+        message = str(exc_info.value)
+        assert "wrong version number" in message
+        assert message.endswith(
+            "Port 587 normally uses STARTTLS, but email.smtp_tls is "
+            "implicit; set it to auto or starttls.")
+
+    def test_matching_mode_keeps_the_plain_message(self):
+        with patch("smtplib.SMTP", side_effect=TimeoutError("timed out")):
+            with pytest.raises(EmailTimeoutError) as exc_info:
+                _login(port=587)
+        assert str(exc_info.value) == (
+            f"SMTP server {SERVER}:587 did not respond within 60 seconds")
+
+    def test_implicit_tls_to_silent_server_times_out(self, silent_port):
+        start = time.monotonic()
+        with pytest.raises(EmailTimeoutError):
+            _login(server="127.0.0.1", port=silent_port, timeout=0.5,
+                   smtp_tls="implicit")
+        assert time.monotonic() - start < 10
+
+    def test_implicit_tls_to_plain_smtp_server_fails_fast(self, greeting_port):
+        # A STARTTLS port answers the TLS handshake with a plain greeting.
+        start = time.monotonic()
+        with pytest.raises(EmailConnectionError) as exc_info:
+            _login(server="127.0.0.1", port=greeting_port, timeout=5,
+                   smtp_tls="implicit")
+        assert time.monotonic() - start < 10
+        assert isinstance(exc_info.value.__cause__, ssl.SSLError)

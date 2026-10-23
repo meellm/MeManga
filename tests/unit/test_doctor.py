@@ -361,7 +361,31 @@ class TestSmtp:
         result = doctor.check_smtp(config, live=True)
         assert result.status == doctor.OK
         assert calls == [(("smtp.gmail.com", 587, "me@gmail.com", "secret-pw"),
-                          {"timeout": 60})]
+                          {"timeout": 60, "smtp_tls": "auto"})]
+
+    def test_live_login_uses_the_tls_setting(self, config, monkeypatch):
+        # Issue #366: the login is secured the way delivery is.
+        self._email_config(config, monkeypatch)
+        config.set("email.smtp_port", 465)
+        config.set("email.smtp_tls", "implicit")
+        calls = []
+        monkeypatch.setattr(doctor, "_smtp_login",
+                            lambda *a, **k: calls.append((a, k)))
+        result = doctor.check_smtp(config, live=True)
+        assert result.status == doctor.OK
+        assert calls[0][0][1] == 465
+        assert calls[0][1]["smtp_tls"] == "implicit"
+        assert result.details["smtp_tls"] == "implicit"
+
+    def test_smtp_login_reaches_implicit_tls(self):
+        from unittest.mock import MagicMock, patch
+        with patch("smtplib.SMTP_SSL", return_value=MagicMock()) as factory, \
+                patch("smtplib.SMTP") as plain:
+            doctor._smtp_login("smtp.example.invalid", 465,
+                               "sender@example.invalid", "test-app-password",
+                               timeout=5, smtp_tls="auto")
+        plain.assert_not_called()
+        assert factory.call_args.args == ("smtp.example.invalid", 465)
 
     def test_auth_failure(self, config, monkeypatch):
         self._email_config(config, monkeypatch)
@@ -389,7 +413,7 @@ class TestSmtp:
         config.set("email.smtp_timeout", 7)
         seen = []
 
-        def stall(*a, timeout=None):
+        def stall(*a, timeout=None, **k):
             seen.append(timeout)
             raise EmailTimeoutError(
                 "SMTP server smtp.gmail.com:587 did not respond within 7 seconds")

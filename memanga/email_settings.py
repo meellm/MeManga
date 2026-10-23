@@ -14,6 +14,8 @@ from .config import Config, get_app_password
 
 DEFAULT_SMTP_SERVER = "smtp.gmail.com"
 DEFAULT_SMTP_PORT = 587
+# Issue #366: see SMTP_TLS_MODES in emailer.py.
+DEFAULT_SMTP_TLS = "auto"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -32,6 +34,7 @@ class EmailSettings:
     sender_email: str = ""
     smtp_server: str = DEFAULT_SMTP_SERVER
     smtp_port: int = DEFAULT_SMTP_PORT
+    smtp_tls: str = DEFAULT_SMTP_TLS
     smtp_timeout: Optional[float] = None
     max_email_mb: Optional[float] = None
     # Never part of the repr, so it cannot reach a log line that way.
@@ -48,6 +51,7 @@ class EmailSettings:
             sender_email=cfg.get("email.sender_email", ""),
             smtp_server=cfg.get("email.smtp_server", DEFAULT_SMTP_SERVER),
             smtp_port=cfg.get("email.smtp_port", DEFAULT_SMTP_PORT),
+            smtp_tls=cfg.get("email.smtp_tls", DEFAULT_SMTP_TLS),
             smtp_timeout=cfg.get("email.smtp_timeout"),
             max_email_mb=cfg.get("email.max_email_mb"),
             app_password=get_app_password(cfg) if resolve_password else None,
