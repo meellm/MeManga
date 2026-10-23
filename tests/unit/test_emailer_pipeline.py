@@ -2,6 +2,7 @@
 
 Covers:
   - send_to_kindle wraps SMTP correctly + attaches the file
+  - the Kindle message is an EmailMessage with one PDF or EPUB attachment
   - split_pdf chunks large PDFs under Kindle's attachment limit
   - check_email_config verifies SMTP credentials without sending
   - EmailError raised on bad config / missing file
@@ -180,6 +181,76 @@ class TestSendToKindle:
         assert "18.0MB safe raw attachment limit" in msg
         assert "25.0MB" in msg
         assert "exceeded 25MB limit" not in msg
+
+    def test_pdf_is_sent_as_pdf_attachment(self, good_cfg, tiny_pdf):
+        smtp = _make_smtp_mock()
+        with patch("smtplib.SMTP", return_value=smtp):
+            assert _call_send(good_cfg, tiny_pdf) is True
+        msg = smtp.send_message.call_args.args[0]
+        (attachment,) = msg.iter_attachments()
+        assert attachment.get_content_type() == "application/pdf"
+        assert attachment.get_filename() == "ch.pdf"
+        assert attachment.get_content() == tiny_pdf.read_bytes()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Message construction (issue #367): EmailMessage.add_attachment()
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestKindleMessage:
+    def _message(self, path):
+        from memanga.emailer import _kindle_message
+        return _kindle_message(path, "user@kindle.com", "me@gmail.com",
+                               "Chapter 1")
+
+    def test_pdf_message(self, tiny_pdf):
+        from email import policy
+        from email.message import EmailMessage
+
+        msg = self._message(tiny_pdf)
+
+        assert isinstance(msg, EmailMessage)
+        assert msg.policy is policy.default
+        assert msg.get_content_type() == "multipart/mixed"
+        assert msg["From"] == "me@gmail.com"
+        assert msg["To"] == "user@kindle.com"
+        assert msg["Subject"] == "Chapter 1"
+        assert msg["MIME-Version"] == "1.0"
+        (attachment,) = msg.iter_attachments()
+        assert attachment.get_content_type() == "application/pdf"
+        assert attachment.get_content_disposition() == "attachment"
+        assert attachment.get_filename() == "ch.pdf"
+        assert attachment["Content-Transfer-Encoding"] == "base64"
+        assert attachment.get_content() == tiny_pdf.read_bytes()
+
+    def test_epub_message(self, tmp_path):
+        epub = tmp_path / "Vol 2.epub"
+        epub.write_bytes(b"PK\x03\x04 epub \x00\xff bytes")
+
+        msg = self._message(epub)
+
+        (attachment,) = msg.iter_attachments()
+        assert attachment.get_content_type() == "application/epub+zip"
+        assert attachment.get_content_disposition() == "attachment"
+        assert attachment.get_filename() == "Vol 2.epub"
+        assert attachment.get_content() == epub.read_bytes()
+
+    def test_non_ascii_filename_survives_the_wire_format(self, tmp_path):
+        from email import message_from_bytes, policy
+
+        pdf = tmp_path / "Ch 3 – Café.pdf"
+        pdf.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+        raw = self._message(pdf).as_bytes()
+        raw.decode("ascii")  # every header and part is 7-bit encoded
+
+        parsed = message_from_bytes(raw, policy=policy.default)
+        assert parsed.get_all("MIME-Version") == ["1.0"]
+        (attachment,) = parsed.iter_attachments()
+        assert attachment.get_content_type() == "application/pdf"
+        assert attachment.get_filename() == "Ch 3 – Café.pdf"
+        assert attachment.get_content() == pdf.read_bytes()
 
 
 # ─────────────────────────────────────────────────────────────────────
