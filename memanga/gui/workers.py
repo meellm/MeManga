@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from ..email_settings import EmailSettings
 from .events import EventBus
 
 logger = logging.getLogger(__name__)
@@ -319,7 +320,8 @@ class BackgroundWorker:
     # ------------------------------------------------------------------
 
     def download_chapter(self, manga, chapter, output_dir, output_format, state,
-                         kindle_cfg=None, naming_template=None,
+                         kindle_cfg: Optional[EmailSettings] = None,
+                         naming_template=None,
                          post_processing=None, allow_partial=False,
                          partial_threshold=0.0, delete_after_send=False):
         """Queue a chapter download.
@@ -327,8 +329,10 @@ class BackgroundWorker:
         ``allow_partial``/``partial_threshold`` carry the partial-chapter
         tolerance settings (issue #86) from config through to the
         downloader. Off by default so behavior is unchanged unless the
-        caller opts in. ``delete_after_send`` removes the local file once
-        it has been sent to Kindle via ``kindle_cfg``.
+        caller opts in. ``kindle_cfg`` (from
+        :func:`~memanga.email_settings.kindle_delivery_settings`) sends
+        the chapter to Kindle; None keeps it local. ``delete_after_send``
+        removes the local file once it has been sent.
 
         ``state`` receives the chapter's records (downloaded, partial,
         failed) before the matching event is published.
@@ -395,7 +399,8 @@ class BackgroundWorker:
         if task_id in self._cancel_flags:
             self._cancel_flags[task_id].set()
 
-    def send_pending(self, manga, chapter_number, state, kindle_cfg,
+    def send_pending(self, manga, chapter_number, state,
+                     kindle_cfg: Optional[EmailSettings],
                      delete_after_send=False):
         """Send a saved chapter whose Kindle delivery failed again
         (issue #360).
@@ -421,8 +426,7 @@ class BackgroundWorker:
             })
             return None
         return self._safe_submit(self._run_send_pending, manga, number,
-                                 state, dict(kindle_cfg or {}),
-                                 delete_after_send)
+                                 state, kindle_cfg, delete_after_send)
 
     def _run_send_pending(self, manga, number, state, kindle_cfg,
                           delete_after_send):
@@ -443,8 +447,8 @@ class BackgroundWorker:
                 # Nothing is downloaded: the recorded file is sent.
                 download_dir=Path(),
                 output_format="",
-                delivery_mode="email" if kindle_cfg else "local",
-                email=kindle_cfg,
+                delivery_mode="email" if kindle_cfg is not None else "local",
+                email=kindle_cfg or EmailSettings(),
                 delete_after_send=delete_after_send,
             )
             pipeline = ChapterPipeline(
@@ -455,7 +459,7 @@ class BackgroundWorker:
                     threading.Event(), delete_after_send=delete_after_send,
                 ),
                 send=emailer.send_to_kindle,
-                app_password=lambda: kindle_cfg.get("app_password"),
+                app_password=lambda: options.email.app_password,
             )
             sent = pipeline.redeliver(title, number, manga) is DeliveryStatus.SENT
         except Exception as e:
@@ -507,15 +511,15 @@ class BackgroundWorker:
 
         # Kindle delivery is opted into per job: the page passes a
         # kindle_cfg only when email delivery applies to this manga.
-        kindle_cfg = item.get("kindle_cfg") or {}
+        kindle_cfg = item.get("kindle_cfg")
         options = PipelineOptions(
             download_dir=Path(item["output_dir"]),
             output_format=item["output_format"],
             post_processing=item.get("post_processing"),
             allow_partial=item.get("allow_partial", False),
             partial_threshold=item.get("partial_threshold", 0.0),
-            delivery_mode="email" if kindle_cfg else "local",
-            email=dict(kindle_cfg),
+            delivery_mode="email" if kindle_cfg is not None else "local",
+            email=kindle_cfg or EmailSettings(),
             delete_after_send=item.get("delete_after_send", False),
             naming_template=item.get("naming_template"),
         )
@@ -531,7 +535,7 @@ class BackgroundWorker:
             download=downloader.download_chapter,
             find_backup=downloader._find_chapter_on_backup,
             send=emailer.send_to_kindle,
-            app_password=lambda: kindle_cfg.get("app_password"),
+            app_password=lambda: options.email.app_password,
             cancel_event=item["cancel"],
         )
 

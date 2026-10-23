@@ -593,7 +593,7 @@ class DownloadsPage(BasePage):
         total = sum(len(r["chapters"]) for r in to_queue)
         Toast(self, f"Found {total} new chapter(s), downloading...", kind="success")
 
-        global_kindle = self.app.config.delivery_mode == "email" and self.app.config.email_enabled
+        from ...email_settings import kindle_delivery_settings
         naming_template = self.app.config.get("delivery.naming_template")
         post_processing = self.app.config.get("delivery.post_processing")
         delete_after_send = self.app.config.get("delivery.delete_after_send", False)
@@ -619,22 +619,10 @@ class DownloadsPage(BasePage):
                         batch["resolved"] += 1
                     continue
 
-                kindle_cfg = None
-                if global_kindle and manga.get("send_to_kindle", True):
-                    from ...config import get_app_password
-                    kindle_cfg = {
-                        "kindle_email": self.app.config.get("email.kindle_email"),
-                        "sender_email": self.app.config.get("email.sender_email"),
-                        "app_password": get_app_password(self.app.config),
-                        "smtp_server": self.app.config.get("email.smtp_server", "smtp.gmail.com"),
-                        "smtp_port": self.app.config.get("email.smtp_port", 587),
-                        "smtp_timeout": self.app.config.get("email.smtp_timeout"),
-                    }
-
                 jobs.append({
                     "manga": manga,
                     "chapter": ch,
-                    "kindle_cfg": kindle_cfg,
+                    "kindle_cfg": kindle_delivery_settings(self.app.config, manga),
                     "task_id": f"{m_title}:{ch.number}",
                 })
 

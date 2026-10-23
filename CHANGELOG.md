@@ -175,6 +175,12 @@ All notable changes are recorded here. Format loosely follows
   the command line, and a backup-delay clock is cleared once the chapter
   is saved. Chapters the reader fetches ahead of time are never deleted
   after sending.
+- #296 Kindle email settings (addresses, SMTP server, port, timeout and
+  app password) are read from config in one place for the desktop app's
+  Downloads, Detail and Reader pages and for `check`, `failed retry`,
+  `send --pending`, `config email` and `status --json`, so their defaults
+  and when a manga is sent to the Kindle cannot drift apart. Behavior is
+  unchanged.
 - #351 `memanga check --quiet` on a terminal without `--download` now
   skips new chapters and exits 1 with a hint, as it already did without a
   terminal. It used to skip them silently and exit 0. `--quiet` never

@@ -1489,27 +1489,14 @@ class ReaderPage(BasePage):
         chapter = ChapterWithSource(base, source, source_url, is_backup=is_backup)
 
         cfg = self.app.config
-        kindle_cfg = None
-        global_email_on = (cfg.delivery_mode == "email" and cfg.email_enabled)
-        if global_email_on and self._manga.get("send_to_kindle", True):
-            try:
-                from ...config import get_app_password
-                kindle_cfg = dict(
-                    kindle_email=cfg.get("email.kindle_email"),
-                    sender_email=cfg.get("email.sender_email"),
-                    app_password=get_app_password(cfg),
-                    smtp_server=cfg.get("email.smtp_server", "smtp.gmail.com"),
-                    smtp_port=cfg.get("email.smtp_port", 587),
-                    smtp_timeout=cfg.get("email.smtp_timeout"),
-                )
-            except Exception:
-                kindle_cfg = None
+        from ...email_settings import kindle_delivery_settings
 
         self.app.worker.download_chapter(
             manga=self._manga, chapter=chapter,
             output_dir=cfg.download_dir,
             output_format=cfg.output_format,
-            state=self.app.app_state, kindle_cfg=kindle_cfg,
+            state=self.app.app_state,
+            kindle_cfg=kindle_delivery_settings(cfg, self._manga),
             naming_template=cfg.get("delivery.naming_template"),
             post_processing=cfg.get("delivery.post_processing"),
             allow_partial=cfg.partial_enabled,

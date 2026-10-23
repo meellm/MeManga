@@ -486,3 +486,28 @@ class TestDownloadKwargsPropagation:
         assert call["partial_threshold"] == 12
         assert call["kindle_cfg"] is None
         assert call["state"] is page.app.app_state
+
+    def test_prefetch_passes_shared_email_settings(self, app_window,
+                                                   monkeypatch):
+        # Issue #296: the reader builds delivery settings with the shared
+        # helper, and still never deletes the copy it fetched to read.
+        from memanga.email_settings import EmailSettings
+        monkeypatch.setattr("memanga.email_settings.get_app_password",
+                            lambda cfg: "pw")
+        cfg = app_window.config
+        cfg.set("gui.reader_prefetch_next", True)
+        cfg.set("delivery.mode", "email")
+        cfg.set("delivery.delete_after_send", True)
+        cfg.set("email.kindle_email", "reader@example.com")
+        cfg.set("email.sender_email", "sender@example.com")
+        page, _ = _setup_manga(
+            app_window, available=_avail(1, 2), downloaded=["1"])
+        page._manga["send_to_kindle"] = True
+        calls = _capture_downloads(page)
+        page._maybe_prefetch_next()
+        (call,) = calls
+        assert call["kindle_cfg"] == EmailSettings(
+            kindle_email="reader@example.com",
+            sender_email="sender@example.com",
+            smtp_timeout=60, app_password="pw")
+        assert call["delete_after_send"] is False

@@ -1207,9 +1207,8 @@ class DetailPage(BasePage):
         chapter.group_names = ch_dict.get("group_names", [])
 
         # Optional Kindle delivery, same gating as the auto-queue path
-        kindle_cfg = None
-        if self._manga.get("send_to_kindle", True):
-            kindle_cfg = self._kindle_settings()
+        from ...email_settings import kindle_delivery_settings
+        kindle_cfg = kindle_delivery_settings(self.app.config, self._manga)
 
         naming_template = self.app.config.get("delivery.naming_template")
         post_processing = self.app.config.get("delivery.post_processing")
@@ -1239,24 +1238,10 @@ class DetailPage(BasePage):
         )
 
     def _kindle_settings(self):
-        """Kindle email settings when email delivery is on, else None."""
-        global_email_on = (
-            self.app.config.delivery_mode == "email" and self.app.config.email_enabled
-        )
-        if not global_email_on:
-            return None
-        try:
-            from ...config import get_app_password
-            return {
-                "kindle_email": self.app.config.get("email.kindle_email"),
-                "sender_email": self.app.config.get("email.sender_email"),
-                "app_password": get_app_password(self.app.config),
-                "smtp_server": self.app.config.get("email.smtp_server", "smtp.gmail.com"),
-                "smtp_port": self.app.config.get("email.smtp_port", 587),
-                "smtp_timeout": self.app.config.get("email.smtp_timeout"),
-            }
-        except Exception:
-            return None
+        """Kindle email settings when email delivery is on, else None.
+        Ignores this manga's own choice; callers check it first."""
+        from ...email_settings import kindle_delivery_settings
+        return kindle_delivery_settings(self.app.config)
 
     def _send_pending(self, number: str, button=None):
         """Send a chapter whose Kindle delivery failed again (issue #360),
@@ -1268,7 +1253,7 @@ class DetailPage(BasePage):
             Toast(self, "Kindle delivery is off for this manga", kind="error")
             return
         kindle_cfg = self._kindle_settings()
-        if not kindle_cfg:
+        if kindle_cfg is None:
             Toast(self, "Turn on Kindle email delivery in Settings first", kind="error")
             return
         title = self._manga["title"]
