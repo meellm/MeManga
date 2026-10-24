@@ -27,9 +27,20 @@ from ...emailer import kindle_format_error
 from ...cron import (build_cron_line, build_task_command, managed_lines,
                      read_crontab,
                      remove_managed_lines, replace_managed_line,
-                     source_checkout_root, unmanaged_memanga_lines)
+                     scheduled_checks_supported, source_checkout_root,
+                     unmanaged_memanga_lines)
 
 logger = logging.getLogger(__name__)
+
+# Shown instead of installing a scheduled check from the desktop app
+# (issues #324, #336).
+SCHEDULING_UNAVAILABLE_TEXT = (
+    "Scheduled checks can't be set up from the desktop app: it has no "
+    "command-line part to run them in the background. To check daily, "
+    "install the MeManga command-line version and run "
+    "\"memanga cron install\" (see Scheduling Automatic Checks in the "
+    "guide). Remove and Status still work for a check set up earlier."
+)
 
 
 def _kindle_format_toast_text(config):
@@ -703,6 +714,11 @@ class SettingsPage(BasePage):
 
         # Scheduled checks
         self._section(f, "Scheduled Checks")
+        self._cron_unavailable_hint = QLabel(SCHEDULING_UNAVAILABLE_TEXT)
+        self._cron_unavailable_hint.setProperty("role", "hint")
+        self._cron_unavailable_hint.setWordWrap(True)
+        f.addWidget(self._cron_unavailable_hint)
+
         cron_row = QHBoxLayout()
 
         self._cron_check = QCheckBox("Enable daily auto-check")
@@ -728,18 +744,21 @@ class SettingsPage(BasePage):
         install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         install_btn.clicked.connect(self._install_cron)
         cron_btns.addWidget(install_btn)
+        self._cron_install_btn = install_btn
 
         remove_btn = QPushButton("Remove")
         remove_btn.setMinimumHeight(36)
         remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         remove_btn.clicked.connect(self._remove_cron)
         cron_btns.addWidget(remove_btn)
+        self._cron_remove_btn = remove_btn
 
         status_btn = QPushButton("Status")
         status_btn.setMinimumHeight(36)
         status_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         status_btn.clicked.connect(self._check_cron_status)
         cron_btns.addWidget(status_btn)
+        self._cron_status_btn = status_btn
 
         cron_btns.addStretch()
         f.addLayout(cron_btns)
@@ -747,6 +766,7 @@ class SettingsPage(BasePage):
         self._cron_status_label = QLabel("")
         self._cron_status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
         f.addWidget(self._cron_status_label)
+        self._apply_scheduling_capability()
 
         f.addSpacing(T.PAD_XL)
 
@@ -1203,11 +1223,15 @@ class SettingsPage(BasePage):
             from ...config import set_app_password
             password_in_config = set_app_password(cfg, pw) == "config"
 
-        cron_time = self._cron_time.text().strip()
-        if not self._validate_time(cron_time):
-            cron_time = "06:00"
-        cfg.set("cron.enabled", self._cron_check.isChecked())
-        cfg.set("cron.time", cron_time)
+        # Where scheduling is unsupported the controls are disabled and
+        # may still show a value Remove has since cleared, so they never
+        # write cron settings (issue #324).
+        if scheduled_checks_supported():
+            cron_time = self._cron_time.text().strip()
+            if not self._validate_time(cron_time):
+                cron_time = "06:00"
+            cfg.set("cron.enabled", self._cron_check.isChecked())
+            cfg.set("cron.time", cron_time)
         cfg.set(
             "delivery.post_processing.enabled",
             self._post_processing_check.isChecked(),
@@ -1465,7 +1489,25 @@ class SettingsPage(BasePage):
 
     # ── Cron ──
 
+    def _apply_scheduling_capability(self):
+        """Turn off installing a scheduled check where this build cannot
+        run one (issues #324, #336) and say why. Remove and Status stay
+        available so a check set up by an earlier version can still be
+        inspected and removed."""
+        supported = scheduled_checks_supported()
+        reason = "" if supported else SCHEDULING_UNAVAILABLE_TEXT
+        for widget in (self._cron_check, self._cron_time,
+                       self._cron_install_btn):
+            widget.setEnabled(supported)
+            widget.setToolTip(reason)
+            widget.setAccessibleDescription(reason)
+        self._cron_unavailable_hint.setVisible(not supported)
+
     def _install_cron(self):
+        if not scheduled_checks_supported():
+            Toast(self, "Scheduled checks need the command-line version",
+                  kind="info")
+            return
         cron_time = self._cron_time.text().strip()
         if not self._validate_time(cron_time):
             Toast(self, "Invalid time", kind="error")
@@ -1585,6 +1627,10 @@ class SettingsPage(BasePage):
                 return
         self.app.config.set("cron.enabled", False)
         self.app.config.save()
+        if not scheduled_checks_supported():
+            # The disabled checkbox cannot be unticked by hand; show the
+            # removed state (issue #324).
+            self._cron_check.setChecked(False)
 
     def _check_cron_status(self):
         if platform.system() == "Windows":

@@ -1181,6 +1181,14 @@ run edit "#1" -u "https://new-source.com/one-piece"
 
 ## Scheduling Automatic Checks
 
+Scheduled checks run the command-line version of MeManga. The
+downloaded desktop app has no command-line part, so its Settings page
+turns the Install button off and explains why; Remove and Status there
+still work for a check set up by an earlier version. To check daily,
+set up the command-line version and use the commands below. When the
+app runs from source or a pip/pipx install, its Settings page can set
+up the same scheduled check.
+
 ### Windows — Task Scheduler
 
 Install a daily scheduled task:

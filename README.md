@@ -171,7 +171,10 @@ Hit **Re-check health** to ping every enabled source and see their status.
 
 - **General** — output format (PDF/EPUB/CBZ/…), download folder, theme, concurrency
 - **Kindle / Email** — Gmail App Password setup for sending chapters to your Kindle
-- **Advanced** — fallback-source delay, post-processing, cron, cache management
+- **Advanced** — fallback-source delay, post-processing, cron, cache management.
+  The downloaded desktop app can't set up scheduled checks; use
+  `memanga cron install` from the command-line version instead (see
+  [Schedule daily checks](#schedule-daily-checks)).
 
 <p align="center">
   <img src="docs/screenshots/settings-kindle.png" alt="Settings page — Kindle/Email tab" width="900">
