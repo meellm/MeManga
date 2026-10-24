@@ -78,6 +78,34 @@ def _configure_playwright_browsers() -> Path:
     return pw_browsers
 
 
+def _configure_ca_bundle(bundle_dir: str) -> str | None:
+    """Point ``SSL_CERT_FILE`` and ``REQUESTS_CA_BUNDLE`` at a CA bundle.
+
+    Tries the bundled ``certifi/cacert.pem``, then the one under
+    ``_internal`` next to the executable, then ``certifi.where()``.
+    Returns the chosen path, or None when none is available.
+
+    Local file checks only: startup makes no network request, so an
+    offline or firewalled machine opens the window without waiting
+    (issue #300).
+    """
+    candidates = (
+        os.path.join(bundle_dir, 'certifi', 'cacert.pem'),
+        os.path.join(os.path.dirname(sys.executable), '_internal',
+                     'certifi', 'cacert.pem'),
+    )
+    ca_bundle = next((p for p in candidates if os.path.exists(p)), None)
+    if ca_bundle is None:
+        try:
+            import certifi
+            ca_bundle = certifi.where()
+        except Exception:
+            return None
+    os.environ['SSL_CERT_FILE'] = ca_bundle
+    os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
+    return ca_bundle
+
+
 def _ensure_valid_std_streams() -> bool:
     """Guarantee real, file-descriptor-backed standard streams.
 
@@ -436,23 +464,11 @@ if getattr(sys, 'frozen', False):
     bundle_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(sys.executable)))
 
     # --- SSL certificates ---
-    ca_bundle = os.path.join(bundle_dir, 'certifi', 'cacert.pem')
-    if os.path.exists(ca_bundle):
-        os.environ['SSL_CERT_FILE'] = ca_bundle
-        os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle
+    ca_bundle = _configure_ca_bundle(bundle_dir)
+    if ca_bundle:
         logger.info("CA bundle: %s", ca_bundle)
     else:
-        ca_bundle_alt = os.path.join(os.path.dirname(sys.executable), '_internal', 'certifi', 'cacert.pem')
-        if os.path.exists(ca_bundle_alt):
-            os.environ['SSL_CERT_FILE'] = ca_bundle_alt
-            os.environ['REQUESTS_CA_BUNDLE'] = ca_bundle_alt
-        else:
-            try:
-                import certifi
-                os.environ['SSL_CERT_FILE'] = certifi.where()
-                os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
-            except Exception:
-                logger.warning("No CA bundle found")
+        logger.warning("No CA bundle found")
 
     # --- Playwright browsers ---
     # Pin the browser cache location unconditionally; see
@@ -464,14 +480,6 @@ if getattr(sys, 'frozen', False):
     else:
         logger.info("Playwright browser dir not present yet "
                     "(first-launch install creates it): %s", pw_browsers)
-
-    # Quick SSL test
-    try:
-        import urllib.request
-        urllib.request.urlopen("https://httpbin.org/get", timeout=5)
-        logger.info("HTTPS test passed")
-    except Exception as e:
-        logger.warning("HTTPS test failed: %s", e)
 else:
     _configure_logging()
     logger.info("Running from source")

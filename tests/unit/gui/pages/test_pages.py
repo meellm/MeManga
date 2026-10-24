@@ -1304,6 +1304,47 @@ class TestSettingsPage:
         assert app_window.config.get("cron.time") == "06:00"
         assert toasts and toasts[-1][1].get("kind") == "info"
 
+    @pytest.mark.parametrize("managed_task", [True, False])
+    def test_frozen_build_save_after_remove_keeps_cron_state(
+            self, app_window, qapp, monkeypatch, toasts, tmp_path,
+            managed_task):
+        """#324: the disabled checkbox still shows the old value, so a
+        later Save must not re-enable a check Remove took out, and must
+        not change cron settings when there was nothing to remove."""
+        import sys
+
+        from memanga.config import Config
+        from memanga.cron import build_cron_line
+        from memanga.gui.pages import settings as settings_mod
+
+        cfg = app_window.config
+        cfg.set("cron.enabled", True)
+        cfg.set("cron.time", "05:15")
+        cfg.set("delivery.delete_after_send", False)
+        cfg.save()
+        monkeypatch.setattr(settings_mod, "scheduled_checks_supported",
+                            lambda: False)
+        page = app_window._pages["settings"]
+        page._cron_check.setChecked(True)
+        page._cron_time.setText("07:30")
+        page._apply_scheduling_capability()
+        existing = self._USER_CRONTAB
+        if managed_task:
+            managed = build_cron_line("15", "05", tmp_path, sys.executable)
+            existing += f"{managed}\n"
+        submitted = self._fake_crontab(monkeypatch, existing)
+
+        page._remove_cron()
+        page._delete_after_check.setChecked(True)
+        page._save()
+
+        assert ("crontab" in submitted) is managed_task
+        assert page._cron_check.isChecked() is not managed_task
+        saved = Config(cfg.config_dir)
+        assert saved.get("cron.enabled") is not managed_task
+        assert saved.get("cron.time") == "05:15"
+        assert saved.get("delivery.delete_after_send") is True
+
     def test_install_cron_unix_quotes_paths(self, app_window, qapp,
                                             monkeypatch, tmp_path):
         """#109: cron paths with spaces must be shell-quoted so the

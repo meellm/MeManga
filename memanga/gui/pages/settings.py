@@ -1223,11 +1223,15 @@ class SettingsPage(BasePage):
             from ...config import set_app_password
             password_in_config = set_app_password(cfg, pw) == "config"
 
-        cron_time = self._cron_time.text().strip()
-        if not self._validate_time(cron_time):
-            cron_time = "06:00"
-        cfg.set("cron.enabled", self._cron_check.isChecked())
-        cfg.set("cron.time", cron_time)
+        # Where scheduling is unsupported the controls are disabled and
+        # may still show a value Remove has since cleared, so they never
+        # write cron settings (issue #324).
+        if scheduled_checks_supported():
+            cron_time = self._cron_time.text().strip()
+            if not self._validate_time(cron_time):
+                cron_time = "06:00"
+            cfg.set("cron.enabled", self._cron_check.isChecked())
+            cfg.set("cron.time", cron_time)
         cfg.set(
             "delivery.post_processing.enabled",
             self._post_processing_check.isChecked(),
@@ -1623,6 +1627,10 @@ class SettingsPage(BasePage):
                 return
         self.app.config.set("cron.enabled", False)
         self.app.config.save()
+        if not scheduled_checks_supported():
+            # The disabled checkbox cannot be unticked by hand; show the
+            # removed state (issue #324).
+            self._cron_check.setChecked(False)
 
     def _check_cron_status(self):
         if platform.system() == "Windows":
