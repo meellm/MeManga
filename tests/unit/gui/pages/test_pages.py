@@ -1284,12 +1284,13 @@ class TestSettingsPage:
     def test_frozen_build_install_runs_no_scheduler(
             self, app_window, qapp, monkeypatch, toasts, system):
         """#324, #336: no crontab/schtasks call and no config change."""
+        from memanga import cron as cron_mod
         from memanga.gui.pages import settings as settings_mod
 
         calls = []
         monkeypatch.setattr(settings_mod, "scheduled_checks_supported",
                             lambda: False)
-        monkeypatch.setattr(settings_mod.platform, "system", lambda: system)
+        monkeypatch.setattr(cron_mod.platform, "system", lambda: system)
         monkeypatch.setattr(settings_mod.subprocess, "run",
                             lambda cmd, **kw: calls.append(cmd))
         app_window.config.set("cron.enabled", False)
@@ -1356,6 +1357,7 @@ class TestSettingsPage:
         from pathlib import Path
 
         import memanga
+        from memanga import cron as cron_mod
         from memanga.cron import build_cron_line
         from memanga.gui.pages import settings as settings_mod
 
@@ -1379,10 +1381,12 @@ class TestSettingsPage:
                                                "no crontab for tester\n")
 
         monkeypatch.setattr(settings_mod.subprocess, "run", _fake_run)
+        monkeypatch.setattr(cron_mod.platform, "system", lambda: "Linux")
 
-        page._install_cron_unix("06", "30")
+        page._cron_time.setText("06:30")
+        page._install_cron()
 
-        expected = build_cron_line("30", "06", config_dir, python)
+        expected = build_cron_line(30, 6, config_dir, python)
         assert expected in submitted["crontab"].splitlines()
         assert f"'{config_dir}/memanga.log'" in submitted["crontab"]
         assert f"'{python}' -m memanga" in submitted["crontab"]
@@ -1396,6 +1400,7 @@ class TestSettingsPage:
         import subprocess
         import sys
 
+        from memanga import cron as cron_mod
         from memanga.cron import build_task_command
         from memanga.gui.pages import settings as settings_mod
 
@@ -1408,12 +1413,16 @@ class TestSettingsPage:
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
         monkeypatch.setattr(settings_mod.subprocess, "run", _fake_run)
+        monkeypatch.setattr(cron_mod.platform, "system", lambda: "Windows")
         app_window.config.set("cron.enabled", False)
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
 
-        app_window._pages["settings"]._install_cron_windows("06:30")
+        page._install_cron()
 
-        create, = [c for c in calls if c[1] == "/Create"]
-        command = create[create.index("/TR") + 1]
+        create, = [c for c in calls if c[1] == "/create"]
+        assert create[create.index("/st") + 1] == "06:30"
+        command = create[create.index("/tr") + 1]
         assert command == build_task_command(
             python, source_root=settings_mod.source_checkout_root())
         assert f'"{python}" -m memanga check --auto --quiet' in command
@@ -1433,7 +1442,9 @@ class TestSettingsPage:
         monkeypatch.setattr(settings_mod, "source_checkout_root",
                             lambda: None)
         submitted = self._fake_crontab(monkeypatch, "")
-        app_window._pages["settings"]._install_cron_unix("06", "30")
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
+        page._install_cron()
 
         line, = [l for l in submitted["crontab"].splitlines() if l]
         command = shlex.split(line.split("* * * ", 1)[1], comments=True)
@@ -1445,6 +1456,7 @@ class TestSettingsPage:
         import subprocess
         import sys
 
+        from memanga import cron as cron_mod
         from memanga.cron import build_task_command
         from memanga.gui.pages import settings as settings_mod
 
@@ -1459,10 +1471,13 @@ class TestSettingsPage:
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
         monkeypatch.setattr(settings_mod.subprocess, "run", _fake_run)
-        app_window._pages["settings"]._install_cron_windows("06:30")
+        monkeypatch.setattr(cron_mod.platform, "system", lambda: "Windows")
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
+        page._install_cron()
 
-        create, = [c for c in calls if c[1] == "/Create"]
-        command = create[create.index("/TR") + 1]
+        create, = [c for c in calls if c[1] == "/create"]
+        command = create[create.index("/tr") + 1]
         assert command == build_task_command(
             python, config_dir=root,
             source_root=settings_mod.source_checkout_root())
@@ -1500,7 +1515,9 @@ class TestSettingsPage:
                             lambda: checkout)
         config_dir = app_window.config.config_dir
         submitted = self._fake_crontab(monkeypatch, "")
-        app_window._pages["settings"]._install_cron_unix("06", "30")
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
+        page._install_cron()
 
         line, = [l for l in submitted["crontab"].splitlines() if l]
         command = shlex.split(line.split("* * * ", 1)[1], comments=True)
@@ -1511,6 +1528,7 @@ class TestSettingsPage:
                       write_rc=0):
         import subprocess
 
+        from memanga import cron as cron_mod
         from memanga.gui.pages import settings as settings_mod
 
         submitted = {}
@@ -1519,9 +1537,12 @@ class TestSettingsPage:
             if cmd == ["crontab", "-"]:
                 submitted["crontab"] = input
                 return subprocess.CompletedProcess(cmd, write_rc, "", "")
+            if cmd == ["crontab", "-r"]:
+                submitted["removed"] = True
+                return subprocess.CompletedProcess(cmd, write_rc, "", "")
             return subprocess.CompletedProcess(cmd, read_rc, existing, read_err)
 
-        monkeypatch.setattr(settings_mod.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(cron_mod.platform, "system", lambda: "Linux")
         monkeypatch.setattr(settings_mod.subprocess, "run", _fake_run)
         return submitted
 
@@ -1546,9 +1567,11 @@ class TestSettingsPage:
                               source_root=source_root)
         submitted = self._fake_crontab(
             monkeypatch, f"{old}\n{self._USER_CRONTAB}")
-        app_window._pages["settings"]._install_cron_unix("06", "30")
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
+        page._install_cron()
 
-        expected = build_cron_line("30", "06", config_dir, sys.executable,
+        expected = build_cron_line(30, 6, config_dir, sys.executable,
                                    source_root=source_root)
         assert submitted["crontab"] == f"{self._USER_CRONTAB}{expected}\n"
 
@@ -1584,13 +1607,49 @@ class TestSettingsPage:
         page._check_cron_status()
         assert page._cron_status_label.text() == "No cron found"
 
+    def test_cron_install_save_failure_says_cron_was_installed(
+            self, app_window, qapp, monkeypatch, toasts, tmp_path):
+        """#297: when config.yaml cannot be saved after the cron line was
+        written, the slot does not raise and the toast says the check is
+        installed but its settings were not saved, never "setup failed"."""
+        from memanga.persist import SaveError
+
+        cfg = app_window.config
+        cfg.set("cron.enabled", False)
+
+        def _failing_save():
+            raise SaveError(tmp_path / "config.yaml",
+                            OSError(28, "No space left on device"))
+
+        monkeypatch.setattr(cfg, "save", _failing_save)
+        submitted = self._fake_crontab(monkeypatch, self._USER_CRONTAB)
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
+
+        page._install_cron()
+
+        assert "# memanga-managed" in submitted["crontab"]
+        (text, kw), = toasts
+        assert kw.get("kind") == "error"
+        assert text.startswith(
+            "Cron installed, but its settings could not be saved: ")
+        assert "setup failed" not in text
+        # In memory the settings match the installed schedule, so a later
+        # successful Save writes them.
+        assert cfg.get("cron.enabled") is True
+        assert cfg.get("cron.time") == "06:30"
+        note = app_window.app_state.get_notifications()[0]
+        assert note["message"].startswith("Cron installed, but its settings")
+
     def test_cron_install_unix_refuses_unreadable_crontab(self, app_window, qapp,
                                                           monkeypatch, tmp_path):
         """#231: a read error other than "no crontab" must not overwrite."""
         app_window.config.set("cron.enabled", False)
         submitted = self._fake_crontab(monkeypatch, "", read_rc=1,
                                        read_err="crontab: Permission denied\n")
-        app_window._pages["settings"]._install_cron_unix("06", "30")
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
+        page._install_cron()
         assert submitted == {}
         assert not app_window.config.get("cron.enabled")
 
@@ -1605,6 +1664,145 @@ class TestSettingsPage:
         self._fake_crontab(monkeypatch, f"{managed}\n", write_rc=1)
         app_window._pages["settings"]._remove_cron()
         assert app_window.config.get("cron.enabled") is True
+
+    def test_cron_remove_unix_last_line_deletes_crontab(self, app_window,
+                                                        qapp, monkeypatch,
+                                                        tmp_path):
+        """#297: like `memanga cron remove`, an emptied crontab is
+        deleted rather than written back empty."""
+        import sys
+
+        from memanga.cron import build_cron_line
+
+        app_window.config.set("cron.enabled", True)
+        managed = build_cron_line("30", "06", tmp_path, sys.executable)
+        submitted = self._fake_crontab(monkeypatch, f"\n{managed}\n")
+        app_window._pages["settings"]._remove_cron()
+        assert submitted == {"removed": True}
+        assert app_window.config.get("cron.enabled") is False
+
+    @pytest.mark.parametrize("action", ["_remove_cron", "_check_cron_status"])
+    def test_cron_unix_unreadable_crontab_changes_nothing(
+            self, app_window, qapp, monkeypatch, toasts, action):
+        """#297: Remove and Status share install's read check, so a
+        permission error is never shown as "no cron"."""
+        app_window.config.set("cron.enabled", True)
+        page = app_window._pages["settings"]
+        submitted = self._fake_crontab(monkeypatch, "", read_rc=1,
+                                       read_err="crontab: Permission denied\n")
+        getattr(page, action)()
+
+        assert submitted == {}
+        assert app_window.config.get("cron.enabled") is True
+        if action == "_check_cron_status":
+            assert page._cron_status_label.text() == "Check failed"
+        else:
+            assert toasts[-1][1].get("kind") == "error"
+
+    def _fake_schtasks(self, monkeypatch, delete_rc=0, tn_rc=0, query_rc=0,
+                       listing=""):
+        """Fake schtasks; records ``(argv, kwargs)``. ``tn_rc`` answers
+        ``/query /tn``, ``query_rc``/``listing`` the CSV task list."""
+        import subprocess
+
+        from memanga import cron as cron_mod
+        from memanga.gui.pages import settings as settings_mod
+
+        calls = []
+
+        def _fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            if cmd[:3] == ["schtasks", "/query", "/tn"]:
+                rc, stdout = tn_rc, ""
+            elif cmd[1] == "/query":
+                rc, stdout = query_rc, listing
+            else:
+                rc, stdout = {"/delete": delete_rc}.get(cmd[1], 0), ""
+            return subprocess.CompletedProcess(cmd, rc, stdout,
+                                               "ERROR: Access is denied.\n")
+
+        monkeypatch.setattr(cron_mod.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(settings_mod.subprocess, "run", _fake_run)
+        return calls
+
+    @pytest.mark.parametrize(
+        "delete_rc, query_rc, listing, enabled_after, kind",
+        [(0, 0, "", False, "success"),                  # removed
+         (1, 0, '"\\Backup","N/A","Ready"\n', True, "info"),  # no task
+         (1, 0, '"\\MeManga_AutoCheck","N/A","Ready"\n',
+          True, "error"),                               # task not deleted
+         (1, 1, "", True, "error")])                    # list unreadable
+    def test_cron_remove_windows_checks_result(
+            self, app_window, qapp, monkeypatch, toasts, delete_rc, query_rc,
+            listing, enabled_after, kind):
+        """#297: Remove only turns the setting off when schtasks really
+        deleted the task (it used to report success regardless), and only
+        says there is none when the task list shows that."""
+        from memanga.cron import SCHEDULER_TIMEOUT, WINDOWS_TASK_NAME
+
+        app_window.config.set("cron.enabled", True)
+        calls = self._fake_schtasks(monkeypatch, delete_rc,
+                                    query_rc=query_rc, listing=listing)
+
+        app_window._pages["settings"]._remove_cron()
+
+        assert app_window.config.get("cron.enabled") is enabled_after
+        assert toasts[-1][1].get("kind") == kind
+        argv, kwargs = calls[0]
+        assert argv == ["schtasks", "/delete", "/tn", WINDOWS_TASK_NAME, "/f"]
+        assert kwargs["timeout"] == SCHEDULER_TIMEOUT
+        if delete_rc:
+            assert calls[1][0] == ["schtasks", "/query", "/fo", "csv", "/nh"]
+
+    @pytest.mark.parametrize("tn_rc, query_rc, listing, text", [
+        (0, 0, "", "Task installed"),
+        (1, 0, '"\\MeManga_AutoCheck","N/A","Ready"\n', "Task installed"),
+        (1, 0, '"\\Backup","N/A","Ready"\n', "No task found"),
+        (1, 1, "", "Check failed"),   # denied / scheduler unavailable
+    ])
+    def test_cron_status_windows(self, app_window, qapp, monkeypatch,
+                                 tn_rc, query_rc, listing, text):
+        from memanga.cron import SCHEDULER_TIMEOUT, WINDOWS_TASK_NAME
+
+        page = app_window._pages["settings"]
+        calls = self._fake_schtasks(monkeypatch, tn_rc=tn_rc,
+                                    query_rc=query_rc, listing=listing)
+        page._check_cron_status()
+        argv, kwargs = calls[0]
+        assert argv == ["schtasks", "/query", "/tn", WINDOWS_TASK_NAME]
+        assert kwargs["timeout"] == SCHEDULER_TIMEOUT
+        assert kwargs["capture_output"] and kwargs["text"]
+        assert len(calls) == (1 if tn_rc == 0 else 2)
+        assert page._cron_status_label.text() == text
+
+    @pytest.mark.parametrize("action", ["_install_cron", "_remove_cron",
+                                        "_check_cron_status"])
+    def test_cron_undecodable_output_reports_error(
+            self, app_window, qapp, monkeypatch, toasts, action):
+        """#297: a UnicodeDecodeError from text=True decoding must reach
+        the user as an error, not escape the Qt slot silently."""
+        from memanga import cron as cron_mod
+        from memanga.gui.pages import settings as settings_mod
+
+        def _undecodable(cmd, **kwargs):
+            raise UnicodeDecodeError("utf-8", b"\xe9", 0, 1,
+                                     "invalid continuation byte")
+
+        monkeypatch.setattr(cron_mod.platform, "system", lambda: "Linux")
+        monkeypatch.setattr(settings_mod.subprocess, "run", _undecodable)
+        app_window.config.set("cron.enabled", True)
+        page = app_window._pages["settings"]
+        page._cron_time.setText("06:30")
+
+        getattr(page, action)()
+
+        assert app_window.config.get("cron.enabled") is True
+        if action == "_check_cron_status":
+            assert page._cron_status_label.text() == "Check failed"
+        else:
+            text, kw = toasts[-1]
+            assert kw.get("kind") == "error"
+            assert text.startswith("Could not read crontab; nothing changed")
 
     def test_import_merge_deduplicates_titles_within_backup(
         self, app_window, qapp, monkeypatch, tmp_path

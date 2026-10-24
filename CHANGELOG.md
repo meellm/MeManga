@@ -216,6 +216,20 @@ All notable changes are recorded here. Format loosely follows
   `send --pending`, `config email` and `status --json`, so their defaults
   and when a manga is sent to the Kindle cannot drift apart. Behavior is
   unchanged.
+- #297 `memanga cron` and the desktop app's Settings install, remove and
+  check the daily scheduled check through one shared module, so cron and
+  Windows Task Scheduler behave the same from both. Remove in Settings on
+  Windows no longer reports success and turns the setting off when the
+  task was not deleted. Status and Remove now say when the crontab or the
+  Windows task list could not be read instead of reporting that no check
+  is set up, and change nothing. `cron install` rejects times outside
+  00:00-23:59, as Settings already did. A missing `crontab` or `schtasks`,
+  or output that is not readable text, is reported as an error instead of
+  a crash, and each scheduler call that hangs gives up after
+  30 seconds. Reinstalling on Windows replaces the task in place, so a
+  failed reinstall no longer leaves no task while the setting stays on.
+  If Settings installs the check but cannot save config.yaml, it says
+  the check is installed and its settings were not saved.
 - #351 `memanga check --quiet` on a terminal without `--download` now
   skips new chapters and exits 1 with a hint, as it already did without a
   terminal. It used to skip them silently and exit 0. `--quiet` never

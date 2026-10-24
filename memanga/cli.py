@@ -8,7 +8,6 @@ import argparse
 import json
 import logging
 import os
-import platform
 import re
 import shutil
 import signal
@@ -42,10 +41,8 @@ from .config import (CONFIG_DIR_ENV, CONFIG_KEYS, AppPasswordError, Config,
                      default_root_moved, explicit_config_dir,
                      get_app_password, parse_config_value,
                      plaintext_password_notice, set_app_password)
-from .cron import (build_cron_line, build_task_command, managed_lines,
-                   read_crontab,
-                   remove_managed_lines, replace_managed_line,
-                   source_checkout_root, unmanaged_memanga_lines)
+from .cron import (ScheduleStatus, install_schedule, parse_schedule_time,
+                   remove_schedule, schedule_status, source_checkout_root)
 from . import __version__, completion, doctor
 from .persist import SaveError
 from .process_lock import (LOCK_FILENAME, ConfigDirBusy, ConfigDirLock,
@@ -2610,15 +2607,20 @@ def cmd_config(args):
 
 
 def cmd_cron(args):
-    """Manage scheduled task for automatic checking."""
-    if platform.system() == "Windows":
-        return _cmd_cron_windows(args)
-    return _cmd_cron_unix(args)
+    """Manage the scheduled daily check (cron, or Task Scheduler on Windows).
+
+    The scheduler work is shared with the GUI Settings page (issue #297);
+    this only words the result.
+    """
+    if args.action == "status":
+        return _cron_status()
+    if args.action == "install":
+        return _cron_install(args)
+    return _cron_remove()
 
 
-def _print_unmanaged_cron_lines(crontab):
+def _print_unmanaged_cron_lines(lines):
     """Point out MeManga lines that cron install/remove leave alone."""
-    lines = unmanaged_memanga_lines(crontab)
     if not lines:
         return
     console.print("[yellow]These crontab lines mention MeManga but are not "
@@ -2627,183 +2629,98 @@ def _print_unmanaged_cron_lines(crontab):
         console.print(f"[dim]{_esc(line)}[/dim]")
 
 
-def _cmd_cron_unix(args):
-    """Manage cron job (macOS/Linux)."""
+def _scheduler_error(message, detail):
+    """Report a failed scheduler action with its error text, if any."""
+    if detail:
+        message = f"{message}: {_esc(detail)}"
+    return _error(f"[red]{message}[/red]")
 
-    if args.action == "status":
-        result = subprocess.run(
-            ["crontab", "-l"],
-            capture_output=True,
-            text=True,
-        )
 
-        # Issue #231: only the marked line counts as the installed job.
-        existing = result.stdout if result.returncode == 0 else ""
-        owned = managed_lines(existing)
-        if owned:
-            console.print("[green]✅ Cron job is installed[/green]")
-            for line in owned:
-                console.print(f"[dim]{_esc(line)}[/dim]")
-        else:
-            console.print("[yellow]⚠️  No cron job found[/yellow]")
-            console.print("[dim]Use 'memanga cron install' to set up automatic checking.[/dim]")
-        _print_unmanaged_cron_lines(existing)
+def _unreadable_error(result):
+    # Never overwrite a crontab we could not read (issue #231).
+    what = "scheduled tasks" if result.windows else "current crontab"
+    return _scheduler_error(f"Could not read the {what}; nothing was changed",
+                            result.detail)
+
+
+def _cron_status():
+    result = schedule_status()
+    if result.status is ScheduleStatus.UNREADABLE:
+        if result.windows:
+            return _scheduler_error("Could not query the scheduled task",
+                                    result.detail)
+        return _scheduler_error("Could not read the current crontab",
+                                result.detail)
+    if result.status is ScheduleStatus.INSTALLED:
+        installed = ("Scheduled task is installed" if result.windows
+                     else "Cron job is installed")
+        console.print(f"[green]✅ {installed}[/green]")
+        for line in result.entries:
+            console.print(f"[dim]{_esc(line)}[/dim]")
+    else:
+        missing = "No scheduled task found" if result.windows else "No cron job found"
+        console.print(f"[yellow]⚠️  {missing}[/yellow]")
+        console.print("[dim]Use 'memanga cron install' to set up automatic checking.[/dim]")
+    _print_unmanaged_cron_lines(result.unmanaged)
+
+
+def _cron_install(args):
+    time_str = args.time or config.get("cron.time", "06:00")
+
+    if not args.time:
+        if not _stdin_is_tty():
+            return _non_interactive_error(
+                "cron install needs a terminal to ask for the time; pass --time HH:MM"
+            )
+        time_str = Prompt.ask("Check time (HH:MM)", default=time_str)
+
+    parsed = parse_schedule_time(time_str)
+    if parsed is None:
+        return _error("[red]Invalid time format. Use HH:MM[/red]")
+    hour, minute = parsed
+
+    # Issue #232: run the current interpreter and log to the config
+    # root, never into the package install directory.
+    result = install_schedule(
+        hour, minute, runtime_dir=config.config_dir,
+        config_dir=_context.config_dir,
+        source_root=source_checkout_root(Path(__file__).resolve().parent))
+
+    if result.status is ScheduleStatus.UNREADABLE:
+        return _unreadable_error(result)
+    if not result.ok:
+        failed = ("Failed to create scheduled task" if result.windows
+                  else "Failed to install cron job")
+        return _scheduler_error(failed, result.detail)
+
+    config.set("cron.enabled", True)
+    config.set("cron.time", time_str)
+    config.save()
+    if result.windows:
+        console.print(f"[green]✅ Scheduled task installed! Will check daily at {time_str}[/green]")
+        return
+    console.print(f"[green]✅ Cron job installed! Will check daily at {time_str}[/green]")
+    for line in result.entries:
+        console.print(f"[dim]{_esc(line)}[/dim]")
+    _print_unmanaged_cron_lines(result.unmanaged)
+
+
+def _cron_remove():
+    result = remove_schedule()
+    job = "scheduled task" if result.windows else "cron job"
+    if result.status is ScheduleStatus.UNREADABLE:
+        return _unreadable_error(result)
+    if result.status is ScheduleStatus.FAILED:
+        return _scheduler_error(f"Failed to remove {job}", result.detail)
+    if result.status is ScheduleStatus.NOT_FOUND:
+        console.print(f"[yellow]No MeManga {job} found[/yellow]")
+        _print_unmanaged_cron_lines(result.unmanaged)
         return
 
-    elif args.action == "install":
-        time_str = args.time or config.get("cron.time", "06:00")
-
-        if not args.time:
-            if not _stdin_is_tty():
-                return _non_interactive_error(
-                    "cron install needs a terminal to ask for the time; pass --time HH:MM"
-                )
-            time_str = Prompt.ask("Check time (HH:MM)", default=time_str)
-
-        try:
-            hour, minute = time_str.split(":")
-            hour, minute = int(hour), int(minute)
-        except ValueError:
-            return _error("[red]Invalid time format. Use HH:MM[/red]")
-
-        # Issue #232: run the current interpreter and log to the config
-        # root, never into the package install directory.
-        cron_line = build_cron_line(
-            minute, hour, config.config_dir, sys.executable,
-            config_dir=_context.config_dir,
-            source_root=source_checkout_root(Path(__file__).resolve().parent))
-
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-        existing = read_crontab(result)
-        if existing is None:
-            # Never overwrite a crontab we could not read (issue #231).
-            return _error("[red]Could not read the current crontab; nothing "
-                          f"was changed: {_esc((result.stderr or '').strip())}[/red]")
-
-        # Issue #231: replace only the line a previous install marked as
-        # managed; every other entry, comment and blank line is kept.
-        new_crontab = replace_managed_line(existing, cron_line)
-        process = subprocess.Popen(
-            ["crontab", "-"],
-            stdin=subprocess.PIPE,
-            text=True,
-        )
-        process.communicate(input=new_crontab)
-
-        if process.returncode == 0:
-            config.set("cron.enabled", True)
-            config.set("cron.time", time_str)
-            config.save()
-
-            console.print(f"[green]✅ Cron job installed! Will check daily at {time_str}[/green]")
-            console.print(f"[dim]{_esc(cron_line)}[/dim]")
-            _print_unmanaged_cron_lines(existing)
-        else:
-            return _error("[red]Failed to install cron job[/red]")
-
-    elif args.action == "remove":
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-        if result.returncode != 0:
-            console.print("[yellow]No crontab found[/yellow]")
-            return
-
-        new_crontab, removed = remove_managed_lines(result.stdout)
-
-        if not removed:
-            console.print("[yellow]No MeManga cron job found[/yellow]")
-            _print_unmanaged_cron_lines(result.stdout)
-            return
-
-        if not new_crontab.strip():
-            write = subprocess.run(["crontab", "-r"], capture_output=True)
-        else:
-            write = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
-            write.communicate(input=new_crontab)
-        if write.returncode != 0:
-            return _error("[red]Failed to remove cron job[/red]")
-
-        config.set("cron.enabled", False)
-        config.save()
-
-        console.print("[green]✅ Cron job removed[/green]")
-
-
-def _cmd_cron_windows(args):
-    """Manage Windows Task Scheduler task."""
-    task_name = "MeManga_AutoCheck"
-
-    if args.action == "status":
-        result = subprocess.run(
-            ["schtasks", "/query", "/tn", task_name],
-            capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            console.print("[green]✅ Scheduled task is installed[/green]")
-            for line in result.stdout.strip().split("\n"):
-                if line.strip():
-                    console.print(f"[dim]{_esc(line.strip())}[/dim]")
-        else:
-            console.print("[yellow]⚠️  No scheduled task found[/yellow]")
-            console.print("[dim]Use 'memanga cron install' to set up automatic checking.[/dim]")
-
-    elif args.action == "install":
-        time_str = args.time or config.get("cron.time", "06:00")
-
-        if not args.time:
-            if not _stdin_is_tty():
-                return _non_interactive_error(
-                    "cron install needs a terminal to ask for the time; pass --time HH:MM"
-                )
-            time_str = Prompt.ask("Check time (HH:MM)", default=time_str)
-
-        try:
-            hour, minute = time_str.split(":")
-            int(hour), int(minute)
-        except ValueError:
-            return _error("[red]Invalid time format. Use HH:MM[/red]")
-
-        # Delete existing task if present
-        subprocess.run(
-            ["schtasks", "/delete", "/tn", task_name, "/f"],
-            capture_output=True, text=True,
-        )
-
-        # Issue #232: the running interpreter, not a checkout-local venv.
-        cmd = build_task_command(
-            sys.executable, _context.config_dir,
-            source_root=source_checkout_root(Path(__file__).resolve().parent))
-        result = subprocess.run(
-            [
-                "schtasks", "/create",
-                "/tn", task_name,
-                "/tr", cmd,
-                "/sc", "daily",
-                "/st", time_str,
-                "/f",
-            ],
-            capture_output=True, text=True,
-        )
-
-        if result.returncode == 0:
-            config.set("cron.enabled", True)
-            config.set("cron.time", time_str)
-            config.save()
-            console.print(f"[green]✅ Scheduled task installed! Will check daily at {time_str}[/green]")
-        else:
-            return _error(f"[red]Failed to create scheduled task: {_esc(result.stderr.strip())}[/red]")
-
-    elif args.action == "remove":
-        result = subprocess.run(
-            ["schtasks", "/delete", "/tn", task_name, "/f"],
-            capture_output=True, text=True,
-        )
-
-        if result.returncode == 0:
-            config.set("cron.enabled", False)
-            config.save()
-            console.print("[green]✅ Scheduled task removed[/green]")
-        else:
-            console.print("[yellow]No MeManga scheduled task found[/yellow]")
+    config.set("cron.enabled", False)
+    config.save()
+    removed = "Scheduled task removed" if result.windows else "Cron job removed"
+    console.print(f"[green]✅ {removed}[/green]")
 
 
 def cmd_sources(args):

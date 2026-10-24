@@ -32,7 +32,7 @@ import yaml
 
 from . import __version__
 from .config import AppPasswordError, app_password_override, get_app_password
-from .cron import is_managed_line
+from .cron import WINDOWS_TASK_NAME, is_managed_line
 from .emailer import EmailAuthError, kindle_format_error, smtp_login
 
 SCHEMA_VERSION = 1
@@ -60,8 +60,6 @@ CHECK_NAMES = (
 # memanga.gui._REQUIRED_BROWSERS; kept here because the CLI-only Docker
 # image ships without the gui package.
 REQUIRED_BROWSERS = ("firefox", "chromium")
-
-WINDOWS_TASK_NAME = "MeManga_AutoCheck"
 
 
 @dataclass
