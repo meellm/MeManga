@@ -233,6 +233,10 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #300 The packaged desktop app no longer contacts httpbin.org before
+  opening its window. That test request held up every launch for up to
+  several seconds on a slow, offline or firewalled network. Startup now
+  only picks the bundled certificate file, and logs which one it uses.
 - #362 Chapters saved as CBZ or ZIP are no longer emailed to the Kindle,
   which rejects them; only PDF and EPUB are sent, and image folders stay
   unsent as before. The chapter is still saved and kept, and the command
