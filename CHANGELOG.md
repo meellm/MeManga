@@ -233,6 +233,13 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #324, #336 The downloaded desktop app no longer offers to install a
+  scheduled check it cannot run. Its only executable starts the app, so
+  the daily task opened the window instead of checking while Settings
+  reported success. Settings now turns off the daily auto-check, its time
+  and Install there, and says to use `memanga cron install` from the
+  command-line version; Remove and Status still work for a task set up
+  earlier. Source, pip and pipx installs schedule checks as before.
 - #362 Chapters saved as CBZ or ZIP are no longer emailed to the Kindle,
   which rejects them; only PDF and EPUB are sent, and image folders stay
   unsent as before. The chapter is still saved and kept, and the command

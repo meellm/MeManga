@@ -1239,6 +1239,71 @@ class TestSettingsPage:
                   for m in app_window.config.get("manga", []) or []]
         assert "FromBackup" in titles
 
+    def test_scheduling_controls_enabled_when_supported(
+            self, app_window, qapp, monkeypatch):
+        """#324, #336: source/pip installs keep the scheduling controls."""
+        from memanga.gui.pages import settings as settings_mod
+
+        monkeypatch.setattr(settings_mod, "scheduled_checks_supported",
+                            lambda: True)
+        page = app_window._pages["settings"]
+        page._apply_scheduling_capability()
+
+        assert page._cron_check.isEnabled()
+        assert page._cron_time.isEnabled()
+        assert page._cron_install_btn.isEnabled()
+        assert page._cron_install_btn.toolTip() == ""
+        assert page._cron_unavailable_hint.isHidden()
+
+    def test_frozen_build_disables_scheduling_and_explains(
+            self, app_window, qapp, monkeypatch):
+        """#324, #336: the desktop build cannot run a headless check, so
+        installing one is turned off with the reason and the alternative;
+        Remove and Status stay usable for a task set up earlier."""
+        from memanga.gui.pages import settings as settings_mod
+
+        monkeypatch.setattr(settings_mod, "scheduled_checks_supported",
+                            lambda: False)
+        page = app_window._pages["settings"]
+        page._apply_scheduling_capability()
+
+        for widget in (page._cron_check, page._cron_time,
+                       page._cron_install_btn):
+            assert not widget.isEnabled()
+            assert widget.toolTip() == settings_mod.SCHEDULING_UNAVAILABLE_TEXT
+            assert (widget.accessibleDescription()
+                    == settings_mod.SCHEDULING_UNAVAILABLE_TEXT)
+        hint = page._cron_unavailable_hint
+        assert not hint.isHidden()
+        assert "memanga cron install" in hint.text()
+        assert "Remove and Status" in hint.text()
+        assert page._cron_remove_btn.isEnabled()
+        assert page._cron_status_btn.isEnabled()
+
+    @pytest.mark.parametrize("system", ["Linux", "Windows"])
+    def test_frozen_build_install_runs_no_scheduler(
+            self, app_window, qapp, monkeypatch, toasts, system):
+        """#324, #336: no crontab/schtasks call and no config change."""
+        from memanga.gui.pages import settings as settings_mod
+
+        calls = []
+        monkeypatch.setattr(settings_mod, "scheduled_checks_supported",
+                            lambda: False)
+        monkeypatch.setattr(settings_mod.platform, "system", lambda: system)
+        monkeypatch.setattr(settings_mod.subprocess, "run",
+                            lambda cmd, **kw: calls.append(cmd))
+        app_window.config.set("cron.enabled", False)
+        app_window.config.set("cron.time", "06:00")
+        page = app_window._pages["settings"]
+        page._cron_time.setText("07:30")
+
+        page._install_cron()
+
+        assert calls == []
+        assert app_window.config.get("cron.enabled") is False
+        assert app_window.config.get("cron.time") == "06:00"
+        assert toasts and toasts[-1][1].get("kind") == "info"
+
     def test_install_cron_unix_quotes_paths(self, app_window, qapp,
                                             monkeypatch, tmp_path):
         """#109: cron paths with spaces must be shell-quoted so the

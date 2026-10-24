@@ -25,6 +25,18 @@ def quote_cron_path(path) -> str:
     return shlex.quote(str(path)).replace("%", r"\%")
 
 
+def scheduled_checks_supported() -> bool:
+    """Whether this install can schedule a headless ``check --auto`` run.
+
+    A frozen desktop build has no command-line entry point: its single
+    windowed executable starts the app and ignores ``-m memanga check``,
+    so a scheduled task would open the window instead of checking
+    (issues #324, #336). Source, pip and pipx installs run ``-m memanga``
+    with their interpreter and are supported.
+    """
+    return not getattr(sys, "frozen", False)
+
+
 def source_checkout_root(package_dir=None):
     """The source checkout ``memanga`` is imported from, or None.
 

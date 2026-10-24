@@ -20,6 +20,7 @@ from memanga.cron import (
     read_crontab,
     remove_managed_lines,
     replace_managed_line,
+    scheduled_checks_supported,
     source_checkout_root,
     unmanaged_memanga_lines,
 )
@@ -118,6 +119,18 @@ class TestSourceCheckoutRoot:
         root = Path(memanga.__file__).resolve().parent.parent
         expected = None if root.name.endswith("-packages") else root
         assert source_checkout_root() == expected
+
+
+class TestScheduledChecksSupported:
+    """#324, #336: a frozen desktop build cannot run `-m memanga check`."""
+
+    def test_source_or_installed(self, monkeypatch):
+        monkeypatch.delattr(sys, "frozen", raising=False)
+        assert scheduled_checks_supported() is True
+
+    def test_frozen_build(self, monkeypatch):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        assert scheduled_checks_supported() is False
 
 
 class TestSourceCheckoutCronLine:
