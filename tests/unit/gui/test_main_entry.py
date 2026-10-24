@@ -14,8 +14,13 @@ source for the entire first session on a fresh machine.
 
 from __future__ import annotations
 
+import ast
 import os
+import socket
+import sys
 from pathlib import Path
+
+import pytest
 
 import memanga
 
@@ -86,6 +91,89 @@ class TestConfigurePlaywrightBrowsers:
         d = ns["_playwright_browsers_dir"]()
         assert d.name == "ms-playwright"
         assert d.is_absolute()
+
+
+def _cacert(root: Path) -> Path:
+    pem = root / "certifi" / "cacert.pem"
+    pem.parent.mkdir(parents=True)
+    pem.write_text("bundle\n")
+    return pem
+
+
+class TestConfigureCaBundle:
+    """Issue #300: certificate setup stays local; no request is made."""
+
+    @pytest.fixture(autouse=True)
+    def _offline(self, monkeypatch, tmp_path):
+        def no_network(*args, **kwargs):
+            raise AssertionError("startup made a network connection")
+        monkeypatch.setattr(socket, "create_connection", no_network)
+        monkeypatch.setattr(socket.socket, "connect", no_network)
+        monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+        monkeypatch.delenv("REQUESTS_CA_BUNDLE", raising=False)
+        monkeypatch.setattr(sys, "executable", str(tmp_path / "app" / "MeManga"))
+
+    def test_bundled_certifi_wins(self, tmp_path):
+        pem = _cacert(tmp_path / "bundle")
+        _cacert(tmp_path / "app" / "_internal")
+
+        result = _entry_helpers()["_configure_ca_bundle"](
+            str(tmp_path / "bundle"))
+
+        assert result == str(pem)
+        assert os.environ["SSL_CERT_FILE"] == str(pem)
+        assert os.environ["REQUESTS_CA_BUNDLE"] == str(pem)
+
+    def test_internal_dir_next_to_executable(self, tmp_path):
+        pem = _cacert(tmp_path / "app" / "_internal")
+
+        result = _entry_helpers()["_configure_ca_bundle"](
+            str(tmp_path / "bundle"))
+
+        assert result == str(pem)
+        assert os.environ["SSL_CERT_FILE"] == str(pem)
+        assert os.environ["REQUESTS_CA_BUNDLE"] == str(pem)
+
+    def test_falls_back_to_certifi(self, tmp_path):
+        import certifi
+
+        result = _entry_helpers()["_configure_ca_bundle"](
+            str(tmp_path / "bundle"))
+
+        assert result == certifi.where()
+        assert os.environ["SSL_CERT_FILE"] == certifi.where()
+        assert os.environ["REQUESTS_CA_BUNDLE"] == certifi.where()
+
+    def test_no_bundle_leaves_environment_alone(self, monkeypatch, tmp_path):
+        monkeypatch.setitem(sys.modules, "certifi", None)
+
+        result = _entry_helpers()["_configure_ca_bundle"](
+            str(tmp_path / "bundle"))
+
+        assert result is None
+        assert "SSL_CERT_FILE" not in os.environ
+        assert "REQUESTS_CA_BUNDLE" not in os.environ
+
+
+def test_entry_module_makes_no_network_request():
+    """Issue #300: the frozen startup used to block on an HTTPS request
+    to a third-party host before the window could open. The entry module
+    must not import an HTTP/socket client or contact any host."""
+    src = (Path(memanga.__file__).parent / "gui" / "__main__.py").read_text()
+    network = {"urllib.request", "http.client", "socket", "ssl",
+               "requests", "httpx", "aiohttp", "curl_cffi", "cloudscraper"}
+    imported = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+            imported.update(f"{node.module}.{alias.name}"
+                            for alias in node.names)
+
+    assert not imported & network
+    assert "urlopen" not in src
+    assert "httpbin" not in src
 
 
 def test_log_dir_is_the_shared_default_config_dir(isolated_home, monkeypatch):
