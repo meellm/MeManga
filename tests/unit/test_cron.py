@@ -10,16 +10,24 @@ import pytest
 
 import memanga
 
+import memanga.cron as cron_mod
 from memanga.cron import (
     MANAGED_MARKER,
+    SCHEDULER_TIMEOUT,
+    WINDOWS_TASK_NAME,
+    ScheduleStatus,
     build_cron_line,
     build_task_command,
+    install_schedule,
     is_managed_line,
     managed_lines,
+    parse_schedule_time,
     quote_cron_path,
     read_crontab,
     remove_managed_lines,
+    remove_schedule,
     replace_managed_line,
+    schedule_status,
     scheduled_checks_supported,
     source_checkout_root,
     unmanaged_memanga_lines,
@@ -360,3 +368,367 @@ class TestReadCrontab:
         assert read_crontab(self._result(1)) is None
         assert read_crontab(self._result(
             1, stderr="crontab: Permission denied\n")) is None
+
+
+class TestParseScheduleTime:
+    @pytest.mark.parametrize("text, expected", [
+        ("06:00", (6, 0)), ("6:5", (6, 5)), (" 23:59 ", (23, 59)),
+        ("00:00", (0, 0)),
+    ])
+    def test_valid(self, text, expected):
+        assert parse_schedule_time(text) == expected
+
+    @pytest.mark.parametrize("text", [
+        "24:00", "06:60", "-1:00", "6", "6:00:00", "aa:bb", "", "6:",
+    ])
+    def test_invalid(self, text):
+        assert parse_schedule_time(text) is None
+
+
+class FakeScheduler:
+    """Stands in for ``subprocess.run`` so the service never touches a
+    real crontab or Task Scheduler (issue #297)."""
+
+    def __init__(self, crontab=None, read_rc=None, read_err="",
+                 write_rc=0, results=None, error=None):
+        if read_rc is None:
+            read_rc = 0 if crontab is not None else 1
+            if crontab is None:
+                read_err = "no crontab for tester\n"
+        self.crontab = crontab or ""
+        self.read_rc, self.read_err = read_rc, read_err
+        self.write_rc = write_rc
+        self.results = results or {}
+        self.error = error
+        self.calls = []
+        self.written = None
+        self.deleted = False
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append((argv, kwargs))
+        if self.error is not None:
+            raise self.error
+        if argv == ["crontab", "-l"]:
+            return subprocess.CompletedProcess(argv, self.read_rc, self.crontab,
+                                               self.read_err)
+        if argv == ["crontab", "-"]:
+            self.written = kwargs["input"]
+            return subprocess.CompletedProcess(argv, self.write_rc, "", "denied")
+        if argv == ["crontab", "-r"]:
+            self.deleted = True
+            return subprocess.CompletedProcess(argv, self.write_rc, "", "denied")
+        # "/query /tn" (by name) and "/query /fo" (task list) can be told
+        # apart; a plain "/query" key answers both.
+        rc, out = self.results.get(" ".join(argv[1:3]),
+                                   self.results.get(argv[1], (0, "")))
+        return subprocess.CompletedProcess(argv, rc, out, "ERROR: denied\n")
+
+
+# What ``text=True`` raises for bytes the locale encoding cannot decode.
+UNDECODABLE = UnicodeDecodeError("cp1252", b"abc\x81", 3, 4,
+                                 "character maps to <undefined>")
+
+
+@pytest.fixture
+def on_linux(monkeypatch):
+    monkeypatch.setattr(cron_mod.platform, "system", lambda: "Linux")
+
+
+@pytest.fixture
+def on_windows(monkeypatch):
+    monkeypatch.setattr(cron_mod.platform, "system", lambda: "Windows")
+
+
+def _install(runner, **kwargs):
+    kwargs.setdefault("runtime_dir", "/opt/memanga")
+    kwargs.setdefault("python_path", "/usr/bin/python3")
+    return install_schedule(6, 0, runner=runner, **kwargs)
+
+
+@pytest.mark.usefixtures("on_linux")
+class TestCronService:
+    def test_install_keeps_unrelated_lines(self):
+        runner = FakeScheduler(f"{build_cron_line(15, 3, '/x', '/y')}\n{CRONTAB}")
+        result = _install(runner)
+
+        assert result.status is ScheduleStatus.INSTALLED and result.ok
+        assert not result.windows
+        assert result.entries == (MANAGED,)
+        assert runner.written == f"{CRONTAB}{MANAGED}\n"
+        assert result.unmanaged == tuple(unmanaged_memanga_lines(CRONTAB))
+
+    def test_install_without_crontab(self):
+        runner = FakeScheduler()
+        assert _install(runner).status is ScheduleStatus.INSTALLED
+        assert runner.written == f"{MANAGED}\n"
+
+    def test_install_passes_paths_to_builder(self):
+        runner = FakeScheduler("")
+        result = _install(runner, config_dir="/srv/My cfg",
+                          source_root="/src/My Checkout")
+        assert result.entries == (build_cron_line(
+            0, 6, "/opt/memanga", "/usr/bin/python3",
+            config_dir="/srv/My cfg", source_root="/src/My Checkout"),)
+
+    def test_install_refuses_unreadable_crontab(self):
+        runner = FakeScheduler("", read_rc=1,
+                               read_err="crontab: Permission denied\n")
+        result = _install(runner)
+
+        assert result.status is ScheduleStatus.UNREADABLE and not result.ok
+        assert result.detail == "crontab: Permission denied"
+        assert runner.written is None
+
+    def test_install_write_failure(self):
+        runner = FakeScheduler(CRONTAB, write_rc=1)
+        result = _install(runner)
+        assert result.status is ScheduleStatus.FAILED
+        assert result.detail == "denied"
+
+    def test_missing_crontab_binary_is_a_result(self):
+        runner = FakeScheduler(error=FileNotFoundError("crontab"))
+        assert _install(runner).status is ScheduleStatus.UNREADABLE
+        assert remove_schedule(runner=runner).status is ScheduleStatus.UNREADABLE
+        assert schedule_status(runner=runner).status is ScheduleStatus.UNREADABLE
+
+    def test_timeout_is_a_result(self):
+        runner = FakeScheduler(
+            error=subprocess.TimeoutExpired(["crontab", "-l"], SCHEDULER_TIMEOUT))
+        result = schedule_status(runner=runner)
+        assert result.status is ScheduleStatus.UNREADABLE
+        assert "timed out" in result.detail
+
+    def test_undecodable_crontab_is_never_rewritten(self):
+        """A crontab line in another encoding makes ``crontab -l`` output
+        undecodable: report it, never write a crontab rebuilt without it."""
+        runner = FakeScheduler(error=UNDECODABLE)
+        for result in (_install(runner), remove_schedule(runner=runner),
+                       schedule_status(runner=runner)):
+            assert result.status is ScheduleStatus.UNREADABLE
+            assert result.detail == (
+                "output is not valid cp1252 text "
+                "(character maps to <undefined> at byte 3)")
+        assert runner.written is None and not runner.deleted
+
+    def test_unencodable_crontab_write_fails(self):
+        class EncodeFails(FakeScheduler):
+            def __call__(self, argv, **kwargs):
+                if argv == ["crontab", "-"]:
+                    raise UnicodeEncodeError("ascii", "é", 0, 1,
+                                             "ordinal not in range(128)")
+                return super().__call__(argv, **kwargs)
+
+        result = _install(EncodeFails(CRONTAB))
+        assert result.status is ScheduleStatus.FAILED
+        assert result.detail == (
+            "text cannot be written as ascii (ordinal not in range(128))")
+
+    def test_every_call_is_bounded(self):
+        runner = FakeScheduler(f"{MANAGED}\n")
+        _install(runner)
+        remove_schedule(runner=runner)
+        schedule_status(runner=runner)
+        for _, kwargs in runner.calls:
+            assert kwargs["timeout"] == SCHEDULER_TIMEOUT
+            assert kwargs["capture_output"] and kwargs["text"]
+
+    def test_remove_drops_only_managed_line(self):
+        runner = FakeScheduler(CRONTAB.replace("\n\n", f"\n{MANAGED}\n\n", 1))
+        result = remove_schedule(runner=runner)
+
+        assert result.status is ScheduleStatus.REMOVED
+        assert result.entries == (MANAGED,)
+        assert runner.written == CRONTAB
+        assert not runner.deleted
+
+    def test_remove_last_line_deletes_crontab(self):
+        runner = FakeScheduler(f"\n{MANAGED}\n")
+        assert remove_schedule(runner=runner).status is ScheduleStatus.REMOVED
+        assert runner.deleted and runner.written is None
+
+    def test_remove_without_managed_line_writes_nothing(self):
+        runner = FakeScheduler(CRONTAB)
+        result = remove_schedule(runner=runner)
+
+        assert result.status is ScheduleStatus.NOT_FOUND and result.ok
+        assert result.unmanaged == tuple(unmanaged_memanga_lines(CRONTAB))
+        assert runner.written is None and not runner.deleted
+
+    def test_remove_refuses_unreadable_crontab(self):
+        runner = FakeScheduler("", read_rc=1, read_err="Permission denied")
+        assert remove_schedule(runner=runner).status is ScheduleStatus.UNREADABLE
+        assert runner.written is None and not runner.deleted
+
+    def test_remove_write_failure(self):
+        runner = FakeScheduler(f"{MANAGED}\n", write_rc=1)
+        assert remove_schedule(runner=runner).status is ScheduleStatus.FAILED
+
+    def test_status(self):
+        found = schedule_status(runner=FakeScheduler(f"{CRONTAB}{MANAGED}\n"))
+        assert found.status is ScheduleStatus.INSTALLED
+        assert found.entries == (MANAGED,)
+
+        missing = schedule_status(runner=FakeScheduler(CRONTAB))
+        assert missing.status is ScheduleStatus.NOT_FOUND
+        assert missing.unmanaged
+
+        none = schedule_status(runner=FakeScheduler())
+        assert none.status is ScheduleStatus.NOT_FOUND
+
+    def test_defaults_to_subprocess_run(self, monkeypatch):
+        runner = FakeScheduler(f"{MANAGED}\n")
+        monkeypatch.setattr(cron_mod.subprocess, "run", runner)
+        assert schedule_status().status is ScheduleStatus.INSTALLED
+        assert runner.calls
+
+
+@pytest.mark.usefixtures("on_windows")
+class TestTaskSchedulerService:
+    def test_install_creates_task(self):
+        runner = FakeScheduler()
+        result = install_schedule(6, 5, runtime_dir="C:/cfg",
+                                  python_path=r"C:\Py\python.exe",
+                                  config_dir=r"D:\My cfg", runner=runner)
+
+        assert result.status is ScheduleStatus.INSTALLED and result.windows
+        command = build_task_command(r"C:\Py\python.exe", r"D:\My cfg")
+        assert result.entries == (command,)
+        argvs = [argv for argv, _ in runner.calls]
+        assert argvs == [
+            ["schtasks", "/create", "/tn", WINDOWS_TASK_NAME, "/tr", command,
+             "/sc", "daily", "/st", "06:05", "/f"],
+        ]
+
+    def test_install_failure_keeps_existing_task(self):
+        """A failed reinstall must not have deleted the task it replaces:
+        /create /f overwrites in place, nothing is deleted first."""
+        runner = FakeScheduler(results={"/create": (1, ""),
+                                        "/query": (0, self.OWN_TASK)})
+        result = install_schedule(6, 0, runtime_dir="C:/cfg", runner=runner)
+        assert result.status is ScheduleStatus.FAILED
+        assert result.detail == "ERROR: denied"
+        assert [argv[1] for argv, _ in runner.calls] == ["/create"]
+
+    def test_install_timeout_deletes_nothing(self):
+        runner = FakeScheduler(error=subprocess.TimeoutExpired(
+            ["schtasks", "/create"], SCHEDULER_TIMEOUT))
+        result = install_schedule(6, 0, runtime_dir="C:/cfg", runner=runner)
+        assert result.status is ScheduleStatus.FAILED
+        assert [argv[1] for argv, _ in runner.calls] == ["/create"]
+
+    def test_remove(self):
+        runner = FakeScheduler()
+        assert remove_schedule(runner=runner).status is ScheduleStatus.REMOVED
+        assert [argv[1] for argv, _ in runner.calls] == ["/delete"]
+
+    OTHER_TASKS = ('"\\Backup","10/26/2026 2:30:00 AM","Ready"\n'
+                   '"\\Sub\\MeManga_AutoCheck","N/A","Ready"\n')
+    OWN_TASK = f'"\\{WINDOWS_TASK_NAME}","10/26/2026 6:00:00 AM","Ready"\n'
+
+    def test_remove_missing_task(self):
+        """The task list was read and does not have the task."""
+        runner = FakeScheduler(results={"/delete": (1, ""),
+                                        "/query": (0, self.OTHER_TASKS)})
+        assert remove_schedule(runner=runner).status is ScheduleStatus.NOT_FOUND
+        assert [argv for argv, _ in runner.calls][1] == [
+            "schtasks", "/query", "/fo", "csv", "/nh"]
+
+    def test_remove_failure_with_task_present(self):
+        runner = FakeScheduler(results={
+            "/delete": (1, ""), "/query": (0, self.OTHER_TASKS + self.OWN_TASK)})
+        result = remove_schedule(runner=runner)
+        assert result.status is ScheduleStatus.FAILED
+        assert result.detail == "ERROR: denied"
+
+    def test_remove_with_unreadable_task_list_fails_safe(self):
+        """Delete and query both denied, or the scheduler unavailable: a
+        failed query is no proof the task is gone."""
+        runner = FakeScheduler(results={"/delete": (1, ""), "/query": (1, "")})
+        result = remove_schedule(runner=runner)
+        assert result.status is ScheduleStatus.FAILED and not result.ok
+        assert result.detail == "ERROR: denied"
+
+    def test_remove_with_failing_query_call_fails_safe(self):
+        class QueryUnavailable(FakeScheduler):
+            def __call__(self, argv, **kwargs):
+                if argv[1] == "/query":
+                    raise subprocess.TimeoutExpired(argv, SCHEDULER_TIMEOUT)
+                return super().__call__(argv, **kwargs)
+
+        runner = QueryUnavailable(results={"/delete": (1, "")})
+        assert remove_schedule(runner=runner).status is ScheduleStatus.FAILED
+
+    def test_status_queries_task_by_name(self):
+        out = "\nFolder: \\\nTaskName  Next Run Time  Status\n"
+        runner = FakeScheduler(results={"/query /tn": (0, out)})
+        found = schedule_status(runner=runner)
+        assert found.status is ScheduleStatus.INSTALLED
+        assert found.entries == ("Folder: \\", "TaskName  Next Run Time  Status")
+        assert [argv for argv, _ in runner.calls] == [
+            ["schtasks", "/query", "/tn", WINDOWS_TASK_NAME]]
+
+    def test_status_falls_back_to_task_list(self):
+        runner = FakeScheduler(results={
+            "/query /tn": (1, ""),
+            "/query /fo": (0, self.OTHER_TASKS + self.OWN_TASK)})
+        found = schedule_status(runner=runner)
+        assert found.status is ScheduleStatus.INSTALLED
+        assert found.entries == (
+            f"\\{WINDOWS_TASK_NAME}  10/26/2026 6:00:00 AM  Ready",)
+        assert [argv for argv, _ in runner.calls][1] == [
+            "schtasks", "/query", "/fo", "csv", "/nh"]
+
+    def test_status_absent_task(self):
+        """The name query failed and the task list, read successfully,
+        does not have the root task."""
+        missing = schedule_status(runner=FakeScheduler(results={
+            "/query /tn": (1, ""), "/query /fo": (0, self.OTHER_TASKS)}))
+        assert missing.status is ScheduleStatus.NOT_FOUND and missing.ok
+
+        empty = schedule_status(runner=FakeScheduler(results={
+            "/query /tn": (1, ""), "/query /fo": (
+                0, "INFO: There are no scheduled tasks presently available.\n")}))
+        assert empty.status is ScheduleStatus.NOT_FOUND
+
+    def test_status_inaccessible_task_list_is_unreadable(self):
+        """Access denied or an unavailable scheduler is never "no task"."""
+        result = schedule_status(
+            runner=FakeScheduler(results={"/query": (1, "")}))
+        assert result.status is ScheduleStatus.UNREADABLE and not result.ok
+        assert result.detail == "ERROR: denied"
+
+    def test_status_query_timeout_is_unreadable(self):
+        runner = FakeScheduler(error=subprocess.TimeoutExpired(
+            ["schtasks", "/query"], SCHEDULER_TIMEOUT))
+        result = schedule_status(runner=runner)
+        assert result.status is ScheduleStatus.UNREADABLE
+        assert "timed out" in result.detail
+        # A hung scheduler is not asked a second time.
+        assert len(runner.calls) == 1
+
+    def test_missing_schtasks_is_a_result(self):
+        runner = FakeScheduler(error=FileNotFoundError("schtasks"))
+        assert install_schedule(6, 0, runtime_dir="C:/cfg",
+                                runner=runner).status is ScheduleStatus.FAILED
+        assert remove_schedule(runner=runner).status is ScheduleStatus.FAILED
+        assert schedule_status(runner=runner).status is ScheduleStatus.UNREADABLE
+
+    def test_undecodable_output_is_a_result(self):
+        """``text=True`` decoding can raise UnicodeDecodeError (a
+        ValueError, not an OSError); it must not escape the service."""
+        runner = FakeScheduler(error=UNDECODABLE)
+        assert install_schedule(6, 0, runtime_dir="C:/cfg",
+                                runner=runner).status is ScheduleStatus.FAILED
+        assert remove_schedule(runner=runner).status is ScheduleStatus.FAILED
+        result = schedule_status(runner=runner)
+        assert result.status is ScheduleStatus.UNREADABLE
+        assert "not valid cp1252 text" in result.detail
+
+        class DeleteThenUndecodable(FakeScheduler):
+            def __call__(self, argv, **kwargs):
+                if argv[1] == "/query":
+                    raise UNDECODABLE
+                return super().__call__(argv, **kwargs)
+
+        runner = DeleteThenUndecodable(results={"/delete": (1, "")})
+        assert remove_schedule(runner=runner).status is ScheduleStatus.FAILED

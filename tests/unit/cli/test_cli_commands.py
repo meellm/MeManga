@@ -2875,35 +2875,31 @@ class TestSearchCommand:
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _capture_crontab(monkeypatch, existing=None):
+def _capture_crontab(monkeypatch, existing=None, write_rc=0):
     """Fake a crontab on Linux (empty, or ``existing`` text); return the
     dict that receives the text `cron install` submits under
-    ``"crontab"`` and records a `crontab -r` under ``"removed"``."""
+    ``"crontab"`` and records a `crontab -r` under ``"removed"``.
+    Writes exit with ``write_rc``."""
     from memanga import cli
 
     submitted = {}
 
-    def _run(argv, *a, **k):
+    def _run(argv, *a, input=None, **k):
+        if argv == ["crontab", "-"]:
+            submitted["crontab"] = input
+            return types.SimpleNamespace(returncode=write_rc, stdout="",
+                                         stderr="")
         if argv == ["crontab", "-r"]:
             submitted["removed"] = True
+            return types.SimpleNamespace(returncode=write_rc, stdout="",
+                                         stderr="")
         if existing is None:
             return types.SimpleNamespace(returncode=1, stdout="",
                                          stderr="no crontab for tester\n")
         return types.SimpleNamespace(returncode=0, stdout=existing, stderr="")
 
-    class _FakePopen:
-        returncode = 0
-
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def communicate(self, input=None):
-            submitted["crontab"] = input
-            return ("", "")
-
-    monkeypatch.setattr(cli.platform, "system", lambda: "Linux")
+    monkeypatch.setattr("memanga.cron.platform.system", lambda: "Linux")
     monkeypatch.setattr(cli.subprocess, "run", _run)
-    monkeypatch.setattr(cli.subprocess, "Popen", _FakePopen)
     return submitted
 
 
@@ -3022,7 +3018,7 @@ class TestCronCommand:
             calls.append(argv)
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Windows")
         monkeypatch.setattr(cli.subprocess, "run", _run)
         monkeypatch.setattr(sys, "argv", [
             "memanga", "--config-dir", str(root),
@@ -3084,7 +3080,7 @@ class TestCronCommand:
             calls.append(argv)
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Windows")
         monkeypatch.setattr(cli.subprocess, "run", _run)
         monkeypatch.setattr(sys, "argv",
                             ["memanga", "cron", "install", "--time", "06:00"])
@@ -3191,19 +3187,8 @@ class TestCronOwnership:
 
         config.set("cron.enabled", True)
         config.save()
-        submitted = _capture_crontab(monkeypatch, f"{_USER_CRONTAB}{self._managed()}\n")
-
-        class _FailingPopen:
-            returncode = 1
-
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def communicate(self, input=None):
-                submitted["crontab"] = input
-                return ("", "")
-
-        monkeypatch.setattr(cli.subprocess, "Popen", _FailingPopen)
+        _capture_crontab(monkeypatch, f"{_USER_CRONTAB}{self._managed()}\n",
+                         write_rc=1)
         assert run_cli("cron", "remove") == 1
         assert config.get("cron.enabled") is True
 
@@ -3211,6 +3196,207 @@ class TestCronOwnership:
         _capture_crontab(monkeypatch, f"{_USER_CRONTAB}{self._managed()}\n")
         run_cli("cron", "status")
         assert "Cron job is installed" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("action", ["status", "remove"])
+    def test_unreadable_crontab_is_an_error(self, run_cli, monkeypatch,
+                                            config, capsys, action):
+        """#297: status and remove share install's read check, so a
+        permission error is never reported as "no cron job"."""
+        from memanga import cli
+
+        config.set("cron.enabled", True)
+        config.save()
+        calls = []
+
+        def _run(argv, *a, **k):
+            calls.append(argv)
+            return types.SimpleNamespace(returncode=1, stdout="",
+                                         stderr="crontab: Permission denied\n")
+
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Linux")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        assert run_cli("cron", action) == 1
+
+        assert ["crontab", "-l"] in calls
+        assert ["crontab", "-"] not in calls
+        assert ["crontab", "-r"] not in calls
+        assert config.get("cron.enabled") is True
+        err = capsys.readouterr().err
+        assert "Could not read" in err
+        assert "Permission denied" in err
+
+    def test_undecodable_crontab_is_an_error(self, run_cli, monkeypatch,
+                                             config, capsys):
+        """#297: undecodable `crontab -l` output is reported, not a
+        traceback, and nothing is written."""
+        from memanga import cli
+
+        calls = []
+
+        def _run(argv, *a, **k):
+            calls.append(argv)
+            if argv[:1] == ["crontab"]:
+                raise UnicodeDecodeError("utf-8", b"\xe9", 0, 1,
+                                         "invalid continuation byte")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Linux")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        assert run_cli("cron", "install", "--time", "06:00") == 1
+
+        assert ["crontab", "-"] not in calls
+        assert not config.get("cron.enabled")
+        err = capsys.readouterr().err
+        assert "Could not read the current crontab" in err
+        assert "not valid utf-8 text" in err
+
+    @pytest.mark.parametrize("time_str", ["24:00", "06:60", "6", "aa:bb"])
+    def test_install_rejects_invalid_time(self, run_cli, monkeypatch, config,
+                                          capsys, time_str):
+        """#297: the CLI uses the same HH:MM check as the Settings page."""
+        submitted = _capture_crontab(monkeypatch, _USER_CRONTAB)
+        assert run_cli("cron", "install", "--time", time_str) == 1
+
+        assert submitted == {}
+        assert not config.get("cron.enabled")
+        assert "Invalid time format" in capsys.readouterr().err
+
+
+class TestCronWindows:
+    """#297: Task Scheduler results come from the shared service."""
+
+    @staticmethod
+    def _fake_schtasks(monkeypatch, delete_rc=0, create_rc=0, tn_rc=0,
+                       tn_out="", query_rc=0, listing=""):
+        """Fake schtasks. ``tn_*`` answer ``/query /tn`` (by name);
+        ``query_rc``/``listing`` the CSV task list ``/query /fo csv``."""
+        from memanga import cli
+
+        calls = []
+
+        def _run(argv, *a, **k):
+            if argv[:1] == ["schtasks"]:
+                calls.append(argv[:2])
+            if argv[:3] == ["schtasks", "/query", "/tn"]:
+                rc, stdout = tn_rc, tn_out
+            elif argv[:2] == ["schtasks", "/query"]:
+                rc, stdout = query_rc, listing
+            else:
+                rc = {("schtasks", "/delete"): delete_rc,
+                      ("schtasks", "/create"): create_rc}.get(tuple(argv[:2]), 0)
+                stdout = ""
+            return types.SimpleNamespace(returncode=rc, stdout=stdout,
+                                         stderr="ERROR: Access is denied.\n")
+
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Windows")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        return calls
+
+    def test_install_pads_start_time(self, run_cli, monkeypatch, config):
+        from memanga import cli
+
+        calls = []
+
+        def _run(argv, *a, **k):
+            calls.append(argv)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Windows")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        assert run_cli("cron", "install", "--time", "6:5") == 0
+
+        create, = [c for c in calls if c[1] == "/create"]
+        assert create[create.index("/st") + 1] == "06:05"
+        assert config.get("cron.enabled") is True
+
+    def test_failed_reinstall_keeps_task_and_config(self, run_cli, monkeypatch,
+                                                    config, capsys):
+        """#297: a failed /create must not follow a /delete, and the
+        existing schedule settings stay as they were."""
+        config.set("cron.enabled", True)
+        config.set("cron.time", "05:15")
+        config.save()
+        calls = self._fake_schtasks(monkeypatch, create_rc=1)
+        assert run_cli("cron", "install", "--time", "06:30") == 1
+
+        assert calls == [["schtasks", "/create"]]
+        assert config.get("cron.enabled") is True
+        assert config.get("cron.time") == "05:15"
+        assert "Failed to create scheduled task" in capsys.readouterr().err
+
+    def test_remove_disables_config(self, run_cli, monkeypatch, config,
+                                    capsys):
+        config.set("cron.enabled", True)
+        config.save()
+        self._fake_schtasks(monkeypatch, delete_rc=0)
+        assert run_cli("cron", "remove") == 0
+
+        assert config.get("cron.enabled") is False
+        assert "Scheduled task removed" in capsys.readouterr().out
+
+    def test_remove_missing_task_keeps_config(self, run_cli, monkeypatch,
+                                              config, capsys):
+        config.set("cron.enabled", True)
+        config.save()
+        calls = self._fake_schtasks(
+            monkeypatch, delete_rc=1,
+            listing='"\\Backup","10/26/2026 2:30:00 AM","Ready"\n')
+        assert run_cli("cron", "remove") == 0
+
+        assert calls == [["schtasks", "/delete"], ["schtasks", "/query"]]
+        assert config.get("cron.enabled") is True
+        assert "No MeManga scheduled task found" in capsys.readouterr().out
+
+    def test_remove_failure_with_task_present_is_an_error(
+            self, run_cli, monkeypatch, config, capsys):
+        config.set("cron.enabled", True)
+        config.save()
+        self._fake_schtasks(monkeypatch, delete_rc=1,
+                            listing='"\\MeManga_AutoCheck","N/A","Ready"\n')
+        assert run_cli("cron", "remove") == 1
+
+        assert config.get("cron.enabled") is True
+        err = capsys.readouterr().err
+        assert "Failed to remove scheduled task" in err
+        assert "Access is denied" in err
+
+    def test_remove_with_unreadable_task_list_keeps_config(
+            self, run_cli, monkeypatch, config, capsys):
+        """Delete and query both denied: no proof the task is gone, so it
+        is an error and cron.enabled stays on."""
+        config.set("cron.enabled", True)
+        config.save()
+        self._fake_schtasks(monkeypatch, delete_rc=1, query_rc=1)
+        assert run_cli("cron", "remove") == 1
+
+        assert config.get("cron.enabled") is True
+        assert "Failed to remove scheduled task" in capsys.readouterr().err
+
+    def test_status_installed(self, run_cli, monkeypatch, capsys):
+        calls = self._fake_schtasks(
+            monkeypatch, tn_out="TaskName  Next Run Time  Status\n"
+                                "MeManga_AutoCheck  N/A  Ready\n")
+        assert run_cli("cron", "status") == 0
+        assert calls == [["schtasks", "/query"]]
+        out = capsys.readouterr().out
+        assert "Scheduled task is installed" in out
+        assert "MeManga_AutoCheck  N/A  Ready" in out
+
+    def test_status_absent(self, run_cli, monkeypatch, capsys):
+        self._fake_schtasks(
+            monkeypatch, tn_rc=1, listing='"\\Backup","N/A","Ready"\n')
+        assert run_cli("cron", "status") == 0
+        assert "No scheduled task found" in capsys.readouterr().out
+
+    def test_status_unreadable_task_list_is_an_error(self, run_cli,
+                                                     monkeypatch, capsys):
+        """#297: a denied or failing query is never shown as "no task"."""
+        self._fake_schtasks(monkeypatch, tn_rc=1, query_rc=1)
+        assert run_cli("cron", "status") == 1
+        captured = capsys.readouterr()
+        assert "No scheduled task found" not in captured.out
+        assert "Could not query the scheduled task" in captured.err
+        assert "Access is denied" in captured.err
 
 
 # ─────────────────────────────────────────────────────────────────────────

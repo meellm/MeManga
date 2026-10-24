@@ -4,9 +4,7 @@ Settings page - Tabbed: General, Email, Advanced, About.
 
 import json
 import logging
-import platform
 import subprocess
-import sys
 import threading
 from datetime import datetime
 from PySide6.QtWidgets import (
@@ -22,15 +20,21 @@ from .. import theme as T
 from ... import doctor
 from ..components.error_details import detail_tooltip, notify_error, summarize_error
 from ..components.toast import Toast
+from .._subprocess import no_window_kwargs
 from ...backup import EXPORT_VERSION, BackupVersionError, validate_backup
 from ...emailer import kindle_format_error
-from ...cron import (build_cron_line, build_task_command, managed_lines,
-                     read_crontab,
-                     remove_managed_lines, replace_managed_line,
-                     scheduled_checks_supported, source_checkout_root,
-                     unmanaged_memanga_lines)
+from ...cron import (ScheduleStatus, install_schedule, parse_schedule_time,
+                     remove_schedule, schedule_status,
+                     scheduled_checks_supported, source_checkout_root)
 
 logger = logging.getLogger(__name__)
+
+
+def _run_scheduler(argv, **kwargs):
+    """Run a crontab/schtasks command for the shared scheduler service
+    without flashing a console window from the windowed release exe."""
+    return subprocess.run(argv, **kwargs, **no_window_kwargs())
+
 
 # Shown instead of installing a scheduled check from the desktop app
 # (issues #324, #336).
@@ -1114,14 +1118,7 @@ class SettingsPage(BasePage):
             self._dir_entry.setText(path)
 
     def _validate_time(self, time_str):
-        try:
-            parts = time_str.strip().split(":")
-            if len(parts) != 2:
-                return False
-            h, m = int(parts[0]), int(parts[1])
-            return 0 <= h <= 23 and 0 <= m <= 59
-        except (ValueError, IndexError):
-            return False
+        return parse_schedule_time(time_str) is not None
 
     def _style_preview_frame(self):
         """Apply theme colors to the filename preview frame + its label.
@@ -1509,15 +1506,51 @@ class SettingsPage(BasePage):
                   kind="info")
             return
         cron_time = self._cron_time.text().strip()
-        if not self._validate_time(cron_time):
+        parsed = parse_schedule_time(cron_time)
+        if parsed is None:
             Toast(self, "Invalid time", kind="error")
             return
-        hour, minute = cron_time.split(":")
+        hour, minute = parsed
 
-        if platform.system() == "Windows":
-            self._install_cron_windows(cron_time)
+        # Issue #232: run the current interpreter and log to the config
+        # root, never into the package install directory.
+        result = install_schedule(
+            hour, minute, runtime_dir=self.app.config.config_dir,
+            config_dir=self._explicit_config_dir(),
+            source_root=source_checkout_root(), runner=_run_scheduler)
+        if result.status is ScheduleStatus.UNREADABLE:
+            # Issue #231: never overwrite a crontab we could not read.
+            self._unreadable_scheduler_toast(result)
+            return
+        if not result.ok:
+            self._error_toast("Task setup failed" if result.windows
+                              else "Cron setup failed", result.detail)
+            return
+
+        label = "Task" if result.windows else "Cron"
+        try:
+            self.app.config.set("cron.enabled", True)
+            self.app.config.set("cron.time", cron_time)
+            self.app.config.save()
+        except Exception as e:
+            # The scheduled check is already in place; only remembering
+            # it in config.yaml failed, so say exactly that.
+            self._error_toast(f"{label} installed, but its settings could "
+                              "not be saved", e)
+            return
+        if result.unmanaged:
+            Toast(self, "Cron set; an older MeManga cron line is still "
+                  "there, remove it with crontab -e", kind="warning",
+                  duration=6000)
         else:
-            self._install_cron_unix(hour, minute)
+            Toast(self, f"{label}: daily at {cron_time}", kind="success")
+
+    def _unreadable_scheduler_toast(self, result):
+        """Nothing was changed because the scheduler could not be read;
+        the reason goes to Notifications (issue #342)."""
+        what = "scheduled tasks" if result.windows else "crontab"
+        self._error_toast(f"Could not read {what}; nothing changed",
+                          result.detail)
 
     def _explicit_config_dir(self):
         """The --config-dir / $MEMANGA_CONFIG_DIR choice the window runs
@@ -1525,106 +1558,24 @@ class SettingsPage(BasePage):
         does (issue #221); None keeps the default location."""
         return getattr(self.app, "explicit_config_dir", None)
 
-    def _install_cron_unix(self, hour, minute):
-        # Issue #232: run the current interpreter and log to the config
-        # root, never into the package install directory.
-        cron_cmd = build_cron_line(minute, hour, self.app.config.config_dir,
-                                   sys.executable,
-                                   config_dir=self._explicit_config_dir(),
-                                   source_root=source_checkout_root())
-        try:
-            result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-            existing = read_crontab(result)
-            if existing is None:
-                # Issue #231: never overwrite a crontab we could not read.
-                Toast(self, "Could not read crontab; nothing changed", kind="error")
-                return
-            # Issue #231: only the managed line is replaced.
-            proc = subprocess.run(
-                ["crontab", "-"], input=replace_managed_line(existing, cron_cmd),
-                capture_output=True, text=True
-            )
-            if proc.returncode == 0:
-                self.app.config.set("cron.enabled", True)
-                self.app.config.set("cron.time", f"{hour}:{minute}")
-                self.app.config.save()
-                if unmanaged_memanga_lines(existing):
-                    Toast(self, "Cron set; an older MeManga cron line is still "
-                          "there, remove it with crontab -e", kind="warning",
-                          duration=6000)
-                else:
-                    Toast(self, f"Cron: daily at {hour}:{minute}", kind="success")
-            else:
-                self._error_toast("Cron setup failed", proc.stderr)
-        except Exception as e:
-            self._error_toast("Cron setup failed", e)
-
-    def _install_cron_windows(self, cron_time):
-        from .._subprocess import no_window_kwargs
-        task_name = "MeManga_AutoCheck"
-        # Issue #232: the running interpreter, not a checkout-local venv.
-        cmd = build_task_command(sys.executable,
-                                 config_dir=self._explicit_config_dir(),
-                                 source_root=source_checkout_root())
-        try:
-            # no_window_kwargs(): release exe is console=False, so any
-            # naked subprocess.run() would flash a black cmd box for a
-            # frame. schtasks runs headless on a normal admin install,
-            # but we still want zero visual noise.
-            subprocess.run(
-                ["schtasks", "/Delete", "/TN", task_name, "/F"],
-                capture_output=True, text=True, **no_window_kwargs(),
-            )
-            result = subprocess.run(
-                ["schtasks", "/Create", "/TN", task_name, "/SC", "DAILY",
-                 "/ST", cron_time, "/TR", cmd, "/F"],
-                capture_output=True, text=True, **no_window_kwargs(),
-            )
-            if result.returncode == 0:
-                self.app.config.set("cron.enabled", True)
-                self.app.config.set("cron.time", cron_time)
-                self.app.config.save()
-                Toast(self, f"Task: daily at {cron_time}", kind="success")
-            else:
-                self._error_toast("Task setup failed", result.stderr)
-        except Exception as e:
-            self._error_toast("Task setup failed", e)
-
     def _remove_cron(self):
-        if platform.system() == "Windows":
-            from .._subprocess import no_window_kwargs
-            try:
-                subprocess.run(
-                    ["schtasks", "/Delete", "/TN", "MeManga_AutoCheck", "/F"],
-                    capture_output=True, text=True, **no_window_kwargs(),
-                )
-                Toast(self, "Task removed", kind="success")
-            except Exception:
-                Toast(self, "Failed", kind="error")
-        else:
-            try:
-                result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-                existing = result.stdout if result.returncode == 0 else ""
-                # Issue #231: only the managed line is removed; the
-                # crontab is not rewritten when there is none.
-                new_crontab, removed = remove_managed_lines(existing)
-                if removed:
-                    proc = subprocess.run(
-                        ["crontab", "-"], input=new_crontab,
-                        capture_output=True, text=True,
-                    )
-                    if proc.returncode != 0:
-                        self._error_toast("Cron removal failed", proc.stderr)
-                        return
-                    Toast(self, "Cron removed", kind="success")
-                else:
-                    # Nothing MeManga owns was removed: keep config as-is,
-                    # like `memanga cron remove`.
-                    Toast(self, "No managed cron found", kind="info")
-                    return
-            except Exception:
-                Toast(self, "Failed", kind="error")
-                return
+        result = remove_schedule(runner=_run_scheduler)
+        if result.status is ScheduleStatus.UNREADABLE:
+            self._unreadable_scheduler_toast(result)
+            return
+        if result.status is ScheduleStatus.FAILED:
+            self._error_toast("Task removal failed" if result.windows
+                              else "Cron removal failed", result.detail)
+            return
+        if result.status is ScheduleStatus.NOT_FOUND:
+            # Nothing MeManga owns was removed: keep config as-is,
+            # like `memanga cron remove`.
+            Toast(self, "No scheduled task found" if result.windows
+                  else "No managed cron found", kind="info")
+            return
+
+        Toast(self, "Task removed" if result.windows else "Cron removed",
+              kind="success")
         self.app.config.set("cron.enabled", False)
         self.app.config.save()
         if not scheduled_checks_supported():
@@ -1633,30 +1584,19 @@ class SettingsPage(BasePage):
             self._cron_check.setChecked(False)
 
     def _check_cron_status(self):
-        if platform.system() == "Windows":
-            from .._subprocess import no_window_kwargs
-            try:
-                result = subprocess.run(
-                    ["schtasks", "/Query", "/TN", "MeManga_AutoCheck"],
-                    capture_output=True, text=True, **no_window_kwargs(),
-                )
-                text = "Task installed" if result.returncode == 0 else "No task found"
-                color = T.SUCCESS if result.returncode == 0 else T.WARNING
-            except Exception:
-                text, color = "Check failed", T.ERROR
+        result = schedule_status(runner=_run_scheduler)
+        if result.status is ScheduleStatus.INSTALLED:
+            text = "Task installed" if result.windows else "Cron installed"
+            color = T.SUCCESS
+        elif result.status is ScheduleStatus.NOT_FOUND:
+            text = "No task found" if result.windows else "No cron found"
+            color = T.WARNING
         else:
-            try:
-                result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-                existing = result.stdout if result.returncode == 0 else ""
-                found = bool(managed_lines(existing))
-                text = "Cron installed" if found else "No cron found"
-                color = T.SUCCESS if found else T.WARNING
-                if unmanaged_memanga_lines(existing):
-                    # Issue #231: lines MeManga does not manage may still run.
-                    text += "; unmanaged MeManga line found, edit with crontab -e"
-                    color = T.WARNING
-            except Exception:
-                text, color = "Check failed", T.ERROR
+            text, color = "Check failed", T.ERROR
+        if result.unmanaged:
+            # Issue #231: lines MeManga does not manage may still run.
+            text += "; unmanaged MeManga line found, edit with crontab -e"
+            color = T.WARNING
         self._cron_status_label.setText(text)
         self._cron_status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {color};")
 
