@@ -618,6 +618,37 @@ class TestUpdatePolicyFields:
         assert run_cli("update", "Legacy", flag) == 0
         assert self._entry(config, "Legacy")["send_to_kindle"] is expected
 
+    def test_kindle_under_selected_scope(self, run_cli, config, seed):
+        # Issue #345: an entry without a choice is off under "selected",
+        # so --kindle turns it on.
+        config.set("email.kindle_scope", "selected")
+        seed(LEGACY)
+        assert run_cli("update", "Legacy", "--kindle") == 0
+        assert self._entry(config, "Legacy")["send_to_kindle"] is True
+
+    @pytest.mark.parametrize(("scope", "flag", "expected"), [
+        ("selected", "--no-kindle", False),
+        (None, "--kindle", True),
+        ("all", "--kindle", True),
+    ])
+    def test_kindle_choice_matching_the_scope_is_stored(
+            self, run_cli, config, seed, capsys, scope, flag, expected):
+        # Issue #345: the scope already gives this value, but the
+        # explicit choice is stored so it holds when the scope changes.
+        if scope is not None:
+            config.set("email.kindle_scope", scope)
+        seed(LEGACY)
+        assert run_cli("update", "Legacy", flag) == 0
+        assert self._entry(config, "Legacy")["send_to_kindle"] is expected
+        assert "Kindle →" in capsys.readouterr().out
+
+    def test_stored_kindle_choice_writes_nothing(self, run_cli, seed, capsys):
+        path = seed(dict(LEGACY, send_to_kindle=True))
+        before = path.read_bytes()
+        assert run_cli("update", "Legacy", "--kindle") == 0
+        assert "No changes" in capsys.readouterr().out
+        assert path.read_bytes() == before
+
     @pytest.mark.parametrize("days", [0, 7])
     def test_fallback_days_with_existing_backup(self, run_cli, config, seed, days):
         seed(MULTI)
@@ -744,7 +775,6 @@ class TestUpdatePolicyFields:
     @pytest.mark.parametrize("flags", [
         ("--status", "reading"),
         ("--mode", "auto"),
-        ("--kindle",),
         ("--no-backup",),
         ("--url", PRIMARY, "--title", "Legacy"),
     ])
@@ -1455,11 +1485,48 @@ class TestConfigActions:
         assert run_cli("config", "set", "delivery.output_format", "epub") == 0
         assert "Kindle" not in capsys.readouterr().err
 
+    def test_set_email_mode_chooses_selected_manga(self, run_cli, config,
+                                                   capsys):
+        # Issue #345: no one to ask, so only manga turned on are sent,
+        # and the output says how to send every manga.
+        assert config.get("email.kindle_scope") is None
+        assert run_cli("config", "set", "delivery.mode", "email") == 0
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        assert config.get("email.kindle_scope") == "selected"
+        assert "only manga with Kindle turned on" in output
+        assert "config set email.kindle_scope all" in output
+
+    def test_set_email_mode_keeps_a_chosen_scope(self, run_cli, config,
+                                                 capsys):
+        assert run_cli("config", "set", "email.kindle_scope", "all") == 0
+        assert run_cli("config", "set", "delivery.mode", "email") == 0
+        captured = capsys.readouterr()
+        assert config.get("email.kindle_scope") == "all"
+        assert ("every manga unless its Kindle toggle is off"
+                in captured.out + captured.err)
+
+    def test_set_email_mode_again_leaves_legacy_config_alone(
+            self, run_cli, config, capsys):
+        # A config already on email delivery keeps sending every manga.
+        config.set("delivery.mode", "email")
+        config.save()
+        assert run_cli("config", "set", "delivery.mode", "email") == 0
+        assert config.get("email.kindle_scope") is None
+        assert "kindle_scope" not in capsys.readouterr().out
+
+    def test_config_email_shows_the_scope(self, run_cli, config, capsys):
+        config.set("email.kindle_scope", "selected")
+        config.save()
+        assert run_cli("config", "email") == 0
+        assert "only manga with Kindle turned on" in capsys.readouterr().out
+
     @pytest.mark.parametrize("key,value", [
         ("delivery.output_format", "mobi"),
         ("email.smtp_port", "abc"),
         ("email.smtp_port", "0"),
         ("email.smtp_tls", "none"),
+        ("email.kindle_scope", "some"),
         ("partial_chapters.threshold_percent", "150"),
         ("delivery.mode", "fax"),
     ])
@@ -1569,6 +1636,53 @@ class TestConfigActions:
         assert "plain text" not in captured.err
         assert "wizard-pw" not in captured.out + captured.err
         assert keyring_store == {("memanga", "app_password"): "wizard-pw"}
+
+    def _run_wizard_email(self, run_cli, monkeypatch, scope_answer=None):
+        """Drive the `config` wizard to email mode; record the prompts.
+        ``scope_answer`` None takes the proposed default."""
+        from memanga import cli
+        prompts = []
+
+        def ask(prompt, *a, **k):
+            prompts.append((prompt, k.get("default")))
+            if prompt.startswith("Select mode"):
+                return "2"
+            if prompt.startswith("Send which manga") and scope_answer:
+                return scope_answer
+            return k.get("default", "")
+        monkeypatch.setattr(cli.Prompt, "ask", ask)
+        monkeypatch.setattr(cli.Confirm, "ask",
+                            lambda prompt, *a, **k: bool(k.get("default", False)))
+        assert run_cli("config") == 0
+        return dict(prompts)
+
+    def test_wizard_turning_email_on_proposes_selected(
+            self, run_cli, monkeypatch, capsys, config, tty):
+        # Issue #345: the library is not sent in full unless chosen.
+        config.set("manga", [
+            {"title": t, "source": "mangadex.org", "url": f"https://mangadex.org/t/{t}"}
+            for t in ("A", "B")])
+        config.save()
+        prompts = self._run_wizard_email(run_cli, monkeypatch)
+        assert prompts["Send which manga"] == "1"
+        assert config.get("email.kindle_scope") == "selected"
+        out = capsys.readouterr().out
+        assert "Your library has 2 manga" in out
+        assert "keeps that" in out
+
+    def test_wizard_can_choose_every_manga(self, run_cli, monkeypatch,
+                                           config, tty):
+        self._run_wizard_email(run_cli, monkeypatch, scope_answer="2")
+        assert config.get("email.kindle_scope") == "all"
+
+    def test_wizard_on_legacy_email_config_proposes_all(
+            self, run_cli, monkeypatch, config, tty):
+        # Pressing Enter keeps what a library on email delivery does now.
+        config.set("delivery.mode", "email")
+        config.save()
+        prompts = self._run_wizard_email(run_cli, monkeypatch)
+        assert prompts["Send which manga"] == "2"
+        assert config.get("email.kindle_scope") == "all"
 
     def test_set_secret_reports_unusable_override(self, run_cli, monkeypatch,
                                                   capsys, keyring_store, tmp_path):
@@ -1700,6 +1814,48 @@ class TestConfigActions:
         editor(returncode=3)
         assert run_cli("config", "edit") == 1
         assert "status 3" in capsys.readouterr().err
+
+    # Issue #345: turning email on by hand asks nothing, so it takes the
+    # safe choice; a config already on email is left as it was.
+
+    def test_edit_turning_email_on_chooses_selected(self, run_cli, config,
+                                                    capsys, editor):
+        editor("delivery:\n  mode: email\n")
+        assert run_cli("config", "edit") == 0
+        assert config.get("delivery.mode") == "email"
+        assert config.get("email.kindle_scope") == "selected"
+        assert ("only manga with Kindle turned on"
+                in capsys.readouterr().out)
+
+    @pytest.mark.parametrize("scope", ["all", "selected"])
+    def test_edit_turning_email_on_keeps_an_explicit_scope(
+            self, run_cli, config, capsys, editor, scope):
+        editor(f"delivery:\n  mode: email\nemail:\n  kindle_scope: {scope}\n")
+        assert run_cli("config", "edit") == 0
+        assert config.get("email.kindle_scope") == scope
+
+    def test_edit_of_email_config_leaves_scope_unset(self, run_cli, config,
+                                                     config_path, capsys,
+                                                     editor):
+        config.set("delivery.mode", "email")
+        config.save()
+        editor("delivery:\n  mode: email\n  output_format: epub\n")
+        assert run_cli("config", "edit") == 0
+        assert config.get("delivery.output_format") == "epub"
+        assert config.get("email.kindle_scope") is None
+        assert "kindle_scope" not in config_path.read_text(encoding="utf-8")
+        assert "Kindle delivery applies" not in capsys.readouterr().out
+
+    def test_edit_fixing_an_unreadable_config_leaves_scope_unset(
+            self, run_cli, config, config_path, editor):
+        # Its mode before the edit is unknown: it may already have been
+        # sending every manga.
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("delivery: [unclosed\n", encoding="utf-8")
+        editor("delivery:\n  mode: email\n")
+        assert run_cli("config", "edit") == 0
+        assert config.get("delivery.mode") == "email"
+        assert config.get("email.kindle_scope") is None
 
     # ── email ──
 
@@ -2031,6 +2187,26 @@ class TestExportImport:
         assert manga_state["Stateful"]["downloaded"] == ["1"]
         assert manga_state["stateful"]["downloaded"] == ["2"]
         assert manga_state["stateful"]["failed_chapters"]["5"]["error"] == "backup"
+
+    @pytest.mark.parametrize("replace", [False, True])
+    def test_import_keeps_delivery_settings_and_kindle_choices(
+            self, run_cli, config, tmp_path, replace):
+        # Issue #345: a backup holds manga and state, never settings, so
+        # an import cannot turn email on; manga keep their own choices.
+        backup = tmp_path / "x.json"
+        backup.write_text(json.dumps({"version": 1, "manga": [
+            {"title": "Off", "url": "https://mangadex.org/title/1/x",
+             "source": "mangadex.org", "send_to_kindle": False},
+            {"title": "On", "url": "https://mangadex.org/title/2/x",
+             "source": "mangadex.org", "send_to_kindle": True},
+        ]}))
+        args = ["import", str(backup)] + (["--replace", "--yes"] if replace else [])
+        assert run_cli(*args) == 0
+        assert config.get("delivery.mode") == "local"
+        assert config.get("email.kindle_scope") is None
+        choices = {m["title"]: m.get("send_to_kindle")
+                   for m in config.get("manga", [])}
+        assert choices == {"Off": False, "On": True}
 
     def test_import_roundtrip(self, run_cli, config, tmp_path):
         """An export produced by the CLI must import cleanly (issue #42)."""
@@ -3114,6 +3290,22 @@ class TestListJson:
         assert multi["backup_count"] == 1
 
 
+class TestListJsonKindleScope:
+    def test_selected_scope(self, run_cli, config, cli_state, capsys):
+        # Issue #345: an entry without its own choice follows the scope.
+        config.set("email.kindle_scope", "selected")
+        config.set("manga", [
+            {"title": "Unset", "source": "mangadex.org", "url": "https://mangadex.org/t/1"},
+            {"title": "On", "source": "mangadex.org", "url": "https://mangadex.org/t/2",
+             "send_to_kindle": True},
+        ])
+        config.save()
+        capsys.readouterr()
+        assert run_cli("list", "--json") == 0
+        unset, on = _stdout_json(capsys)["manga"]
+        assert (unset["send_to_kindle"], on["send_to_kindle"]) == (False, True)
+
+
 class TestListFilterSort:
     """Issue #346: list --status / --sort / --reverse and richer fields."""
 
@@ -4126,6 +4318,28 @@ class TestSendPending:
         assert run_cli("send", "--pending") == 0
 
         assert sorted(sent) == sorted(pending.values())
+
+    def test_untracked_title_is_not_sent_under_selected_scope(
+            self, run_cli, config, email, pending, sends, capsys):
+        """Issue #345: a manga no longer tracked was never turned on, so
+        with only chosen manga sent its record is kept, not sent."""
+        sent, _ = sends
+        # Read before setting: config.get() reloads from disk and would
+        # drop a set() that was not saved yet.
+        tracked = [dict(m, send_to_kindle=True) for m in config.get("manga")
+                   if m["title"] != "Berserk"]
+        config.set("email.kindle_scope", "selected")
+        config.set("manga", tracked)
+        config.save()
+        assert config.get("email.kindle_scope") == "selected"
+
+        assert run_cli("send", "--pending") == 0
+
+        assert sent == [pending["Vinland Saga"]]
+        assert list(_disk_state().failures.get_all_undelivered()) == ["Berserk"]
+        out = capsys.readouterr().out
+        assert "Skipped Berserk: not in the library" in out
+        assert "config set email.kindle_scope all" in out
 
     @pytest.mark.parametrize("resolve", [["send", "--pending"],
                                          ["send", "--pending", "--clear"]])

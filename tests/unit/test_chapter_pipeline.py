@@ -1116,6 +1116,24 @@ class TestPerMangaPolicy:
         assert pipeline.delivers_to_kindle(SINGLE)
         assert not pipeline.delivers_to_kindle({**SINGLE, "send_to_kindle": False})
 
+    def test_selected_scope_sends_only_manga_turned_on(
+            self, state, tmp_path, pdf):
+        # Issue #345: with "only manga I choose", a manga without its
+        # own choice is saved but not sent; one turned on is sent.
+        downloads = _Downloads({("primary.test", False): pdf})
+        sent = []
+        pipeline = _pipeline(state, tmp_path, downloads, sent=sent,
+                             delivery_mode="email",
+                             email=replace(EMAIL, kindle_scope="selected"))
+
+        assert pipeline.delivers_to_kindle()
+        assert not pipeline.delivers_to_kindle(SINGLE)
+        assert pipeline.delivers_to_kindle({**SINGLE, "send_to_kindle": True})
+        outcome = pipeline.process(SINGLE, _primary())
+        assert outcome.status is ChapterStatus.COMPLETE
+        assert outcome.delivery is DeliveryStatus.NOT_REQUESTED
+        assert sent == []
+
     def test_redeliver_skips_opted_out_manga_and_keeps_record(
             self, state, tmp_path, pdf):
         state.add_download_history(TITLE, "71", "pdf", str(pdf), 0.1)

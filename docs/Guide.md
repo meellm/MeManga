@@ -342,8 +342,8 @@ For daily checks, add a host cron entry from the repository directory:
 
 ### Kindle delivery
 
-Run `docker compose run --rm memanga config`, choose email delivery, and
-enter the Kindle/Gmail settings. Containers usually do not have a desktop
+Run `docker compose run --rm memanga config`, choose email delivery,
+enter the Kindle/Gmail settings, and choose which manga to send. Containers usually do not have a desktop
 keyring, so a password entered there is stored in plain text in the
 config volume (MeManga prints a warning with the file path); keep that
 volume private.
@@ -406,9 +406,11 @@ run add -t "Blue Lock" -u "https://mangadex.org/title/uuid-here" --status on-hol
 |------|--------|----------------------|
 | `--status` | `reading`, `on-hold`, `dropped`, `completed` | `reading` |
 | `--mode` | `auto`, `manual` | `auto` |
-| `--kindle` / `--no-kindle` | per-manga Kindle toggle on or off | on |
+| `--kindle` / `--no-kindle` | per-manga Kindle toggle on or off | follows `email.kindle_scope` |
 
-`--kindle` and `--no-kindle` cannot be combined. `--mode` and the Kindle
+`--kindle` and `--no-kindle` cannot be combined. Without either, the manga
+follows the choice of which manga to send (`email.kindle_scope`, see
+[Choose which manga are sent](#choose-which-manga-are-sent)). `--mode` and the Kindle
 toggle are the same per-manga settings shown on the desktop app's manga page,
 and the command line honors them the same way (the Kindle toggle only matters
 when email delivery is enabled). A `manual` manga is checked and its new
@@ -919,9 +921,32 @@ Delivery mode (local/email): email
 Kindle email: yourname@kindle.com
 Sender email: youremail@gmail.com
 App password: abcdefghijklmnop
+Send which manga: 1 (selected) or 2 (all)
 
 ✅ Configuration saved!
 ```
+
+#### Choose which manga are sent
+
+When you turn email delivery on, MeManga asks which manga to send
+(`email.kindle_scope`):
+
+| Choice | Value | Sent |
+|--------|-------|------|
+| Only manga I choose | `selected` | manga with the Kindle toggle on (`update TITLE --kindle`, or **Send to Kindle after download** on the manga's page) |
+| Every manga | `all` | every manga except those with the Kindle toggle off |
+
+A manga you already turned on or off for Kindle keeps that choice either
+way. Turning email delivery on proposes `selected`, so it never starts
+sending the whole library unasked; `run config set delivery.mode email`
+and switching from local to email in `run config edit` cannot ask, so they
+choose `selected` when no choice was made yet and say so. A backup import
+never changes the delivery mode or this choice. A config that used email
+delivery before this choice existed and has none keeps sending every
+manga, as before. Change it later in
+**Settings → General → Send to Kindle**, by running `run config` again, or
+with `run config set email.kindle_scope all` (or `selected`). `run config
+email` shows the current choice.
 
 The app password is stored in your system keyring when available. If the keyring isn't available, it is stored in plain text in the config file instead, and MeManga warns you with the file's path. Keep that file private (on Linux and macOS, readable only by you). On servers and in containers you can set `MEMANGA_SMTP_PASSWORD_FILE` (a file holding the password) or `MEMANGA_SMTP_PASSWORD` instead; a password passed this way is never saved.
 
@@ -1435,7 +1460,9 @@ It stays the same when `--status` or `--sort` hide or reorder entries.
 `source` and `url` are the primary source (`null` if there is none),
 and `sources` lists the primary first, then backups. `last_chapter`
 is a string or `null`. `mode` is `auto` or `manual`, `send_to_kindle`
-is the per-manga Kindle toggle (email delivery must also be on), and
+is whether the manga is sent to Kindle: its own toggle, or the
+`email.kindle_scope` choice when it has none (email delivery must also
+be on), and
 `backup_count` is the number of sources after the primary (shown as
 `(+N)` in the table's Source column).
 

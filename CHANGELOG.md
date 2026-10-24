@@ -7,6 +7,16 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #345 Turning on email delivery asks which manga to send: only the
+  manga you turn on, or every manga. The desktop app's Settings and the
+  `config` wizard propose "only manga I choose", so a library is never
+  sent in full unasked; `config set delivery.mode email` and switching
+  from local to email in `config edit` take that choice when none was
+  made and say how to change it. The choice is the
+  new `email.kindle_scope` setting (`selected` or `all`), shown by
+  `config email`. A manga's own Kindle toggle always wins, and a config
+  that already used email delivery without the setting keeps sending
+  every manga as before.
 - #366 Email can be sent over implicit TLS (port 465) as well as
   STARTTLS (port 587). The new `email.smtp_tls` setting is `auto` by
   default (implicit TLS on port 465, STARTTLS on any other port), or

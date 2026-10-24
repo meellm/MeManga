@@ -409,6 +409,34 @@ class SettingsPage(BasePage):
         mode_row.addStretch()
         f.addLayout(mode_row)
 
+        # Issue #345: which manga email delivery applies to, asked where
+        # it is turned on. Preselected so turning it on never sends a
+        # whole library by default.
+        self._section(f, "Send to Kindle")
+        scope_row = QHBoxLayout()
+        self._scope_group = QButtonGroup(self)
+        self._radio_scope_selected = QRadioButton("Only manga I choose")
+        self._radio_scope_selected.setToolTip(
+            "Turn on Send to Kindle after download on each manga's page.")
+        self._radio_scope_all = QRadioButton("Every manga in my library")
+        self._radio_scope_all.setToolTip(
+            "Every manga is sent unless you turn Kindle off on its page.")
+        self._scope_group.addButton(self._radio_scope_selected)
+        self._scope_group.addButton(self._radio_scope_all)
+        scope_row.addWidget(self._radio_scope_selected)
+        scope_row.addSpacing(T.PAD_XL)
+        scope_row.addWidget(self._radio_scope_all)
+        scope_row.addStretch()
+        f.addLayout(scope_row)
+        self._scope_hint = _WrappingLabel(
+            "Applies when Email is selected. A manga you already turned "
+            "Kindle on or off for keeps that choice."
+        )
+        self._scope_hint.setProperty("role", "hint")
+        f.addWidget(self._scope_hint)
+        self._radio_email.toggled.connect(self._refresh_kindle_scope_enabled)
+        self._load_kindle_scope()
+
         # Download directory
         dir_row = QHBoxLayout()
         dir_lbl = QLabel("Download Directory:")
@@ -1047,6 +1075,19 @@ class SettingsPage(BasePage):
 
     # ── Actions ──
 
+    def _load_kindle_scope(self):
+        from ...email_settings import proposed_kindle_scope
+        if proposed_kindle_scope(self.app.config) == "all":
+            self._radio_scope_all.setChecked(True)
+        else:
+            self._radio_scope_selected.setChecked(True)
+        self._refresh_kindle_scope_enabled()
+
+    def _refresh_kindle_scope_enabled(self, *_):
+        email = self._radio_email.isChecked()
+        self._radio_scope_selected.setEnabled(email)
+        self._radio_scope_all.setEnabled(email)
+
     def _browse_dir(self):
         path = QFileDialog.getExistingDirectory(self, "Select Download Directory")
         if path:
@@ -1120,6 +1161,9 @@ class SettingsPage(BasePage):
         cfg = self.app.config
         mode = "email" if self._radio_email.isChecked() else "local"
         cfg.set("delivery.mode", mode)
+        if mode == "email":
+            cfg.set("email.kindle_scope",
+                    "all" if self._radio_scope_all.isChecked() else "selected")
         cfg.set("delivery.download_dir", self._dir_entry.text().strip())
         cfg.set("delivery.output_format", self._format_combo.currentText())
         cfg.set("mangadex.data_saver", self._mangadex_quality.currentData())
@@ -1227,6 +1271,7 @@ class SettingsPage(BasePage):
             self._radio_email.setChecked(True)
         else:
             self._radio_local.setChecked(True)
+        self._load_kindle_scope()
 
         self._dir_entry.setText(str(cfg.download_dir))
         self._format_combo.setCurrentText(cfg.output_format)

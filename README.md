@@ -190,7 +190,13 @@ Hit **Re-check health** to ping every enabled source and see their status.
    The mail server accepting it does not prove delivery: Amazon delivers it
    only when the sender is on the approved list, so look for
    "MeManga test document" in your Kindle library after a few minutes.
-4. On the Detail page of any manga, toggle **Send to Kindle after download**.
+4. In **Settings → General**, choose **Email (send to Kindle)** and which
+   manga to send: **Only manga I choose** (selected first, so turning email
+   on never sends the whole library) or **Every manga in my library**. A
+   manga you already turned Kindle on or off for keeps that choice.
+5. With **Only manga I choose**, turn on **Send to Kindle after download**
+   on the Detail page of each manga to send. With **Every manga**, turn it
+   off for the manga you don't want sent.
 
 Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs too large for one email (over 18 MB with the default 25 MB email size limit, `email.max_email_mb`) are split automatically and the parts are sent in one mail session; EPUB files can't be split so they fail-loud with a size warning. See the [Guide](docs/Guide.md#email-size-limit) to match the limit to your mail provider.
 

@@ -276,8 +276,11 @@ class DetailPage(BasePage):
         info_layout.addWidget(mode_hint)
 
         # Kindle toggle (below controls card)
+        from ...email_settings import kindle_scope, manga_sends_to_kindle
         global_email_on = (self.app.config.delivery_mode == "email" and self.app.config.email_enabled)
-        manga_kindle = manga.get("send_to_kindle", True)
+        # Issue #345: a manga without its own choice follows the
+        # Settings choice of which manga to send.
+        manga_kindle = manga_sends_to_kindle(manga, kindle_scope(self.app.config))
         kindle_row = QHBoxLayout()
         self._kindle_check = QCheckBox("Send to Kindle after download")
         self._kindle_check.setChecked(bool(manga_kindle and global_email_on))
@@ -1248,8 +1251,9 @@ class DetailPage(BasePage):
         the same way `memanga send --pending` does."""
         if not self._manga:
             return
-        from ...chapter_pipeline import manga_sends_to_kindle
-        if not manga_sends_to_kindle(self._manga):
+        from ...email_settings import kindle_scope, manga_sends_to_kindle
+        if not manga_sends_to_kindle(self._manga,
+                                     kindle_scope(self.app.config)):
             Toast(self, "Kindle delivery is off for this manga", kind="error")
             return
         kindle_cfg = self._kindle_settings()
