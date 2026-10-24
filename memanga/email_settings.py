@@ -17,6 +17,10 @@ DEFAULT_SMTP_PORT = 587
 # Issue #366: see SMTP_TLS_MODES in emailer.py.
 DEFAULT_SMTP_TLS = "auto"
 
+# Issue #345: which manga email delivery applies to. "all": every manga
+# that has not turned Kindle off; "selected": only manga turned on.
+KINDLE_SCOPES = ("all", "selected")
+
 
 @dataclass(frozen=True, kw_only=True)
 class EmailSettings:
@@ -37,6 +41,7 @@ class EmailSettings:
     smtp_tls: str = DEFAULT_SMTP_TLS
     smtp_timeout: Optional[float] = None
     max_email_mb: Optional[float] = None
+    kindle_scope: str = "all"
     # Never part of the repr, so it cannot reach a log line that way.
     app_password: Optional[str] = field(default=None, repr=False)
 
@@ -54,14 +59,40 @@ class EmailSettings:
             smtp_tls=cfg.get("email.smtp_tls", DEFAULT_SMTP_TLS),
             smtp_timeout=cfg.get("email.smtp_timeout"),
             max_email_mb=cfg.get("email.max_email_mb"),
+            kindle_scope=kindle_scope(cfg),
             app_password=get_app_password(cfg) if resolve_password else None,
         )
 
 
-def manga_sends_to_kindle(manga: Mapping[str, Any]) -> bool:
-    """Whether ``manga`` takes part in Kindle delivery (#341). A missing
-    ``send_to_kindle`` (older entries) means it does."""
-    return bool(manga.get("send_to_kindle", True))
+def kindle_scope(cfg: Config) -> str:
+    """The ``email.kindle_scope`` setting (#345). Unset means "all", how
+    email delivery worked before the choice existed, so a library that
+    already sends keeps sending; an invalid value means "selected"."""
+    value = cfg.get("email.kindle_scope")
+    if value is None:
+        return "all"
+    return value if value in KINDLE_SCOPES else "selected"
+
+
+def proposed_kindle_scope(cfg: Config) -> str:
+    """The scope to preselect when asking which manga to send (#345):
+    the chosen one as delivery applies it (an invalid value is
+    "selected"), else "all" when email delivery is already on (what
+    happens now), else "selected", so turning email delivery on never
+    sends a whole library by default."""
+    if cfg.get("email.kindle_scope") is not None:
+        return kindle_scope(cfg)
+    return "all" if cfg.delivery_mode == "email" else "selected"
+
+
+def manga_sends_to_kindle(manga: Mapping[str, Any],
+                          scope: str = "all") -> bool:
+    """Whether ``manga`` takes part in Kindle delivery (#341). Its own
+    ``send_to_kindle`` wins; without one (older entries, or added
+    without a choice) it follows ``scope`` (#345)."""
+    if "send_to_kindle" not in manga:
+        return scope == "all"
+    return bool(manga["send_to_kindle"])
 
 
 def kindle_delivery_settings(
@@ -69,11 +100,12 @@ def kindle_delivery_settings(
 ) -> Optional[EmailSettings]:
     """The settings to send chapters with, or None when they are not
     sent: the delivery mode is not email, no Kindle address is set, or
-    ``manga`` (when given) opted out. The app password is looked up now,
-    so a queued chapter is sent with the password of the moment it was
-    queued."""
+    ``manga`` (when given) does not take part in it. The app password is
+    looked up now, so a queued chapter is sent with the password of the
+    moment it was queued."""
     if not cfg.email_enabled:
         return None
-    if manga is not None and not manga_sends_to_kindle(manga):
+    if manga is not None and not manga_sends_to_kindle(manga,
+                                                       kindle_scope(cfg)):
         return None
     return EmailSettings.from_config(cfg)

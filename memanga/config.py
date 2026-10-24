@@ -648,6 +648,9 @@ CONFIG_KEYS = {
     # Bounds match MIN/MAX_EMAIL_SIZE_MB in emailer.py.
     "email.max_email_mb": {"kind": "int", "min": 10, "max": 50},
     "email.app_password": {"kind": "str", "secret": True},
+    # Issue #345: choices match KINDLE_SCOPES in email_settings.py. Not in
+    # the defaults: unset keeps the pre-#345 "all" for existing configs.
+    "email.kindle_scope": {"kind": "choice", "choices": ("all", "selected")},
     "cron.enabled": {"kind": "bool", "read_only": "memanga cron install/remove"},
     "cron.time": {"kind": "time", "read_only": "memanga cron install --time HH:MM"},
     "gui.sort_by": {"kind": "choice", "choices": (

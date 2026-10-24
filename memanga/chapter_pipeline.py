@@ -498,9 +498,10 @@ class ChapterPipeline:
 
     def delivers_to_kindle(self, manga: Optional[Dict[str, Any]] = None) -> bool:
         """True when this run sends saved chapters to a Kindle address
-        and, given ``manga``, that manga has not opted out (#341)."""
+        and, given ``manga``, that manga takes part in it (#341, #345)."""
         opts = self.options
-        if manga is not None and not manga_sends_to_kindle(manga):
+        if manga is not None and not manga_sends_to_kindle(
+                manga, opts.email.kindle_scope):
             return False
         return opts.delivery_mode == "email" and bool(opts.email.kindle_email)
 

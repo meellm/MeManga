@@ -554,6 +554,57 @@ class TestSettingsPage:
 
         assert toasts == [("Settings saved", {"kind": "success"})]
 
+    # Issue #345: which manga email delivery applies to.
+
+    def test_kindle_scope_is_asked_only_for_email(self, app_window, qapp):
+        page = app_window._pages["settings"]
+        assert app_window.config.delivery_mode == "local"
+        page._load_config_into_widgets()
+        assert not page._radio_scope_selected.isEnabled()
+        assert not page._radio_scope_all.isEnabled()
+        page._radio_email.setChecked(True)
+        assert page._radio_scope_selected.isEnabled()
+        assert page._radio_scope_all.isEnabled()
+        # Turning email on never proposes sending the whole library.
+        assert page._radio_scope_selected.isChecked()
+
+    def test_turning_email_on_saves_selected_scope(self, app_window, qapp,
+                                                   toasts):
+        page = app_window._pages["settings"]
+        page._load_config_into_widgets()
+        page._radio_email.setChecked(True)
+        page._save()
+        assert app_window.config.get("email.kindle_scope") == "selected"
+
+    def test_every_manga_choice_is_saved(self, app_window, qapp, toasts):
+        page = app_window._pages["settings"]
+        page._radio_email.setChecked(True)
+        page._radio_scope_all.setChecked(True)
+        page._save()
+        assert app_window.config.get("email.kindle_scope") == "all"
+
+    def test_local_save_leaves_scope_unset(self, app_window, qapp, toasts):
+        page = app_window._pages["settings"]
+        page._radio_local.setChecked(True)
+        page._save()
+        assert app_window.config.get("email.kindle_scope") is None
+
+    @pytest.mark.parametrize("stored, all_checked", [
+        (None, True),          # email before the choice existed: every manga
+        ("selected", False),
+        ("all", True),
+    ])
+    def test_email_config_shows_its_scope(self, app_window, qapp, stored,
+                                          all_checked):
+        cfg = app_window.config
+        cfg.set("delivery.mode", "email")
+        if stored is not None:
+            cfg.set("email.kindle_scope", stored)
+        page = app_window._pages["settings"]
+        page._load_config_into_widgets()
+        assert page._radio_scope_all.isChecked() is all_checked
+        assert page._radio_scope_selected.isChecked() is not all_checked
+
     @pytest.fixture
     def smtp_logins(self, monkeypatch):
         """Run the SMTP test synchronously against a fake server and
@@ -1776,6 +1827,28 @@ class TestDetailPage:
         app_window.show_page("detail", manga=sample_manga); qapp.processEvents()
         page = app_window._pages["detail"]
         assert page._manga == sample_manga
+
+    @pytest.mark.parametrize("scope, own, checked", [
+        (None, None, True),
+        ("selected", None, False),
+        ("selected", True, True),
+        ("all", False, False),
+    ])
+    def test_kindle_toggle_follows_scope(self, app_window, qapp, sample_manga,
+                                         scope, own, checked):
+        # Issue #345: without its own choice a manga follows the
+        # Settings choice of which manga to send.
+        cfg = app_window.config
+        cfg.set("delivery.mode", "email")
+        cfg.set("email.kindle_email", "reader@example.com")
+        if scope is not None:
+            cfg.set("email.kindle_scope", scope)
+        manga = dict(sample_manga)
+        if own is not None:
+            manga["send_to_kindle"] = own
+        cfg.set("manga", [manga])
+        app_window.show_page("detail", manga=manga); qapp.processEvents()
+        assert app_window._pages["detail"]._kindle_check.isChecked() is checked
 
     def test_status_dropdown_persists(self, app_window, qapp, sample_manga):
         app_window.config.set("manga", [sample_manga])

@@ -55,7 +55,8 @@ from .state import State
 from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
 from .scrapers import get_scraper
 from .search import compute_search_sources, probe_chapter_counts, sweep
-from .email_settings import EmailSettings
+from .email_settings import (EmailSettings, kindle_scope, manga_sends_to_kindle,
+                             proposed_kindle_scope)
 from .emailer import (TEST_DELIVERY_NOTE, EmailError, email_size_limit,
                       kindle_file_error, kindle_format_error,
                       raw_attachment_limit, send_test_document, send_to_kindle,
@@ -483,6 +484,7 @@ def _list_entries(statuses=None, sort: str = DEFAULT_LIST_SORT, reverse: bool = 
     status, no numeric last chapter) go last in either direction.
     """
     entries = []
+    scope = kindle_scope(config)
     for i, manga in enumerate(config.get("manga", []), 1):
         title = manga["title"]
         sources = [s for s in _get_sources_from_manga(manga) if s.get("url")]
@@ -498,7 +500,7 @@ def _list_entries(statuses=None, sort: str = DEFAULT_LIST_SORT, reverse: bool = 
             "last_chapter": state.get_last_chapter(title),
             "downloaded_count": len(state.get_downloaded_chapters(title)),
             "mode": manga.get("mode") or "auto",
-            "send_to_kindle": bool(manga.get("send_to_kindle", True)),
+            "send_to_kindle": manga_sends_to_kindle(manga, scope),
             "backup_count": max(len(sources) - 1, 0),
         })
     if statuses:
@@ -677,7 +679,8 @@ def cmd_add(args):
         }
 
     # Issue #347: policy fields are written only when given, so a plain
-    # `add` keeps the legacy defaults (reading / auto / Kindle on).
+    # `add` keeps the legacy defaults (reading / auto) and, for Kindle,
+    # follows email.kindle_scope (#345).
     status = getattr(args, 'status', None)
     mode = getattr(args, 'mode', None)
     kindle = getattr(args, 'send_to_kindle', None)
@@ -1412,7 +1415,9 @@ def cmd_update(args):
     if mode is not None and mode != (found.get("mode") or "auto"):
         edited["mode"] = mode
         changes.append(f"Mode → {mode}")
-    if kindle is not None and kindle != bool(found.get("send_to_kindle", True)):
+    # Issue #345: an explicit choice is stored even when it matches what
+    # the scope gives now, so it still holds after the scope changes.
+    if kindle is not None and found.get("send_to_kindle") is not kindle:
         edited["send_to_kindle"] = kindle
         changes.append(f"Kindle → {'on' if kindle else 'off'}")
 
@@ -2188,11 +2193,41 @@ def _config_set(args):
         value = parse_config_value(args.key, args.value)
     except ValueError as e:
         return _config_error(f"invalid value for {args.key}: {e}")
+    turns_email_on = (args.key == "delivery.mode" and value == "email"
+                      and config.delivery_mode != "email")
     config.set(args.key, value)
+    if turns_email_on and config.get("email.kindle_scope") is None:
+        # Issue #345: there is no one to ask, so take the safe choice
+        # and say so, rather than sending the whole library.
+        config.set("email.kindle_scope", "selected")
     config.save()
     console.print(f"[green]✅ {_esc(args.key)} = {_esc(_config_value_text(value))}[/green]")
+    if turns_email_on:
+        _print_kindle_scope_note()
     if args.key in ("delivery.mode", "delivery.output_format"):
         _warn_config_kindle_format()
+
+
+_KINDLE_SCOPE_TEXT = {
+    "selected": "only manga with Kindle turned on",
+    "all": "every manga unless its Kindle toggle is off",
+}
+
+
+def _print_kindle_scope_note(cfg=None) -> None:
+    """Which manga email delivery now applies to and how to change it
+    (issue #345)."""
+    if kindle_scope(cfg or config) == "selected":
+        console.print(
+            "[dim]Kindle delivery applies to "
+            f"{_KINDLE_SCOPE_TEXT['selected']}: turn it on with "
+            "`memanga update TITLE --kindle`, or send every manga with "
+            "`memanga config set email.kindle_scope all`.[/dim]")
+    else:
+        console.print(
+            "[dim]Kindle delivery applies to "
+            f"{_KINDLE_SCOPE_TEXT['all']}; send only chosen manga with "
+            "`memanga config set email.kindle_scope selected`.[/dim]")
 
 
 def _config_edit(args):
@@ -2208,6 +2243,9 @@ def _config_edit(args):
     path = config.config_path
     if not path.exists():
         config.save()  # start from the defaults
+    # Issue #345: known only when the file loaded; a broken file's mode
+    # is unknown, so it is never treated as turning email on.
+    was_email = config.load_error is not None or config.delivery_mode == "email"
     try:
         command = shlex.split(editor, posix=os.name != "nt")
         result = subprocess.run(command + [str(path)])
@@ -2242,6 +2280,13 @@ def _config_edit(args):
         sys.stderr.write("Run `memanga config edit` again to fix it.\n")
         return EXIT_ERROR
     console.print(f"[green]✅ {_esc(path)} is valid[/green]")
+    if not was_email and edited.delivery_mode == "email":
+        if edited.get("email.kindle_scope") is None:
+            # Issue #345: turning email on by hand is still turning it
+            # on, so take the safe choice, as `config set` does.
+            edited.set("email.kindle_scope", "selected")
+            edited.save()
+        _print_kindle_scope_note(edited)
     _warn_config_kindle_format(edited)
 
 
@@ -2252,6 +2297,7 @@ def _config_email(args):
     table.add_column(style="dim", width=18)
     table.add_column(style="white")
     table.add_row("Delivery mode", _esc(config.delivery_mode))
+    table.add_row("Send to Kindle", _KINDLE_SCOPE_TEXT[settings.kindle_scope])
     for label, value in (("Kindle email", settings.kindle_email),
                          ("Sender email", settings.sender_email)):
         table.add_row(label, _esc(value) if value else "[red]not set[/red]")
@@ -2401,6 +2447,8 @@ def cmd_config(args):
     
     # Delivery mode
     current_mode = config.delivery_mode
+    # Issue #345: read before the mode below changes what it proposes.
+    current_scope = proposed_kindle_scope(config)
     console.print(f"[bold]Delivery Mode[/bold] (current: [cyan]{_esc(current_mode)}[/cyan])")
     console.print("  [1] local  - Download PDFs to a directory")
     console.print("  [2] email  - Send PDFs to Kindle via email")
@@ -2436,6 +2484,21 @@ def cmd_config(args):
         if Confirm.ask("Update app password?"):
             app_password = Prompt.ask("App password", password=True)
             _report_app_password_storage(set_app_password(config, app_password))
+
+        library_size = len(config.get("manga", []) or [])
+        console.print("\n[bold]Send to Kindle[/bold]")
+        console.print(f"[dim]Your library has {library_size} manga. A manga "
+                      "you already turned Kindle on or off for keeps that "
+                      "choice.[/dim]")
+        console.print("  [1] selected - only manga you turn on "
+                      "(`memanga update TITLE --kindle`)")
+        console.print("  [2] all      - every manga in the library")
+        scope_choice = Prompt.ask(
+            "Send which manga", choices=["1", "2"],
+            default="2" if current_scope == "all" else "1",
+        )
+        config.set("email.kindle_scope",
+                   "all" if scope_choice == "2" else "selected")
 
         delete_after = Confirm.ask(
             "Delete files after sending to Kindle?",
@@ -3854,6 +3917,20 @@ def cmd_send(args):
             )
             opted_out += len(chapters)
             continue
+        if manga is None and not pipeline.delivers_to_kindle({}):
+            # Issue #345: no longer tracked, so never turned on, and only
+            # manga turned on are sent.
+            quoted = _esc(_quoted_title(manga_title))
+            console.print(
+                f"  [dim]Skipped {_esc(manga_title)}: not in the library and "
+                f"Kindle delivery applies only to manga turned on "
+                f"({len(chapters)} chapter(s) kept). Send them with "
+                f"'memanga config set email.kindle_scope all' or forget them "
+                f"with 'memanga send --pending --clear {quoted}'.[/dim]",
+                soft_wrap=True,
+            )
+            opted_out += len(chapters)
+            continue
         for chapter_num in sorted(chapters, key=chapter_order_key):
             console.print(f"  [dim]{_esc(manga_title)} Chapter {_esc(chapter_num)}[/dim]")
             attempted += 1
@@ -3869,7 +3946,7 @@ def cmd_send(args):
     console.print(f"[green]📊 Send summary: {sent}/{attempted} chapters sent to Kindle[/green]")
     if opted_out:
         console.print(f"[dim]{opted_out} chapter(s) skipped: Kindle delivery is "
-                      "off for their manga[/dim]")
+                      "not on for their manga[/dim]")
     if sent < attempted:
         return EXIT_PARTIAL
 
@@ -4314,7 +4391,8 @@ Examples:
                        help="Desktop-app download mode (default: auto)")
     p_add_kindle = p_add.add_mutually_exclusive_group()
     p_add_kindle.add_argument("--kindle", dest="send_to_kindle", action="store_const", const=True,
-                              help="Turn the desktop app's per-manga Kindle toggle on (default)")
+                              help="Turn the desktop app's per-manga Kindle toggle on "
+                                   "(without either flag, email.kindle_scope decides)")
     p_add_kindle.add_argument("--no-kindle", dest="send_to_kindle", action="store_const", const=False,
                               help="Turn the desktop app's per-manga Kindle toggle off")
     p_add.add_argument("-i", "--interactive", action="store_true",

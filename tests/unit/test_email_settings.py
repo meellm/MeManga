@@ -10,8 +10,9 @@ import pytest
 from memanga import config as config_mod
 from memanga.email_settings import (DEFAULT_SMTP_PORT, DEFAULT_SMTP_SERVER,
                                     DEFAULT_SMTP_TLS, EmailSettings,
-                                    kindle_delivery_settings,
-                                    manga_sends_to_kindle)
+                                    kindle_delivery_settings, kindle_scope,
+                                    manga_sends_to_kindle,
+                                    proposed_kindle_scope)
 
 
 @pytest.fixture
@@ -162,6 +163,63 @@ class TestKindleDeliverySettings:
         assert manga_sends_to_kindle(manga) is expected
         assert (kindle_delivery_settings(config, manga) is not None) is expected
 
+    @pytest.mark.parametrize("scope, manga, expected", [
+        ("all", {"title": "Old entry"}, True),
+        ("selected", {"title": "Old entry"}, False),
+        ("selected", {"title": "On", "send_to_kindle": True}, True),
+        ("all", {"title": "Off", "send_to_kindle": False}, False),
+        # A stored null was never "on"; it is not a missing choice.
+        ("all", {"title": "Null", "send_to_kindle": None}, False),
+    ])
+    def test_scope_applies_only_without_own_choice(self, config, no_keyring,
+                                                   scope, manga, expected):
+        # Issue #345: the manga's own choice always wins.
+        _email_on(config)
+        config.set("email.kindle_scope", scope)
+        assert manga_sends_to_kindle(manga, scope) is expected
+        assert (kindle_delivery_settings(config, manga) is not None) is expected
+
+    def test_settings_carry_the_scope(self, config, no_keyring):
+        _email_on(config)
+        config.set("email.kindle_scope", "selected")
+        assert kindle_delivery_settings(config).kindle_scope == "selected"
+
     def test_pipeline_reexports_the_manga_check(self):
         from memanga import chapter_pipeline
         assert chapter_pipeline.manga_sends_to_kindle is manga_sends_to_kindle
+
+
+class TestKindleScope:
+    """Issue #345: which manga email delivery applies to."""
+
+    def test_unset_keeps_sending_every_manga(self, config):
+        # A config from before the choice existed is not changed.
+        assert config.get("email.kindle_scope") is None
+        assert kindle_scope(config) == "all"
+
+    @pytest.mark.parametrize("value, expected", [
+        ("all", "all"), ("selected", "selected"), ("bogus", "selected"),
+    ])
+    def test_stored_value(self, config, value, expected):
+        config.set("email.kindle_scope", value)
+        assert kindle_scope(config) == expected
+
+    def test_not_in_the_defaults(self, config):
+        # Defaults are merged into existing configs on load, which would
+        # change what a library already on email delivery sends.
+        assert "kindle_scope" not in config._default_config()["email"]
+
+    @pytest.mark.parametrize("mode, stored, expected", [
+        ("local", None, "selected"),   # turning email on: the safe choice
+        ("email", None, "all"),        # already on: what happens now
+        ("local", "all", "all"),
+        ("email", "selected", "selected"),
+        ("local", "bogus", "selected"),
+        # Agrees with how delivery reads an invalid value.
+        ("email", "bogus", "selected"),
+    ])
+    def test_proposed_scope(self, config, mode, stored, expected):
+        config.set("delivery.mode", mode)
+        if stored is not None:
+            config.set("email.kindle_scope", stored)
+        assert proposed_kindle_scope(config) == expected
