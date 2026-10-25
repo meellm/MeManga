@@ -8,7 +8,7 @@ WordPress + pic.readkakegurui.com CDN.
 import logging
 import cloudscraper
 from bs4 import BeautifulSoup
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class JJKMangaScraper(BaseScraper):
         self.session = cloudscraper.create_scraper()
         self.session.headers.update({
             "Referer": f"{self.base_url}/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": BROWSER_USER_AGENT
         })
     
     def search(self, query: str) -> list[Manga]:

@@ -32,7 +32,7 @@ from ..scrapers import POPULAR_SOURCES as SOURCE_POPULARITY  # noqa: E402,F401
 # caching a non-image body (an HTML block page served with 200) would
 # leave the cover permanently blank — the disk cache file exists, so
 # the URL is never refetched.
-from ..scrapers.base import looks_like_image  # noqa: E402,F401
+from ..scrapers.base import looks_like_image, BROWSER_USER_AGENT_SHORT  # noqa: E402,F401
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ _COVER_REFERERS = (
     ("fmcdn.mangahere.com", "https://www.mangahere.cc/"),
 )
 
-_COVER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+_COVER_USER_AGENT = BROWSER_USER_AGENT_SHORT
 
 
 def cover_request_headers(url: str) -> Dict[str, str]:

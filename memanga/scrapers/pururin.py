@@ -21,6 +21,7 @@ class PururinScraper(PlaywrightScraper):
     
     name = "pururin"
     base_url = "https://pururin.to"
+    nsfw = True
     
     def search(self, query: str) -> List[Manga]:
         """Search for doujin."""

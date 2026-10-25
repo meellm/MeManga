@@ -446,6 +446,7 @@ _cfg_manga18fx = {
     "base_url": "https://manga18fx.com",
     "uses_ajax": True,
     "image_cdn_filters": ["manga18fx"],
+    "nsfw": True,
 }
 
 _cfg_aquamanga = {

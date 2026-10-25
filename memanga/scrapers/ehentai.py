@@ -14,6 +14,7 @@ class EHentaiScraper(BaseScraper):
     
     name = "ehentai"
     base_url = "https://e-hentai.org"
+    nsfw = True
     
     def search(self, query: str) -> List[Manga]:
         """Search for galleries."""

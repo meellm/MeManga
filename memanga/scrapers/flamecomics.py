@@ -11,7 +11,7 @@ import re
 import json
 from typing import List
 from .playwright_base import PlaywrightScraper
-from .base import Chapter, Manga
+from .base import Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +203,7 @@ class FlameComicsScraper(PlaywrightScraper):
         """Download image with proper referer header."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": f"{self.base_url}/",
             }
             response = self.session.get(url, headers=headers, timeout=30)

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import List, Optional
 from urllib.parse import urljoin, quote
 
-from .base import BaseScraper, Manga, Chapter, looks_like_image
+from .base import BaseScraper, Manga, Chapter, looks_like_image, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +270,7 @@ class MangaHereScraper(BaseScraper):
         """
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': BROWSER_USER_AGENT_SHORT,
                 'Referer': f'{self.base_url}/',
             }
             response = self.session.get(url, headers=headers, timeout=30)

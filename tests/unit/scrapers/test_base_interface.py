@@ -123,7 +123,7 @@ def _discover_scraper_modules():
     out = []
     for _, name, _ in pkgutil.iter_modules(pkg.__path__):
         if name.startswith("_") or name in ("base", "templates",
-                                              "playwright_base"):
+                                              "playwright_base", "catalog"):
             continue
         try:
             m = importlib.import_module(f"memanga.scrapers.{name}")

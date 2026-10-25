@@ -14,6 +14,7 @@ class HentaiFoxScraper(BaseScraper):
     
     name = "hentaifox"
     base_url = "https://hentaifox.com"
+    nsfw = True
     
     def search(self, query: str) -> List[Manga]:
         """Search for galleries."""

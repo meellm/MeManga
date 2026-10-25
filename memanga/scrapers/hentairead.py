@@ -21,6 +21,7 @@ class HentaiReadScraper(PlaywrightScraper):
     
     name = "hentairead"
     base_url = "https://hentairead.com"
+    nsfw = True
     
     def search(self, query: str) -> List[Manga]:
         """Search for manga."""

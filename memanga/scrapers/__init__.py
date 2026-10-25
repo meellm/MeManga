@@ -1,30 +1,12 @@
 """
 MeManga Scrapers
 
-Working sources:
-- TCBScans (tcbonepiecechapters.com) - Jump manga: One Piece, JJK, MHA
-- WeebCentral (weebcentral.com) - Large library, 1000+ manga
-- Asura Scans (asurascans.com) - Manhwa specialist (JSON API)
-- Mangakatana (mangakatana.com) - General library
-- MangaDex (mangadex.org) - Community uploads (skip Shueisha)
-- Mangapill (mangapill.com) - Large library, no Cloudflare
-- MangaPark (mangapark1.com) - Large library (Chromium, Cloudflare)
-- MangaReader (mangareader.to) - Large library, clean UI
-- MangaSee (mangasee123.com) - High quality scans
-- MangaBuddy (mangabuddy.com) - Popular aggregator
-- Bato.to (bato.to) - Community-driven
-- Mangakakalot (mangakakalot.com) - Huge library
-- Manganato (manganato.com) - Same network as Kakalot
-- Mangago (mangago.me) - Large yaoi/shoujo collection
-- MangaTaro (mangataro.org) - ComicK replacement, popular aggregator
-- Mangadot (mangadot.net) - Multi-language aggregator (SSR + JSON API)
-- Olympus Scanlation (olympusxyz.com) - Spanish manhwa scans (JSON API)
-- ZonaTMO (zonatmo.org) - Spanish manga/manhwa library (plain HTML)
-- Lector Manga (lector-mangas.lat) - Spanish manga/manhwa reader (static HTML)
-- Thunder Scans EN (en-thunderscans.com) - English manhwa scans (MangaThemesia HTML)
-- Wurmz (wurmz.net) - Indonesian manga/manhwa/manhua reader (Next.js SSR HTML)
-- MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
-- Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
+``SCRAPERS`` maps every supported domain to its scraper class: the
+individual scrapers registered below plus the template-based ones from
+``registry.TEMPLATE_SCRAPERS``. Source metadata (search skips, curated
+ranking, notes, and the class-level ``engine`` / ``content_language`` /
+``nsfw`` attributes) is collected by ``catalog.source_catalog()``; see
+docs/SUPPORTED_SOURCES.md for the generated list.
 """
 
 from .base import BaseScraper, Chapter, Manga
@@ -708,51 +690,7 @@ def list_supported_sources():
     return sorted(sources)
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Curated source ranking — verified end-to-end (search → get_chapters
-# → get_pages round-trip) against live sites by the probe script in
-# tests/scrapers/live/. Used for:
-#
-#   - POPULAR_SOURCES order: the search worker submits sources in this
-#     order so MangaDex / MangaPill etc. always start first.
-#   - DEFAULT_ENABLED_SOURCES: shipped pre-checked on first launch
-#     so a fresh user gets results in seconds instead of probing
-#     100+ smaller sources sequentially. Everything else stays
-#     available — user can flip it on in Sources tab any time.
-#
-# Re-order or trim if a future probe run says a site went stale.
-# ─────────────────────────────────────────────────────────────────────
-
-
-POPULAR_SOURCES = [
-    "mangadex.org",
-    "mangapill.com",
-    "mangapark1.com",
-    "mangafire.to",
-    "mangabuddy.com",
-    "weebcentral.com",
-    "mangakatana.com",
-    "asurascans.com",
-    "comix.to",
-    "comick.io",
-    "mangahub.io",
-    "mangahere.cc",
-    "mangapanda.onl",
-    "mangahere.onl",
-    "mangataro.org",
-    "luminousscans.com",
-    "tcbonepiecechapters.com",
-    "fanfox.net",
-    "1manga.co",
-    "coffeemanga.io",
-    "manhuaplus.org",
-    "mangaeffect.com",
-    "mangafox.fun",
-    "mangayy.org",
-]
-
-# Fresh installs ship with the top 15 ticked on the Sources page.
-# Everything else is in `sources.disabled` by default. Only canonical
-# domains belong here — retired aliases (asuracomic.net, asuratoon.com)
-# stay out so the sweep doesn't probe the same scraper twice.
-DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:15]
+# Curated ranking and first-launch defaults live in the source catalog;
+# re-exported here because the search engine and GUI import them from
+# this package.
+from .catalog import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES  # noqa: E402

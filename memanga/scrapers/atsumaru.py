@@ -23,6 +23,7 @@ class AtsumaruScraper(BaseScraper):
 
     name = "atsumaru"
     base_url = "https://atsu.moe"
+    engine = "api"
 
     # IDs are short randomly-generated identifiers whose alphabet can include
     # "-" and "_" (e.g. "9L82jefe"), so match those too. The class stops at

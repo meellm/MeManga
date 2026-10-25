@@ -13,7 +13,7 @@ from typing import List
 from pathlib import Path
 from urllib.parse import quote_plus
 from .playwright_base import PlaywrightScraper
-from .base import Chapter, Manga
+from .base import Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +271,7 @@ class MangaBuddyScraper(PlaywrightScraper):
         for referer in (f"{self.base_url}/", "https://comizy.io/"):
             try:
                 headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "User-Agent": BROWSER_USER_AGENT_SHORT,
                     "Referer": referer,
                 }
                 response = self.session.get(url, headers=headers, timeout=30)

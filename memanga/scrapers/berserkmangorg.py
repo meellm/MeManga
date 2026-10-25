@@ -10,7 +10,7 @@ from urllib.parse import urljoin
 import cloudscraper
 from bs4 import BeautifulSoup
 
-from .base import BaseScraper, Manga, Chapter
+from .base import BaseScraper, Manga, Chapter, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class BerserkMangOrgScraper(BaseScraper):
             }
         )
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': BROWSER_USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Referer': self.base_url
@@ -108,7 +108,7 @@ class BerserkMangOrgScraper(BaseScraper):
         """Download an image with proper headers."""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': BROWSER_USER_AGENT_SHORT,
                 'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
                 'Referer': self.base_url
             }

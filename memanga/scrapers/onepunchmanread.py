@@ -10,7 +10,7 @@ import logging
 import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class OnePunchManReadScraper(BaseScraper):
         super().__init__()
         self.session = cloudscraper.create_scraper()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": BROWSER_USER_AGENT_SHORT,
             "Referer": self.BASE_URL,
         })
     
@@ -113,7 +113,7 @@ class OnePunchManReadScraper(BaseScraper):
         """Download an image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": self.BASE_URL,
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
             }

@@ -9,7 +9,7 @@ import logging
 import re
 from typing import List
 from pathlib import Path
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +19,7 @@ class Manhwa18Scraper(BaseScraper):
     
     name = "manhwa18"
     base_url = "https://manhwa18.cc"
+    nsfw = True
     
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title."""
@@ -121,7 +122,7 @@ class Manhwa18Scraper(BaseScraper):
         """Download image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": f"{self.base_url}/",
             }
             response = self.session.get(url, headers=headers, timeout=30)

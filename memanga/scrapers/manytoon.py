@@ -14,6 +14,7 @@ class ManyToonScraper(PlaywrightScraper):
     name = "Manytoon"
     domains = ["manytoon.com"]
     base_url = "https://manytoon.com"
+    nsfw = True
 
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title."""
