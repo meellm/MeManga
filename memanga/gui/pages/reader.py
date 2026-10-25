@@ -3,21 +3,24 @@ Reader page - Built-in manga reader with keyboard shortcuts and zoom.
 Three layouts: continuous vertical scroll, single page, two-up spreads.
 """
 
-import io
 import shutil
-import zipfile
+import time
+from bisect import bisect_left, bisect_right
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QWidget,
 )
-from PySide6.QtGui import QPixmap, QImage, QKeyEvent, QShortcut
-from PySide6.QtCore import Qt, QByteArray, QBuffer, QEvent, QObject, QTimer
+from PySide6.QtGui import QPixmap, QKeyEvent, QShortcut
+from PySide6.QtCore import (Qt, QByteArray, QBuffer, QEvent, QObject, QSize,
+                            QTimer)
 
 from ...chapters import chapter_value
 from .base import BasePage
+from .reader_pages import (PageLoader, PageRef, PixmapCache, display_size,
+                           index_chapter_file, index_chapter_folder)
 from .. import theme as T
 
 
@@ -37,70 +40,6 @@ def _is_inside_download_dir(candidate: Path, download_dir: Path) -> bool:
     return resolved != root and resolved.is_relative_to(root)
 
 
-def _extract_images_from_file(filepath: Path) -> List[QImage]:
-    """Extract images from a downloaded chapter file."""
-    suffix = filepath.suffix.lower()
-    images = []
-
-    if suffix in (".cbz", ".zip"):
-        with zipfile.ZipFile(filepath, "r") as zf:
-            names = sorted([n for n in zf.namelist() if not n.startswith("__")])
-            for name in names:
-                ext = Path(name).suffix.lower()
-                if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-                    data = zf.read(name)
-                    img = QImage()
-                    img.loadFromData(data)
-                    if not img.isNull():
-                        images.append(img)
-
-    elif suffix == ".pdf":
-        try:
-            import fitz
-            doc = fitz.open(str(filepath))
-            for page in doc:
-                pix = page.get_pixmap(dpi=150)
-                img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-                # Make a deep copy since pix.samples is transient
-                images.append(img.copy())
-            doc.close()
-        except ImportError:
-            try:
-                from PIL import Image as PILImage
-                import pikepdf
-                pdf = pikepdf.open(str(filepath))
-                for page in pdf.pages:
-                    for img_key in page.images:
-                        raw = page.images[img_key]
-                        pil_img = PILImage.open(io.BytesIO(raw.get_raw_stream_buffer()))
-                        buf = io.BytesIO()
-                        pil_img.save(buf, format="PNG")
-                        qimg = QImage()
-                        qimg.loadFromData(buf.getvalue())
-                        if not qimg.isNull():
-                            images.append(qimg)
-                pdf.close()
-            except Exception:
-                pass
-
-    elif suffix == ".epub":
-        try:
-            with zipfile.ZipFile(filepath, "r") as zf:
-                names = sorted(zf.namelist())
-                for name in names:
-                    ext = Path(name).suffix.lower()
-                    if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-                        data = zf.read(name)
-                        img = QImage()
-                        img.loadFromData(data)
-                        if not img.isNull():
-                            images.append(img)
-        except Exception:
-            pass
-
-    return images
-
-
 def _chapter_sort_key(number) -> Optional[float]:
     """Numeric sort key for a chapter number, or None when it can't be
     parsed. Used by the reader prefetch (issue #107) to find the
@@ -113,20 +52,6 @@ def _chapter_sort_key(number) -> Optional[float]:
 
 
 _PREFETCH_SKIP = object()
-
-
-def _extract_images_from_folder(folder: Path) -> List[QImage]:
-    extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-    images = []
-    files = sorted([f for f in folder.iterdir() if f.suffix.lower() in extensions])
-    for f in files:
-        try:
-            img = QImage(str(f))
-            if not img.isNull():
-                images.append(img)
-        except Exception:
-            pass
-    return images
 
 
 class ReaderPage(BasePage):
@@ -146,6 +71,17 @@ class ReaderPage(BasePage):
     # between. "double" is the issue-#24 two-up view, now paged.
     VIEW_MODES = ("continuous", "single", "double")
     PAGED_MODES = ("single", "double")
+    # Issue #389: pages (or spreads, in two-up) decoded ahead of and
+    # behind the visible ones, and the memory budget for scaled pages
+    # kept around for quick revisits. Everything else stays undecoded.
+    PAGE_PREFETCH_AHEAD = 3
+    PAGE_PREFETCH_BEHIND = 1
+    PAGE_CACHE_BYTES = 192 * 1024 * 1024
+    # Longest the UI waits for a page decode that is still reading a
+    # finished chapter's file when leaving it. Past that, remove-after-read
+    # is kept and retried every REMOVAL_RETRY_MS until the file is free.
+    REMOVAL_WAIT_S = 2.0
+    REMOVAL_RETRY_MS = 250
 
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -155,8 +91,33 @@ class ReaderPage(BasePage):
         # from, recorded in _find_and_load_chapter so the "remove after
         # reading" cleanup deletes exactly what the reader opened.
         self._artifact_path: Optional[Path] = None
-        self._images: List[QImage] = []
+        # Issue #389: the open chapter's pages as lightweight refs (order
+        # + natural size). Pixels are decoded lazily off the UI thread.
+        self._images: List[PageRef] = []
         self._page_labels: list = []
+        # Issue #389: worker-thread decoding. Results come back through a
+        # queued connection, so _on_page_ready always runs on the GUI
+        # thread. The slot map ties a page index to its on-screen label;
+        # the offsets are each continuous-mode label's top edge.
+        self._page_loader = PageLoader(self)
+        self._page_loader.page_ready.connect(
+            self._on_page_ready, Qt.ConnectionType.QueuedConnection)
+        self._page_cache = PixmapCache(self.PAGE_CACHE_BYTES)
+        self._page_slots: Dict[int, QLabel] = {}
+        self._page_target_w = self.DEFAULT_MAX_WIDTH
+        self._page_offsets: List[int] = []
+        self._page_keep: Tuple[int, int] = (0, -1)
+        self._shown_pages: Set[int] = set()
+        self._failed_pages: Set[int] = set()
+        # Issue #389: remove-after-read for a finished chapter, deferred
+        # until the reader leaves it: (title, chapter, artifact path).
+        self._pending_removal: Optional[Tuple[str, str, Path]] = None
+        # Left chapters whose file a page decode was still reading at the
+        # deadline; the timer retries them, deleting only once idle.
+        self._removal_queue: List[Tuple[str, str, Path]] = []
+        self._removal_timer = QTimer(self)
+        self._removal_timer.setInterval(self.REMOVAL_RETRY_MS)
+        self._removal_timer.timeout.connect(self._retry_pending_removals)
         self._zoom_level = 1.0
         self._fit_width = True
         # Issue #32: reader layout — "continuous" (vertical scroll, all
@@ -237,6 +198,8 @@ class ReaderPage(BasePage):
         # Escape, sidebar — everything routed through show_page) is a
         # save point for the in-chapter resume position.
         self.save_reading_position()
+        self._reset_page_loading()
+        self._finish_pending_removal()
         self._images.clear()
         self._page_labels.clear()
 
@@ -553,6 +516,18 @@ class ReaderPage(BasePage):
         if not self._scroll or not self._images:
             return
 
+        # Issue #389: zoom / fit-width in continuous mode only changes
+        # page sizes, so the placeholders are resized in place. Recreating
+        # every page widget of a long chapter stalled the UI.
+        if not (self._view_mode == "continuous"
+                and self._resize_continuous_pages()):
+            self._rebuild_page_widgets()
+
+        if hasattr(self, "_zoom_label") and self._zoom_label:
+            self._zoom_label.setText(f"{int(self._zoom_level * 100)}%")
+        self._update_progress_display()
+
+    def _rebuild_page_widgets(self):
         # Drain the layout completely — labels AND the dual-page HBox
         # spread layouts. Previously we only deleted labels, which left
         # orphaned QHBoxLayout items behind on every dual<->single flip.
@@ -579,10 +554,6 @@ class ReaderPage(BasePage):
 
         self._render_images()
 
-        if hasattr(self, "_zoom_label") and self._zoom_label:
-            self._zoom_label.setText(f"{int(self._zoom_level * 100)}%")
-        self._update_progress_display()
-
     def _clear_sub_layout(self, layout):
         """Recursively drain a layout's children + delete widgets."""
         while layout.count():
@@ -600,6 +571,7 @@ class ReaderPage(BasePage):
         # _update_progress_display instead.
         if self._view_mode in self.PAGED_MODES:
             return
+        self._update_page_window()
         try:
             sb = self._scroll.verticalScrollBar()
             mx = max(1, sb.maximum())
@@ -658,16 +630,22 @@ class ReaderPage(BasePage):
         # page, not keep resuming at the saved end-of-chapter position.
         self.app.app_state.clear_reader_position(title, str(self._chapter))
         # Issue #104: optionally discard the local file now that the
-        # chapter is finished. Runs after the read set is updated so read
-        # progress survives even if the deletion fails.
-        self._remove_after_read(title, str(self._chapter))
+        # chapter is finished. Issue #389: pages are decoded from that
+        # file on demand, so the deletion waits until the reader leaves
+        # the chapter (_finish_pending_removal). The read set is already
+        # updated, so read progress survives even if the deletion fails.
+        if (self.app.config.get("reader.remove_after_read", False)
+                and self._artifact_path is not None):
+            self._pending_removal = (title, str(self._chapter),
+                                     self._artifact_path)
         # Tell other pages (Library, Detail) to repaint without
         # waiting for the next navigation.
         self.app.events.publish("chapter_read", {
             "title": title, "chapter": str(self._chapter),
         })
 
-    def _remove_after_read(self, title: str, chapter: str):
+    def _remove_after_read(self, title: str, chapter: str,
+                           path: Optional[Path]):
         """Delete the just-read chapter's local artifact and drop it from
         downloaded-state when the "remove chapters after reading" setting
         is on (issue #104).
@@ -680,7 +658,6 @@ class ReaderPage(BasePage):
         """
         if not self.app.config.get("reader.remove_after_read", False):
             return
-        path = self._artifact_path
         if path is None:
             return
         try:
@@ -696,8 +673,15 @@ class ReaderPage(BasePage):
                 f"Couldn't remove {title} Chapter {chapter} after reading: {exc}",
             )
             return
-        self._artifact_path = None
+        if self._artifact_path == path:
+            self._artifact_path = None
         self.app.app_state.remove_downloaded_chapter(title, chapter)
+        # Issue #389: the removal can finish after the reader was left
+        # (a page decode still held the file), so pages already showing
+        # the chapter as downloaded must hear about it.
+        self.app.events.publish("chapter_removed", {
+            "title": title, "chapter": chapter,
+        })
 
     def _mark_read_if_unscrollable(self):
         """A chapter that fits entirely in the viewport never scrolls, so
@@ -830,8 +814,8 @@ class ReaderPage(BasePage):
         except RuntimeError:
             pass  # scroll area torn down before the timer fired
 
-    def _render_images(self):
-        # Total width the spread is allowed to occupy.
+    def _page_width_budget(self) -> int:
+        """Total width the page or spread may occupy, zoom included."""
         if self._fit_width:
             try:
                 max_w = min(self._scroll.width() - 40, 1200)
@@ -842,22 +826,17 @@ class ReaderPage(BasePage):
         else:
             max_w = self.DEFAULT_MAX_WIDTH
 
-        max_w = int(max_w * self._zoom_level)
+        return int(max_w * self._zoom_level)
 
-        def _scaled_pixmap(qimg, target_w):
-            """Scale qimg so its width fits target_w (with zoom factored in)."""
-            w, h = qimg.width(), qimg.height()
-            if w > target_w:
-                ratio = target_w / w
-                new_w, new_h = int(w * ratio), int(h * ratio)
-            else:
-                new_w = int(w * self._zoom_level)
-                new_h = int(h * self._zoom_level)
-            return QPixmap.fromImage(qimg).scaled(
-                new_w, new_h,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
+    def _render_images(self):
+        max_w = self._page_width_budget()
+
+        # Issue #389: labels start as fixed-size placeholders; decoded
+        # pages arrive from the loader in _on_page_ready.
+        self._page_slots.clear()
+        self._shown_pages.clear()
+        self._page_offsets = []
+        self._page_target_w = max_w
 
         # Paged layouts center the (short) content in the viewport;
         # continuous keeps everything pinned to the top of the scroll.
@@ -870,12 +849,19 @@ class ReaderPage(BasePage):
 
         if self._view_mode == "continuous":
             # ── Continuous (default): all pages stacked vertically ──
-            for qimg in self._images:
-                lbl = QLabel()
-                lbl.setPixmap(_scaled_pixmap(qimg, max_w))
+            # Every page gets its full-size placeholder so the scroll
+            # range, resume position and read threshold behave as if
+            # the whole chapter were loaded.
+            spacing = max(0, self._image_layout.spacing())
+            top = self._image_layout.contentsMargins().top()
+            for index in range(len(self._images)):
+                lbl = self._page_label(index, max_w)
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._image_layout.addWidget(lbl)
                 self._page_labels.append(lbl)
+                self._page_offsets.append(top)
+                top += lbl.height() + spacing
+            self._update_page_window()
             return
 
         # ── Paged layouts (issue #32): only the current page/spread ──
@@ -885,11 +871,11 @@ class ReaderPage(BasePage):
             self._current_page -= self._current_page % 2
 
         if self._view_mode == "single":
-            lbl = QLabel()
-            lbl.setPixmap(_scaled_pixmap(self._images[self._current_page], max_w))
+            lbl = self._page_label(self._current_page, max_w)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._image_layout.addWidget(lbl)
             self._page_labels.append(lbl)
+            self._update_page_window()
             return
 
         # ── Two-up (issues #24, #32): one spread, two pages side-by-side
@@ -897,6 +883,7 @@ class ReaderPage(BasePage):
         # max_w per side so the spread as a whole stays inside the
         # viewport.
         per_side = max(120, (max_w - 8) // 2)
+        self._page_target_w = per_side
         i = self._current_page
         spread = QHBoxLayout()
         spread.setSpacing(4)
@@ -906,8 +893,7 @@ class ReaderPage(BasePage):
         for j in (0, 1):
             if i + j >= len(self._images):
                 break
-            lbl = QLabel()
-            lbl.setPixmap(_scaled_pixmap(self._images[i + j], per_side))
+            lbl = self._page_label(i + j, per_side)
             lbl.setAlignment(Qt.AlignmentFlag.AlignTop | (
                 Qt.AlignmentFlag.AlignRight if j == 0 else Qt.AlignmentFlag.AlignLeft
             ))
@@ -915,8 +901,272 @@ class ReaderPage(BasePage):
             self._page_labels.append(lbl)
 
         self._image_layout.addLayout(spread)
+        self._update_page_window()
+
+    # ── Lazy page loading (issue #389) ────────────────────────────────
+    # Opening a chapter only indexes it (page order + header sizes).
+    # Pages are decoded and scaled on the loader's worker threads, and
+    # only around the reading position: the visible pages first, then
+    # PAGE_PREFETCH_AHEAD ahead and PAGE_PREFETCH_BEHIND behind. Pages
+    # that leave that window drop their pixmap; a byte-bounded cache
+    # keeps recent ones for quick revisits. Every chapter load starts a
+    # new loader token, so late results from the previous chapter are
+    # ignored.
+
+    def _page_label(self, index: int, target_w: int) -> QLabel:
+        """Placeholder label for one page, sized like the final pixmap
+        and filled at once when the page is already cached."""
+        lbl = QLabel()
+        lbl.setFixedSize(self._placeholder_size(self._images[index],
+                                                target_w))
+        self._page_slots[index] = lbl
+        cached = self._page_cache.get((index, target_w, self._zoom_level))
+        if cached is not None:
+            self._set_page_pixmap(index, lbl, cached)
+        elif index in self._failed_pages:
+            self._show_page_failed(lbl, index)
+        return lbl
+
+    def _placeholder_size(self, ref: PageRef, target_w: int) -> QSize:
+        if ref.width > 0 and ref.height > 0:
+            return display_size(ref.width, ref.height, target_w,
+                                self._zoom_level)
+        # The header gave no size: reserve a typical page shape until
+        # the decoded page sets the real one.
+        return QSize(target_w, int(target_w * 1.5))
+
+    def _resize_continuous_pages(self) -> bool:
+        """Resize the continuous-mode placeholders for a new zoom or
+        fit-width without recreating them; the scroll offset is kept,
+        as with a rebuild. False when the continuous layout isn't built
+        (e.g. coming from a paged layout), so the caller rebuilds it."""
+        if (not self._page_offsets
+                or len(self._page_labels) != len(self._images)):
+            return False
+        max_w = self._page_width_budget()
+        self._page_target_w = max_w
+        self._shown_pages.clear()
+        spacing = max(0, self._image_layout.spacing())
+        top = self._page_offsets[0]
+        try:
+            for index, lbl in enumerate(self._page_labels):
+                lbl.clear()
+                lbl.setFixedSize(self._placeholder_size(self._images[index],
+                                                        max_w))
+                self._page_offsets[index] = top
+                cached = self._page_cache.get(
+                    (index, max_w, self._zoom_level))
+                if cached is not None:
+                    self._set_page_pixmap(index, lbl, cached)
+                elif index in self._failed_pages:
+                    self._show_page_failed(lbl, index)
+                top += lbl.height() + spacing
+        except RuntimeError:
+            return False  # a label is already gone: rebuild instead
+        self._update_page_window()
+        return True
+
+    def _visible_page_range(self) -> Optional[Tuple[int, int, int]]:
+        """(first, last, step) of the pages on screen; step is the page
+        count of one paging move, so prefetch walks whole spreads."""
+        total = len(self._images)
+        if self._view_mode in self.PAGED_MODES:
+            first = self._current_page
+            last = first + (1 if self._view_mode == "double" else 0)
+            return first, min(total - 1, last), last - first + 1
+        if not self._page_offsets or self._scroll is None:
+            return None
+        try:
+            top = self._scroll.verticalScrollBar().value()
+            bottom = top + max(1, self._scroll.viewport().height())
+        except RuntimeError:
+            return None  # scroll area torn down
+        first = max(0, bisect_right(self._page_offsets, top) - 1)
+        last = max(first, bisect_left(self._page_offsets, bottom) - 1)
+        return first, min(total - 1, last), 1
+
+    def _update_page_window(self):
+        """Request the pages around the reading position (visible ones
+        first) and release the pixmaps of pages far from it."""
+        if not self._images or not self._page_slots:
+            return
+        visible = self._visible_page_range()
+        if visible is None:
+            return
+        first, last, step = visible
+        total = len(self._images)
+        ahead_end = min(total, last + 1 + self.PAGE_PREFETCH_AHEAD * step)
+        behind_start = max(0, first - self.PAGE_PREFETCH_BEHIND * step)
+        order = (list(range(first, last + 1))
+                 + list(range(last + 1, ahead_end))
+                 + list(range(first - 1, behind_start - 1, -1)))
+
+        target_w, zoom = self._page_target_w, self._zoom_level
+        wanted = []
+        for index in order:
+            if index in self._failed_pages or index in self._shown_pages:
+                continue
+            key = (index, target_w, zoom)
+            wanted.append(key)
+            cached = self._page_cache.get(key)
+            if cached is not None:
+                label = self._page_slots.get(index)
+                if label is not None:
+                    self._set_page_pixmap(index, label, cached)
+                continue
+            self._page_loader.request(index, self._images[index],
+                                      target_w, zoom)
+        self._page_loader.cancel_outside(wanted)
+
+        # One extra step of slack on each side, so a page sitting on the
+        # window edge doesn't flip between loaded and released.
+        keep_lo = max(0, behind_start - step)
+        keep_hi = ahead_end - 1 + step
+        self._page_keep = (keep_lo, keep_hi)
+        for index in [i for i in self._shown_pages
+                      if not keep_lo <= i <= keep_hi]:
+            self._shown_pages.discard(index)
+            label = self._page_slots.get(index)
+            if label is not None:
+                try:
+                    label.clear()
+                except RuntimeError:
+                    pass  # deleted by a rebuild
+
+    def _on_page_ready(self, token: int, index: int, target_w: int,
+                       zoom: float, image):
+        """A worker finished a page (GUI thread, via queued signal)."""
+        key = (index, target_w, zoom)
+        if not self._page_loader.finish(token, key):
+            return  # from a previous chapter
+        current = (target_w == self._page_target_w
+                   and zoom == self._zoom_level)
+        label = self._page_slots.get(index) if current else None
+        if image.isNull():
+            self._failed_pages.add(index)
+            if label is not None:
+                self._show_page_failed(label, index)
+            return
+        pixmap = QPixmap.fromImage(image)
+        self._page_cache.put(key, pixmap)
+        keep_lo, keep_hi = self._page_keep
+        if label is not None and keep_lo <= index <= keep_hi:
+            self._set_page_pixmap(index, label, pixmap)
+
+    def _set_page_pixmap(self, index: int, label: QLabel, pixmap: QPixmap):
+        try:
+            if label.size() != pixmap.size():
+                # Header size was missing or off: take the real one.
+                label.setFixedSize(pixmap.size())
+                self._recompute_page_offsets()
+            label.setPixmap(pixmap)
+        except RuntimeError:
+            return  # deleted by a rebuild
+        self._shown_pages.add(index)
+
+    def _recompute_page_offsets(self):
+        if self._view_mode != "continuous" or not self._page_offsets:
+            return
+        spacing = max(0, self._image_layout.spacing())
+        top = self._page_offsets[0]
+        for index in range(len(self._page_offsets)):
+            self._page_offsets[index] = top
+            label = self._page_slots.get(index)
+            top += (label.height() if label is not None else 0) + spacing
+
+    def _show_page_failed(self, label: QLabel, index: int):
+        try:
+            label.setStyleSheet(
+                f"color: {T.FG_MUTED}; font-size: {T.FONT_SIZE_SM}pt;")
+            label.setText(f"Page {index + 1} couldn't be loaded.")
+        except RuntimeError:
+            pass  # deleted by a rebuild
+
+    def _reset_page_loading(self):
+        """Drop the open chapter's decode jobs, cache and pixmaps."""
+        self._page_loader.reset()
+        self._page_cache.clear()
+        for label in self._page_slots.values():
+            try:
+                label.clear()
+            except RuntimeError:
+                pass
+        self._page_slots.clear()
+        self._shown_pages.clear()
+        self._failed_pages.clear()
+        self._page_offsets = []
+        self._page_keep = (0, -1)
+
+    def _finish_pending_removal(
+            self, reopening: Optional[Tuple[str, str]] = None):
+        """Run the remove-after-read that _mark_current_read deferred,
+        now that the reader is letting go of that chapter. Callers cancel
+        its page jobs first; a decode still reading the file gets up to
+        REMOVAL_WAIT_S to finish. The file is only deleted once no decode
+        reads it; past the deadline the removal stays queued and the
+        retry timer finishes it. Runs at most once per finished chapter.
+
+        *reopening* is the (title, chapter) about to be opened: a queued
+        removal for it is handed back to _pending_removal first, so the
+        file stays until that chapter is left again."""
+        pending, self._pending_removal = self._pending_removal, None
+        if pending is not None and pending not in self._removal_queue:
+            self._removal_queue.append(pending)
+        if reopening is not None:
+            for item in list(self._removal_queue):
+                if (item[0], item[1]) == reopening:
+                    self._removal_queue.remove(item)
+                    self._pending_removal = item
+        self._process_removal_queue(self.REMOVAL_WAIT_S, leaving=True)
+
+    def _retry_pending_removals(self):
+        """Retry timer (GUI thread): never blocks, only checks."""
+        self._process_removal_queue(0, leaving=False)
+
+    def _process_removal_queue(self, wait: float, leaving: bool):
+        deadline = time.monotonic() + wait
+        for item in list(self._removal_queue):
+            title, chapter, path = item
+            if not leaving and self._images and path == self._artifact_path:
+                # Opened again since: it goes when the reader leaves it.
+                self._removal_queue.remove(item)
+                if self._pending_removal is None:
+                    self._pending_removal = item
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            if not self._page_loader.wait_idle(remaining, path):
+                continue  # still being read: keep it for the retry
+            self._removal_queue.remove(item)
+            self._remove_after_read(title, chapter, path)
+        if not self._removal_queue:
+            self._removal_timer.stop()
+        elif not self._removal_timer.isActive():
+            self._removal_timer.start()
+
+    def shutdown_page_loader(self):
+        """Stop the page decode workers and finish a deferred
+        remove-after-read (app close)."""
+        self._page_loader.shutdown()
+        self._finish_pending_removal()
+        self._removal_timer.stop()
+        # Nothing can retry after the app closes: the chapter stays on
+        # disk and downloaded (state matches disk), and the user is told.
+        for title, chapter, _path in self._removal_queue:
+            self.app.app_state.add_notification(
+                "error",
+                f"Couldn't remove {title} Chapter {chapter} after reading: "
+                "the file was still in use.",
+            )
+        self._removal_queue.clear()
 
     def _load_chapter(self):
+        # Issue #389: no decode job or pixmap of the previous chapter
+        # survives into this one, and its deferred remove-after-read runs
+        # now that nothing reads its file any more. The chapter being
+        # opened keeps its file even when its removal was still queued.
+        self._reset_page_loading()
+        self._finish_pending_removal(reopening=(
+            (self._manga or {}).get("title", ""), str(self._chapter)))
         # Tear down previous content
         if self._content:
             self._content.deleteLater()
@@ -1136,6 +1386,10 @@ class ReaderPage(BasePage):
         self._scroll.verticalScrollBar().rangeChanged.connect(
             lambda *_: self._scroll.viewport().setCursor(self._idle_cursor())
         )
+        # Issue #389: the layout settling or the window resizing changes
+        # which pages are on screen.
+        self._scroll.verticalScrollBar().rangeChanged.connect(
+            lambda *_: self._update_page_window())
 
         scroll_content = QWidget()
         self._image_layout = QVBoxLayout(scroll_content)
@@ -1218,7 +1472,7 @@ class ReaderPage(BasePage):
         # next one for manual-mode manga (setting-gated, cache-first).
         self._maybe_prefetch_next()
 
-    def _find_and_load_chapter(self) -> List[QImage]:
+    def _find_and_load_chapter(self) -> List[PageRef]:
         # Issue #111: the downloader saves under the *sanitized* title
         # folder and formats chapter labels for sorting ("2" -> "0002.000",
         # "2 Part 1" -> "0002_Part 01"), so the lookup must mirror those
@@ -1266,7 +1520,7 @@ class ReaderPage(BasePage):
                         filepath = manga_dir / f"{base}{ext}"
                         if filepath.exists():
                             self._artifact_path = filepath
-                            return _extract_images_from_file(filepath)
+                            return index_chapter_file(filepath)
 
                 # The downloader only writes a single-component
                 # "Chapter <label>" folder, so require that exact shape
@@ -1278,7 +1532,7 @@ class ReaderPage(BasePage):
                     and folder.is_dir()
                 ):
                     self._artifact_path = folder
-                    return _extract_images_from_folder(folder)
+                    return index_chapter_folder(folder)
 
         # Fallback: scan directories for anything chapter-shaped
         for manga_dir in manga_dirs:
@@ -1287,10 +1541,10 @@ class ReaderPage(BasePage):
                     f"chapter {label.lower()}" in f.stem.lower() for label in labels
                 ):
                     self._artifact_path = f
-                    return _extract_images_from_file(f)
+                    return index_chapter_file(f)
                 if f.is_dir() and any(label in f.name for label in labels):
                     self._artifact_path = f
-                    return _extract_images_from_folder(f)
+                    return index_chapter_folder(f)
 
         return []
 

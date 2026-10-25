@@ -799,6 +799,11 @@ class MeMangaApp(QMainWindow):
         page = self._pages.get(self._current_page)
         if page is not None and hasattr(page, "save_reading_position"):
             page.save_reading_position()
+        # Issue #389: stop the reader's page workers and finish a deferred
+        # remove-after-read before the final flush records it.
+        reader = self._pages.get("reader")
+        if reader is not None:
+            reader.shutdown_page_loader()
         self.app_state.flush()
         self.worker.shutdown()
         if hasattr(self, "network"):

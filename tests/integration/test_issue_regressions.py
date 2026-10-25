@@ -450,6 +450,13 @@ def test_issue_104_removes_chapter_after_read(app_window, qapp, sample_manga,
     bar.setValue(bar.maximum())
     qapp.processEvents()
 
+    # Read at once; the file goes when the reader leaves the chapter,
+    # since its pages are decoded from it on demand (#389).
+    assert app_window.app_state.is_chapter_read(title, "1")
+    assert artifact.exists()
+    app_window.show_page("detail", manga=sample_manga)
+    qapp.processEvents()
+
     # File gone, dropped from downloaded, but read progress kept.
     assert not artifact.exists()
     assert not app_window.app_state.is_chapter_downloaded(title, "1")
@@ -475,9 +482,8 @@ def test_issue_104_next_survives_current_download_cleanup(
     bar.setValue(bar.maximum())
     qapp.processEvents()
 
-    assert not chapter_1.exists()
-    assert not app_window.app_state.is_chapter_downloaded(title, "1")
-    assert app_window.app_state.is_chapter_downloaded(title, "2")
+    # Still open, so still on disk (#389); removed once the reader moves on.
+    assert chapter_1.exists()
     assert app_window.app_state.is_chapter_read(title, "1")
 
     reader._go_next_chapter()
@@ -486,6 +492,10 @@ def test_issue_104_next_survives_current_download_cleanup(
     assert str(reader._chapter) == "2"
     assert reader._artifact_path == chapter_2
     assert reader._images
+    assert not chapter_1.exists()
+    assert not app_window.app_state.is_chapter_downloaded(title, "1")
+    assert app_window.app_state.is_chapter_downloaded(title, "2")
+    assert app_window.app_state.is_chapter_read(title, "1")
 
 
 def test_issue_104_107_prefetch_keeps_immediate_next_after_cleanup(
@@ -506,15 +516,17 @@ def test_issue_104_107_prefetch_keeps_immediate_next_after_cleanup(
     bar.setValue(bar.maximum())
     qapp.processEvents()
 
-    assert not chapter_1.exists()
-    assert app_window.app_state.get_downloaded_chapters(title) == ["3"]
+    # Still open, so still on disk (#389); removed once the reader moves on.
+    assert chapter_1.exists()
+    assert app_window.app_state.get_downloaded_chapters(title) == ["1", "3"]
 
-    # A prefetch/download completion lands chapter 2 after the current
-    # chapter has already been removed from downloaded state.
+    # A prefetch/download completion lands chapter 2 while the finished
+    # chapter is still open.
     chapter_2.write_bytes(
         make_cbz(pages=8, name="ch2.cbz").read_bytes())
     app_window.app_state.add_downloaded_chapter(title, "2")
-    assert app_window.app_state.get_downloaded_chapters(title) == ["2", "3"]
+    assert app_window.app_state.get_downloaded_chapters(title) == [
+        "1", "2", "3"]
 
     reader._on_download_complete({"title": title, "chapter": "2"})
     qapp.processEvents()
@@ -529,6 +541,8 @@ def test_issue_104_107_prefetch_keeps_immediate_next_after_cleanup(
     assert str(reader._chapter) == "2"
     assert reader._artifact_path == chapter_2
     assert reader._images
+    assert not chapter_1.exists()
+    assert app_window.app_state.get_downloaded_chapters(title) == ["2", "3"]
 
 
 def test_issue_104_disabled_keeps_chapter(app_window, qapp, sample_manga,
@@ -568,6 +582,9 @@ def test_issue_104_deletion_failure_keeps_downloaded(app_window, qapp,
                            side_effect=OSError("boom")):
         bar = reader._scroll.verticalScrollBar()
         bar.setValue(bar.maximum())
+        qapp.processEvents()
+        # The deferred removal runs when the reader leaves the chapter.
+        app_window.show_page("detail", manga=sample_manga)
         qapp.processEvents()
 
     # Non-fatal: file untouched, chapter stays downloaded and read.

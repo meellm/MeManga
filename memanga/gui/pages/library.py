@@ -45,6 +45,8 @@ class LibraryPage(BasePage):
         # Issue #18: repaint cards when a chapter is opened in the reader
         # so the "Read X/N" sub-line + cover progress bar update live.
         self.app.events.subscribe("chapter_read", lambda d: self._on_check_done())
+        # Issue #389: remove-after-read may land after the reader was left.
+        self.app.events.subscribe("chapter_removed", lambda d: self._on_check_done())
         # Refresh when something edits/adds/removes a manga elsewhere
         # (Add Manga dialog, Detail page, cover backfill writes a URL).
         self.app.events.subscribe("library_updated", lambda d: self._on_check_done())

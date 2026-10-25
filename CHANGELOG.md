@@ -247,6 +247,18 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #389 The desktop reader opens long chapters without freezing the
+  window. It used to decode every page up front, which on long webtoon
+  chapters took seconds and hundreds of MB to several GB of memory.
+  Opening a chapter now only reads each page's size, so scrolling, the
+  page count and resuming where you left off work at once. Pages are
+  decoded in the background, starting with the ones on screen and a few
+  ahead. Pages far from where you are reading are released again, so
+  memory no longer grows with the chapter's length. A page that can't be
+  decoded shows a short message in its place. With "remove chapters
+  after reading" on, a finished chapter's file is now removed when you
+  leave the chapter rather than the moment you reach its end, so you can
+  still scroll back through it.
 - #324, #336 The downloaded desktop app no longer offers to install a
   scheduled check it cannot run. Its only executable starts the app, so
   the daily task opened the window instead of checking while Settings
