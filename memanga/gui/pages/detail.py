@@ -27,6 +27,9 @@ class DetailPage(BasePage):
         # Container for the merged chapter list — rebuilt independently of the
         # rest of the page when a single download completes.
         self._chapters_container = None
+        # Hero "Downloaded: N chapters" line, refreshed in place when the
+        # reader removes a chapter after reading (issue #389).
+        self._stats_label = None
         # task_ids of in-flight per-chapter Download buttons → button widget,
         # so we can flip them to "Read" when their download completes.
         self._pending_downloads: dict = {}
@@ -60,6 +63,9 @@ class DetailPage(BasePage):
         self.app.events.subscribe("check_complete", self._on_any_check_complete)
         # A chapter sent to Kindle again leaves (or stays on) the list.
         self.app.events.subscribe("kindle_resend_done", self._on_kindle_resend_done)
+        # Issue #389: remove-after-read can finish while this page is
+        # already showing — the row flips back to Download in place.
+        self.app.events.subscribe("chapter_removed", self._on_chapter_removed)
 
     def on_show(self, **kwargs):
         manga = kwargs.get("manga")
@@ -297,16 +303,10 @@ class DetailPage(BasePage):
         info_layout.addSpacing(12)
 
         # Stats
-        downloaded = state_data.get("downloaded", [])
-        last_ch = state_data.get("last_chapter") or "-"
-        last_updated = state_data.get("last_updated") or "Never"
-        if last_updated != "Never" and "T" in last_updated:
-            last_updated = last_updated.split("T")[0]
-
-        stats_text = f"Downloaded: {len(downloaded)} chapters  |  Last: Ch. {last_ch}  |  Updated: {last_updated}"
-        stats_label = QLabel(stats_text)
+        stats_label = QLabel(self._stats_text(state_data))
         stats_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_SECONDARY};")
         info_layout.addWidget(stats_label)
+        self._stats_label = stats_label
 
         info_layout.addSpacing(T.PAD_MD)
 
@@ -1299,6 +1299,36 @@ class DetailPage(BasePage):
         self._pending_downloads.pop(data.get("task_id", ""), None)
         # Only refresh if this page is currently visible to avoid wasted work
         if self.isVisible():
+            self._refresh_chapter_list()
+
+    @staticmethod
+    def _stats_text(state_data) -> str:
+        downloaded = state_data.get("downloaded", [])
+        last_ch = state_data.get("last_chapter") or "-"
+        last_updated = state_data.get("last_updated") or "Never"
+        if last_updated != "Never" and "T" in last_updated:
+            last_updated = last_updated.split("T")[0]
+        return f"Downloaded: {len(downloaded)} chapters  |  Last: Ch. {last_ch}  |  Updated: {last_updated}"
+
+    def _refresh_stats(self):
+        """Re-read the hero stats line from state without a rebuild."""
+        if self._stats_label is None or not self._manga:
+            return
+        state_data = self.app.app_state.get_manga_state(
+            self._manga.get("title", ""))
+        try:
+            self._stats_label.setText(self._stats_text(state_data))
+        except RuntimeError:
+            self._stats_label = None  # deleted by a rebuild
+
+    def _on_chapter_removed(self, data):
+        """The reader removed a finished chapter's file after reading;
+        refresh the hero stats and the list so its row no longer opens a
+        missing file."""
+        if not self._manga or data.get("title") != self._manga.get("title"):
+            return
+        if self.isVisible():
+            self._refresh_stats()
             self._refresh_chapter_list()
 
     def _on_any_check_complete(self, data):
