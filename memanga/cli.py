@@ -2724,37 +2724,126 @@ def _cron_remove():
     console.print(f"[green]✅ {removed}[/green]")
 
 
+SOURCE_HEALTH_STATUSES = ["ok", "warning", "error", "unknown"]
+SOURCE_SEARCH_FILTERS = ["included", "not-searched"]
+_HEALTH_STYLES = {"ok": "green", "warning": "yellow", "error": "red",
+                  "unknown": "dim"}
+
+
+def _source_health(source, all_health):
+    """Saved health for one catalog row, or None if never checked.
+
+    Library checks record health under the domain a manga was saved
+    with, which can be an alias, so every domain of the scraper counts.
+    When several have entries, the most recently checked one wins.
+    """
+    best_domain, best = None, None
+    for domain in (source.domain,) + source.aliases:
+        for key in (domain, "www." + domain):
+            info = all_health.get(key)
+            if not info:
+                continue
+            checked = max(str(info.get("last_success") or ""),
+                          str(info.get("last_error") or ""))
+            if best is None or checked > best[0]:
+                best_domain, best = key, (checked, info)
+    if best is None:
+        return None
+    info = best[1]
+    status = info.get("status")
+    return {
+        "status": status if status in ("ok", "warning", "error") else "unknown",
+        "domain": best_domain,
+        "last_success": info.get("last_success"),
+        "last_error": info.get("last_error"),
+        "last_error_msg": info.get("last_error_msg"),
+        "error_count": info.get("error_count", 0),
+        "latency_ms": info.get("latency_ms"),
+    }
+
+
+def _source_matches(source, health, query, search, statuses) -> bool:
+    """True when a catalog row passes every `sources` filter given."""
+    if query:
+        needle = query.lower()
+        if not any(needle in d for d in (source.domain,) + source.aliases):
+            return False
+    if search == "included" and not source.searchable:
+        return False
+    if search == "not-searched" and source.searchable:
+        return False
+    if statuses and (health["status"] if health else "unknown") not in statuses:
+        return False
+    return True
+
+
 def cmd_sources(args):
-    """List supported manga sources."""
-    sources = source_catalog()
+    """List supported manga sources with their saved health.
+
+    Read-only and offline: health is whatever earlier library checks and
+    the desktop app's source checks saved in state.
+    """
+    catalog = source_catalog()
+    all_health = state.get_all_source_health()
+    query = getattr(args, "query", None)
+    search = getattr(args, "search", None)
+    statuses = getattr(args, "health", None)
+    rows = []
+    for source in catalog:
+        health = _source_health(source, all_health)
+        if _source_matches(source, health, query, search, statuses):
+            rows.append((source, health))
+
     if args.json:
         _print_json({"schema_version": JSON_SCHEMA_VERSION,
-                     "sources": [s.to_dict() for s in sources]})
+                     "sources": [dict(s.to_dict(), health=h) for s, h in rows]})
         return
 
     console.print(_panel("[bold]🌐 Supported Sources[/bold]", border_style="cyan"))
     console.print()
+
+    if not rows:
+        console.print("[dim]No sources match these filters.[/dim]")
+        return
 
     table = _table(box=box.SIMPLE)
     table.add_column("Source", style="cyan")
     table.add_column("Engine", style="dim")
     table.add_column("Language")
     table.add_column("Search")
+    table.add_column("Health")
     table.add_column("Notes")
-    for source in sources:
-        search = source.search_status
+    tally = dict.fromkeys(SOURCE_HEALTH_STATUSES, 0)
+    for source, health in rows:
+        search_text = source.search_status
         notes = source.note
         if source.nsfw:
             notes = "NSFW · " + notes
         if source.default_enabled:
             notes = "default · " + notes
+        status = health["status"] if health else "unknown"
+        tally[status] += 1
+        health_text = f"[{_HEALTH_STYLES[status]}]{status}[/]"
+        if health:
+            checked = max(str(health["last_success"] or ""),
+                          str(health["last_error"] or ""))
+            if checked:
+                health_text += f"\n[dim]{_esc(_local_time_text(checked))}[/dim]"
         table.add_row(source.domain, source.engine,
-                      source.language or "—", search, notes)
+                      source.language or "—", search_text, health_text,
+                      _esc(notes))
 
     console.print(table)
     console.print()
-    console.print(f"[dim]Total: {len(sources)} scrapers, "
-                  f"{len(get_supported_sources())} domains[/dim]")
+    if len(rows) == len(catalog):
+        console.print(f"[dim]Total: {len(catalog)} scrapers, "
+                      f"{len(get_supported_sources())} domains[/dim]")
+    else:
+        console.print(f"[dim]Showing {len(rows)} of {len(catalog)} scrapers[/dim]")
+    console.print("[dim]Health: " + ", ".join(
+        f"{tally[s]} {s}" for s in SOURCE_HEALTH_STATUSES) + "[/dim]")
+    console.print("[dim]Health is the last saved check result, not a live test.[/dim]")
+    console.print("[dim]Unknown means the source was never checked.[/dim]")
 
 
 def _add_search_result(result, status=None):
@@ -4552,7 +4641,14 @@ Examples:
     
     # sources
     p_sources = subparsers.add_parser("sources", help="List supported sources")
+    p_sources.add_argument("query", nargs="?",
+                           help="Only show sources whose domain or alias contains this text")
     p_sources.add_argument("--json", action="store_true", help="Machine-readable JSON output")
+    p_sources.add_argument("--search", choices=SOURCE_SEARCH_FILTERS,
+                           help="Only show sources the search sweep includes or skips")
+    p_sources.add_argument("--health", action="append", choices=SOURCE_HEALTH_STATUSES,
+                           help="Only show sources with this saved health (repeat for several); "
+                                "unknown means never checked")
     p_sources.set_defaults(func=cmd_sources)
 
     # search
