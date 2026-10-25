@@ -2070,6 +2070,97 @@ class TestSourcesCommand:
         assert aliases["asuracomic.net"]["reason"] == "alias"
         assert aliases["asuratoon.com"]["reason"] == "alias"
 
+    # Issue #236: saved health and filters.
+
+    @staticmethod
+    def _json(run_cli, capsys, *argv):
+        assert run_cli("sources", "--json", *argv) == 0
+        return {s["domain"]: s for s in json.loads(capsys.readouterr().out)["sources"]}
+
+    @pytest.fixture
+    def seeded_health(self, state):
+        state.update_source_health("mangadex.org", True, latency_ms=120)
+        # Saved under an alias, as a library entry on an old domain would.
+        for _ in range(3):
+            state.update_source_health("asuracomic.net", False, error_msg="HTTP 503")
+        state.update_source_health("bato.to", False, error_msg="timed out")
+        state.save()
+
+    def test_json_reports_saved_health(self, run_cli, capsys, seeded_health):
+        rows = self._json(run_cli, capsys)
+        assert rows["mangadex.org"]["health"]["status"] == "ok"
+        assert rows["mangadex.org"]["health"]["latency_ms"] == 120
+        assert rows["mangadex.org"]["health"]["last_success"]
+        asura = rows["asurascans.com"]["health"]
+        assert asura["status"] == "error"
+        assert asura["domain"] == "asuracomic.net"
+        assert asura["error_count"] == 3
+        assert rows["bato.to"]["health"]["status"] == "warning"
+        assert rows["nhentai.net"]["health"] is None
+        # Existing keys stay as they were.
+        assert rows["mangadex.org"]["search_status"] == "Included in search"
+
+    def test_json_without_saved_health_is_null(self, run_cli, capsys):
+        rows = self._json(run_cli, capsys)
+        assert all(row["health"] is None for row in rows.values())
+
+    def test_health_filter(self, run_cli, capsys, seeded_health):
+        assert set(self._json(run_cli, capsys, "--health", "ok")) == {"mangadex.org"}
+        assert set(self._json(run_cli, capsys, "--health", "error",
+                              "--health", "warning")) == {"asurascans.com", "bato.to"}
+        unknown = self._json(run_cli, capsys, "--health", "unknown")
+        assert "nhentai.net" in unknown
+        assert not {"mangadex.org", "asurascans.com", "bato.to"} & set(unknown)
+
+    def test_search_filter(self, run_cli, capsys):
+        included = self._json(run_cli, capsys, "--search", "included")
+        skipped = self._json(run_cli, capsys, "--search", "not-searched")
+        assert "mangadex.org" in included and "mangadex.org" not in skipped
+        assert "bato.to" in skipped and "bato.to" not in included
+        assert all(r["searchable"] for r in included.values())
+        assert not any(r["searchable"] for r in skipped.values())
+
+    def test_query_matches_domain_or_alias(self, run_cli, capsys):
+        assert "asurascans.com" in self._json(run_cli, capsys, "ASURACOMIC")
+        assert set(self._json(run_cli, capsys, "mangadex")) == {"mangadex.org"}
+
+    def test_filters_combine(self, run_cli, capsys, seeded_health):
+        assert self._json(run_cli, capsys, "bato", "--search", "included") == {}
+        assert set(self._json(run_cli, capsys, "bato", "--health", "warning",
+                              "--search", "not-searched")) == {"bato.to"}
+
+    def test_bad_filter_value_is_usage_error(self, run_cli):
+        assert run_cli("sources", "--health", "broken") == 2
+        assert run_cli("sources", "--search", "maybe") == 2
+
+    def test_table_shows_health_honestly(self, run_cli, capsys, seeded_health):
+        assert run_cli("sources") == 0
+        out = capsys.readouterr().out
+        assert "Health" in out
+        assert "not a live test" in out
+        assert "1 ok, 1 warning, 1 error" in out
+        assert "Total:" in out
+
+    def test_table_filtered_and_empty(self, run_cli, capsys):
+        assert run_cli("sources", "mangadex") == 0
+        out = capsys.readouterr().out
+        assert "Showing 1 of" in out
+        assert run_cli("sources", "no-such-source-xyz") == 0
+        assert "No sources match these filters." in capsys.readouterr().out
+
+    def test_newest_saved_health_wins_across_aliases(self):
+        from memanga.cli import _source_health
+        from memanga.scrapers.catalog import source_catalog
+        asura = next(s for s in source_catalog() if s.domain == "asurascans.com")
+        health = _source_health(asura, {
+            "asurascans.com": {"status": "ok", "last_success": "2026-01-02T00:00:00"},
+            "asuracomic.net": {"status": "error", "error_count": 4,
+                               "last_error": "2026-01-01T00:00:00"},
+        })
+        assert health["status"] == "ok"
+        assert health["domain"] == "asurascans.com"
+        assert health["error_count"] == 0
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # `export` / `import` — backup + restore
