@@ -716,6 +716,38 @@ class SettingsPage(BasePage):
 
         f.addSpacing(T.PAD_XL)
 
+        # Network & Privacy (issue #337)
+        self._section(f, "Network & Privacy")
+        self._network_hint = QLabel(self._network_hint_text())
+        # Entries come from a hand-edited file: never render them as HTML.
+        self._network_hint.setTextFormat(Qt.TextFormat.PlainText)
+        self._network_hint.setProperty("role", "hint")
+        self._network_hint.setWordWrap(True)
+        f.addWidget(self._network_hint)
+
+        self._network_check = QCheckBox("Check the internet connection")
+        self._network_check.setChecked(
+            bool(self.app.config.get("gui.network_check", True))
+        )
+        f.addWidget(self._network_check)
+
+        cover_hint = QLabel(
+            "Search MangaDex by title for covers a source doesn't provide "
+            "or that no longer load. Never used while MangaDex is turned "
+            "off in Sources."
+        )
+        cover_hint.setProperty("role", "hint")
+        cover_hint.setWordWrap(True)
+        f.addWidget(cover_hint)
+
+        self._mangadex_cover_check = QCheckBox("Find missing covers on MangaDex")
+        self._mangadex_cover_check.setChecked(
+            bool(self.app.config.get("gui.mangadex_cover_fallback", True))
+        )
+        f.addWidget(self._mangadex_cover_check)
+
+        f.addSpacing(T.PAD_XL)
+
         # Scheduled checks
         self._section(f, "Scheduled Checks")
         self._cron_unavailable_hint = QLabel(SCHEDULING_UNAVAILABLE_TEXT)
@@ -1023,6 +1055,33 @@ class SettingsPage(BasePage):
         except RuntimeError:
             pass  # page already closed and deleted
 
+    def _network_hint_text(self) -> str:
+        """The connection-check hint for the hosts in the current config
+        (issue #337). Rebuilt on reload so it never names stale hosts."""
+        from ..network_status import configured_endpoints, invalid_hosts
+        endpoints = configured_endpoints(self.app.config)
+        if endpoints:
+            hosts = ", ".join(f"{host}:{port}" for host, port in endpoints)
+            probe_text = (
+                "Every 30 seconds, open a connection (no data sent) to the "
+                f"first reachable of {hosts} to notice when you go offline. "
+                "When off, offline detection is off too."
+            )
+        else:
+            probe_text = (
+                "gui.network_check_hosts has no valid host, so no "
+                "connection check is sent and offline detection is off."
+            )
+        bad_hosts = invalid_hosts(self.app.config)
+        if bad_hosts:
+            probe_text += (
+                " Ignored entries that are not host:port: "
+                + ", ".join(str(h) for h in bad_hosts) + "."
+            )
+        return (probe_text + " Set your own hosts with "
+                "gui.network_check_hosts in config.yaml (used after a "
+                "restart).")
+
     def _refresh_post_processing_enabled(self):
         enabled = self._post_processing_check.isChecked()
         self._post_processing_command.setEnabled(enabled)
@@ -1258,6 +1317,18 @@ class SettingsPage(BasePage):
                 self._remove_after_read_check.isChecked(),
             )
 
+        # Network & Privacy (issue #337). The connectivity check takes
+        # effect right away; turning it off clears any offline state.
+        if hasattr(self, "_network_check"):
+            network_check = self._network_check.isChecked()
+            cfg.set("gui.network_check", network_check)
+            network = getattr(self.app, "network", None)
+            if network is not None:
+                network.set_enabled(network_check)
+        if hasattr(self, "_mangadex_cover_check"):
+            cfg.set("gui.mangadex_cover_fallback",
+                    self._mangadex_cover_check.isChecked())
+
         cfg.save()
         kindle_notice = _kindle_format_toast_text(cfg)
         if password_in_config:
@@ -1277,13 +1348,23 @@ class SettingsPage(BasePage):
         defaults = cfg._default_config()
         # A reset restores preferences, not the user's group block list.
         removed_groups = list(cfg.get("mangadex.removed_group_ids", []) or [])
+        had_custom_hosts = bool(cfg.get("gui.network_check_hosts", []))
         for section in ("delivery", "email", "cron", "gui", "partial_chapters",
                         "reader", "mangadex"):
             cfg.set(section, defaults[section])
         cfg.set("mangadex.removed_group_ids", removed_groups)
         cfg.save()
+        network = getattr(self.app, "network", None)
+        if network is not None:
+            network.set_enabled(bool(cfg.get("gui.network_check", True)))
         self._load_config_into_widgets()
-        Toast(self, "Settings reset to defaults", kind="success")
+        if had_custom_hosts:
+            # Issue #337: say that the user's own probe hosts are gone.
+            Toast(self, "Settings reset to defaults.\nYour connection-check "
+                        "hosts were cleared; the built-in hosts are used "
+                        "after a restart.", kind="success", duration=10000)
+        else:
+            Toast(self, "Settings reset to defaults", kind="success")
 
     def _load_config_into_widgets(self):
         cfg = self.app.config
@@ -1338,6 +1419,15 @@ class SettingsPage(BasePage):
             self._remove_after_read_check.setChecked(
                 cfg.get("reader.remove_after_read", False)
             )
+
+        if hasattr(self, "_network_check"):
+            self._network_check.setChecked(
+                bool(cfg.get("gui.network_check", True)))
+        if hasattr(self, "_mangadex_cover_check"):
+            self._mangadex_cover_check.setChecked(
+                bool(cfg.get("gui.mangadex_cover_fallback", True)))
+        if hasattr(self, "_network_hint"):
+            self._network_hint.setText(self._network_hint_text())
 
         self._refresh_filename_preview()
 

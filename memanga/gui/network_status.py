@@ -25,6 +25,13 @@ Probe:
     connection. Only timeouts, unreachable-network errors and
     name-resolution failures count as offline evidence.
 
+Settings (issue #337):
+    ``gui.network_check`` turns the monitor off entirely — no probe is
+    ever sent and the app simply assumes it is online.
+    ``gui.network_check_hosts`` replaces the built-in hosts with the
+    user's own ``host:port`` list. A list with no valid entry probes
+    nothing; it never falls back to the built-in hosts.
+
 Events published:
     "network_online"  → emitted on the first probe AND on every offline
                         → online transition. Pages should re-enable UI.
@@ -66,12 +73,19 @@ class NetworkMonitor:
     publishes transitions on the GUI EventBus.
     """
 
-    def __init__(self, events):
+    def __init__(self, events, endpoints=None):
         self._events = events
+        # None means the built-in hosts; an empty tuple means probe
+        # nothing (user hosts that are all invalid, issue #337).
+        self._endpoints = (PROBE_ENDPOINTS if endpoints is None
+                           else tuple(endpoints))
         self._online: Optional[bool] = None    # None until first probe
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        # Bumped by stop(): a probe started before a stop never counts,
+        # even when start() runs again before that probe finishes.
+        self._generation = 0
 
     # ── public API ────────────────────────────────────────────────
 
@@ -85,16 +99,42 @@ class NetworkMonitor:
 
     def start(self):
         """Spawn the monitor thread (idempotent)."""
+        # Clear first: a thread stopped moments ago (Settings off, then
+        # on again) is still alive and just keeps running.
+        self._stop.clear()
+        if not self._endpoints:
+            return  # nothing to probe: stay optimistic, send nothing
         if self._thread is not None and self._thread.is_alive():
             return
-        self._stop.clear()
         self._thread = threading.Thread(
             target=self._run, name="network-monitor", daemon=True,
         )
         self._thread.start()
 
     def stop(self):
+        with self._lock:
+            self._generation += 1
         self._stop.set()
+
+    def set_enabled(self, enabled: bool):
+        """Turn background probing on or off (Settings, issue #337).
+
+        Turning it off forgets the last result, so the app goes back to
+        assuming it is online; if it was showing offline, publish
+        ``network_online`` so the banner and disabled controls recover.
+        """
+        if enabled:
+            self.start()
+            return
+        self.stop()
+        with self._lock:
+            was_offline = self._online is False
+            self._online = None
+        if was_offline:
+            try:
+                self._events.publish("network_online", {})
+            except Exception:
+                pass
 
     def force_recheck(self):
         """Manual re-probe (used by an explicit 'Retry' button in the
@@ -118,8 +158,14 @@ class NetworkMonitor:
                 slept += 0.5
 
     def _probe_and_publish(self):
-        online = _check_connectivity()
+        if not self._endpoints:
+            return  # nothing to probe: never report offline
         with self._lock:
+            generation = self._generation
+        online = _check_connectivity(self._endpoints)
+        with self._lock:
+            if self._stop.is_set() or generation != self._generation:
+                return  # stopped or turned off while this probe ran
             changed = (self._online is None) or (self._online != online)
             prev = self._online
             self._online = online
@@ -138,9 +184,35 @@ class NetworkMonitor:
             pass
 
 
-def _check_connectivity() -> bool:
+def configured_endpoints(config) -> tuple:
+    """The probe hosts from ``gui.network_check_hosts``.
+
+    Unset or an empty list means the built-in PROBE_ENDPOINTS.
+    Otherwise only the valid ``host:port`` entries are used; with none
+    (or a value that is not a list) the result is empty and nothing is
+    probed, so a typo never sends probes to hosts the user replaced.
+    """
+    from ..config import parse_host_port
+    raw = config.get("gui.network_check_hosts", []) if config else []
+    if raw == []:
+        return PROBE_ENDPOINTS
+    if not isinstance(raw, list):
+        return ()
+    return tuple(ep for ep in map(parse_host_port, raw) if ep)
+
+
+def invalid_hosts(config) -> list:
+    """Entries of ``gui.network_check_hosts`` that are not ``host:port``."""
+    from ..config import parse_host_port
+    raw = config.get("gui.network_check_hosts", []) if config else []
+    if not isinstance(raw, list):
+        return [raw]
+    return [h for h in raw if parse_host_port(h) is None]
+
+
+def _check_connectivity(endpoints=PROBE_ENDPOINTS) -> bool:
     """Probe endpoints in order; online as soon as one is reachable."""
-    for host, port in PROBE_ENDPOINTS:
+    for host, port in endpoints:
         if _tcp_probe(host, port, PROBE_TIMEOUT):
             return True
     return False

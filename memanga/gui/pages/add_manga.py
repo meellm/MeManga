@@ -276,20 +276,8 @@ class AddMangaDialog(ModalDialog):
         is_offline = net is not None and not net.is_online
         if not is_offline:
             def _fetch_cover():
-                cover = None
-                try:
-                    from ...scrapers import get_scraper
-                    scraper = get_scraper(domain)
-                    if hasattr(scraper, "get_cover_url"):
-                        cover = scraper.get_cover_url(url)
-                except Exception:
-                    cover = None
-                if not cover:
-                    try:
-                        from ..cover_fallback import fetch_mangadex_cover
-                        cover = fetch_mangadex_cover(title)
-                    except Exception:
-                        cover = None
+                from ..cover_fallback import find_cover
+                cover = find_cover(self.app.config, domain, url, title)
                 if cover:
                     manga_list = self.app.config.get("manga", [])
                     for m in manga_list:

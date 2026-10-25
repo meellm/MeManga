@@ -171,7 +171,9 @@ Hit **Re-check health** to ping every enabled source and see their status.
 
 - **General** — output format (PDF/EPUB/CBZ/…), download folder, theme, concurrency
 - **Kindle / Email** — Gmail App Password setup for sending chapters to your Kindle
-- **Advanced** — fallback-source delay, post-processing, cron, cache management.
+- **Advanced** — fallback-source delay, post-processing, cron, cache management,
+  and **Network & Privacy** (the connection check and MangaDex cover lookup,
+  see the [FAQ](#faq)).
   The downloaded desktop app can't set up scheduled checks; use
   `memanga cron install` from the command-line version instead (see
   [Schedule daily checks](#schedule-daily-checks)).
@@ -647,9 +649,41 @@ when it detects you're offline and re-enables them when the wifi
 returns.
 
 **Does it phone home / send analytics?**
-No. The app talks only to the manga sources you enable. No telemetry,
-no crash reports auto-sent. Crash dumps go to `crash.log` locally -
-if you want to share one in a bug report, you can (please do so).
+No. No telemetry, no accounts, no crash reports auto-sent. Crash dumps
+go to `crash.log` locally - if you want to share one in a bug report,
+you can (please do so).
+
+The desktop app contacts:
+
+- **The manga sources you use** and the image servers their pages and
+  covers come from.
+- **A connection check:** every 30 seconds (every 5 while offline) it
+  opens a connection, with no data sent, to the first reachable of
+  `1.1.1.1:53`, `cloudflare.com:443` and `github.com:443`, so it can
+  tell when you are offline. Turn it off in **Settings → Advanced →
+  Network & Privacy** (offline detection is then off too), or list your
+  own hosts in `config.yaml`:
+
+  ```yaml
+  gui:
+    network_check_hosts:
+      - "192.0.2.1:80"
+  ```
+
+  Only valid `host:port` entries are used. A list with none sends no
+  check at all (it never falls back to the hosts above). Settings lists
+  any ignored entries, and `memanga config edit` rejects them.
+
+- **MangaDex, for covers:** when a manga has no cover or its cover no
+  longer loads, the app searches MangaDex by title. This never happens
+  while MangaDex is turned off in **Sources**, and you can turn it off
+  in **Settings → Advanced → Network & Privacy**.
+- **Your mail server**, only if you set up Kindle / email delivery.
+- **Playwright's download server**, once, for the browser driver on
+  first launch.
+
+The same switches exist as `gui.network_check` and
+`gui.mangadex_cover_fallback` for `memanga config set`.
 
 **Why does the first launch take a while?**
 It's downloading Playwright's Firefox driver (~80 MB) so it can

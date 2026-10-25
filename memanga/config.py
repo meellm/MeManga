@@ -322,6 +322,16 @@ class Config:
                 # reading a manual-mode manga, the reader quietly queues
                 # the immediate next available chapter in the background.
                 "reader_prefetch_next": False,
+                # Desktop network behaviour (issue #337). The connectivity
+                # check opens a bare TCP connection (no data sent) to the
+                # first reachable host so the app can tell when it is
+                # offline; an empty host list means the built-in hosts in
+                # gui/network_status.py.
+                "network_check": True,
+                "network_check_hosts": [],
+                # Look up missing or broken covers on MangaDex. Also skipped
+                # whenever mangadex.org is turned off in Sources.
+                "mangadex_cover_fallback": True,
             },
             # Built-in reader behaviour (issue #104). Kept separate from
             # delivery.delete_after_send, which is tied to email delivery —
@@ -658,6 +668,10 @@ CONFIG_KEYS = {
     "gui.auto_check": {"kind": "bool"},
     "gui.auto_check_interval": {"kind": "int", "min": 60},
     "gui.reader_prefetch_next": {"kind": "bool"},
+    "gui.network_check": {"kind": "bool"},
+    "gui.network_check_hosts": {
+        "kind": "list", "items": "host_port", "read_only": "memanga config edit"},
+    "gui.mangadex_cover_fallback": {"kind": "bool"},
     "reader.remove_after_read": {"kind": "bool"},
     "mangadex.data_saver": {"kind": "bool"},
     "mangadex.removed_group_ids": {
@@ -680,6 +694,25 @@ def _is_hhmm(value) -> bool:
     if len(parts) != 2 or not all(p.isdigit() for p in parts):
         return False
     return 0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59
+
+
+def parse_host_port(text):
+    """``"host:port"`` (or ``"[v6]:port"``) as ``(host, port)``, or None.
+
+    Only a bare host and port: URLs, paths and whitespace are rejected.
+    """
+    if not isinstance(text, str):
+        return None
+    host, sep, port = text.strip().rpartition(":")
+    if not sep or not port.isdigit() or not 1 <= int(port) <= 65535:
+        return None
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not host or any(c.isspace() or c in "/@[]" for c in host):
+        return None
+    if ":" in host and not text.strip().startswith("["):
+        return None  # IPv6 needs brackets so the port is unambiguous
+    return host, int(port)
 
 
 def _range_problem(spec, value):
@@ -780,7 +813,13 @@ def config_value_problem(key, value):
     if kind == "time":
         return None if isinstance(value, str) and _is_hhmm(value) else "expected HH:MM"
     if kind == "list":
-        return None if isinstance(value, list) else "expected a list"
+        if not isinstance(value, list):
+            return "expected a list"
+        if spec.get("items") == "host_port":
+            for item in value:
+                if parse_host_port(item) is None:
+                    return f"expected host:port entries, got {item!r}"
+        return None
     if not isinstance(value, str):
         return "expected text"
     if spec.get("required") and not value.strip():
