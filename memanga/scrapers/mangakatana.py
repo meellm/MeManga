@@ -10,7 +10,7 @@ import re
 from typing import List, Optional
 from pathlib import Path
 from .playwright_base import PlaywrightScraper
-from .base import Chapter, Manga
+from .base import Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class MangakatanataScraper(PlaywrightScraper):
         """Download image with proper referer header for Mangakatana."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": "https://mangakatana.com/",
             }
             response = self.session.get(url, headers=headers, timeout=30)

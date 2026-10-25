@@ -13,7 +13,7 @@ from typing import List, Optional
 from pathlib import Path
 from urllib.parse import quote_plus, urljoin
 
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class OneMangaScraper(BaseScraper):
         super().__init__()
         self.session = cloudscraper.create_scraper()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": BROWSER_USER_AGENT_SHORT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Referer": self.base_url
         })
@@ -198,7 +198,7 @@ class OneMangaScraper(BaseScraper):
     def download_image(self, url: str, path: Path) -> bool:
         """Download an image with proper headers."""
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": BROWSER_USER_AGENT_SHORT,
             "Referer": self.base_url,
             "Accept": "image/webp,image/apng,image/*,*/*;q=0.8"
         }

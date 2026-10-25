@@ -317,7 +317,7 @@ For a host cron job, run Compose from the repository directory:
 | `config path` / `config edit` / `config email [--test \| --send-test]` | Print the config file path, open it in `$VISUAL`/`$EDITOR` and check it, show email settings (`--test` only logs in to SMTP; `--send-test` emails a small test PDF to the Kindle) |
 | `cron install [--time 06:00]` | Schedule a daily `check --auto --quiet` job (`--auto` is an alias of `--download`) |
 | `cron status` / `cron remove` | Inspect / uninstall the cron job |
-| `sources` | List all 319 supported domains, marking which ones are healthy |
+| `sources` | List registered sources and their search status (`--json` for metadata) |
 | `export FILE` / `import FILE` | Back up or restore your library + state as JSON (`-` for stdout/stdin; `import --dry-run` previews, `--replace` asks unless `--yes`) |
 | `tui` | Launch the in-terminal interactive view |
 | `completion bash` | Print a bash completion script (see [Shell completion](#shell-completion)) |
@@ -515,30 +515,30 @@ reads your library or config, so nothing runs on TAB. Use `#N` from
 
 ## Sources
 
-The default search sweep covers these 15 verified working
-aggregators (popularity order):
+<!-- source-catalog:start -->
+The default search selection includes these 15 sources, in search order.
+Their availability can change; check the Sources page for current health.
 
-| Source | Type | Notes |
-|---|---|---|
-| mangadex.org | API | Largest fan-translation library |
-| mangapill.com | Requests | Fast, no Cloudflare |
-| mangapark1.com | Playwright | Large library (Chromium, Cloudflare) |
-| mangafire.to | Playwright | VRF-signed API + image descrambling |
-| mangabuddy.com | Playwright | Popular aggregator |
-| weebcentral.com | Playwright | 1000+ series |
-| mangakatana.com | Playwright | General library |
-| asurascans.com | API | Manhwa specialist |
-| comix.to | Playwright | React SPA aggregator |
-| comick.io | Requests | Clean API |
-| mangahub.io | Requests | Huge library |
-| mangahere.cc | Requests | Reliable mirror |
-| mangapanda.onl | Requests | MangaHub network |
-| mangahere.onl | Playwright | Alternate mirror |
-| mangataro.org | Requests | ComicK replacement |
+| Source | Notes |
+|---|---|
+| mangadex.org | Largest fan-translation library |
+| mangapill.com | Fast, no Cloudflare |
+| mangapark1.com | Large library (Chromium, Cloudflare) |
+| mangafire.to | VRF-signed API + image descrambling |
+| mangabuddy.com | Popular aggregator |
+| weebcentral.com | 1000+ series |
+| mangakatana.com | General library |
+| asurascans.com | Manhwa specialist |
+| comix.to | React SPA aggregator |
+| comick.io | Clean API |
+| mangahub.io | Huge library |
+| mangahere.cc | Large library |
+| mangapanda.onl | MangaHub network |
+| mangahere.onl | Alternate mirror |
+| mangataro.org | ComicK replacement |
 
-200+ more aggregators are in the registry — toggle them on in the
-**Sources** tab or via `python -m memanga sources`. See the
-[full domain list](docs/SUPPORTED_SOURCES.md).
+For every registered domain, see the [supported sources](docs/SUPPORTED_SOURCES.md).
+<!-- source-catalog:end -->
 
 ---
 

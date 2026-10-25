@@ -99,6 +99,10 @@ every push.
 4. Register the domain in `memanga/scrapers/__init__.py` (or the
    registry's `TEMPLATE_SCRAPERS` map for template-based scrapers).
 5. Add a fixture-based test under `tests/scrapers/`.
+6. Declare `engine`, `content_language`, and `nsfw` on the scraper class
+   where applicable. Add per-domain search skips or notes in
+   `memanga/scrapers/catalog.py` when needed.
+7. Regenerate the source lists with `python -m memanga.source_docs`.
 
 ## Commit style
 

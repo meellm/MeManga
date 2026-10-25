@@ -2048,6 +2048,27 @@ class TestSourcesCommand:
         out = capsys.readouterr().out
         # Should mention at least a couple known sources.
         assert "mangadex.org" in out or "mangafire.to" in out
+        assert "All tested and working" not in out
+
+    def test_json_exposes_catalog(self, run_cli, capsys):
+        assert run_cli("sources", "--json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["schema_version"] == 1
+        domains = {source["domain"] for source in payload["sources"]}
+        assert "mangadex.org" in domains
+        assert "nhentai.net" in domains
+        rows = {source["domain"]: source for source in payload["sources"]}
+        assert rows["mangadex.org"]["search_status"] == "Included in search"
+        assert rows["bato.to"]["search_status"] == "Not searched (unreliable)"
+        assert rows["bato.to"]["search_skip"]["reason"] == "unreliable"
+        assert rows["bato.to"]["searchable"] is False
+        assert rows["manga18fx.com"]["template"]
+        assert rows["manga18fx.com"]["searchable"] is False
+        assert rows["manga18fx.com"]["search_status"] == "Not searched (template)"
+        assert rows["nhentai.net"]["nsfw"] is True
+        aliases = rows["asurascans.com"]["domain_search_skips"]
+        assert aliases["asuracomic.net"]["reason"] == "alias"
+        assert aliases["asuratoon.com"]["reason"] == "alias"
 
 
 # ─────────────────────────────────────────────────────────────────────────

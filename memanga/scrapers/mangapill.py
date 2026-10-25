@@ -9,7 +9,7 @@ import logging
 import re
 from typing import List, Optional
 from pathlib import Path
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ class MangapillScraper(BaseScraper):
         """Download image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": "https://mangapill.com/",
             }
             response = self.session.get(url, headers=headers, timeout=30)

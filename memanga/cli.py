@@ -51,6 +51,7 @@ from .chapters import ChapterWithSource, chapter_order_key, chapter_sort_key, ch
 from .state import State
 from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
 from .scrapers import get_scraper
+from .scrapers.catalog import source_catalog
 from .search import compute_search_sources, probe_chapter_counts, sweep
 from .email_settings import (EmailSettings, kindle_scope, manga_sends_to_kindle,
                              proposed_kindle_scope)
@@ -2725,25 +2726,35 @@ def _cron_remove():
 
 def cmd_sources(args):
     """List supported manga sources."""
-    sources = get_supported_sources()
-    
+    sources = source_catalog()
+    if args.json:
+        _print_json({"schema_version": JSON_SCHEMA_VERSION,
+                     "sources": [s.to_dict() for s in sources]})
+        return
+
     console.print(_panel("[bold]🌐 Supported Sources[/bold]", border_style="cyan"))
     console.print()
-    
+
     table = _table(box=box.SIMPLE)
     table.add_column("Source", style="cyan")
-    table.add_column("Type", style="dim")
-    table.add_column("Best For")
-    
-    table.add_row("[bold]tcbonepiecechapters.com[/bold]", "Requests", "Jump manga (One Piece, JJK, MHA)")
-    table.add_row("[bold]weebcentral.com[/bold]", "Hybrid", "Large library (1000+ series)")
-    table.add_row("[bold]asurascans.com[/bold]", "API", "Manhwa / Webtoons")
-    table.add_row("[bold]mangakatana.com[/bold]", "Playwright", "General manga library")
-    table.add_row("[bold]mangadex.org[/bold]", "API", "Fan translations (skip Shueisha)")
-    
+    table.add_column("Engine", style="dim")
+    table.add_column("Language")
+    table.add_column("Search")
+    table.add_column("Notes")
+    for source in sources:
+        search = source.search_status
+        notes = source.note
+        if source.nsfw:
+            notes = "NSFW · " + notes
+        if source.default_enabled:
+            notes = "default · " + notes
+        table.add_row(source.domain, source.engine,
+                      source.language or "—", search, notes)
+
     console.print(table)
     console.print()
-    console.print(f"[dim]Total: {len(sources)} sources • All tested and working![/dim]")
+    console.print(f"[dim]Total: {len(sources)} scrapers, "
+                  f"{len(get_supported_sources())} domains[/dim]")
 
 
 def _add_search_result(result, status=None):
@@ -4541,6 +4552,7 @@ Examples:
     
     # sources
     p_sources = subparsers.add_parser("sources", help="List supported sources")
+    p_sources.add_argument("--json", action="store_true", help="Machine-readable JSON output")
     p_sources.set_defaults(func=cmd_sources)
 
     # search

@@ -45,6 +45,8 @@ def cleanup_browsers():
 class PlaywrightScraper(BaseScraper):
     """Base class for scrapers that need Playwright with stealth mode."""
 
+    engine = "browser"
+
     # NOTE: do NOT define `_executor`/`_executor_lock` on this base class.
     # `__init_subclass__` below gives every subclass its OWN dedicated pair
     # so WeebCentral, MangaKatana, MangaClash, MangaHere etc.

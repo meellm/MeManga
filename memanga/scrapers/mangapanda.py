@@ -11,7 +11,7 @@ import logging
 import re
 from typing import List
 from pathlib import Path
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class MangaPandaScraper(BaseScraper):
             import requests
             self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            "User-Agent": BROWSER_USER_AGENT_SHORT
         })
     
     def search(self, query: str) -> List[Manga]:
@@ -155,7 +155,7 @@ class MangaPandaScraper(BaseScraper):
         """Download image with proper referer header."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": f"{self.base_url}/",
             }
             response = self.session.get(url, headers=headers, timeout=30)

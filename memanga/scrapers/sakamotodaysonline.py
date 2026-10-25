@@ -10,7 +10,7 @@ import re
 import requests
 from pathlib import Path
 from bs4 import BeautifulSoup
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class SakamotoDaysOnlineScraper(BaseScraper):
         self.base_url = "https://sakamoto-days.online"
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": BROWSER_USER_AGENT,
             "Referer": self.base_url
         })
     

@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
 
 # Try to import playwright
 try:
@@ -434,6 +434,8 @@ class MangaFireScraper(BaseScraper):
 
     name = "mangafire"
     base_url = BASE_URL
+    # Mints VRF tokens in a headless browser (VRFGenerator).
+    engine = "browser"
 
     # Supported languages
     LANGUAGES = ['en', 'es', 'es-la', 'fr', 'ja', 'pt', 'pt-br']
@@ -454,7 +456,7 @@ class MangaFireScraper(BaseScraper):
             self.session = requests.Session()
 
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': BROWSER_USER_AGENT,
             'Referer': f'{self.base_url}/',
             'Accept': 'application/json, text/html, */*',
             'Accept-Language': 'en-US,en;q=0.9',
@@ -822,7 +824,7 @@ class MangaFireScraper(BaseScraper):
         try:
             headers = {
                 'Referer': f'{self.base_url}/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': BROWSER_USER_AGENT_SHORT,
             }
 
             response = self.session.get(url, headers=headers, timeout=30)

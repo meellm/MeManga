@@ -14,6 +14,7 @@ class IMHentaiScraper(BaseScraper):
     
     name = "imhentai"
     base_url = "https://imhentai.xxx"
+    nsfw = True
     
     def search(self, query: str) -> List[Manga]:
         """Search for galleries."""

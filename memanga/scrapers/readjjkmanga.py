@@ -9,7 +9,7 @@ import re
 from typing import List, Optional
 from bs4 import BeautifulSoup
 
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
 
 
 class ReadJJKMangaScraper(BaseScraper):
@@ -21,7 +21,7 @@ class ReadJJKMangaScraper(BaseScraper):
         super().__init__()
         self.session.headers.update({
             "Referer": self.BASE_URL,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": BROWSER_USER_AGENT
         })
     
     def search(self, query: str) -> List[Manga]:
