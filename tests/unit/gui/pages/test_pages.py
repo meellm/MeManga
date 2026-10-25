@@ -476,6 +476,68 @@ class TestSettingsPage:
         # No exception = passes. Config got at least one write.
         assert app_window.config.get("delivery.output_format") is not None
 
+    # Issue #337: Network & Privacy switches.
+
+    def test_network_privacy_defaults_on(self, app_window, qapp):
+        page = app_window._pages["settings"]
+        assert page._network_check.isChecked()
+        assert page._mangadex_cover_check.isChecked()
+
+    def test_network_privacy_save_and_reload(self, app_window, qapp):
+        page = app_window._pages["settings"]
+        page._network_check.setChecked(False)
+        page._mangadex_cover_check.setChecked(False)
+        page._save()
+        cfg = app_window.config
+        assert cfg.get("gui.network_check") is False
+        assert cfg.get("gui.mangadex_cover_fallback") is False
+
+        page._network_check.setChecked(True)
+        page._mangadex_cover_check.setChecked(True)
+        page._load_config_into_widgets()
+        assert not page._network_check.isChecked()
+        assert not page._mangadex_cover_check.isChecked()
+
+    def test_turning_network_check_off_clears_offline(self, app_window, qapp):
+        network = app_window.network
+        network.stop()
+        with network._lock:
+            network._online = False  # app currently showing offline
+        page = app_window._pages["settings"]
+        page._network_check.setChecked(False)
+        page._save()
+        assert network.is_online is True
+        assert network._stop.is_set()
+
+    def test_reset_clears_custom_hosts_and_refreshes_hint(
+            self, app_window, qapp, toasts):
+        page = app_window._pages["settings"]
+        app_window.config.set("gui.network_check_hosts", ["192.0.2.1:80"])
+        page._load_config_into_widgets()
+        assert "192.0.2.1:80" in page._network_hint.text()
+
+        page._reset_to_defaults()
+        assert app_window.config.get("gui.network_check_hosts") == []
+        hint = page._network_hint.text()
+        assert "192.0.2.1:80" not in hint
+        assert "1.1.1.1:53" in hint
+        message, kw = toasts[-1]
+        assert "connection-check hosts were cleared" in message
+
+    def test_reset_without_custom_hosts_keeps_plain_toast(
+            self, app_window, qapp, toasts):
+        page = app_window._pages["settings"]
+        page._reset_to_defaults()
+        assert toasts[-1] == ("Settings reset to defaults", {"kind": "success"})
+
+    def test_network_hint_names_probe_hosts(self, app_window, qapp):
+        from PySide6.QtWidgets import QLabel
+        page = app_window._pages["settings"]
+        texts = " ".join(l.text() for l in page.findChildren(QLabel))
+        assert "1.1.1.1:53" in texts
+        assert "cloudflare.com:443" in texts
+        assert "github.com:443" in texts
+
     @pytest.fixture
     def toasts(self, monkeypatch):
         from memanga.gui.pages import settings as settings_mod

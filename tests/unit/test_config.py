@@ -426,10 +426,41 @@ class TestConfigKeys:
         ("cron.time", 450),  # unquoted 7:30 in YAML 1.1
         ("partial_chapters.threshold_percent", 101),
         ("mangadex.removed_group_ids", "abc"),
+        # Issue #337
+        ("gui.network_check", "off"),
+        ("gui.mangadex_cover_fallback", 0),
+        ("gui.network_check_hosts", "1.1.1.1:53"),
+        ("gui.network_check_hosts", ["https://example.test"]),
+        ("gui.network_check_hosts", ["example.test"]),
+        ("gui.network_check_hosts", ["example.test:0"]),
+        ("gui.network_check_hosts", ["2001:db8::1:443"]),
+        ("gui.network_check_hosts", [443]),
     ])
     def test_value_problem(self, key, value):
         from memanga.config import config_value_problem
         assert config_value_problem(key, value)
+
+    @pytest.mark.parametrize("value", [
+        [], ["1.1.1.1:53"], ["example.test:443", "[2001:db8::1]:443"],
+    ])
+    def test_network_check_hosts_accepted(self, value):
+        from memanga.config import config_value_problem
+        assert config_value_problem("gui.network_check_hosts", value) is None
+
+    @pytest.mark.parametrize("key,text,expected", [
+        ("gui.network_check", "false", False),
+        ("gui.mangadex_cover_fallback", "off", False),
+    ])
+    def test_network_privacy_switches_parse(self, key, text, expected):
+        from memanga.config import parse_config_value
+        assert parse_config_value(key, text) is expected
+
+    def test_network_privacy_defaults(self, isolated_home):
+        from memanga.config import Config
+        cfg = Config()
+        assert cfg.get("gui.network_check") is True
+        assert cfg.get("gui.network_check_hosts") == []
+        assert cfg.get("gui.mangadex_cover_fallback") is True
 
     @pytest.mark.parametrize("data,expected", [
         ({}, []),

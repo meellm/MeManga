@@ -936,28 +936,14 @@ class DetailPage(BasePage):
         """Spawn a background cover lookup (scraper → MangaDex fallback).
 
         Called after a manga is renamed so the corrected title gets
-        another chance to resolve to a cover image. Mirrors the chain
-        in ``add_manga.py:_fetch_cover``.
+        another chance to resolve to a cover image. Same chain as
+        Add Manga (``cover_fallback.find_cover``).
         """
         import threading
 
         def _task():
-            cover = None
-            try:
-                from ...scrapers import get_scraper
-                scraper = get_scraper(domain)
-                if hasattr(scraper, "get_cover_url") and url:
-                    cover = scraper.get_cover_url(url)
-            except Exception:
-                cover = None
-
-            if not cover:
-                try:
-                    from ..cover_fallback import fetch_mangadex_cover
-                    cover = fetch_mangadex_cover(title)
-                except Exception:
-                    cover = None
-
+            from ..cover_fallback import find_cover
+            cover = find_cover(self.app.config, domain, url, title)
             if cover:
                 def _mutate(entry, _cover=cover):
                     entry["cover_url"] = _cover

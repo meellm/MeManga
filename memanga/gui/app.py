@@ -16,7 +16,7 @@ from ..state import State
 from .events import EventBus
 from .workers import BackgroundWorker
 from .cache import CoverCache
-from .network_status import NetworkMonitor
+from .network_status import NetworkMonitor, configured_endpoints, invalid_hosts
 from . import theme as T
 from .components.sidebar import Sidebar
 from .components.offline_banner import OfflineBanner
@@ -66,13 +66,21 @@ class MeMangaApp(QMainWindow):
         # Centralised network status — probes connectivity in a daemon
         # thread, publishes `network_online` / `network_offline` events.
         # Workers and pages subscribe to short-circuit / disable
-        # network-bound actions while offline.
-        self.network = NetworkMonitor(self.events)
+        # network-bound actions while offline. Settings → Advanced can
+        # turn the probes off or pick the hosts (issue #337); when off
+        # the monitor never runs and the app assumes it is online.
+        self.network = NetworkMonitor(
+            self.events, endpoints=configured_endpoints(self.config))
         # Hand the same monitor to the worker so its entry points
         # (search, check, download, cover fetch) can bail fast when
         # offline instead of timing out per-source.
         self.worker.network = self.network
-        self.network.start()
+        bad_hosts = invalid_hosts(self.config)
+        if bad_hosts:
+            logger.warning("gui.network_check_hosts: ignoring entries that "
+                           "are not host:port: %r", bad_hosts)
+        if self.config.get("gui.network_check", True):
+            self.network.start()  # no-op when no valid host is left
 
         # Wire up event handlers
         self.events.subscribe("cover_fetch_request", self._on_cover_fetch_request)
@@ -243,9 +251,13 @@ class MeMangaApp(QMainWindow):
         a permanent placeholder — `_backfill_missing_covers` only
         handles entries with no URL at all. Tried at most once per
         URL per session; repeated paints of the same broken cover
-        shouldn't re-query MangaDex.
+        shouldn't re-query MangaDex. Skipped entirely when the lookup
+        isn't allowed (issue #337), so allowing it later still works.
         """
         if not data.get("error") or data.get("offline"):
+            return
+        from .cover_fallback import mangadex_fallback_allowed
+        if not mangadex_fallback_allowed(self.config):
             return
         url = data.get("url") or ""
         if not url or url in self._cover_fallback_attempted:
@@ -261,6 +273,12 @@ class MeMangaApp(QMainWindow):
         def _task():
             from .cover_fallback import fetch_mangadex_cover
             for t in titles:
+                # Re-check per title: MangaDex may have been turned off
+                # since this task was queued (issue #337). Forget the
+                # attempt so allowing it again can still repair the URL.
+                if not mangadex_fallback_allowed(self.config):
+                    self._cover_fallback_attempted.discard(url)
+                    return
                 try:
                     cover = fetch_mangadex_cover(t)
                 except Exception:
@@ -671,6 +689,11 @@ class MeMangaApp(QMainWindow):
         # `network_online` subscriber re-runs this when we come back.
         if hasattr(self, "network") and not self.network.is_online:
             return
+        # MangaDex off in Sources or the lookup off in Settings (issue
+        # #337): don't contact MangaDex and don't mark anything failed.
+        from .cover_fallback import mangadex_fallback_allowed
+        if not mangadex_fallback_allowed(self.config):
+            return
         manga_list = self.config.get("manga", [])
         # Skip entries that have a cover OR that we already tried and missed.
         missing = [
@@ -689,6 +712,11 @@ class MeMangaApp(QMainWindow):
             from .cover_fallback import fetch_mangadex_cover
 
             for t in titles:
+                # Re-check per title: MangaDex may have been turned off
+                # while this pass runs (issue #337). Stop without marking
+                # the remaining titles failed.
+                if not mangadex_fallback_allowed(self.config):
+                    return
                 try:
                     cover = fetch_mangadex_cover(t)
                 except Exception:
