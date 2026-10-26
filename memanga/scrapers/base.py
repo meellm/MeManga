@@ -9,8 +9,11 @@ import threading
 import requests
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import List, Optional
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # The chapter model lives in memanga.chapters; scrapers keep importing it from here.
 from ..chapters import Chapter
@@ -141,8 +144,78 @@ def is_retryable_request_error(error: BaseException) -> bool:
     ))
 
 
+# Longest Retry-After wait honored before a retry, in seconds. A source
+# that asks for longer gets its 429 raised right away: retrying sooner
+# would only send a request it already said it will refuse.
+MAX_RETRY_AFTER = 60.0
+
+
+def _parse_http_date(value: str) -> Optional[datetime]:
+    """Parse an HTTP-date (RFC 9110 section 5.6.7) as an aware UTC datetime.
+
+    Covers IMF-fixdate and the obsolete RFC 850 and asctime forms. HTTP
+    dates are always UTC, so a zone-less (asctime) value is taken as UTC.
+    """
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def parse_retry_after(value: Optional[str], now: Optional[datetime] = None) -> Optional[float]:
+    """Seconds a ``Retry-After`` header value asks the client to wait.
+
+    Accepts both RFC 9110 forms: delay-seconds (ASCII digits only, so
+    negative or fractional values are rejected) and an HTTP-date. A date
+    is measured from ``now``, which should be the response's own ``Date``
+    header when there is one so clock skew between us and the server does
+    not matter; it defaults to the local UTC time. A date in the past
+    means no wait (0). Returns None for a missing or malformed value.
+    """
+    if not value:
+        return None
+    value = value.strip()
+    if value.isascii() and value.isdigit():
+        return float(value)
+    retry_at = _parse_http_date(value)
+    if retry_at is None:
+        return None
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return max(0.0, (retry_at - now).total_seconds())
+
+
+def _rate_limited_response(error: BaseException) -> Optional[requests.Response]:
+    """The response of an HTTP 429 error, or None for any other error."""
+    if isinstance(error, requests.HTTPError):
+        response = error.response
+        if response is not None and response.status_code == 429:
+            return response
+    return None
+
+
+def _retry_after_wait(response: requests.Response) -> Optional[float]:
+    """Retry-After wait of a response, timed against its Date header."""
+    server_now = _parse_http_date(response.headers.get("Date") or "")
+    return parse_retry_after(response.headers.get("Retry-After"), now=server_now)
+
+
+def _response_host(response: requests.Response) -> str:
+    """Host of a response for log messages (no path, query or credentials)."""
+    return urlsplit(response.url or "").hostname or "source"
+
+
 def _retry(func, max_attempts=3, base_delay=1.0, exceptions=(Exception,), retry_if=None):
     """Retry an operation with exponential backoff.
+
+    An HTTP 429 response waits for its ``Retry-After`` value instead when
+    that is longer than the backoff, and is raised without further
+    retries when the server asks for more than ``MAX_RETRY_AFTER``.
 
     Args:
         func: Callable to retry
@@ -163,7 +236,32 @@ def _retry(func, max_attempts=3, base_delay=1.0, exceptions=(Exception,), retry_
             if retry_if is not None and not retry_if(e):
                 raise
             last_error = e
-            if attempt < max_attempts:
+            rate_limited = _rate_limited_response(e)
+            if rate_limited is not None:
+                host = _response_host(rate_limited)
+                if attempt >= max_attempts:
+                    logger.warning(
+                        "%s is still rate limiting requests (HTTP 429) after %d attempts",
+                        host, max_attempts,
+                    )
+                    break
+                delay = base_delay * (2 ** (attempt - 1))
+                wait = _retry_after_wait(rate_limited)
+                if wait is not None and wait > MAX_RETRY_AFTER:
+                    logger.warning(
+                        "%s is rate limiting requests (HTTP 429) and asks to wait %.0fs, "
+                        "more than the %.0fs limit; not retrying",
+                        host, wait, MAX_RETRY_AFTER,
+                    )
+                    raise
+                if wait is not None:
+                    delay = max(delay, wait)
+                logger.info(
+                    "%s is rate limiting requests (HTTP 429); retrying in %.1fs (attempt %d/%d)",
+                    host, delay, attempt, max_attempts,
+                )
+                time.sleep(delay)
+            elif attempt < max_attempts:
                 delay = base_delay * (2 ** (attempt - 1))
                 logger.debug(f"Attempt {attempt}/{max_attempts} failed: {e}. Retrying in {delay}s...")
                 time.sleep(delay)
