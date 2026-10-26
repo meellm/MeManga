@@ -14,9 +14,11 @@ import pytest
 import requests
 from PIL import Image
 
+from datetime import datetime, timezone
+
 from memanga.scrapers.base import (
-    BaseScraper, Chapter, Manga, _retry, is_image_file, is_retryable_request_error,
-    looks_like_image,
+    BaseScraper, Chapter, Manga, MAX_RETRY_AFTER, _retry, is_image_file,
+    is_retryable_request_error, looks_like_image, parse_retry_after,
 )
 
 
@@ -150,6 +152,172 @@ class TestRetryableRequestError:
         from memanga.scrapers.mangaball import _is_retryable_post_error
         assert _is_retryable_post_error(_http_error(419))
         assert not _is_retryable_post_error(_http_error(404))
+
+
+# ──────────────────────────────────────────────────────────────────────
+# HTTP 429 Retry-After
+# ──────────────────────────────────────────────────────────────────────
+
+
+_NOW = datetime(2015, 10, 21, 7, 28, 0, tzinfo=timezone.utc)
+
+
+class TestParseRetryAfter:
+    @pytest.mark.parametrize("value,expected", [
+        ("0", 0.0),
+        ("120", 120.0),
+        ("  7 ", 7.0),
+    ])
+    def test_delay_seconds(self, value, expected):
+        assert parse_retry_after(value, now=_NOW) == expected
+
+    @pytest.mark.parametrize("value", [
+        "Wed, 21 Oct 2015 07:28:30 GMT",      # IMF-fixdate
+        "Wednesday, 21-Oct-15 07:28:30 GMT",  # obsolete RFC 850
+        "Wed Oct 21 07:28:30 2015",           # obsolete asctime (no zone = UTC)
+    ])
+    def test_http_date_forms(self, value):
+        assert parse_retry_after(value, now=_NOW) == 30.0
+
+    def test_http_date_in_the_past_means_no_wait(self):
+        assert parse_retry_after("Wed, 21 Oct 2015 07:00:00 GMT", now=_NOW) == 0.0
+
+    def test_http_date_defaults_to_local_utc_clock(self):
+        wait = parse_retry_after("Fri, 01 Jan 2100 00:00:00 GMT")
+        assert wait is not None and wait > MAX_RETRY_AFTER
+
+    @pytest.mark.parametrize("value", [
+        None, "", "   ", "-5", "1.5", "+3", "1e3", "\u0663", "soon",
+        "5, 10",  # two Retry-After headers folded into one value
+        "Wed, 32 Oct 2015 07:28:30 GMT",
+    ])
+    def test_missing_or_malformed_is_none(self, value):
+        assert parse_retry_after(value, now=_NOW) is None
+
+
+def _rate_limited(retry_after=None, date=None, url="https://cdn.example.test/ch/1.jpg?token=secret"):
+    response = requests.Response()
+    response.status_code = 429
+    response.url = url
+    if retry_after is not None:
+        response.headers["Retry-After"] = retry_after
+    if date is not None:
+        response.headers["Date"] = date
+    return requests.HTTPError("429 Client Error", response=response)
+
+
+class TestRetryHonorsRetryAfter:
+    @pytest.fixture
+    def sleeps(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr("memanga.scrapers.base.time.sleep", sleeps.append)
+        return sleeps
+
+    def _flaky(self, *errors):
+        """Callable raising each error in turn, then returning "ok"."""
+        pending = list(errors)
+        calls = []
+        def fn():
+            calls.append(1)
+            if pending:
+                raise pending.pop(0)
+            return "ok"
+        return fn, calls
+
+    def test_waits_for_retry_after_seconds(self, sleeps):
+        fn, calls = self._flaky(_rate_limited("5"))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [5.0]
+        assert len(calls) == 2
+
+    def test_waits_until_http_date_measured_from_server_date(self, sleeps):
+        # Local clock is irrelevant: the wait is Retry-After minus Date.
+        fn, _ = self._flaky(_rate_limited(
+            "Wed, 21 Oct 2015 07:28:12 GMT", date="Wed, 21 Oct 2015 07:28:00 GMT",
+        ))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [12.0]
+
+    def test_backoff_is_a_floor_for_short_retry_after(self, sleeps):
+        fn, _ = self._flaky(_rate_limited("0"), _rate_limited("1"))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [1.0, 2.0]
+
+    def test_wait_at_the_cap_is_honored(self, sleeps):
+        fn, _ = self._flaky(_rate_limited(str(int(MAX_RETRY_AFTER))))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [MAX_RETRY_AFTER]
+
+    @pytest.mark.parametrize("retry_after", [
+        str(int(MAX_RETRY_AFTER) + 1),
+        "Fri, 01 Jan 2100 00:00:00 GMT",
+    ])
+    def test_wait_over_the_cap_raises_without_retrying(self, sleeps, retry_after):
+        fn, calls = self._flaky(_rate_limited(retry_after))
+        with pytest.raises(requests.HTTPError):
+            _retry(fn, max_attempts=3, base_delay=1.0)
+        assert sleeps == []
+        assert len(calls) == 1
+
+    @pytest.mark.parametrize("retry_after", [None, "soon", "-1"])
+    def test_missing_or_malformed_retry_after_keeps_backoff(self, sleeps, retry_after):
+        fn, calls = self._flaky(_rate_limited(retry_after), _rate_limited(retry_after))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [1.0, 2.0]
+        assert len(calls) == 3
+
+    def test_persistent_429_raises_after_max_attempts(self, sleeps):
+        fn, calls = self._flaky(*[_rate_limited("2") for _ in range(3)])
+        with pytest.raises(requests.HTTPError):
+            _retry(fn, max_attempts=3, base_delay=1.0)
+        assert sleeps == [2.0, 2.0]
+        assert len(calls) == 3
+
+    def test_other_errors_ignore_retry_after(self, sleeps):
+        error = _rate_limited("30")
+        error.response.status_code = 503
+        fn, _ = self._flaky(error, IOError("reset"))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [1.0, 2.0]
+
+    def test_logs_rate_limiting_with_host_only(self, sleeps, caplog):
+        fn, _ = self._flaky(_rate_limited("5"))
+        with caplog.at_level("INFO", logger="memanga.scrapers.base"):
+            _retry(fn, max_attempts=3, base_delay=1.0)
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("cdn.example.test" in m and "429" in m and "5.0s" in m for m in messages)
+        assert not any("token" in m or "/ch/" in m for m in messages)
+
+    def test_logs_a_warning_when_the_wait_is_too_long(self, sleeps, caplog):
+        fn, _ = self._flaky(_rate_limited("3600"))
+        with caplog.at_level("INFO", logger="memanga.scrapers.base"):
+            with pytest.raises(requests.HTTPError):
+                _retry(fn, max_attempts=3, base_delay=1.0)
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert "3600s" in warnings[0].getMessage()
+        assert "token" not in warnings[0].getMessage()
+
+    def test_request_honors_retry_after(self, monkeypatch, sleeps):
+        s = _DummyScraper()
+        s._rate_limit = 0
+        responses = []
+        def fake_get(url, **kw):
+            response = requests.Response()
+            response.url = url
+            response._content = b"ok"
+            if not responses:
+                response.status_code = 429
+                response.headers["Retry-After"] = "4"
+            else:
+                response.status_code = 200
+            responses.append(response)
+            return response
+        monkeypatch.setattr(s.session, "get", fake_get)
+
+        assert s._request("https://dummy.test/page").status_code == 200
+        assert len(responses) == 2
+        assert sleeps == [4.0]
 
 
 # ──────────────────────────────────────────────────────────────────────
