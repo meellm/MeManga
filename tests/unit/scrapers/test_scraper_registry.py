@@ -6,6 +6,9 @@ and that every registered scraper at least imports cleanly.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 
 
@@ -78,3 +81,135 @@ def test_no_bare_except_in_package():
                  for node in ast.walk(tree)
                  if isinstance(node, ast.ExceptHandler) and node.type is None]
     assert bare == []
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Lazy loading (#253) — scraper modules are imported on lookup only
+# ─────────────────────────────────────────────────────────────────────────
+
+# Package modules that are not scraper implementations.
+_REGISTRY_MODULES = {"memanga.scrapers", "memanga.scrapers.base",
+                     "memanga.scrapers.catalog", "memanga.scrapers.registry"}
+
+
+def _loaded_scraper_modules(code: str) -> set:
+    """Run ``code`` in a fresh interpreter; return the scraper modules it loaded."""
+    probe = (
+        f"{code}\n"
+        "import sys\n"
+        "print('\\n'.join(m for m in sys.modules "
+        "if m.startswith('memanga.scrapers.')))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", probe], capture_output=True,
+                         text=True, check=True).stdout.split()
+    return {m for m in out
+            if m not in _REGISTRY_MODULES
+            and not m.startswith("memanga.scrapers.templates")}
+
+
+class TestLazyRegistry:
+    def test_cli_import_loads_no_scraper_module(self):
+        assert _loaded_scraper_modules("import memanga.cli") == set()
+
+    @pytest.mark.parametrize("flag", ["--version", "--help"])
+    def test_cli_exit_loads_no_scraper_module(self, flag, isolated_home):
+        # atexit runs handlers last in, first out: registering the probe
+        # before memanga.cli registers its browser cleanup makes the probe
+        # see sys.modules after that cleanup has run.
+        code = (
+            "import atexit, runpy, sys\n"
+            "def probe():\n"
+            "    print('LOADED', *(m for m in sys.modules\n"
+            "                      if m.startswith('memanga.scrapers.')\n"
+            "                      or m.split('.')[0] == 'playwright'))\n"
+            "atexit.register(probe)\n"
+            f"sys.argv = ['memanga', {flag!r}]\n"
+            "runpy.run_module('memanga', run_name='__main__')\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code],
+                                capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stderr
+        probe = [line for line in result.stdout.splitlines()
+                 if line.startswith("LOADED")]
+        assert len(probe) == 1, result.stdout
+        loaded = {m for m in probe[0].split()[1:]
+                  if m not in _REGISTRY_MODULES
+                  and not m.startswith("memanga.scrapers.templates")}
+        assert loaded == set()
+
+    def test_listing_domains_loads_no_scraper_module(self):
+        code = (
+            "from memanga.scrapers import SCRAPERS, list_supported_sources\n"
+            "assert len(SCRAPERS) == len(list(SCRAPERS)) > 300\n"
+            "assert 'mangadex.org' in SCRAPERS and 'nope.invalid' not in SCRAPERS\n"
+            "assert 'mangadex.org' in list_supported_sources()\n"
+        )
+        assert _loaded_scraper_modules(code) == set()
+
+    def test_unknown_source_loads_no_scraper_module(self):
+        code = (
+            "from memanga.scrapers import get_scraper\n"
+            "try:\n"
+            "    get_scraper('nope.invalid')\n"
+            "except ValueError as e:\n"
+            "    assert 'mangadex.org' in str(e)\n"
+            "else:\n"
+            "    raise SystemExit('no error')\n"
+        )
+        assert _loaded_scraper_modules(code) == set()
+
+    def test_lookup_loads_only_that_scraper(self):
+        code = ("from memanga.scrapers import get_scraper\n"
+                "get_scraper('api.mangadex.org')\n")
+        assert _loaded_scraper_modules(code) == {"memanga.scrapers.mangadex"}
+
+    def test_subdomain_lookup_loads_only_that_scraper(self):
+        code = ("from memanga.scrapers import get_scraper\n"
+                "get_scraper('foo.weebcentral.com')\n")
+        loaded = _loaded_scraper_modules(code)
+        assert "memanga.scrapers.weebcentral" in loaded
+        assert "memanga.scrapers.mangadex" not in loaded
+
+    def test_every_path_names_a_scraper_class(self):
+        import memanga.scrapers as pkg
+        from memanga.scrapers.base import BaseScraper
+        for domain, path in pkg._SCRAPER_PATHS.items():
+            module, _, name = path.partition(":")
+            cls = pkg.SCRAPERS[domain]
+            assert cls.__name__ == name, domain
+            assert cls.__module__ == f"memanga.scrapers.{module}", domain
+            assert issubclass(cls, BaseScraper), domain
+
+    def test_scraper_values_are_the_module_classes(self):
+        from memanga.scrapers import SCRAPERS
+        from memanga.scrapers.mangadex import MangaDexScraper
+        from memanga.scrapers.registry import get_template_scrapers
+        assert SCRAPERS["mangadex.org"] is MangaDexScraper
+        assert SCRAPERS["api.mangadex.org"] is MangaDexScraper
+        assert SCRAPERS.get("nope.invalid") is None
+        for domain, cls in get_template_scrapers().items():
+            assert SCRAPERS[domain] is cls
+
+    def test_registry_is_read_only(self):
+        from memanga.scrapers import SCRAPERS
+        with pytest.raises(TypeError):
+            SCRAPERS["new.example"] = object  # type: ignore[index]
+
+    def test_class_names_are_still_exported(self):
+        import memanga.scrapers as pkg
+        from memanga.scrapers import MangaDexScraper, ReadMangaBaseScraper
+        from memanga.scrapers.mangadex import MangaDexScraper as direct
+        from memanga.scrapers.readmanga_base import ReadMangaBaseScraper as rb
+        assert MangaDexScraper is direct
+        assert ReadMangaBaseScraper is rb
+        for name in pkg._CLASS_PATHS:
+            assert getattr(pkg, name) is not None, name
+        assert {"MangaDexScraper", "get_scraper"} <= set(dir(pkg))
+
+    def test_unknown_attribute_raises_attribute_error(self):
+        import memanga.scrapers as pkg
+        with pytest.raises(AttributeError):
+            pkg.NoSuchScraper  # noqa: B018
+        # Submodule imports still fall through to the import system.
+        from memanga.scrapers import mangafire
+        assert mangafire.__name__ == "memanga.scrapers.mangafire"
