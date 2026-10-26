@@ -96,8 +96,10 @@ every push.
    `memanga/scrapers/registry.py`).
 2. Subclass `BaseScraper` (or `PlaywrightScraper` if JS-rendered).
 3. Implement `search()`, `get_chapters()`, `get_pages()`.
-4. Register the domain in `memanga/scrapers/__init__.py` (or the
-   registry's `TEMPLATE_SCRAPERS` map for template-based scrapers).
+4. Register the domain in `_SCRAPER_PATHS` in `memanga/scrapers/__init__.py`
+   as `"newsite:NewSiteScraper"` (module and class; it is imported on first
+   use), or in the registry's `TEMPLATE_SCRAPERS` map for template-based
+   scrapers.
 5. Add a fixture-based test under `tests/scrapers/`.
 6. Declare `engine`, `content_language`, and `nsfw` on the scraper class
    where applicable. Add per-domain search skips or notes in

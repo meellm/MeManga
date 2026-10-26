@@ -141,6 +141,10 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #253 Commands start faster: scraper modules are loaded when a source
+  is used instead of all of them on every run. `memanga --version` and
+  `--help` load no scraper, and checking or downloading a manga loads
+  only the scrapers for its sources.
 - #372 The plain summary line of `memanga check` ends with the next
   step when there is one: `next: run 'memanga failed' for details` after
   failed chapters, or `next: rerun with --download` when chapters needed
