@@ -9,6 +9,10 @@ Hardened against the common runtime failure modes:
     page height stops growing instead of a fixed iteration count.
   * Browser wedged after a prior failure — the internal helpers expose
     a one-shot retry path.
+
+When the retry is exhausted the failure is raised as a
+``WeebCentralError`` rather than returned as an empty list, so callers
+can tell a broken source from a series that genuinely has no chapters.
 """
 
 from __future__ import annotations
@@ -39,6 +43,25 @@ def _looks_like_cloudflare(html: str, title: str = "") -> bool:
     """Cheap heuristic — only the first 4 KB is sampled."""
     sample = (title + " " + html[:4096]).lower()
     return any(h in sample for h in _CF_HINTS)
+
+
+class WeebCentralError(RuntimeError):
+    """Raised when WeebCentral cannot deliver data: a navigation or
+    browser failure, or one of the categories below."""
+
+
+class WeebCentralChallengeError(WeebCentralError):
+    """The site served a Cloudflare challenge instead of content."""
+
+
+class WeebCentralNotFoundError(WeebCentralError):
+    """The series page is a 404."""
+
+
+def _first_line(error: BaseException) -> str:
+    """One-line summary of ``error``; Playwright appends call logs."""
+    lines = str(error).strip().splitlines()
+    return lines[0] if lines else type(error).__name__
 
 
 class WeebCentralScraper(PlaywrightScraper):
@@ -84,6 +107,21 @@ class WeebCentralScraper(PlaywrightScraper):
         page = context.new_page()
         return browser, context, page
 
+    @staticmethod
+    def _failure(operation: str, target: str,
+                 error: BaseException) -> WeebCentralError:
+        """Build the error raised once the retry is exhausted.
+
+        Keeps the category of a WeebCentral error; anything else
+        (navigation timeout, closed browser, ...) becomes a plain
+        ``WeebCentralError``. Callers raise it ``from error``.
+        """
+        category = (type(error) if isinstance(error, WeebCentralError)
+                    else WeebCentralError)
+        return category(
+            f"WeebCentral {operation} failed for {target}: {_first_line(error)}"
+        )
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
@@ -113,7 +151,7 @@ class WeebCentralScraper(PlaywrightScraper):
             content = page.content()
             if _looks_like_cloudflare(content, page.title() or ""):
                 # Signal the caller to retry after a warm-up.
-                raise RuntimeError("cloudflare interstitial")
+                raise WeebCentralChallengeError("Cloudflare challenge did not clear")
 
             soup = BeautifulSoup(content, "html.parser")
             for link in soup.select('a[href*="/series/"]'):
@@ -150,8 +188,11 @@ class WeebCentralScraper(PlaywrightScraper):
         First attempt hits ``/search/data`` directly. If the response
         looks like a CF challenge we visit the homepage (which the
         thread-local browser can solve interactively, since it has a
-        full JS engine) and retry once.
+        full JS engine) and retry once. Any other failure, or a failed
+        retry, raises ``WeebCentralError``; an empty result list means
+        the search genuinely matched nothing.
         """
+        target = repr(query)
         try:
             return self._do_search_once(query)
         except RuntimeError:
@@ -171,11 +212,9 @@ class WeebCentralScraper(PlaywrightScraper):
             try:
                 return self._do_search_once(query)
             except Exception as e:
-                logger.warning("retry search failed: %s", e)
-                return []
+                raise self._failure("search", target, e) from e
         except Exception as e:
-            logger.warning("search error: %s", e)
-            return []
+            raise self._failure("search", target, e) from e
 
     def search(self, query: str) -> List[Manga]:
         """Search via the persistent Firefox under the class lock."""
@@ -351,11 +390,10 @@ class WeebCentralScraper(PlaywrightScraper):
             page.wait_for_timeout(1500)
 
             if self._looks_like_404(page):
-                logger.warning("404 for %s", manga_url)
-                return []
+                raise WeebCentralNotFoundError("series page not found (404)")
 
             if _looks_like_cloudflare(page.content(), page.title() or ""):
-                raise RuntimeError("cloudflare interstitial")
+                raise WeebCentralChallengeError("Cloudflare challenge did not clear")
 
             # Self-heal: if the stored URL is a chapter URL instead of
             # a series URL (legacy library entries from before the
@@ -394,18 +432,18 @@ class WeebCentralScraper(PlaywrightScraper):
         """Two-attempt chapter fetch.
 
         First attempt is the normal flow. If it returns zero chapters
-        OR raises a CF interstitial, the browser is restarted and we
-        try once more.
+        OR fails (CF interstitial, 404, navigation error), the browser
+        is restarted and we try once more. A failed retry raises
+        ``WeebCentralError``; an empty list means the series page
+        loaded and genuinely lists no chapters.
         """
         try:
             ch = self._do_chapters_once(manga_url)
             if ch:
                 return ch
             logger.debug("empty chapter list — restarting browser and retrying")
-        except RuntimeError:
-            logger.debug("CF interstitial on chapter page — retrying")
         except Exception as e:
-            logger.debug("chapter load error: %s — retrying", e)
+            logger.debug("chapter load error: %s — retrying", _first_line(e))
 
         # One restart + retry. _restart_browser_in_thread closes the
         # thread-local Firefox so the next call rebuilds it from
@@ -415,8 +453,7 @@ class WeebCentralScraper(PlaywrightScraper):
         try:
             return self._do_chapters_once(manga_url)
         except Exception as e:
-            logger.warning("chapter retry failed: %s", e)
-            return []
+            raise self._failure("chapter list", manga_url, e) from e
 
     def get_chapters(self, manga_url: str) -> List[Chapter]:
         """Get chapters under the class lock so concurrent callers
@@ -508,7 +545,7 @@ class WeebCentralScraper(PlaywrightScraper):
             page.wait_for_timeout(2500)
 
             if _looks_like_cloudflare(page.content(), page.title() or ""):
-                raise RuntimeError("cloudflare interstitial")
+                raise WeebCentralChallengeError("Cloudflare challenge did not clear")
 
             self._scroll_until_settled(page)
             pages = self._collect_page_images(page)
@@ -518,6 +555,8 @@ class WeebCentralScraper(PlaywrightScraper):
             page.close()
 
     def _get_pages_in_thread(self, chapter_url: str) -> List[str]:
+        """Two-attempt page fetch, same shape as the chapter list. A
+        failed retry raises ``WeebCentralError``."""
         try:
             pages = self._do_pages_once(chapter_url)
             if pages:
@@ -532,8 +571,7 @@ class WeebCentralScraper(PlaywrightScraper):
         try:
             return self._do_pages_once(chapter_url)
         except Exception as e:
-            logger.warning("page retry failed: %s", e)
-            return []
+            raise self._failure("page list", chapter_url, e) from e
 
     def get_pages(self, chapter_url: str) -> List[str]:
         """Get pages under the class lock."""
