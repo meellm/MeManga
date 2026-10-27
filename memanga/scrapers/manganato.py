@@ -8,6 +8,7 @@ Same network as Mangakakalot, large library.
 import logging
 import re
 from typing import List
+from urllib.parse import quote
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
@@ -25,7 +26,7 @@ class ManganatoScraper(BaseScraper):
         """Search for manga by title."""
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/search/story/{query.replace(' ', '_')}"
+        url = f"{self.base_url}/search/story/{quote(query.replace(' ', '_'), safe='')}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

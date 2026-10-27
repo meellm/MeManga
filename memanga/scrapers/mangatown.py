@@ -8,6 +8,7 @@ Large manga library, shares CDN with MangaHere.
 import logging
 import re
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
@@ -24,7 +25,7 @@ class MangaTownScraper(BaseScraper):
         """Search for manga by title."""
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/search?name={query.replace(' ', '+')}"
+        url = f"{self.base_url}/search?name={quote_plus(query)}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

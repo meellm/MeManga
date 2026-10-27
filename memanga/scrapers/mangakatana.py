@@ -8,6 +8,7 @@ Extends PlaywrightScraper for thread-safe Playwright with shared cleanup.
 import logging
 import re
 from typing import List, Optional
+from urllib.parse import quote_plus
 from pathlib import Path
 from .playwright_base import PlaywrightScraper
 from .base import Chapter, Manga, BROWSER_USER_AGENT_SHORT
@@ -41,7 +42,7 @@ class MangakatanataScraper(PlaywrightScraper):
         """Search for manga by title."""
         from bs4 import BeautifulSoup
 
-        url = f"{self.base_url}/?search={query.replace(' ', '+')}&search_by=book_name"
+        url = f"{self.base_url}/?search={quote_plus(query)}&search_by=book_name"
         html = self._get_page_content(url)
         soup = BeautifulSoup(html, "html.parser")
 

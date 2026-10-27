@@ -8,6 +8,7 @@ Manhua library using WordPress Manga theme.
 import logging
 import re
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga
 
@@ -22,7 +23,7 @@ class ManhuaUsScraper(BaseScraper):
 
     def search(self, query: str) -> List[Manga]:
         from bs4 import BeautifulSoup
-        url = f"{self.base_url}/?s={query.replace(' ', '+')}&post_type=wp-manga"
+        url = f"{self.base_url}/?s={quote_plus(query)}&post_type=wp-manga"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

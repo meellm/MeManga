@@ -8,6 +8,7 @@ Large manhua/manhwa library with AJAX-based chapter loading.
 import logging
 import re
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
@@ -24,7 +25,7 @@ class ManhuaPlusScraper(BaseScraper):
         """Search for manga by title."""
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/?s={query.replace(' ', '+')}&post_type=wp-manga"
+        url = f"{self.base_url}/?s={quote_plus(query)}&post_type=wp-manga"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

@@ -4,6 +4,7 @@ E-Hentai.org scraper
 
 import re
 from typing import List, Optional
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from .base import BaseScraper, Chapter, Manga
@@ -18,7 +19,7 @@ class EHentaiScraper(BaseScraper):
     
     def search(self, query: str) -> List[Manga]:
         """Search for galleries."""
-        url = f"{self.base_url}/?f_search={query}"
+        url = f"{self.base_url}/?f_search={quote_plus(query)}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

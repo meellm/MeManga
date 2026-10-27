@@ -45,8 +45,6 @@ class ReadKingdomFreeScraper(BaseScraper):
             return [Manga(
                 title="Kingdom",
                 url=f"{self.BASE_URL}/",
-                slug="kingdom",
-                source="readkingdomfree.com"
             )]
         return []
     

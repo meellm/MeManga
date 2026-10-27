@@ -10,6 +10,7 @@ Uses cloudscraper for Cloudflare bypass.
 import logging
 import re
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
@@ -38,7 +39,7 @@ class MangaFoxFunScraper(BaseScraper):
         """Search for manga by title."""
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/search?q={query.replace(' ', '+')}"
+        url = f"{self.base_url}/search?q={quote_plus(query)}"
         resp = self.session.get(url, timeout=20)
         soup = BeautifulSoup(resp.text, "html.parser")
         

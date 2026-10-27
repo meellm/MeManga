@@ -37,11 +37,9 @@ class OyasumiPunpunMangaScraper(BaseScraper):
         query_lower = query.lower()
         if any(term in query_lower for term in ["punpun", "oyasumi", "goodnight", "inio", "asano"]):
             return [Manga(
-                id="oyasumi-punpun",
                 title="Oyasumi Punpun (Goodnight Punpun)",
                 url=self.base_url,
-                cover_url="",
-                source="oyasumipunpun.com"
+                cover_url=None,
             )]
         return []
     
