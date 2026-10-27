@@ -8,6 +8,7 @@ Manga library with chapters hosted on mangamonk.com CDN.
 import logging
 import re
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga
 
@@ -23,7 +24,7 @@ class TrueMangaScraper(BaseScraper):
     def search(self, query: str) -> List[Manga]:
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/search?q={query.replace(' ', '+')}"
+        url = f"{self.base_url}/search?q={quote_plus(query)}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

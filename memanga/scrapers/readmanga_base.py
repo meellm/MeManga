@@ -8,6 +8,7 @@ Sites: readsnk.com, readberserk.com, readhaikyuu.com, readjujutsukaisen.com, rea
 import logging
 import re
 from typing import List, Optional
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
 
@@ -45,7 +46,7 @@ class ReadMangaBaseScraper(BaseScraper):
     
     def search(self, query: str) -> List[Manga]:
         """Search for manga."""
-        search_url = f"{self.base_url}/?s={query.replace(' ', '+')}"
+        search_url = f"{self.base_url}/?s={quote_plus(query)}"
         html = self._get_html(search_url)
         soup = BeautifulSoup(html, "html.parser")
         

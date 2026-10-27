@@ -5,6 +5,7 @@ Actual domain: ww2.mangafreak.me
 
 import re
 from typing import List
+from urllib.parse import quote
 from bs4 import BeautifulSoup
 
 from .base import BaseScraper, Chapter, Manga
@@ -19,7 +20,7 @@ class MangaFreakScraper(BaseScraper):
     def search(self, query: str) -> List[Manga]:
         """Search for manga."""
         # MangaFreak uses /Find/query for search
-        search_url = f"{self.base_url}/Find/{query.replace(' ', '%20')}"
+        search_url = f"{self.base_url}/Find/{quote(query, safe='')}"
         html = self._get_html(search_url)
         soup = BeautifulSoup(html, "html.parser")
         

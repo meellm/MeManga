@@ -10,6 +10,7 @@ URL patterns:
 
 import re
 import logging
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from .playwright_base import PlaywrightScraper
@@ -28,7 +29,7 @@ class MangaYYScraper(PlaywrightScraper):
         """Search for manga."""
         try:
             # Use WordPress search
-            search_url = f"{self.base_url}/?s={query.replace(' ', '+')}&post_type=wp-manga"
+            search_url = f"{self.base_url}/?s={quote_plus(query)}&post_type=wp-manga"
             content = self._get_page_content(search_url, wait_time=5000)
             soup = BeautifulSoup(content, 'html.parser')
             

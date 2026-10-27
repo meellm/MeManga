@@ -39,18 +39,14 @@ class KenganAshuraMangaScraper(BaseScraper):
         
         if any(term in query_lower for term in ["kengan", "ashura", "omega"]):
             results.append(Manga(
-                id="kengan-ashura",
                 title="Kengan Ashura",
                 url=f"{self.base_url}/manga/kengan-ashura-chapter-1/",
-                cover_url="",
-                source="kenganashura.com"
+                cover_url=None,
             ))
             results.append(Manga(
-                id="kengan-omega",
                 title="Kengan Omega",
                 url=f"{self.base_url}/manga/kengan-omega-chapter-1/",
-                cover_url="",
-                source="kenganashura.com"
+                cover_url=None,
             ))
         
         return results

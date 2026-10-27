@@ -9,6 +9,7 @@ import logging
 import re
 import time
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
 
 import requests
@@ -71,7 +72,7 @@ class MangagoScraper(BaseScraper):
         """Search for manga by title."""
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/r/l_search/?name={query.replace(' ', '+')}"
+        url = f"{self.base_url}/r/l_search/?name={quote_plus(query)}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

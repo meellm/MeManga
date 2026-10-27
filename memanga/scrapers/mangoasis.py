@@ -12,6 +12,7 @@ import re
 import logging
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 import cloudscraper
 
@@ -45,7 +46,7 @@ class MangOasisScraper(BaseScraper):
         results = []
         
         # MangOasis uses WordPress search
-        search_url = f"{self.BASE_URL}/?s={query.replace(' ', '+')}"
+        search_url = f"{self.BASE_URL}/?s={quote_plus(query)}"
         
         try:
             response = self.session.get(search_url, timeout=30)

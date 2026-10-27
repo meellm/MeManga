@@ -4,6 +4,7 @@ IMHentai.xxx scraper
 
 import re
 from typing import List, Optional
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from .base import BaseScraper, Chapter, Manga
@@ -18,7 +19,7 @@ class IMHentaiScraper(BaseScraper):
     
     def search(self, query: str) -> List[Manga]:
         """Search for galleries."""
-        url = f"{self.base_url}/search/?key={query}&page=1"
+        url = f"{self.base_url}/search/?key={quote_plus(query)}&page=1"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

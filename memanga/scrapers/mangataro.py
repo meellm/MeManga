@@ -19,7 +19,7 @@ import logging
 import re
 from typing import List, Optional
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, quote_plus, urlparse
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
@@ -60,7 +60,7 @@ class MangaTaroScraper(BaseScraper):
         
         # Method 1: Try direct URL construction
         slug = query.lower().replace(" ", "-").replace("'", "").replace(":", "")
-        direct_url = f"{self.base_url}/manga/{slug}"
+        direct_url = f"{self.base_url}/manga/{quote(slug, safe='')}"
         
         try:
             resp = self.session.get(direct_url, timeout=15)
@@ -81,7 +81,7 @@ class MangaTaroScraper(BaseScraper):
         
         # Method 2: Browse API endpoint and filter
         try:
-            api_url = f"{self.base_url}/api/manga?q={query.replace(' ', '+')}"
+            api_url = f"{self.base_url}/api/manga?q={quote_plus(query)}"
             resp = self.session.get(api_url, timeout=15)
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, "html.parser")
