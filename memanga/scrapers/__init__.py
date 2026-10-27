@@ -12,8 +12,17 @@ Scraper modules are imported on first lookup, not with this package, so
 commands that never talk to a site don't load every scraper and its
 dependencies. Listing or testing domains imports no scraper module;
 ``SCRAPERS[domain]`` and ``get_scraper()`` import only the one needed.
+
+``get_scraper()`` hands each thread one instance per scraper class, so
+repeated calls for a source share its session. It never gives one
+instance to two threads (scraper state and sessions are not guaranteed
+thread-safe); code that hands a scraper's work to threads of its own
+gives each a ``BaseScraper.worker_copy()``, as chapter page downloads
+do. Request spacing is shared by the whole class in every thread (see
+``base.BaseScraper._rate_lock``).
 """
 
+import threading
 from collections.abc import Iterator, Mapping
 from importlib import import_module
 from typing import Dict, Optional, Type, Union
@@ -586,24 +595,57 @@ def __dir__():
     return sorted(set(globals()) | set(_CLASS_PATHS))
 
 
+# Per-thread scraper instances, keyed by scraper class.
+_instances = threading.local()
+
+
+def _resolve_class(source: str) -> Optional[Type[BaseScraper]]:
+    """Scraper class for ``source``: an exact domain, else its closest
+    registered parent domain (``ww3.mangafreak.me`` -> ``mangafreak.me``).
+
+    Each parent is a single registry lookup, so a miss checks only the
+    host's own labels and imports nothing.
+    """
+    if source in SCRAPERS:
+        return SCRAPERS[source]
+    dot = source.find(".")
+    while dot != -1:
+        parent = source[dot + 1:]
+        if parent in SCRAPERS:
+            return SCRAPERS[parent]
+        dot = source.find(".", dot + 1)
+    return None
+
+
 def get_scraper(source: str) -> BaseScraper:
-    """Get scraper instance for a source domain."""
+    """Get the scraper instance for a source domain.
+
+    Repeated calls from one thread return the same instance for every
+    domain of a scraper class; other threads get their own.
+    """
     source = source.lower()
     if source.startswith("www."):
         source = source[4:]
 
-    # Exact match first
-    if source in SCRAPERS:
-        return SCRAPERS[source]()
+    cls = _resolve_class(source)
+    if cls is None:
+        supported = list_supported_sources()
+        raise ValueError(f"No scraper available for: {source}\nSupported: {', '.join(supported)}")
 
-    # Match by domain suffix (e.g., "ww3.mangafreak.me" matches "mangafreak.me").
-    # Iterate names only so a miss doesn't import every scraper.
-    for domain in SCRAPERS:
-        if source == domain or source.endswith("." + domain):
-            return SCRAPERS[domain]()
+    local = _instances  # read once: clear_scraper_cache() may swap it
+    instances = getattr(local, "by_class", None)
+    if instances is None:
+        instances = local.by_class = {}
+    scraper = instances.get(cls)
+    if scraper is None:
+        scraper = instances[cls] = cls()
+    return scraper
 
-    supported = list_supported_sources()
-    raise ValueError(f"No scraper available for: {source}\nSupported: {', '.join(supported)}")
+
+def clear_scraper_cache() -> None:
+    """Drop the cached scraper instances of every thread."""
+    global _instances
+    _instances = threading.local()
 
 
 def list_supported_sources():

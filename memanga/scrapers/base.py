@@ -2,10 +2,12 @@
 Base scraper class and data models
 """
 
+import copy
 import io
 import time
 import logging
 import threading
+import weakref
 import requests
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -278,6 +280,38 @@ class Manga:
     chapters: List[Chapter] = field(default_factory=list)
 
 
+class _RequestSpacing:
+    """When one scraper class last sent a request, and the lock that
+    makes each request wait its turn after it."""
+
+    __slots__ = ("lock", "last")
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.last = 0.0
+
+
+# One entry per scraper class, shared by all of its instances in every
+# thread. Weak keys let classes built at runtime go away with their entry.
+_spacing_lock = threading.Lock()
+_spacing: "weakref.WeakKeyDictionary[type, _RequestSpacing]" = weakref.WeakKeyDictionary()
+
+
+def _request_spacing(cls: type) -> _RequestSpacing:
+    with _spacing_lock:
+        spacing = _spacing.get(cls)
+        if spacing is None:
+            spacing = _spacing[cls] = _RequestSpacing()
+        return spacing
+
+
+def reset_request_spacing() -> None:
+    """Forget when every scraper class last sent a request."""
+    with _spacing_lock:
+        for spacing in _spacing.values():
+            spacing.last = 0.0
+
+
 class BaseScraper(ABC):
     """Base class for all manga scrapers."""
 
@@ -302,14 +336,47 @@ class BaseScraper(ABC):
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
         })
-        self._last_request = 0
         self._rate_limit = 1.0  # Seconds between requests
-        self._rate_lock = threading.Lock()
+
+    # Request spacing belongs to the scraper class, not the instance:
+    # get_scraper() gives each thread its own instance and session, and
+    # all of them wait their turn against one clock per source. The lock
+    # covers only the wait and the timestamp, never the request itself.
+    @property
+    def _rate_lock(self) -> threading.Lock:
+        return _request_spacing(type(self)).lock
+
+    @property
+    def _last_request(self) -> float:
+        return _request_spacing(type(self)).last
+
+    @_last_request.setter
+    def _last_request(self, value: float) -> None:
+        _request_spacing(type(self)).last = value
+
+    def worker_copy(self) -> "BaseScraper":
+        """This scraper for another thread, with a session of its own.
+
+        A ``requests.Session`` is not guaranteed thread-safe, so work this
+        scraper hands to other threads goes through copies. A copy shares
+        this scraper's state (page details from ``get_pages()``, settings,
+        request spacing) and sends through a new session built the way
+        this class builds one, carrying this session's headers and cookies.
+        """
+        clone = copy.copy(self)
+        session = type(self)().session
+        session.headers = self.session.headers.copy()
+        session.cookies.update(self.session.cookies)
+        # Also re-point other names for the session (e.g. ``self.scraper``).
+        for name, value in vars(self).items():
+            if value is self.session:
+                setattr(clone, name, session)
+        return clone
 
     def _request(self, url: str, **kwargs) -> requests.Response:
         """Make a rate-limited request with retry."""
         def _do_request():
-            # Thread-safe rate limiting
+            # Thread-safe rate limiting, shared by every instance of the class
             with self._rate_lock:
                 elapsed = time.time() - self._last_request
                 if elapsed < self._rate_limit:

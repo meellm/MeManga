@@ -985,6 +985,130 @@ def _decodes(data: bytes) -> bool:
         return False
 
 
+def _png_bytes() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (20, 30), "white").save(buf, "PNG")
+    return buf.getvalue()
+
+
+class TestPageWorkerSessions:
+    """Issue #254: page workers never share a requests.Session, and still
+    keep the scraper's request spacing."""
+
+    _manga = {"title": "X", "url": "https://cdn.test/x", "source": "cdn.test"}
+
+    def _scraper_class(self, calls, closed, meet):
+        import threading
+        import requests
+        from memanga.scrapers.base import BaseScraper
+
+        body = _png_bytes()
+        calls_lock = threading.Lock()
+
+        class _Session(requests.Session):
+            def get(self, url, **kwargs):
+                with calls_lock:
+                    calls.append((self, threading.get_ident()))
+                    count = len(calls)
+                if count <= 2:
+                    # Hold the first two pages until both are in flight.
+                    meet.wait()
+                response = requests.Response()
+                response.status_code = 200
+                response._content = body
+                response.url = url
+                return response
+
+            def close(self):
+                closed.append(self)
+                super().close()
+
+        class _Scraper(BaseScraper):
+            def __init__(self):
+                super().__init__()
+                self.session = _Session()
+
+            def search(self, query):
+                return []
+
+            def get_chapters(self, url):
+                return []
+
+            def get_pages(self, url):
+                return [f"https://cdn.test/p{i}.png" for i in range(6)]
+
+        return _Scraper
+
+    def test_workers_use_own_sessions_and_shared_spacing(
+            self, tmp_path, fake_state, monkeypatch):
+        import threading
+        import memanga.downloader as dl
+        from memanga.downloader import download_chapter
+        from memanga.scrapers import base
+
+        calls, closed, sleeps = [], [], []
+        meet = threading.Barrier(2, timeout=10)
+        lock = threading.Lock()
+        now = [100.0]
+
+        def fake_time():
+            with lock:
+                return now[0]
+
+        def fake_sleep(seconds):
+            with lock:
+                sleeps.append(seconds)
+                now[0] += seconds
+
+        monkeypatch.setattr(base, "time", types.SimpleNamespace(
+            time=fake_time, sleep=fake_sleep))
+        scraper = self._scraper_class(calls, closed, meet)()
+        monkeypatch.setattr(dl.chapter, "get_scraper", lambda d: scraper)
+
+        out = download_chapter(self._manga, _partial_chapter(), tmp_path,
+                               "cbz", fake_state, max_retries=0)
+
+        with zipfile.ZipFile(out) as zf:
+            assert len([n for n in zf.namelist()
+                        if n.startswith("page_")]) == 6
+        assert len(calls) == 6
+        sessions = {id(s) for s, _ in calls}
+        assert id(scraper.session) not in sessions
+        assert len(sessions) >= 2
+        # One session per worker thread, one worker thread per session.
+        threads_of = {}
+        sessions_of = {}
+        for session, thread in calls:
+            threads_of.setdefault(id(session), set()).add(thread)
+            sessions_of.setdefault(thread, set()).add(id(session))
+        assert all(len(t) == 1 for t in threads_of.values())
+        assert all(len(s) == 1 for s in sessions_of.values())
+        # Every request after the first waited a full spacing interval.
+        assert sleeps == [1.0] * 5
+        # Worker sessions are closed with the pool; the scraper's is not.
+        assert {id(s) for s in closed} == sessions
+        assert scraper.session not in closed
+
+    def test_other_scrapers_are_used_as_they_are(
+            self, tmp_path, fake_state, monkeypatch):
+        import memanga.downloader as dl
+        from memanga.downloader import download_chapter
+
+        used = []
+
+        class _Recording(_PartialScraper):
+            def download_image(self, url, path):
+                used.append(self)
+                return super().download_image(url, path)
+
+        scraper = _Recording(2, set())
+        monkeypatch.setattr(dl.chapter, "get_scraper", lambda d: scraper)
+        download_chapter(self._manga, _partial_chapter(), tmp_path, "cbz",
+                         fake_state, max_retries=0)
+        # Test doubles that are not a BaseScraper are not copied.
+        assert len(used) == 2 and all(s is scraper for s in used)
+
+
 class TestInvalidPageBytes:
     _manga = {"title": "X", "url": "https://cdn.test/x", "source": "cdn.test"}
 
