@@ -27,7 +27,10 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 
 from PIL import Image
 
-from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
+from .base import (
+    BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT,
+    _identifies_as_image,
+)
 from .playwright_base import BrowserWorker, step_timeout_ms
 
 # Try to import playwright
@@ -471,7 +474,13 @@ class MangaFireScraper(BaseScraper):
 
     # Every API call is signed in _api_get_json(). Token minting routes
     # through VRFGenerator's own _run_serialized; image downloads and the
-    # API fetches themselves stay on the plain session.
+    # API fetches themselves stay on the plain session, through the
+    # shared request policy (BaseScraper._request).
+
+    # Chapter lists come 100 per page. 100 pages (10,000 chapters) is
+    # about ten times the longest real series, so reaching it means the
+    # API keeps promising more pages and the list cannot be trusted.
+    _MAX_CHAPTER_PAGES = 100
 
     def __init__(self):
         super().__init__()
@@ -639,10 +648,20 @@ class MangaFireScraper(BaseScraper):
 
     def _api_get(self, url: str, api_path: str,
                  params: List[Tuple[str, str]], token: Optional[str]):
-        """Issue one signed API request, mapping transport errors."""
+        """Issue one signed API request, mapping transport errors.
+
+        Goes through the shared request policy (``BaseScraper._request``):
+        per-source pacing, and retries of 429 / 5xx / connection errors
+        that honor Retry-After. A final HTTP error is returned as its
+        response rather than raised, so ``_api_get_json`` can still tell
+        a rejected VRF token (403) apart and explain the failure.
+        """
         try:
-            return self.session.get(
-                self._signed_api_url(api_path, params, token), timeout=30)
+            return self._request(self._signed_api_url(api_path, params, token))
+        except requests.HTTPError as e:
+            if e.response is not None:
+                return e.response
+            raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
         except requests.RequestException as e:
             raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
         except Exception as e:
@@ -757,9 +776,9 @@ class MangaFireScraper(BaseScraper):
 
         chapters: List[Chapter] = []
         seen_numbers = set()
-        page = 1
+        seen_ids = set()
 
-        while True:
+        for page in range(1, self._MAX_CHAPTER_PAGES + 1):
             api_url = (
                 f"{self.base_url}/api/titles/{manga_id}/chapters"
                 f"?language={language}&limit=100&page={page}"
@@ -771,10 +790,14 @@ class MangaFireScraper(BaseScraper):
                     f"MangaFire returned an invalid chapter list for {api_url}"
                 )
 
+            new_ids = 0
             for item in items:
                 if not isinstance(item, dict):
                     continue
                 chapter_id = item.get('id')
+                if chapter_id and chapter_id not in seen_ids:
+                    seen_ids.add(chapter_id)
+                    new_ids += 1
                 number = self._format_chapter_number(item.get('number', ''))
                 if not chapter_id or not number or number in seen_numbers:
                     continue
@@ -788,11 +811,30 @@ class MangaFireScraper(BaseScraper):
                 ))
 
             meta = data.get('meta') if isinstance(data.get('meta'), dict) else {}
-            if not meta.get('hasNext'):
-                break
-            page += 1
+            # A missing (or null) hasNext ends the list, as before; any
+            # value but a JSON boolean is a continuation we can't trust.
+            has_next = meta.get('hasNext')
+            if has_next is None or has_next is False:
+                return sorted(chapters, key=lambda x: x.numeric)
+            if has_next is not True:
+                raise MangaFireError(
+                    f"MangaFire returned a malformed chapter list continuation "
+                    f"for {api_url} (hasNext={has_next!r}); the chapter list "
+                    f"would be incomplete"
+                )
+            if not new_ids:
+                # An empty or repeated page that still promises more would
+                # page forever without adding anything.
+                raise MangaFireError(
+                    f"MangaFire chapter list for {manga_url} promised another "
+                    f"page after page {page}, but page {page} added no new "
+                    f"chapters; the chapter list would be incomplete"
+                )
 
-        return sorted(chapters, key=lambda x: x.numeric)
+        raise MangaFireError(
+            f"MangaFire chapter list for {manga_url} still had more pages after "
+            f"{self._MAX_CHAPTER_PAGES} pages; refusing an incomplete list"
+        )
 
     def _resolve_chapter_api_url(self, chapter_url: str) -> str:
         """Resolve a saved MangaFire chapter URL to the current chapter API URL."""
@@ -860,10 +902,17 @@ class MangaFireScraper(BaseScraper):
                 'User-Agent': BROWSER_USER_AGENT_SHORT,
             }
 
-            response = self.session.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
+            # Shared request policy: pacing, transient retries, Retry-After.
+            response = self._request(url, headers=headers)
 
             image_data = response.content
+            if not _identifies_as_image(image_data):
+                # Same rule as BaseScraper.download_image (#229): a block
+                # page or empty body is a failed page, judged on the bytes
+                # and never descrambled or written; drop any older file.
+                Path(path).unlink(missing_ok=True)
+                logger.debug("Failed to download %s: response body is not an image", url)
+                return False
 
             # Check if image needs descrambling
             offset = self._current_offsets.get(url, 0)

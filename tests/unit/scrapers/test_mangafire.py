@@ -2,19 +2,34 @@
 
 from __future__ import annotations
 
+import time
+import types
+
 import pytest
+import requests
 
 
 class _Response:
-    def __init__(self, status_code=200, payload=None, json_error=None):
+    """Just enough of ``requests.Response`` for the shared request policy
+    (``raise_for_status``, headers, url) and MangaFire's own parsing."""
+
+    def __init__(self, status_code=200, payload=None, json_error=None,
+                 content=b"", headers=None):
         self.status_code = status_code
         self._payload = payload
         self._json_error = json_error
+        self.content = content
+        self.headers = dict(headers or {})
+        self.url = "https://mangafire.to/api"
 
     def json(self):
         if self._json_error:
             raise self._json_error
         return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} error", response=self)
 
 
 class _Session:
@@ -22,10 +37,12 @@ class _Session:
         self.responses = list(responses)
         self.calls = 0
         self.urls = []
+        self.kwargs = []
 
     def get(self, *args, **kwargs):
         self.calls += 1
         self.urls.append(args[0] if args else kwargs.get("url"))
+        self.kwargs.append(kwargs)
         item = self.responses.pop(0)
         if isinstance(item, BaseException):
             raise item
@@ -63,6 +80,22 @@ def stub_vrf(monkeypatch):
     stub = _StubVRF()
     monkeypatch.setattr(mf, "get_vrf_generator", lambda: stub)
     return stub
+
+
+@pytest.fixture(autouse=True)
+def request_sleeps(monkeypatch):
+    """Record the shared request policy's waits instead of sleeping.
+
+    MangaFire's API and image calls go through ``BaseScraper._request``,
+    whose pacing and retry backoff sleep via ``memanga.scrapers.base``'s
+    ``time``. Only that module's view is swapped: the clock stays real.
+    """
+    from memanga.scrapers import base
+
+    sleeps = []
+    monkeypatch.setattr(base, "time", types.SimpleNamespace(
+        time=time.time, monotonic=time.monotonic, sleep=sleeps.append))
+    return sleeps
 
 
 class TestMangaFireGetChapters:
@@ -122,9 +155,10 @@ class TestMangaFireGetChapters:
         from memanga.scrapers.mangafire import MangaFireError, MangaFireScraper
 
         scraper = MangaFireScraper()
+        # A 503 is transient, so the shared policy tries it 3 times.
         scraper.session = _Session([
             _Response(status_code=503, payload={"message": "unavailable"}),
-        ])
+        ] * 3)
 
         with pytest.raises(MangaFireError) as exc:
             scraper.get_chapters("https://mangafire.to/manga/demo.abc")
@@ -132,6 +166,7 @@ class TestMangaFireGetChapters:
         message = str(exc.value)
         assert "HTTP 503" in message
         assert "/api/titles/abc/chapters" in message
+        assert scraper.session.calls == 3
 
     def test_request_errors_raise_instead_of_empty_list(self, monkeypatch):
         import requests
@@ -140,14 +175,16 @@ class TestMangaFireGetChapters:
         monkeypatch.setattr(mf.time, "sleep", lambda _seconds: None)
 
         scraper = mf.MangaFireScraper()
+        # Timeouts are transient: retried by the shared policy, then the
+        # last one is reported.
         scraper.session = _Session([
             requests.Timeout("temporary timeout"),
-        ])
+        ] * 3)
 
         with pytest.raises(mf.MangaFireError, match="temporary timeout"):
             scraper.get_chapters("https://mangafire.to/manga/demo.abc")
 
-        assert scraper.session.calls == 1
+        assert scraper.session.calls == 3
 
 
 class TestMangaFireGetPages:
@@ -270,7 +307,7 @@ class TestMangaFireSearch:
         scraper = MangaFireScraper()
         scraper.session = _Session([
             _Response(status_code=503, payload={}),
-        ])
+        ] * 3)
 
         with pytest.raises(MangaFireError, match="HTTP 503"):
             scraper.search("one piece")
@@ -936,3 +973,364 @@ def test_expired_generator_raises_token_timeout_and_forces_reload(monkeypatch):
     finally:
         if hasattr(mf._vrf_thread_local, "token_page_ready"):
             del mf._vrf_thread_local.token_page_ready
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Shared request policy: MangaFire's API and image calls go through
+# BaseScraper._request (per-source pacing, transient retries that honor
+# Retry-After, permanent errors not retried) instead of a bare session.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _png_bytes():
+    import io
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (4, 4), (200, 30, 30)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _rate_limited(retry_after):
+    return _Response(status_code=429, payload={},
+                     headers={"Retry-After": retry_after})
+
+
+class TestMangaFireRequestPolicy:
+    def _scraper(self, responses):
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session(responses)
+        return scraper
+
+    def test_api_429_waits_for_retry_after_then_succeeds(
+            self, stub_vrf, request_sleeps):
+        scraper = self._scraper([
+            _rate_limited("7"),
+            _Response(payload={"items": []}),
+        ])
+
+        assert scraper.search("one piece") == []
+
+        assert scraper.session.calls == 2
+        assert 7.0 in request_sleeps
+        # One signed request, retried as-is: no second mint, no reload.
+        assert len(stub_vrf.minted) == 1
+        assert stub_vrf.invalidations == 0
+
+    def test_api_server_error_is_retried(self):
+        scraper = self._scraper([
+            _Response(status_code=503, payload={}),
+            _Response(payload={"items": []}),
+        ])
+
+        assert scraper.search("one piece") == []
+        assert scraper.session.calls == 2
+
+    def test_api_retry_after_beyond_the_cap_is_not_retried(
+            self, request_sleeps):
+        from memanga.scrapers.base import MAX_RETRY_AFTER
+        from memanga.scrapers.mangafire import MangaFireError
+
+        scraper = self._scraper([
+            _rate_limited(str(int(MAX_RETRY_AFTER) + 1)),
+        ])
+
+        with pytest.raises(MangaFireError, match="HTTP 429"):
+            scraper.search("one piece")
+        assert scraper.session.calls == 1
+        assert request_sleeps == []
+
+    def test_api_persistent_429_fails_after_the_shared_attempts(
+            self, stub_vrf):
+        from memanga.scrapers.mangafire import MangaFireError
+
+        scraper = self._scraper([_rate_limited("1")] * 3)
+
+        with pytest.raises(MangaFireError, match="HTTP 429"):
+            scraper.search("one piece")
+        assert scraper.session.calls == 3
+        # A rate limit is not a token problem.
+        assert stub_vrf.invalidations == 0
+
+    @pytest.mark.parametrize("status", [404, 410])
+    def test_api_permanent_error_is_not_retried(self, status):
+        from memanga.scrapers.mangafire import MangaFireError
+
+        scraper = self._scraper([_Response(status_code=status, payload={})])
+
+        with pytest.raises(MangaFireError, match=f"HTTP {status}"):
+            scraper.search("one piece")
+        assert scraper.session.calls == 1
+
+    def test_token_403_gets_one_reload_and_transport_retries_inside_it(
+            self, stub_vrf):
+        """The VRF reload stays a single extra round; a transient error on
+        the re-signed request is the shared policy's to retry."""
+        scraper = self._scraper([
+            _Response(status_code=403, payload={"message": "Invalid token."}),
+            _Response(status_code=503, payload={}),
+            _Response(payload={"items": []}),
+        ])
+
+        assert scraper.search("one piece") == []
+        assert stub_vrf.invalidations == 1
+        assert len(stub_vrf.minted) == 2
+        assert scraper.session.calls == 3
+
+    def test_api_calls_wait_for_the_sources_shared_pacing(
+            self, request_sleeps):
+        from memanga.scrapers import base
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        scraper = self._scraper([_Response(payload={"items": []})])
+        # Another instance of this source has just sent a request.
+        base._request_spacing(MangaFireScraper).last = time.time()
+
+        scraper.search("one piece")
+
+        assert request_sleeps and request_sleeps[0] > 0.5
+        assert base._request_spacing(MangaFireScraper).last > 0
+
+    def test_worker_copy_images_share_pacing_and_offsets_not_session(
+            self, request_sleeps, tmp_path):
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        scraper = MangaFireScraper()
+        copy = scraper.worker_copy()
+        # Each copy keeps its own session (#254); page offsets are shared.
+        assert copy.session is not scraper.session
+        assert copy._current_offsets is scraper._current_offsets
+        scraper.session = _Session([_Response(payload={"items": []})])
+        copy.session = _Session([_Response(content=_png_bytes())])
+
+        scraper.search("one piece")   # the source's clock is now "just used"
+        assert request_sleeps == []
+        assert copy.download_image("https://cdn.example/1.png",
+                                   tmp_path / "page_001.png") is True
+
+        # The copy's image request waited its turn on the shared clock.
+        assert len(request_sleeps) == 1 and request_sleeps[0] > 0.5
+        assert scraper.session.calls == 1 and copy.session.calls == 1
+
+
+class TestMangaFireDownloadImage:
+    def _scraper(self, responses):
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session(responses)
+        return scraper
+
+    def test_valid_image_is_written_with_referer(self, tmp_path):
+        png = _png_bytes()
+        scraper = self._scraper([_Response(content=png,
+                                           headers={"Content-Type": "image/png"})])
+        target = tmp_path / "page_001.png"
+
+        assert scraper.download_image("https://cdn.example/1.png", target) is True
+
+        assert target.read_bytes() == png
+        sent = scraper.session.kwargs[0]
+        assert sent["headers"]["Referer"] == "https://mangafire.to/"
+        assert sent["timeout"] == 30
+
+    @pytest.mark.parametrize("body", [
+        b"<!DOCTYPE html><html><body>Just a moment...</body></html>",
+        b"",
+    ])
+    @pytest.mark.parametrize("offset", [0, 5])
+    def test_non_image_body_is_a_failed_page(self, tmp_path, monkeypatch,
+                                             body, offset):
+        """The header is not trusted: markup labeled image/jpeg is still
+        markup. It is never descrambled or written, and an older file at
+        the target is removed."""
+        from memanga.scrapers import mangafire as mf
+
+        descrambled = []
+        monkeypatch.setattr(mf.ImageDescrambler, "descramble",
+                            staticmethod(lambda data, off: descrambled.append(off) or data))
+        url = "https://cdn.example/7.jpg"
+        scraper = self._scraper([_Response(content=body,
+                                           headers={"Content-Type": "image/jpeg"})])
+        if offset:
+            scraper._current_offsets[url] = offset
+        target = tmp_path / "page_007.jpg"
+        target.write_bytes(b"stale bytes from an earlier attempt")
+
+        assert scraper.download_image(url, target) is False
+
+        assert not target.exists()
+        assert descrambled == []
+        assert scraper.session.calls == 1
+
+    def test_scrambled_image_is_descrambled_after_validation(
+            self, tmp_path, monkeypatch):
+        from memanga.scrapers import mangafire as mf
+
+        png = _png_bytes()
+        seen = []
+
+        def fake_descramble(data, offset):
+            seen.append((data, offset))
+            return b"descrambled"
+
+        monkeypatch.setattr(mf.ImageDescrambler, "descramble",
+                            staticmethod(fake_descramble))
+        url = "https://cdn.example/2.png"
+        scraper = self._scraper([_Response(content=png)])
+        scraper._current_offsets[url] = 3
+        target = tmp_path / "page_002.png"
+
+        assert scraper.download_image(url, target) is True
+
+        assert seen == [(png, 3)]
+        assert target.read_bytes() == b"descrambled"
+
+    def test_image_429_waits_for_retry_after_then_succeeds(
+            self, tmp_path, request_sleeps):
+        scraper = self._scraper([
+            _rate_limited("4"),
+            _Response(content=_png_bytes()),
+        ])
+
+        assert scraper.download_image("https://cdn.example/3.png",
+                                      tmp_path / "p.png") is True
+        assert scraper.session.calls == 2
+        assert 4.0 in request_sleeps
+
+    def test_image_404_is_not_retried(self, tmp_path):
+        scraper = self._scraper([_Response(status_code=404)])
+
+        assert scraper.download_image("https://cdn.example/4.png",
+                                      tmp_path / "p.png") is False
+        assert scraper.session.calls == 1
+        assert not (tmp_path / "p.png").exists()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Chapter pagination: bounded, and never a silent partial list.
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _chapter_page(first_id, count, has_next, number_start=None):
+    number_start = first_id if number_start is None else number_start
+    page = {"items": [
+        {"id": first_id + i, "number": number_start + i, "name": ""}
+        for i in range(count)
+    ]}
+    if has_next is not ...:
+        page["meta"] = {"hasNext": has_next}
+    return _Response(payload=page)
+
+
+class TestMangaFireChapterPagination:
+    URL = "https://mangafire.to/title/abc-demo"
+
+    def _scraper(self, responses):
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session(responses)
+        return scraper
+
+    def test_never_ending_has_next_stops_at_the_bound(self, monkeypatch):
+        from memanga.scrapers.mangafire import MangaFireError, MangaFireScraper
+
+        monkeypatch.setattr(MangaFireScraper, "_MAX_CHAPTER_PAGES", 3)
+        scraper = self._scraper([
+            _chapter_page(1, 2, True),
+            _chapter_page(3, 2, True),
+            _chapter_page(5, 2, True),
+            _chapter_page(7, 2, True),   # never requested
+        ])
+
+        with pytest.raises(MangaFireError) as exc:
+            scraper.get_chapters(self.URL)
+
+        assert "still had more pages after 3 pages" in str(exc.value)
+        assert scraper.session.calls == 3
+
+    def test_default_bound_is_finite_and_generous(self):
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        assert 20 <= MangaFireScraper._MAX_CHAPTER_PAGES <= 1000
+
+    def test_repeated_page_is_an_error_not_a_loop(self):
+        from memanga.scrapers.mangafire import MangaFireError
+
+        scraper = self._scraper([
+            _chapter_page(1, 3, True),
+            _chapter_page(1, 3, True),
+            _chapter_page(1, 3, True),
+        ])
+
+        with pytest.raises(MangaFireError,
+                           match="page 2 added no new chapters"):
+            scraper.get_chapters(self.URL)
+        assert scraper.session.calls == 2
+
+    def test_empty_page_that_promises_more_is_an_error(self):
+        from memanga.scrapers.mangafire import MangaFireError
+
+        scraper = self._scraper([
+            _chapter_page(1, 3, True),
+            _Response(payload={"items": [], "meta": {"hasNext": True}}),
+            _chapter_page(4, 3, False),
+        ])
+
+        with pytest.raises(MangaFireError,
+                           match="page 2 added no new chapters"):
+            scraper.get_chapters(self.URL)
+        assert scraper.session.calls == 2
+
+    @pytest.mark.parametrize("has_next", ["false", "true", 1, 0, [], {}])
+    def test_malformed_has_next_is_rejected(self, has_next):
+        from memanga.scrapers.mangafire import MangaFireError
+
+        scraper = self._scraper([
+            _chapter_page(1, 3, has_next),
+            _chapter_page(4, 3, False),
+        ])
+
+        with pytest.raises(MangaFireError,
+                           match="malformed chapter list continuation"):
+            scraper.get_chapters(self.URL)
+        assert scraper.session.calls == 1
+
+    @pytest.mark.parametrize("has_next", [False, None, ...])
+    def test_final_page_markers_end_the_list(self, has_next):
+        scraper = self._scraper([_chapter_page(1, 3, has_next)])
+
+        chapters = scraper.get_chapters(self.URL)
+
+        assert [c.number for c in chapters] == ["1", "2", "3"]
+        assert scraper.session.calls == 1
+
+    def test_empty_final_page_is_a_legitimate_end(self):
+        scraper = self._scraper([
+            _chapter_page(1, 2, True),
+            _Response(payload={"items": [], "meta": {"hasNext": False}}),
+        ])
+
+        assert [c.number for c in scraper.get_chapters(self.URL)] == ["1", "2"]
+
+    def test_large_series_is_read_in_full_and_in_order(self):
+        # 12 pages of 100, newest first like the site, with one chapter
+        # number repeated across a page boundary (two uploads of it).
+        pages = []
+        for p in range(12):
+            start = 1200 - p * 100
+            items = [{"id": 10_000 + start - i, "number": start - i, "name": ""}
+                     for i in range(100)]
+            pages.append(_Response(payload={
+                "items": items, "meta": {"hasNext": p < 11}}))
+        pages[1]._payload["items"].append(
+            {"id": 99_999, "number": 1001, "name": ""})
+        scraper = self._scraper(pages)
+
+        chapters = scraper.get_chapters(self.URL)
+
+        assert [c.numeric for c in chapters] == [float(n) for n in range(1, 1201)]
+        assert scraper.session.calls == 12

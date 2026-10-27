@@ -209,6 +209,9 @@ class TestMangaFireSearchUsesJsonApi:
         def json(self):
             return self._payload
 
+        def raise_for_status(self):
+            pass
+
     class _FakeSession:
         def __init__(self, payload):
             self._payload = payload
