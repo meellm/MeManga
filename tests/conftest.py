@@ -94,6 +94,19 @@ def _reset_output_setup():
     cli.console, cli.err_console = saved
 
 
+@pytest.fixture(autouse=True)
+def _reset_scraper_cache():
+    """get_scraper() reuses instances and request spacing is shared per
+    scraper class (issue #254); neither may carry over to the next test."""
+    yield
+    scrapers = sys.modules.get("memanga.scrapers")
+    if scrapers is not None:
+        scrapers.clear_scraper_cache()
+    base = sys.modules.get("memanga.scrapers.base")
+    if base is not None:
+        base.reset_request_spacing()
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Config directory lock (issue #244): a real second process holds it
 # ─────────────────────────────────────────────────────────────────────────

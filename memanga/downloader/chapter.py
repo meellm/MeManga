@@ -3,6 +3,7 @@ run the post-processing hook."""
 
 import logging
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import Any, Dict, Literal, Optional
 
 from ..chapters import Chapter, ChapterWithSource
 from ..scrapers import get_scraper
-from ..scrapers.base import is_image_file
+from ..scrapers.base import BaseScraper, is_image_file
 from ..state import State
 from .errors import DownloaderError
 from .formats import (_build_comicinfo_xml, _images_to_cbz, _images_to_epub,
@@ -130,11 +131,31 @@ def download_chapter(
         if not page_urls:
             raise DownloaderError("No pages found for chapter")
 
+        # Each page worker thread downloads through its own copy of the
+        # scraper, so no session is used by two threads at once (#254).
+        # Copies share the scraper's request spacing; pages retried below
+        # run on this thread with the scraper itself.
+        caller = threading.current_thread()
+        worker_local = threading.local()
+        worker_copies = []
+        worker_copies_lock = threading.Lock()
+
+        def _page_scraper():
+            if (threading.current_thread() is caller
+                    or not isinstance(scraper, BaseScraper)):
+                return scraper
+            own = getattr(worker_local, "scraper", None)
+            if own is None:
+                own = worker_local.scraper = scraper.worker_copy()
+                with worker_copies_lock:
+                    worker_copies.append(own)
+            return own
+
         def _fetch_page(url, img_path) -> bool:
             # A page counts only when the saved bytes are an image, whatever
             # the scraper returned: an HTML block page or empty body is a
             # failed page that goes through retry/partial handling (#229).
-            if not scraper.download_image(url, img_path):
+            if not _page_scraper().download_image(url, img_path):
                 return False
             if is_image_file(img_path):
                 return True
@@ -185,6 +206,11 @@ def download_chapter(
             # make the cleanup fail (Windows) or recreate the folder and
             # leave it behind (issue #246).
             executor.shutdown(wait=True, cancel_futures=True)
+            for own in worker_copies:
+                try:
+                    own.session.close()
+                except Exception:
+                    pass
 
         if cancelled:
             raise InterruptedError("Download cancelled")

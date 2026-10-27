@@ -145,6 +145,14 @@ All notable changes are recorded here. Format loosely follows
   is used instead of all of them on every run. `memanga --version` and
   `--help` load no scraper, and checking or downloading a manga loads
   only the scrapers for its sources.
+- #254 A source's scraper is reused instead of rebuilt on every lookup,
+  so repeated searches, checks and retries against one site keep its
+  connection and cookies. Each worker thread, including the ones that
+  download a chapter's pages, uses its own scraper and connection, but
+  the pause between requests to a site is now shared by all of them, so
+  parallel searches, chapter counts and downloads no longer hit one site
+  faster than its limit. Finding the scraper for a subdomain checks only
+  that host's parent domains instead of every supported site.
 - #372 The plain summary line of `memanga check` ends with the next
   step when there is one: `next: run 'memanga failed' for details` after
   failed chapters, or `next: rerun with --download` when chapters needed
