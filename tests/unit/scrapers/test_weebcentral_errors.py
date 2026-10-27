@@ -63,8 +63,10 @@ class _Page:
             for n in chapters
         ]
         self._images = [_Element(src=src) for src in images]
+        self.goto_timeouts = []
 
-    def goto(self, url, **_):
+    def goto(self, url, **kwargs):
+        self.goto_timeouts.append(kwargs.get("timeout"))
         if self._goto_error is not None:
             raise self._goto_error
         self.url = self.url or url
@@ -325,3 +327,181 @@ class TestCallers:
         )
         assert isinstance(exc.value.__cause__, wc.WeebCentralError)
         assert exc.value.__cause__.__cause__ is nav
+
+
+class TestTimeBudget:
+    """Every navigation fits the caller's budget, and a retry that could
+    not finish in time is skipped in favour of the first error."""
+
+    def _run(self, method, target, timeout):
+        scraper = wc.WeebCentralScraper()
+        return wc.WeebCentralScraper._run_serialized(
+            getattr(scraper, method), target, timeout=timeout)
+
+    def test_navigation_timeouts_follow_the_remaining_budget(self, site):
+        from memanga.scrapers.playwright_base import STEP_RESERVE_S
+
+        first = _Page(goto_error=_nav_error())
+        second = _Page(chapters=["1"])
+        site.serve(first, second)
+
+        chapters = self._run("_get_chapters_in_thread", SERIES_URL, 40)
+
+        assert [c.number for c in chapters] == ["1"]
+        limit = (40 - STEP_RESERVE_S) * 1000
+        assert 0 < first.goto_timeouts[0] <= limit
+        assert 0 < second.goto_timeouts[0] <= limit
+
+    def test_full_budget_keeps_the_usual_navigation_limit(self, site):
+        page = _Page(chapters=["1"])
+        site.serve(page)
+
+        wc.WeebCentralScraper().get_chapters(SERIES_URL)
+
+        assert page.goto_timeouts == [60000]
+
+    def test_short_budget_skips_retry_and_keeps_first_error(self, site):
+        nav = _nav_error()
+        site.serve(_Page(goto_error=nav))
+
+        with pytest.raises(wc.WeebCentralError) as exc:
+            self._run("_get_chapters_in_thread", SERIES_URL, 15)
+
+        _assert_failure(exc.value, wc.WeebCentralError, "chapter list",
+                        SERIES_URL)
+        assert "Page.goto: Timeout 60000ms exceeded." in str(exc.value)
+        assert exc.value.__cause__ is nav
+        assert site.opened == 1
+        assert site.restarts == 0
+
+    def test_short_budget_does_not_pass_an_empty_reader_as_final(self, site):
+        site.serve(_Page())
+
+        with pytest.raises(wc.WeebCentralError) as exc:
+            self._run("_get_pages_in_thread", CHAPTER_URL, 15)
+
+        assert "too little to retry an empty page list" in str(exc.value)
+        assert site.restarts == 0
+
+
+class _ExpandablePage(_Page):
+    """A series page with a "show all chapters" button. ``click`` gets
+    the click's timeout in ms; ``count_links`` answers the poll that
+    waits for the expanded list to stop growing."""
+
+    def __init__(self, click, count_links=lambda: 0, **kwargs):
+        super().__init__(**kwargs)
+        self._click = click
+        self._count_links = count_links
+        self.click_timeouts = []
+
+    def locator(self, _selector):
+        page = self
+
+        class _Button:
+            first = property(lambda self: self)
+
+            def count(self):
+                return 1
+
+            def click(self, timeout=None):
+                page.click_timeouts.append(timeout)
+                page._click(timeout)
+
+        return _Button()
+
+    def evaluate(self, expr):
+        if "/chapters/" in expr:
+            return self._count_links()
+        return 0
+
+
+class TestChapterExpansionBudget:
+    """Running out of budget while expanding the chapter list must fail
+    the fetch: the links shown before expansion are only a partial list
+    and must never be reported as the whole series."""
+
+    def _run(self, timeout):
+        scraper = wc.WeebCentralScraper()
+        return wc.WeebCentralScraper._run_serialized(
+            scraper._get_chapters_in_thread, SERIES_URL, timeout=timeout)
+
+    def test_native_timeout_of_a_budget_cut_click_fails_the_fetch(self, site):
+        import time
+        from memanga.scrapers.playwright_base import (
+            STEP_RESERVE_S, BrowserTimeoutError)
+        pw = pytest.importorskip("playwright.sync_api")
+
+        native = []
+
+        def click(timeout_ms):
+            # Playwright waits out the (shortened) timeout, then raises.
+            time.sleep(timeout_ms / 1000)
+            native.append(pw.TimeoutError(
+                f"Locator.click: Timeout {timeout_ms:.0f}ms exceeded."))
+            raise native[-1]
+
+        page = _ExpandablePage(click, chapters=["1", "2"])
+        site.serve(page)
+        budget = STEP_RESERVE_S + 2.0
+
+        began = time.monotonic()
+        with pytest.raises(wc.WeebCentralError) as exc:
+            self._run(budget)
+
+        assert time.monotonic() - began < budget
+        assert page.click_timeouts[0] < 30000   # cut by the budget
+        _assert_failure(exc.value, wc.WeebCentralError, "chapter list",
+                        SERIES_URL)
+        assert ("budget ran out while expanding the chapter list: "
+                "Locator.click: Timeout") in str(exc.value)
+        assert isinstance(exc.value.__cause__, BrowserTimeoutError)
+        assert exc.value.__cause__.__cause__ is native[0]
+        # No time for a second attempt: fail rather than retry or return
+        # the two pre-expansion links.
+        assert site.opened == 1
+        assert site.restarts == 0
+
+    def test_list_that_never_settles_fails_at_the_deadline(self, site):
+        import itertools
+        import time
+        from memanga.scrapers.playwright_base import STEP_RESERVE_S
+
+        growing = itertools.count(10, 10)
+
+        def count_links():
+            time.sleep(0.3)          # each poll takes a while
+            return next(growing)     # and the list keeps growing
+
+        page = _ExpandablePage(lambda _ms: None, count_links,
+                               chapters=["1", "2"])
+        site.serve(page)
+        budget = STEP_RESERVE_S + 2.0
+
+        began = time.monotonic()
+        with pytest.raises(wc.WeebCentralError) as exc:
+            self._run(budget)
+
+        assert time.monotonic() - began < budget
+        _assert_failure(exc.value, wc.WeebCentralError, "chapter list",
+                        SERIES_URL)
+        assert (f"weebcentral get_chapters: {budget:g}s budget used up "
+                "before the next browser step") in str(exc.value)
+        assert site.opened == 1
+
+    def test_click_failure_with_budget_left_keeps_the_fallback(self, site):
+        """Control: a click that fails quickly, with plenty of budget
+        left, is still treated as a stale selector, as before."""
+        pw = pytest.importorskip("playwright.sync_api")
+
+        def click(_timeout_ms):
+            raise pw.TimeoutError("Locator.click: element is not visible")
+
+        page = _ExpandablePage(click, chapters=["1", "2"])
+        site.serve(page)
+
+        chapters = wc.WeebCentralScraper().get_chapters(SERIES_URL)
+
+        assert [c.number for c in chapters] == ["1", "2"]
+        assert len(page.click_timeouts) == len(
+            wc.WeebCentralScraper._SHOW_ALL_SELECTORS)

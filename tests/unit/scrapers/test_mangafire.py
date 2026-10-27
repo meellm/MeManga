@@ -667,3 +667,272 @@ class TestVRFBrowserInitAtomicity:
         # AttributeError about a missing 'page' on the thread-local.
         with pytest.raises(RuntimeError, match="Executable doesn't exist"):
             gen._ensure_browser_in_thread()
+
+
+class TestVRFTimeouts:
+    """A token mint that times out, or fails with an exception that has
+    no text, must read as a token generation failure, never as a
+    generator that legitimately issued no token."""
+
+    def _search_403(self, monkeypatch, error):
+        from memanga.scrapers import mangafire as mf
+
+        stub = _StubVRF(error=error)
+        monkeypatch.setattr(mf, "get_vrf_generator", lambda: stub)
+        scraper = mf.MangaFireScraper()
+        scraper.session = _Session([
+            _Response(status_code=403, payload={"message": "Missing token."}),
+        ])
+        with pytest.raises(mf.MangaFireError) as exc:
+            scraper.search("one piece")
+        return exc.value, scraper, stub
+
+    def test_mint_timeout_is_a_generation_failure(self, monkeypatch):
+        from memanga.scrapers.playwright_base import BrowserTimeoutError
+
+        timeout = BrowserTimeoutError(
+            "mangafire token generator mint_token timed out after 120s")
+        error, scraper, stub = self._search_403(monkeypatch, timeout)
+
+        assert ("VRF token generation failed: mangafire token generator "
+                "mint_token timed out after 120s") in str(error)
+        assert error.__cause__ is timeout
+        # A broken generator gets no reload-and-retry.
+        assert scraper.session.calls == 1
+        assert stub.invalidations == 0
+
+    @pytest.mark.parametrize("bare", [TimeoutError(), RuntimeError("  ")])
+    def test_textless_error_is_not_mistaken_for_a_missing_token(
+            self, monkeypatch, bare):
+        error, scraper, _ = self._search_403(monkeypatch, bare)
+
+        message = str(error)
+        assert (f"VRF token generation failed: {type(bare).__name__}"
+                in message)
+        assert "issued no VRF token" not in message
+        assert error.__cause__ is bare
+        assert scraper.session.calls == 1
+
+
+class TestVRFWorker:
+    """The generator's own browser worker, run for real with a short
+    budget on a private worker so the shared one is never wedged."""
+
+    @pytest.fixture
+    def worker(self, monkeypatch):
+        import threading
+        from memanga.scrapers import mangafire as mf
+        from memanga.scrapers.playwright_base import BrowserWorker
+
+        w = BrowserWorker(thread_name_prefix="test-vrf")
+        monkeypatch.setattr(mf.VRFGenerator, "_worker", w)
+        gate = threading.Event()
+        yield w, gate
+        gate.set()
+        w.shutdown(wait=True)
+
+    def test_timeout_names_the_generator_and_recovers(self, worker):
+        from memanga.scrapers import mangafire as mf
+        from memanga.scrapers.playwright_base import BrowserTimeoutError
+
+        _, gate = worker
+
+        def _mint_token_in_thread():
+            assert gate.wait(10)
+
+        with pytest.raises(BrowserTimeoutError) as exc:
+            mf.VRFGenerator._run_serialized(_mint_token_in_thread, timeout=0.2)
+        assert str(exc.value).startswith(
+            "mangafire token generator mint_token timed out after 0.2s")
+
+        # While the abandoned mint runs, cleanup does not queue behind it.
+        with pytest.raises(BrowserTimeoutError, match="still busy"):
+            mf.VRFGenerator._run_serialized(lambda: None, timeout=0.2)
+
+        gate.set()
+        assert mf.VRFGenerator._run_serialized(lambda: "tok", timeout=10) == "tok"
+
+    def test_token_startup_steps_fit_the_mint_budget(self, worker,
+                                                     monkeypatch):
+        """Launch, page load and generator wait each used to allow up to
+        60-180s inside a 120s mint; they are now cut to what is left."""
+        from memanga.scrapers import mangafire as mf
+        from memanga.scrapers.playwright_base import STEP_RESERVE_S
+
+        seen = {}
+
+        class _Page:
+            def goto(self, url, **kw):
+                seen["goto"] = kw["timeout"]
+
+            def wait_for_function(self, script, **kw):
+                seen["wait_for_function"] = kw["timeout"]
+
+        class _Browser:
+            def new_context(self, **kw):
+                return type("_C", (), {"new_page": lambda self: _Page()})()
+
+        class _Firefox:
+            def launch(self, **kw):
+                seen["launch"] = kw["timeout"]
+                return _Browser()
+
+        class _PW:
+            firefox = _Firefox()
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr(mf, "PLAYWRIGHT_AVAILABLE", True)
+        monkeypatch.setattr(
+            mf, "sync_playwright",
+            lambda: type("_S", (), {"start": lambda self: _PW()})())
+
+        gen = mf.VRFGenerator()
+        mf.VRFGenerator._run_serialized(gen._ensure_token_page_in_thread,
+                                        timeout=30)
+
+        assert set(seen) == {"launch", "goto", "wait_for_function"}
+        for step, limit in seen.items():
+            assert 0 < limit <= (30 - STEP_RESERVE_S) * 1000, step
+
+
+class TestVRFPendingPromiseInBrowser:
+    """A generator promise that never settles, run in a real headless
+    Firefox on the generator's own worker thread. The page is local
+    content (no network); only the generator function is the test's.
+
+    Needs Playwright's Firefox installed locally; if it cannot be
+    launched the test is skipped with the launch error as the reason.
+    """
+
+    # Function bodies, not bare assignments: evaluate() invokes a value
+    # that is a function, which would run the generator itself here.
+    NEVER_SETTLES = ("() => { window.getProtectionToken = "
+                     "() => new Promise(() => {}); }")
+    SIGNS = ("() => { window.getProtectionToken = "
+             "(path, params) => 'tok-' + params.keyword; }")
+
+    @pytest.fixture
+    def browser(self, monkeypatch):
+        from memanga.scrapers import mangafire as mf
+        from memanga.scrapers.playwright_base import BrowserWorker
+
+        if not mf.PLAYWRIGHT_AVAILABLE:
+            pytest.skip("Playwright is not installed")
+        worker = BrowserWorker(thread_name_prefix="test-vrf-browser")
+        monkeypatch.setattr(mf.VRFGenerator, "_worker", worker)
+
+        def _open_local_page():
+            pw = mf.sync_playwright().start()
+            try:
+                browser = pw.firefox.launch(headless=True, timeout=30000)
+            except Exception:
+                pw.stop()
+                raise
+            context = browser.new_context()
+            page = context.new_page()
+            page.set_content("<html><body>token page</body></html>")
+            mf._vrf_thread_local.playwright = pw
+            mf._vrf_thread_local.browser = browser
+            mf._vrf_thread_local.context = context
+            mf._vrf_thread_local.page = page
+
+        try:
+            worker.call("test", 60, _open_local_page)
+        except Exception as e:
+            worker.shutdown(wait=True)
+            pytest.skip(f"local headless Firefox could not be launched: {e}")
+
+        def install(script):
+            """Swap the page's generator, on the worker thread."""
+            def _install_generator():
+                mf._vrf_thread_local.page.evaluate(script)
+                mf._vrf_thread_local.token_page_ready = True
+            worker.call("test", 10, _install_generator)
+
+        def page_ready():
+            return worker.call(
+                "test", 10, lambda: getattr(
+                    mf._vrf_thread_local, "token_page_ready", False))
+
+        gen = mf.VRFGenerator()
+        gen._token_cache.clear()
+        try:
+            yield mf, worker, install, page_ready
+        finally:
+            gen._token_cache.clear()
+            try:
+                worker.call("test", 30, gen._close_in_thread)
+            finally:
+                worker.shutdown(wait=True)
+
+    def test_never_settling_generator_fails_in_budget_then_recovers(
+            self, browser, monkeypatch):
+        import time
+        from memanga.scrapers.playwright_base import STEP_RESERVE_S
+
+        mf, worker, install, page_ready = browser
+        budget = STEP_RESERVE_S + 2.0
+        monkeypatch.setattr(mf.VRFGenerator, "_MINT_BUDGET_S", budget)
+        monkeypatch.setattr(mf, "get_vrf_generator", mf.VRFGenerator)
+
+        install(self.NEVER_SETTLES)
+        scraper = mf.MangaFireScraper()
+        scraper.session = _Session([
+            _Response(status_code=403, payload={"message": "Missing token."}),
+        ])
+
+        began = time.monotonic()
+        with pytest.raises(mf.MangaFireError) as exc:
+            scraper.search("one piece")
+        elapsed = time.monotonic() - began
+
+        # Answered by the in-page timer, inside the mint budget, so the
+        # worker is not left running an abandoned task.
+        assert elapsed < budget
+        message = str(exc.value)
+        assert ("VRF token generation failed: MangaFire token generation "
+                "timed out for /titles: the generator did not answer "
+                "within") in message
+        assert "issued no VRF token" not in message
+        assert isinstance(exc.value.__cause__, mf.MangaFireTokenTimeout)
+        # A broken generator gets no reload-and-retry round.
+        assert scraper.session.calls == 1
+        # ...but the next mint reloads the generator page.
+        assert page_ready() is False
+
+        # The same worker serves the next mint normally.
+        install(self.SIGNS)
+        scraper.session = _Session([_Response(payload={"items": []})])
+        assert scraper.search("naruto") == []
+        assert "vrf=tok-naruto" in scraper.session.urls[0]
+
+
+def test_expired_generator_raises_token_timeout_and_forces_reload(monkeypatch):
+    """Browser-free companion to the test above (which needs Firefox):
+    an expired race is a token timeout, never a null (unprotected) token,
+    and the generator page is reloaded before the next mint."""
+    from memanga.scrapers import mangafire as mf
+
+    seen = []
+
+    class _Page:
+        def evaluate(self, script, arg):
+            seen.append(arg)
+            return {"expired": True}
+
+    gen = mf.VRFGenerator()
+    monkeypatch.setattr(mf.VRFGenerator, "_ensure_token_page_in_thread",
+                        lambda self: _Page())
+    mf._vrf_thread_local.token_page_ready = True
+    try:
+        with pytest.raises(mf.MangaFireTokenTimeout,
+                           match="timed out for /titles"):
+            gen._mint_token_in_thread("/titles", [("keyword", "x")])
+        assert not hasattr(mf._vrf_thread_local, "token_page_ready")
+        # The in-page timer gets the step limit (outside a worker task).
+        assert seen == [["/titles", [["keyword", "x"]], mf._MINT_STEP_MS]]
+    finally:
+        if hasattr(mf._vrf_thread_local, "token_page_ready"):
+            del mf._vrf_thread_local.token_page_ready

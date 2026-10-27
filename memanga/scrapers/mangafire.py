@@ -24,11 +24,11 @@ from io import BytesIO
 from typing import List, Optional, Dict, Sequence, Tuple
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse
-from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
+from .playwright_base import BrowserWorker, step_timeout_ms
 
 # Try to import playwright
 try:
@@ -62,6 +62,10 @@ API_PREFIX = "/api"
 
 class MangaFireError(RuntimeError):
     """Raised when MangaFire returns an error instead of scraper data."""
+
+
+class MangaFireTokenTimeout(MangaFireError):
+    """The site's token generator did not answer within the mint budget."""
 
 
 # ==================== Image Descrambler ====================
@@ -158,20 +162,31 @@ _vrf_thread_local = threading.local()
 # object rather than the bare token so a thrown JS error crosses back as
 # data instead of a Playwright evaluation failure — and so a genuinely
 # unprotected endpoint (null) stays distinguishable from a failure.
+# The generator's promise is raced against a timer so a promise that
+# never settles cannot hold the browser worker past the mint budget.
 _TOKEN_SCRIPT = """
-([path, pairs]) => {
+([path, pairs, timeoutMs]) => {
     const generate = window.getProtectionToken;
     if (typeof generate !== 'function') {
         return {error: 'window.getProtectionToken is not available'};
     }
     const params = {};
     for (const [key, value] of pairs) { params[key] = value; }
-    return Promise.resolve()
+    const minted = Promise.resolve()
         .then(() => generate(path, params))
         .then(token => ({token: token == null ? null : String(token)}))
         .catch(err => ({error: String(err)}));
+    let timer;
+    const expired = new Promise(resolve => {
+        timer = setTimeout(() => resolve({expired: true}), timeoutMs);
+    });
+    return Promise.race([minted, expired]).finally(() => clearTimeout(timer));
 }
 """
+
+# Longest the generator may take to sign one call, before it is cut to
+# the mint's remaining budget.
+_MINT_STEP_MS = 60000
 
 
 # ==================== VRF Token Generator ====================
@@ -197,23 +212,22 @@ class VRFGenerator:
     browser cookies, so chapter listing, page extraction and image
     downloads all keep running on ordinary HTTP.
 
-    Uses ThreadPoolExecutor to run Playwright in a separate thread,
+    Uses a dedicated BrowserWorker thread to run Playwright,
     avoiding conflicts with asyncio event loops (e.g., from rich library).
     """
 
     _instance = None
-    # Single-worker pool keeps one Firefox per process. Pair with a lock so
-    # callers wait OUTSIDE the timeout — otherwise a second chapter queued
-    # behind a slow first chapter eats into its own 120s budget. See
-    # playwright_base.PlaywrightScraper._run_serialized for the same pattern.
-    _executor = ThreadPoolExecutor(max_workers=1)
-    _executor_lock = threading.Lock()
+    # One worker thread keeps one Firefox per process. Callers wait
+    # OUTSIDE the timeout for other live calls, and a timed-out mint is
+    # never queued behind; see playwright_base.BrowserWorker.
+    _worker = BrowserWorker(thread_name_prefix="mangafire-vrf")
+    # Budget for one mint, browser startup included.
+    _MINT_BUDGET_S = 120.0
 
     @classmethod
     def _run_serialized(cls, fn, *args, timeout: float, **kwargs):
-        with cls._executor_lock:
-            future = cls._executor.submit(fn, *args, **kwargs)
-            return future.result(timeout=timeout)
+        return cls._worker.call("mangafire token generator", timeout, fn,
+                                *args, **kwargs)
 
     def __new__(cls):
         if cls._instance is None:
@@ -259,7 +273,10 @@ class VRFGenerator:
         logger.info("Starting the browser used to mint API tokens...")
         pw = sync_playwright().start()
         try:
-            browser = pw.firefox.launch(headless=True)
+            # Every startup step is cut to the mint's remaining budget so
+            # the worker is done before get_token's caller gives up.
+            browser = pw.firefox.launch(headless=True,
+                                        timeout=step_timeout_ms(180000))
             context = browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
                 viewport={'width': 1920, 'height': 1080}
@@ -292,10 +309,11 @@ class VRFGenerator:
             return page
 
         logger.debug("Loading the site's token generator...")
-        page.goto(BASE_URL, wait_until='domcontentloaded', timeout=60000)
+        page.goto(BASE_URL, wait_until='domcontentloaded',
+                  timeout=step_timeout_ms(60000))
         page.wait_for_function(
             "() => typeof window.getProtectionToken === 'function'",
-            timeout=60000,
+            timeout=step_timeout_ms(60000),
         )
         _vrf_thread_local.token_page_ready = True
         return page
@@ -304,7 +322,17 @@ class VRFGenerator:
                               params: List[Tuple[str, str]]) -> Optional[str]:
         """Sign one API call - runs in executor thread."""
         page = self._ensure_token_page_in_thread()
-        result = page.evaluate(_TOKEN_SCRIPT, [api_path, [list(p) for p in params]])
+        timeout_ms = step_timeout_ms(_MINT_STEP_MS)
+        result = page.evaluate(
+            _TOKEN_SCRIPT, [api_path, [list(p) for p in params], timeout_ms])
+
+        if isinstance(result, dict) and result.get('expired'):
+            # The generator may be wedged; reload it before the next mint.
+            self._reset_token_page_in_thread()
+            raise MangaFireTokenTimeout(
+                f"MangaFire token generation timed out for {api_path}: the "
+                f"generator did not answer within {timeout_ms / 1000:.1f}s"
+            )
 
         detail = None
         if not isinstance(result, dict):
@@ -336,7 +364,8 @@ class VRFGenerator:
             return self._token_cache[key]
 
         token = self._run_serialized(
-            self._mint_token_in_thread, api_path, list(params), timeout=120,
+            self._mint_token_in_thread, api_path, list(params),
+            timeout=self._MINT_BUDGET_S,
         )
         self._token_cache[key] = token
         return token
@@ -517,28 +546,32 @@ class MangaFireScraper(BaseScraper):
         return f"{self.base_url}{API_PREFIX}{api_path}{suffix}"
 
     def _vrf_token(self, api_path: str, params: List[Tuple[str, str]]
-                   ) -> Tuple[Optional[str], Optional[str]]:
+                   ) -> Tuple[Optional[str], Optional[Exception]]:
         """Mint the token for one API call, returning ``(token, error)``.
 
         A missing token is not fatal on its own - MangaFire leaves some
         endpoints unprotected and its generator returns null for those -
-        so the failure is carried alongside instead of raised. If the
-        server then answers 403, the error explains that token generation,
-        not the request itself, is what actually broke.
+        so the failure is carried alongside instead of raised. ``error``
+        is the exception when minting failed and None only when the
+        generator answered, whatever the exception's text. If the server
+        then answers 403, the error explains that token generation, not
+        the request itself, is what actually broke.
         """
         try:
             return get_vrf_generator().get_token(api_path, params), None
         except Exception as e:
-            return None, str(e)
+            return None, e
 
     def _api_error_message(self, url: str, status: int, token: Optional[str],
-                           token_error: Optional[str]) -> str:
+                           token_error: Optional[Exception]) -> str:
         """Explain an API failure, naming the token step when it's to blame."""
         message = f"MangaFire returned HTTP {status} for {url}"
         if status != 403:
             return message
-        if token_error:
-            return f"{message} (VRF token generation failed: {token_error})"
+        if token_error is not None:
+            # A bare timeout has no text; name its type instead.
+            detail = str(token_error).strip() or type(token_error).__name__
+            return f"{message} (VRF token generation failed: {detail})"
         if not token:
             return (f"{message} (endpoint is token-protected but MangaFire's "
                     f"generator issued no VRF token)")
@@ -595,7 +628,7 @@ class MangaFireScraper(BaseScraper):
 
         if response.status_code != 200:
             raise MangaFireError(self._api_error_message(
-                url, response.status_code, token, token_error))
+                url, response.status_code, token, token_error)) from token_error
 
         try:
             return response.json()

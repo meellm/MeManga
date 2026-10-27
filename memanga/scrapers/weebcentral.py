@@ -22,7 +22,10 @@ import re
 from typing import List, Optional
 from urllib.parse import quote_plus
 
-from .playwright_base import PlaywrightScraper, cleanup_browsers, _thread_local
+from .playwright_base import (
+    BrowserTimeoutError, PlaywrightScraper, STEP_RESERVE_S, _thread_local,
+    cleanup_browsers, step_timeout_ms, task_budget_spent, task_seconds_left,
+)
 from .base import Chapter, Manga
 
 logger = logging.getLogger(__name__)
@@ -122,6 +125,22 @@ class WeebCentralScraper(PlaywrightScraper):
             f"WeebCentral {operation} failed for {target}: {_first_line(error)}"
         )
 
+    # A second attempt needs at least this much of the caller's budget
+    # (on top of STEP_RESERVE_S) to have a real chance of loading a page.
+    _RETRY_MIN_S = 15.0
+
+    def _ensure_time_to_retry(self, operation: str, target: str,
+                              first_error: Optional[BaseException]) -> None:
+        """Fail now, keeping the first attempt's error, when the caller's
+        budget cannot fit a second attempt."""
+        left = task_seconds_left()
+        if left is None or left >= self._RETRY_MIN_S + STEP_RESERVE_S:
+            return
+        error = first_error or BrowserTimeoutError(
+            f"{left:.0f}s left, too little to retry an empty {operation}"
+        )
+        raise self._failure(operation, target, error) from error
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
@@ -135,15 +154,17 @@ class WeebCentralScraper(PlaywrightScraper):
             search_url = self._SEARCH_URL_FMT.format(
                 base=self.base_url, q=quote_plus(query),
             )
-            page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+            page.goto(search_url, wait_until="domcontentloaded",
+                      timeout=step_timeout_ms(30000))
             # Wait for at least one real series link OR the empty-state
             # render, then snapshot. wait_for_selector returns instantly
             # when the link already exists in the static HTML the
             # /search/data endpoint returns.
+            selector_ms = step_timeout_ms(10000)
             try:
                 page.wait_for_selector(
                     'a[href*="/series/"]:not([href*="/series/random"])',
-                    timeout=10000,
+                    timeout=selector_ms,
                 )
             except Exception:
                 pass
@@ -195,7 +216,8 @@ class WeebCentralScraper(PlaywrightScraper):
         target = repr(query)
         try:
             return self._do_search_once(query)
-        except RuntimeError:
+        except RuntimeError as first_error:
+            self._ensure_time_to_retry("search", target, first_error)
             # Pre-warm the homepage and retry. A single page.goto on the
             # root domain is enough to seed CF cookies into the context.
             logger.debug("CF interstitial — warming up homepage…")
@@ -203,7 +225,7 @@ class WeebCentralScraper(PlaywrightScraper):
                 _, _, p = self._new_page()
                 try:
                     p.goto(self.base_url, wait_until="domcontentloaded",
-                            timeout=30000)
+                            timeout=step_timeout_ms(30000))
                     p.wait_for_timeout(2000)
                 finally:
                     p.close()
@@ -261,10 +283,21 @@ class WeebCentralScraper(PlaywrightScraper):
                 loc = page.locator(selector)
                 if loc.count() > 0:
                     logger.debug("Clicking 'show all chapters'…")
-                    loc.first.click()
+                    loc.first.click(timeout=step_timeout_ms(30000))
                     self._wait_for_chapter_list_stable(page)
                     return True
+            except BrowserTimeoutError:
+                # Out of budget: a partial list must not pass as the
+                # whole series.
+                raise
             except Exception as e:
+                if task_budget_spent():
+                    # The click (or the wait after it) was cut short by
+                    # the budget and timed out natively: same rule.
+                    raise BrowserTimeoutError(
+                        f"budget ran out while expanding the chapter "
+                        f"list: {_first_line(e)}"
+                    ) from e
                 # Try the next selector — WeebCentral has shipped a
                 # couple of label variants over time and one stale
                 # match shouldn't crash the whole flow.
@@ -300,7 +333,9 @@ class WeebCentralScraper(PlaywrightScraper):
             else:
                 stable = 0
                 last = count
-            page.wait_for_timeout(interval_ms)
+            # Raises once the caller's budget is used up, so polling
+            # never runs past the deadline.
+            page.wait_for_timeout(step_timeout_ms(interval_ms))
         return count
 
     def _looks_like_404(self, page) -> bool:
@@ -386,7 +421,8 @@ class WeebCentralScraper(PlaywrightScraper):
         _, _, page = self._new_page()
         try:
             logger.debug("Loading: %s", manga_url)
-            page.goto(manga_url, wait_until="domcontentloaded", timeout=60000)
+            page.goto(manga_url, wait_until="domcontentloaded",
+                      timeout=step_timeout_ms(60000))
             page.wait_for_timeout(1500)
 
             if self._looks_like_404(page):
@@ -407,7 +443,7 @@ class WeebCentralScraper(PlaywrightScraper):
                 if series_url and series_url != manga_url:
                     logger.debug("resolved chapter URL → series URL: %s", series_url)
                     page.goto(series_url, wait_until="domcontentloaded",
-                              timeout=60000)
+                              timeout=step_timeout_ms(60000))
                     page.wait_for_timeout(1500)
                 else:
                     logger.warning("could not resolve series URL from chapter page %s", manga_url)
@@ -437,14 +473,17 @@ class WeebCentralScraper(PlaywrightScraper):
         ``WeebCentralError``; an empty list means the series page
         loaded and genuinely lists no chapters.
         """
+        first_error = None
         try:
             ch = self._do_chapters_once(manga_url)
             if ch:
                 return ch
             logger.debug("empty chapter list — restarting browser and retrying")
         except Exception as e:
+            first_error = e
             logger.debug("chapter load error: %s — retrying", _first_line(e))
 
+        self._ensure_time_to_retry("chapter list", manga_url, first_error)
         # One restart + retry. _restart_browser_in_thread closes the
         # thread-local Firefox so the next call rebuilds it from
         # scratch. That clears any wedged state from a half-loaded CF
@@ -482,7 +521,9 @@ class WeebCentralScraper(PlaywrightScraper):
         stable = 0
         for _ in range(max_passes):
             page.evaluate(f"window.scrollBy(0, {step_px})")
-            page.wait_for_timeout(350)
+            # Raises once the caller's budget is used up: stopping early
+            # would pass a half-loaded chapter off as complete.
+            page.wait_for_timeout(step_timeout_ms(350))
             try:
                 h = page.evaluate(
                     "document.body.scrollHeight || document.documentElement.scrollHeight"
@@ -536,12 +577,12 @@ class WeebCentralScraper(PlaywrightScraper):
             # warm session to avoid an inline auth check; one extra
             # navigation is cheaper than a retry round trip.
             try:
-                page.goto(self.base_url, timeout=30000)
+                page.goto(self.base_url, timeout=step_timeout_ms(30000))
                 page.wait_for_timeout(1500)
             except Exception:
                 pass
 
-            page.goto(chapter_url, timeout=45000)
+            page.goto(chapter_url, timeout=step_timeout_ms(45000))
             page.wait_for_timeout(2500)
 
             if _looks_like_cloudflare(page.content(), page.title() or ""):
@@ -557,16 +598,20 @@ class WeebCentralScraper(PlaywrightScraper):
     def _get_pages_in_thread(self, chapter_url: str) -> List[str]:
         """Two-attempt page fetch, same shape as the chapter list. A
         failed retry raises ``WeebCentralError``."""
+        first_error = None
         try:
             pages = self._do_pages_once(chapter_url)
             if pages:
                 return pages
             logger.debug("empty page list — restarting browser and retrying")
-        except RuntimeError:
+        except RuntimeError as e:
+            first_error = e
             logger.debug("CF interstitial on reader — retrying")
         except Exception as e:
+            first_error = e
             logger.debug("page load error: %s — retrying", e)
 
+        self._ensure_time_to_retry("page list", chapter_url, first_error)
         self._restart_browser_in_thread()
         try:
             return self._do_pages_once(chapter_url)

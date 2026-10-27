@@ -543,7 +543,7 @@ class TestPlaywrightScraperPerSubclassExecutor:
     all queued serially on a single browser thread inside the
     search worker's 8-slot pool. The first slow scraper blocked every
     other Playwright source. Each subclass must now own its own
-    executor + lock pair.
+    browser worker.
     """
 
     def test_each_subclass_has_distinct_executor(self):
@@ -551,9 +551,10 @@ class TestPlaywrightScraperPerSubclassExecutor:
         from memanga.scrapers.weebcentral import WeebCentralScraper
         from memanga.scrapers.mangakatana import MangakatanataScraper
 
-        # Two subclasses → two distinct executors and two distinct locks.
-        assert WeebCentralScraper._executor is not MangakatanataScraper._executor
-        assert WeebCentralScraper._executor_lock is not MangakatanataScraper._executor_lock
+        # Two subclasses → two distinct workers (thread + lock each).
+        assert WeebCentralScraper._worker is not MangakatanataScraper._worker
+        assert "_worker" in WeebCentralScraper.__dict__
+        assert "_worker" in MangakatanataScraper.__dict__
 
     def test_get_browser_in_thread_rolls_back_partial_init(self, monkeypatch):
         """When firefox.launch raises, neither `_thread_local.playwright`
