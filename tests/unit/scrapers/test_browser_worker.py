@@ -21,6 +21,7 @@ from memanga.scrapers.playwright_base import (
     BrowserWorker,
     PlaywrightScraper,
     _operation_name,
+    browser_recycle_due,
     step_timeout_ms,
     task_seconds_left,
 )
@@ -338,6 +339,124 @@ class TestCleanup:
             gate.set()
             _Family._worker.shutdown(wait=True)
             _Busy._worker.shutdown(wait=True)
+
+
+class _FakeBrowser:
+    def __init__(self):
+        self.closed = False
+
+    def new_context(self, **kwargs):
+        return _FakeContext()
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeContext:
+    def close(self):
+        pass
+
+
+class _FakePlaywright:
+    """``sync_playwright().start()`` result whose Firefox never starts."""
+
+    def __init__(self):
+        self.launched = []
+        self.firefox = self
+
+    def launch(self, **kwargs):
+        self.launched.append(_FakeBrowser())
+        return self.launched[-1]
+
+    def stop(self):
+        pass
+
+
+class TestBrowserRecycling:
+    """#402: a browser that served many tasks is replaced at the start
+    of the next one, so long runs don't need ``--safe`` to stay bounded."""
+
+    @pytest.fixture
+    def source(self, monkeypatch):
+        import playwright.sync_api as pwapi
+        from memanga.scrapers import playwright_base as pb
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        pw = _FakePlaywright()
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: type(
+            "_S", (), {"start": staticmethod(lambda: pw)})())
+
+        class _Recycled(WeebCentralScraper):
+            name = "recycle-test"
+            browser_recycle_after = 2
+
+        scraper = _Recycled()
+        yield scraper, pw
+        _Recycled._run_serialized(pb.cleanup_browsers, timeout=LONG)
+        _Recycled._worker.shutdown(wait=True)
+
+    @staticmethod
+    def _task(scraper, uses=1):
+        """One worker task that asks for the browser ``uses`` times."""
+        def _get_pages_in_thread():
+            for _ in range(uses):
+                browser, _ = scraper._get_browser_in_thread()
+            return browser
+        return type(scraper)._run_serialized(_get_pages_in_thread,
+                                             timeout=LONG)
+
+    def test_browser_is_replaced_after_its_task_limit(self, source):
+        scraper, pw = source
+        used = [self._task(scraper) for _ in range(5)]
+        assert len(pw.launched) == 3
+        assert used == [pw.launched[0]] * 2 + [pw.launched[1]] * 2 \
+            + [pw.launched[2]]
+        assert pw.launched[0].closed and pw.launched[1].closed
+        assert not pw.launched[2].closed
+
+    def test_repeat_uses_within_one_task_count_once(self, source):
+        """A recycle only happens between tasks, never under a page a
+        running task still holds."""
+        scraper, pw = source
+        self._task(scraper, uses=5)
+        self._task(scraper, uses=5)
+        assert len(pw.launched) == 1
+        self._task(scraper, uses=5)
+        assert len(pw.launched) == 2
+
+    def test_zero_limit_keeps_the_browser(self, source):
+        scraper, pw = source
+        scraper.browser_recycle_after = 0
+        for _ in range(5):
+            self._task(scraper)
+        assert len(pw.launched) == 1
+
+    def test_a_restart_inside_a_task_starts_a_new_count(self, source):
+        """WeebCentral drops its browser after a hard failure; the fresh
+        one must get its full limit, not inherit the old count."""
+        from memanga.scrapers import playwright_base as pb
+
+        scraper, pw = source
+        self._task(scraper)
+
+        def _get_chapters_in_thread():
+            scraper._get_browser_in_thread()
+            pb.cleanup_browsers()
+            return scraper._get_browser_in_thread()
+
+        type(scraper)._run_serialized(_get_chapters_in_thread, timeout=LONG)
+        self._task(scraper)
+        assert len(pw.launched) == 2
+        self._task(scraper)
+        assert len(pw.launched) == 3
+
+
+def test_recycle_is_never_due_outside_a_task():
+    import types
+
+    local = types.SimpleNamespace(tasks_served=99)
+    assert browser_recycle_due(local, 1) is False
+    assert local.tasks_served == 99
 
 
 def test_operation_names_drop_private_prefix_and_thread_suffix():

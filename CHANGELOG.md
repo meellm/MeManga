@@ -141,6 +141,13 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #402 Browsers are replaced during long runs without `--safe`: a
+  source's headless browser is replaced with a fresh one after it has
+  served 20 searches, chapter lists or chapter pages (100 tokens for
+  MangaFire's token browser). The replacement happens between two of
+  those steps, never in the middle of one, and is only logged at debug
+  level. `--safe` still restarts every browser after every 3 downloaded
+  chapters, for machines with very little memory.
 - #253 Commands start faster: scraper modules are loaded when a source
   is used instead of all of them on every run. `memanga --version` and
   `--help` load no scraper, and checking or downloading a manga loads
