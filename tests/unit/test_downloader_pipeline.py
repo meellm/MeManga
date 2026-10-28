@@ -1380,3 +1380,305 @@ class TestFindChapterDownloads:
         bare = self._save(tmp_path, "0012.000 [].pdf")
         assert self._find(tmp_path, "12", templates=["{chapter} [{source}]"],
                           sources=["mangadex.org"]) == [bare]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Archive page names follow the page's encoded format, not the URL or temp
+# file suffix it was saved under. Pages are generated here with Pillow.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+# Pillow format -> the extension an archive entry must carry.
+_ARCHIVE_EXT = {"JPEG": ".jpg", "PNG": ".png", "GIF": ".gif", "BMP": ".bmp",
+                "TIFF": ".tif", "WEBP": ".webp", "AVIF": ".avif"}
+
+
+def _encoded(fmt, color=(200, 40, 40), size=(24, 16)) -> bytes:
+    """A small image encoded as ``fmt``; skips when this Pillow build
+    cannot encode it (only ever asked for WEBP and AVIF)."""
+    buf = io.BytesIO()
+    try:
+        Image.new("RGB", size, color).save(buf, fmt)
+    except (KeyError, OSError, ValueError) as e:
+        pytest.skip(f"Pillow here cannot encode {fmt}: {e}")
+    return buf.getvalue()
+
+
+def _page_file(tmp_path, name, data) -> Path:
+    path = tmp_path / name
+    path.write_bytes(data)
+    return path
+
+
+def _decoded_format(data: bytes) -> str:
+    with Image.open(io.BytesIO(data)) as img:
+        img.load()
+        return img.format
+
+
+class TestArchivePageNames:
+    @pytest.mark.parametrize("fmt,local_name", [
+        ("JPEG", "page_000.png"),     # JPEG served from a .png URL
+        ("JPEG", "page_000.webp"),
+        ("JPEG", "page_000"),         # no suffix at all
+        ("JPEG", "page_000.tmp"),
+        ("JPEG", "page_000.jpg"),     # matching suffix stays
+        ("JPEG", "page_000.jpeg"),    # a JPEG is always named .jpg
+        ("PNG", "page_000.jpg"),      # PNG behind a .jpg / default name
+        ("PNG", "page_000.png"),
+        ("GIF", "page_000.jpg"),
+        ("BMP", "page_000.jpg"),
+        ("TIFF", "page_000.jpg"),
+    ])
+    def test_entry_extension_follows_the_bytes(self, tmp_path, fmt,
+                                               local_name):
+        from memanga.downloader import _images_to_cbz
+
+        data = _encoded(fmt)
+        page = _page_file(tmp_path, local_name, data)
+        out = tmp_path / "ch.cbz"
+
+        _images_to_cbz([page], out)
+
+        with zipfile.ZipFile(out) as zf:
+            (info,) = zf.infolist()
+            assert info.filename == f"page_000{_ARCHIVE_EXT[fmt]}"
+            assert info.compress_type == zipfile.ZIP_STORED
+            assert zf.read(info) == data   # stored exactly, not re-encoded
+
+    @pytest.mark.parametrize("fmt", ["WEBP", "AVIF"])
+    def test_encoded_webp_and_avif(self, tmp_path, fmt):
+        from memanga.downloader import _images_to_cbz
+
+        data = _encoded(fmt)
+        out = tmp_path / "ch.cbz"
+        _images_to_cbz([_page_file(tmp_path, "page_000.jpg", data)], out)
+
+        with zipfile.ZipFile(out) as zf:
+            assert zf.namelist() == [f"page_000{_ARCHIVE_EXT[fmt]}"]
+            assert zf.read(zf.namelist()[0]) == data
+
+    @pytest.mark.parametrize("head,ext", [
+        (b"RIFF\x24\x00\x00\x00WEBPVP8 ", ".webp"),
+        (b"\x00\x00\x00\x1cftypavif", ".avif"),
+        (b"\x00\x00\x00\x1cftypavis", ".avif"),
+        (b"\x00\x00\x00\x18ftypheic", ".heic"),
+        (b"\x00\x00\x00\x18ftypheix", ".heic"),
+    ], ids=["webp", "avif", "avif-sequence", "heic", "heix"])
+    def test_formats_named_from_their_signature_alone(self, tmp_path, head,
+                                                      ext):
+        """The writer reads only the header, so formats this Pillow
+        cannot decode (which the page check accepts on their signature)
+        are still named correctly."""
+        from memanga.downloader import _images_to_cbz
+
+        data = head + b"\x00" * 32
+        out = tmp_path / "ch.cbz"
+        _images_to_cbz([_page_file(tmp_path, "page_000.jpg", data)], out)
+
+        with zipfile.ZipFile(out) as zf:
+            assert zf.namelist() == [f"page_000{ext}"]
+            assert zf.read(f"page_000{ext}") == data
+
+    def test_ppm_page_admitted_by_the_page_check_is_archived_as_ppm(
+            self, tmp_path):
+        """No signature matches PPM; Pillow identifies it (header only)
+        and it keeps its own name instead of failing the archive."""
+        from memanga.downloader import _images_to_cbz
+        from memanga.scrapers.base import is_image_file
+
+        data = _encoded("PPM")
+        page = _page_file(tmp_path, "page_000.jpg", data)
+        assert is_image_file(page)          # the existing page check
+        out = tmp_path / "ch.cbz"
+
+        _images_to_cbz([page], out)
+
+        with zipfile.ZipFile(out) as zf:
+            assert zf.namelist() == ["page_000.ppm"]
+            assert zf.read("page_000.ppm") == data
+            assert _decoded_format(zf.read("page_000.ppm")) == "PPM"
+
+    def test_avif_with_mif1_major_brand_is_archived_as_avif(self, tmp_path):
+        """A real, fully decodable AVIF whose ftyp major brand is "mif1"
+        (with "avif" among its compatible brands) is not matched by the
+        "ftypavif" signature; Pillow identifies it as AVIF."""
+        from memanga.downloader import _images_to_cbz
+        from memanga.scrapers.base import is_image_file
+
+        data = bytearray(_encoded("AVIF"))
+        assert data[4:8] == b"ftyp"
+        box_size = int.from_bytes(data[0:4], "big")
+        compatible = [bytes(data[i:i + 4]) for i in range(16, box_size, 4)]
+        assert b"avif" in compatible, compatible
+        data[8:12] = b"mif1"          # same file, major brand mif1
+        data = bytes(data)
+        assert data[4:12] == b"ftypmif1"
+        assert _decoded_format(data) == "AVIF"   # full decode, not a header
+        page = _page_file(tmp_path, "page_000.jpg", data)
+        assert is_image_file(page)
+        out = tmp_path / "ch.cbz"
+
+        _images_to_cbz([page], out)
+
+        with zipfile.ZipFile(out) as zf:
+            assert zf.namelist() == ["page_000.avif"]
+            assert zf.read("page_000.avif") == data
+            assert _decoded_format(zf.read("page_000.avif")) == "AVIF"
+
+    def test_every_canonical_extension_is_advertised(self):
+        from memanga.downloader.formats.cbz import (_PAGE_SIGNATURES,
+                                                    archive_page_extensions)
+        exts = archive_page_extensions()
+        assert {ext for ext, _ in _PAGE_SIGNATURES} <= exts
+        assert {".ppm", ".jp2"} <= exts
+
+    def test_mixed_pages_keep_order_numbering_bytes_and_metadata(
+            self, tmp_path):
+        from memanga.downloader import _images_to_cbz
+
+        pages = [("JPEG", "page_000.png"), ("PNG", "page_001.jpg"),
+                 ("GIF", "page_002.jpg"), ("BMP", "page_003.png"),
+                 ("JPEG", "page_004.jpg")]
+        data = [_encoded(fmt, color=(30 * i, 90, 160))
+                for i, (fmt, _) in enumerate(pages)]
+        paths = [_page_file(tmp_path, name, d)
+                 for (_, name), d in zip(pages, data)]
+        out = tmp_path / "ch.cbz"
+
+        _images_to_cbz(paths, out, comicinfo_xml=b"<ComicInfo/>",
+                       credit="MangaDex · Group A")
+
+        with zipfile.ZipFile(out) as zf:
+            assert zf.namelist() == [
+                "page_000.jpg", "page_001.png", "page_002.gif",
+                "page_003.bmp", "page_004.jpg",
+                "ComicInfo.xml", "Source.txt",
+            ]
+            for i, (fmt, _) in enumerate(pages):
+                name = zf.namelist()[i]
+                assert zf.read(name) == data[i]
+                assert _decoded_format(zf.read(name)) == fmt
+                assert zf.getinfo(name).compress_type == zipfile.ZIP_STORED
+            assert zf.read("ComicInfo.xml") == b"<ComicInfo/>"
+            assert zf.read("Source.txt").decode("utf-8") == "MangaDex · Group A\n"
+
+    def test_unrecognised_page_raises_before_any_archive_is_written(
+            self, tmp_path):
+        from memanga.downloader import DownloaderError, _images_to_cbz
+
+        paths = [_page_file(tmp_path, "page_000.jpg", _encoded("JPEG")),
+                 _page_file(tmp_path, "page_001.jpg",
+                            b"<html><body>blocked</body></html>")]
+        out = tmp_path / "ch.cbz"
+
+        with pytest.raises(DownloaderError, match=r"Page 2 \(page_001\.jpg\)"):
+            _images_to_cbz(paths, out)
+        assert not out.exists()
+
+    def test_failure_leaves_an_existing_archive_untouched(self, tmp_path):
+        from memanga.downloader import DownloaderError, _images_to_cbz
+
+        out = tmp_path / "ch.cbz"
+        _images_to_cbz([_page_file(tmp_path, "good.jpg", _encoded("JPEG"))],
+                       out)
+        before = out.read_bytes()
+
+        with pytest.raises(DownloaderError):
+            _images_to_cbz([_page_file(tmp_path, "bad.png", b"not an image")],
+                           out)
+        assert out.read_bytes() == before
+
+    def test_missing_page_writes_nothing(self, tmp_path):
+        from memanga.downloader import _images_to_cbz
+
+        paths = [_page_file(tmp_path, "page_000.jpg", _encoded("JPEG")),
+                 tmp_path / "page_001.jpg"]
+        out = tmp_path / "ch.cbz"
+
+        with pytest.raises(FileNotFoundError):
+            _images_to_cbz(paths, out)
+        assert not out.exists()
+
+    def test_empty_input_raises_and_writes_nothing(self, tmp_path):
+        from memanga.downloader import DownloaderError, _images_to_cbz
+
+        out = tmp_path / "ch.cbz"
+        with pytest.raises(DownloaderError, match="No images to archive"):
+            _images_to_cbz([], out)
+        assert not out.exists()
+
+
+class _FormatScraper:
+    """Serves real image bytes of several formats under URLs whose
+    extensions lie about them (or have none)."""
+
+    def __init__(self, bodies):
+        self.bodies = bodies   # [(url, bytes)]
+
+    def get_pages(self, url):
+        return [u for u, _ in self.bodies]
+
+    def download_image(self, url, path):
+        Path(path).write_bytes(dict(self.bodies)[url])
+        return True
+
+    def get_cover_url(self, url):
+        return None
+
+
+class TestArchiveRoutesNamePagesByFormat:
+    """Both public archive outputs (cbz, zip) go through the real
+    download_chapter route."""
+
+    _manga = {"title": "X", "url": "https://cdn.test/x", "source": "cdn.test"}
+
+    @pytest.mark.parametrize("output_format", ["cbz", "zip"])
+    def test_route_names_entries_by_format(self, tmp_path, fake_state,
+                                           monkeypatch, output_format):
+        import memanga.downloader as dl
+
+        bodies = [
+            ("https://cdn.test/p/0.png", _encoded("JPEG", (10, 20, 30))),
+            ("https://cdn.test/p/1.jpg", _encoded("PNG", (40, 50, 60))),
+            ("https://cdn.test/p/2", _encoded("GIF", (70, 80, 90))),
+            ("https://cdn.test/p/3.jpg?token=x", _encoded("BMP", (5, 6, 7))),
+            # Accepted by the page check because Pillow decodes it; named
+            # from Pillow's identification, not a signature.
+            ("https://cdn.test/p/4.jpg", _encoded("PPM", (8, 9, 10))),
+        ]
+        monkeypatch.setattr(dl.chapter, "get_scraper",
+                            lambda d: _FormatScraper(bodies))
+        monkeypatch.setattr(dl.chapter.time, "sleep", lambda s: None)
+
+        out = dl.download_chapter(self._manga, _partial_chapter(), tmp_path,
+                                  output_format, fake_state, max_retries=0)
+
+        assert Path(out).suffix == f".{output_format}"
+        with zipfile.ZipFile(out) as zf:
+            names = zf.namelist()
+            pages = [n for n in names if n.startswith("page_")]
+            assert pages == ["page_000.jpg", "page_001.png",
+                             "page_002.gif", "page_003.bmp",
+                             "page_004.ppm"]
+            for name, (_, data) in zip(pages, bodies):
+                assert zf.read(name) == data
+            assert ("ComicInfo.xml" in names) == (output_format == "cbz")
+
+    @pytest.mark.parametrize("output_format", ["cbz", "zip"])
+    def test_route_still_rejects_a_non_image_page_first(
+            self, tmp_path, fake_state, monkeypatch, output_format):
+        """The page check (#229) stops a non-image body before the
+        archive writer is reached; nothing is written."""
+        import memanga.downloader as dl
+
+        bodies = [("https://cdn.test/p/0.jpg", _encoded("JPEG")),
+                  ("https://cdn.test/p/1.jpg", b"<html>blocked</html>")]
+        monkeypatch.setattr(dl.chapter, "get_scraper",
+                            lambda d: _FormatScraper(bodies))
+        monkeypatch.setattr(dl.chapter.time, "sleep", lambda s: None)
+
+        with pytest.raises(dl.DownloaderError):
+            dl.download_chapter(self._manga, _partial_chapter(), tmp_path,
+                                output_format, fake_state, max_retries=0)
+        assert not any(p.is_file() for p in tmp_path.rglob("*"))

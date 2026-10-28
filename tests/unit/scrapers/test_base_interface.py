@@ -209,6 +209,9 @@ class TestMangaFireSearchUsesJsonApi:
         def json(self):
             return self._payload
 
+        def raise_for_status(self):
+            pass
+
     class _FakeSession:
         def __init__(self, payload):
             self._payload = payload
@@ -383,10 +386,25 @@ class TestWeebCentralCloudflareDetection:
     def test_looks_like_cloudflare_matches_known_phrases(self):
         from memanga.scrapers.weebcentral import _looks_like_cloudflare
         assert _looks_like_cloudflare("", "Just a moment...")
+        # Body text counts only as the classic interstitial's sentences;
+        # ordinary mentions are covered in test_weebcentral_parsing.py.
         assert _looks_like_cloudflare(
-            "<html><body>Checking your browser…</body></html>",
+            "<html><body>Checking your browser before accessing "
+            "weebcentral.com.</body></html>",
         )
         assert _looks_like_cloudflare("DDoS protection by Cloudflare")
+        # A Cloudflare deny page names Cloudflare in its title, whether
+        # the title comes from the page or only from the raw markup.
+        deny_body = "<html><body>Sorry, you have been blocked</body></html>"
+        assert _looks_like_cloudflare(
+            deny_body, "Attention Required! | Cloudflare")
+        assert _looks_like_cloudflare(
+            "<html><head><title>Attention Required! | Cloudflare</title>"
+            "</head><body>Sorry, you have been blocked</body></html>")
+        # The word in ordinary body text is not a signal.
+        assert not _looks_like_cloudflare(
+            "<html><body>Mirror served via Cloudflare</body></html>",
+            "Blue Lock | Weeb Central")
         # A normal results page must NOT trip the detector.
         assert not _looks_like_cloudflare(
             "<html><a href='/series/abc'>Blue Lock</a></html>",
@@ -543,7 +561,7 @@ class TestPlaywrightScraperPerSubclassExecutor:
     all queued serially on a single browser thread inside the
     search worker's 8-slot pool. The first slow scraper blocked every
     other Playwright source. Each subclass must now own its own
-    executor + lock pair.
+    browser worker.
     """
 
     def test_each_subclass_has_distinct_executor(self):
@@ -551,9 +569,10 @@ class TestPlaywrightScraperPerSubclassExecutor:
         from memanga.scrapers.weebcentral import WeebCentralScraper
         from memanga.scrapers.mangakatana import MangakatanataScraper
 
-        # Two subclasses → two distinct executors and two distinct locks.
-        assert WeebCentralScraper._executor is not MangakatanataScraper._executor
-        assert WeebCentralScraper._executor_lock is not MangakatanataScraper._executor_lock
+        # Two subclasses → two distinct workers (thread + lock each).
+        assert WeebCentralScraper._worker is not MangakatanataScraper._worker
+        assert "_worker" in WeebCentralScraper.__dict__
+        assert "_worker" in MangakatanataScraper.__dict__
 
     def test_get_browser_in_thread_rolls_back_partial_init(self, monkeypatch):
         """When firefox.launch raises, neither `_thread_local.playwright`

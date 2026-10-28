@@ -24,11 +24,14 @@ from io import BytesIO
 from typing import List, Optional, Dict, Sequence, Tuple
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse
-from concurrent.futures import ThreadPoolExecutor
 
 from PIL import Image
 
-from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
+from .base import (
+    BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT,
+    _identifies_as_image,
+)
+from .playwright_base import BrowserWorker, step_timeout_ms
 
 # Try to import playwright
 try:
@@ -64,6 +67,10 @@ class MangaFireError(RuntimeError):
     """Raised when MangaFire returns an error instead of scraper data."""
 
 
+class MangaFireTokenTimeout(MangaFireError):
+    """The site's token generator did not answer within the mint budget."""
+
+
 # ==================== Image Descrambler ====================
 class ImageDescrambler:
     """
@@ -72,7 +79,10 @@ class ImageDescrambler:
     MangaFire scrambles images by dividing them into pieces and rearranging them.
     The offset parameter determines how pieces are shifted.
 
-    Based on the Tachiyomi extension and MangaFire-API implementation.
+    Based on the Tachiyomi extension (keiyoushi extensions-source,
+    all/mangafire ImageInterceptor.kt) and MangaFire-API implementation.
+    Pieces are moved, never altered: the result keeps the source's mode,
+    palette and transparency and is saved in the source's format.
     """
     PIECE_SIZE = 200
     MIN_SPLIT_COUNT = 5
@@ -101,8 +111,9 @@ class ImageDescrambler:
         img = Image.open(BytesIO(image_data))
         width, height = img.size
 
-        # Create result image
-        result = Image.new('RGB', (width, height))
+        # Start from a copy so mode, palette and info carry over; the
+        # piece grid below covers every pixel, so each one is rewritten.
+        result = img.copy()
 
         # Calculate piece dimensions
         piece_width = min(cls.PIECE_SIZE, cls.ceil_div(width, cls.MIN_SPLIT_COUNT))
@@ -145,7 +156,12 @@ class ImageDescrambler:
         if fmt.upper() == 'JPEG':
             result.save(output, format='JPEG', quality=95)
         else:
-            result.save(output, format=fmt)
+            extra = {}
+            if 'transparency' in img.info:
+                # Palette / colour-key transparency is not kept by save()
+                # unless passed back explicitly.
+                extra['transparency'] = img.info['transparency']
+            result.save(output, format=fmt, **extra)
 
         return output.getvalue()
 
@@ -158,20 +174,31 @@ _vrf_thread_local = threading.local()
 # object rather than the bare token so a thrown JS error crosses back as
 # data instead of a Playwright evaluation failure — and so a genuinely
 # unprotected endpoint (null) stays distinguishable from a failure.
+# The generator's promise is raced against a timer so a promise that
+# never settles cannot hold the browser worker past the mint budget.
 _TOKEN_SCRIPT = """
-([path, pairs]) => {
+([path, pairs, timeoutMs]) => {
     const generate = window.getProtectionToken;
     if (typeof generate !== 'function') {
         return {error: 'window.getProtectionToken is not available'};
     }
     const params = {};
     for (const [key, value] of pairs) { params[key] = value; }
-    return Promise.resolve()
+    const minted = Promise.resolve()
         .then(() => generate(path, params))
         .then(token => ({token: token == null ? null : String(token)}))
         .catch(err => ({error: String(err)}));
+    let timer;
+    const expired = new Promise(resolve => {
+        timer = setTimeout(() => resolve({expired: true}), timeoutMs);
+    });
+    return Promise.race([minted, expired]).finally(() => clearTimeout(timer));
 }
 """
+
+# Longest the generator may take to sign one call, before it is cut to
+# the mint's remaining budget.
+_MINT_STEP_MS = 60000
 
 
 # ==================== VRF Token Generator ====================
@@ -197,23 +224,22 @@ class VRFGenerator:
     browser cookies, so chapter listing, page extraction and image
     downloads all keep running on ordinary HTTP.
 
-    Uses ThreadPoolExecutor to run Playwright in a separate thread,
+    Uses a dedicated BrowserWorker thread to run Playwright,
     avoiding conflicts with asyncio event loops (e.g., from rich library).
     """
 
     _instance = None
-    # Single-worker pool keeps one Firefox per process. Pair with a lock so
-    # callers wait OUTSIDE the timeout — otherwise a second chapter queued
-    # behind a slow first chapter eats into its own 120s budget. See
-    # playwright_base.PlaywrightScraper._run_serialized for the same pattern.
-    _executor = ThreadPoolExecutor(max_workers=1)
-    _executor_lock = threading.Lock()
+    # One worker thread keeps one Firefox per process. Callers wait
+    # OUTSIDE the timeout for other live calls, and a timed-out mint is
+    # never queued behind; see playwright_base.BrowserWorker.
+    _worker = BrowserWorker(thread_name_prefix="mangafire-vrf")
+    # Budget for one mint, browser startup included.
+    _MINT_BUDGET_S = 120.0
 
     @classmethod
     def _run_serialized(cls, fn, *args, timeout: float, **kwargs):
-        with cls._executor_lock:
-            future = cls._executor.submit(fn, *args, **kwargs)
-            return future.result(timeout=timeout)
+        return cls._worker.call("mangafire token generator", timeout, fn,
+                                *args, **kwargs)
 
     def __new__(cls):
         if cls._instance is None:
@@ -259,7 +285,10 @@ class VRFGenerator:
         logger.info("Starting the browser used to mint API tokens...")
         pw = sync_playwright().start()
         try:
-            browser = pw.firefox.launch(headless=True)
+            # Every startup step is cut to the mint's remaining budget so
+            # the worker is done before get_token's caller gives up.
+            browser = pw.firefox.launch(headless=True,
+                                        timeout=step_timeout_ms(180000))
             context = browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
                 viewport={'width': 1920, 'height': 1080}
@@ -292,10 +321,11 @@ class VRFGenerator:
             return page
 
         logger.debug("Loading the site's token generator...")
-        page.goto(BASE_URL, wait_until='domcontentloaded', timeout=60000)
+        page.goto(BASE_URL, wait_until='domcontentloaded',
+                  timeout=step_timeout_ms(60000))
         page.wait_for_function(
             "() => typeof window.getProtectionToken === 'function'",
-            timeout=60000,
+            timeout=step_timeout_ms(60000),
         )
         _vrf_thread_local.token_page_ready = True
         return page
@@ -304,7 +334,17 @@ class VRFGenerator:
                               params: List[Tuple[str, str]]) -> Optional[str]:
         """Sign one API call - runs in executor thread."""
         page = self._ensure_token_page_in_thread()
-        result = page.evaluate(_TOKEN_SCRIPT, [api_path, [list(p) for p in params]])
+        timeout_ms = step_timeout_ms(_MINT_STEP_MS)
+        result = page.evaluate(
+            _TOKEN_SCRIPT, [api_path, [list(p) for p in params], timeout_ms])
+
+        if isinstance(result, dict) and result.get('expired'):
+            # The generator may be wedged; reload it before the next mint.
+            self._reset_token_page_in_thread()
+            raise MangaFireTokenTimeout(
+                f"MangaFire token generation timed out for {api_path}: the "
+                f"generator did not answer within {timeout_ms / 1000:.1f}s"
+            )
 
         detail = None
         if not isinstance(result, dict):
@@ -336,7 +376,8 @@ class VRFGenerator:
             return self._token_cache[key]
 
         token = self._run_serialized(
-            self._mint_token_in_thread, api_path, list(params), timeout=120,
+            self._mint_token_in_thread, api_path, list(params),
+            timeout=self._MINT_BUDGET_S,
         )
         self._token_cache[key] = token
         return token
@@ -442,7 +483,13 @@ class MangaFireScraper(BaseScraper):
 
     # Every API call is signed in _api_get_json(). Token minting routes
     # through VRFGenerator's own _run_serialized; image downloads and the
-    # API fetches themselves stay on the plain session.
+    # API fetches themselves stay on the plain session, through the
+    # shared request policy (BaseScraper._request).
+
+    # Chapter lists come 100 per page. 100 pages (10,000 chapters) is
+    # about ten times the longest real series, so reaching it means the
+    # API keeps promising more pages and the list cannot be trusted.
+    _MAX_CHAPTER_PAGES = 100
 
     def __init__(self):
         super().__init__()
@@ -517,28 +564,32 @@ class MangaFireScraper(BaseScraper):
         return f"{self.base_url}{API_PREFIX}{api_path}{suffix}"
 
     def _vrf_token(self, api_path: str, params: List[Tuple[str, str]]
-                   ) -> Tuple[Optional[str], Optional[str]]:
+                   ) -> Tuple[Optional[str], Optional[Exception]]:
         """Mint the token for one API call, returning ``(token, error)``.
 
         A missing token is not fatal on its own - MangaFire leaves some
         endpoints unprotected and its generator returns null for those -
-        so the failure is carried alongside instead of raised. If the
-        server then answers 403, the error explains that token generation,
-        not the request itself, is what actually broke.
+        so the failure is carried alongside instead of raised. ``error``
+        is the exception when minting failed and None only when the
+        generator answered, whatever the exception's text. If the server
+        then answers 403, the error explains that token generation, not
+        the request itself, is what actually broke.
         """
         try:
             return get_vrf_generator().get_token(api_path, params), None
         except Exception as e:
-            return None, str(e)
+            return None, e
 
     def _api_error_message(self, url: str, status: int, token: Optional[str],
-                           token_error: Optional[str]) -> str:
+                           token_error: Optional[Exception]) -> str:
         """Explain an API failure, naming the token step when it's to blame."""
         message = f"MangaFire returned HTTP {status} for {url}"
         if status != 403:
             return message
-        if token_error:
-            return f"{message} (VRF token generation failed: {token_error})"
+        if token_error is not None:
+            # A bare timeout has no text; name its type instead.
+            detail = str(token_error).strip() or type(token_error).__name__
+            return f"{message} (VRF token generation failed: {detail})"
         if not token:
             return (f"{message} (endpoint is token-protected but MangaFire's "
                     f"generator issued no VRF token)")
@@ -595,7 +646,7 @@ class MangaFireScraper(BaseScraper):
 
         if response.status_code != 200:
             raise MangaFireError(self._api_error_message(
-                url, response.status_code, token, token_error))
+                url, response.status_code, token, token_error)) from token_error
 
         try:
             return response.json()
@@ -606,10 +657,20 @@ class MangaFireScraper(BaseScraper):
 
     def _api_get(self, url: str, api_path: str,
                  params: List[Tuple[str, str]], token: Optional[str]):
-        """Issue one signed API request, mapping transport errors."""
+        """Issue one signed API request, mapping transport errors.
+
+        Goes through the shared request policy (``BaseScraper._request``):
+        per-source pacing, and retries of 429 / 5xx / connection errors
+        that honor Retry-After. A final HTTP error is returned as its
+        response rather than raised, so ``_api_get_json`` can still tell
+        a rejected VRF token (403) apart and explain the failure.
+        """
         try:
-            return self.session.get(
-                self._signed_api_url(api_path, params, token), timeout=30)
+            return self._request(self._signed_api_url(api_path, params, token))
+        except requests.HTTPError as e:
+            if e.response is not None:
+                return e.response
+            raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
         except requests.RequestException as e:
             raise MangaFireError(f"MangaFire request failed for {url}: {e}") from e
         except Exception as e:
@@ -724,9 +785,9 @@ class MangaFireScraper(BaseScraper):
 
         chapters: List[Chapter] = []
         seen_numbers = set()
-        page = 1
+        seen_ids = set()
 
-        while True:
+        for page in range(1, self._MAX_CHAPTER_PAGES + 1):
             api_url = (
                 f"{self.base_url}/api/titles/{manga_id}/chapters"
                 f"?language={language}&limit=100&page={page}"
@@ -738,10 +799,14 @@ class MangaFireScraper(BaseScraper):
                     f"MangaFire returned an invalid chapter list for {api_url}"
                 )
 
+            new_ids = 0
             for item in items:
                 if not isinstance(item, dict):
                     continue
                 chapter_id = item.get('id')
+                if chapter_id and chapter_id not in seen_ids:
+                    seen_ids.add(chapter_id)
+                    new_ids += 1
                 number = self._format_chapter_number(item.get('number', ''))
                 if not chapter_id or not number or number in seen_numbers:
                     continue
@@ -755,11 +820,30 @@ class MangaFireScraper(BaseScraper):
                 ))
 
             meta = data.get('meta') if isinstance(data.get('meta'), dict) else {}
-            if not meta.get('hasNext'):
-                break
-            page += 1
+            # A missing (or null) hasNext ends the list, as before; any
+            # value but a JSON boolean is a continuation we can't trust.
+            has_next = meta.get('hasNext')
+            if has_next is None or has_next is False:
+                return sorted(chapters, key=lambda x: x.numeric)
+            if has_next is not True:
+                raise MangaFireError(
+                    f"MangaFire returned a malformed chapter list continuation "
+                    f"for {api_url} (hasNext={has_next!r}); the chapter list "
+                    f"would be incomplete"
+                )
+            if not new_ids:
+                # An empty or repeated page that still promises more would
+                # page forever without adding anything.
+                raise MangaFireError(
+                    f"MangaFire chapter list for {manga_url} promised another "
+                    f"page after page {page}, but page {page} added no new "
+                    f"chapters; the chapter list would be incomplete"
+                )
 
-        return sorted(chapters, key=lambda x: x.numeric)
+        raise MangaFireError(
+            f"MangaFire chapter list for {manga_url} still had more pages after "
+            f"{self._MAX_CHAPTER_PAGES} pages; refusing an incomplete list"
+        )
 
     def _resolve_chapter_api_url(self, chapter_url: str) -> str:
         """Resolve a saved MangaFire chapter URL to the current chapter API URL."""
@@ -803,17 +887,40 @@ class MangaFireScraper(BaseScraper):
         for page in pages:
             if isinstance(page, dict):
                 url = page.get('url')
-                offset = page.get('offset') or page.get('scrambleOffset') or 0
+                offset = self._page_offset(page, api_url)
             else:
                 url = page
                 offset = 0
             if not url:
                 continue
             image_urls.append(url)
-            if isinstance(offset, int) and offset > 0:
+            if offset > 0:
                 self._current_offsets[url] = offset
 
         return image_urls
+
+    @staticmethod
+    def _page_offset(page: dict, api_url: str) -> int:
+        """Scramble offset of one page entry; 0 when it is not scrambled.
+
+        The offset is an integer (``offset``, else ``scrambleOffset``) and
+        only a positive one means "descramble". A value of any other type
+        is refused: a page that is still scrambled is a valid image, so
+        nothing downstream would notice and a shuffled page would be
+        delivered as a good one.
+        """
+        for key in ('offset', 'scrambleOffset'):
+            value = page.get(key)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise MangaFireError(
+                    f"MangaFire returned an invalid page {key} {value!r} for "
+                    f"{api_url}; refusing pages that might stay scrambled"
+                )
+            if value > 0:
+                return value
+        return 0
 
     def download_image(self, url: str, path) -> bool:
         """
@@ -827,10 +934,17 @@ class MangaFireScraper(BaseScraper):
                 'User-Agent': BROWSER_USER_AGENT_SHORT,
             }
 
-            response = self.session.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
+            # Shared request policy: pacing, transient retries, Retry-After.
+            response = self._request(url, headers=headers)
 
             image_data = response.content
+            if not _identifies_as_image(image_data):
+                # Same rule as BaseScraper.download_image (#229): a block
+                # page or empty body is a failed page, judged on the bytes
+                # and never descrambled or written; drop any older file.
+                Path(path).unlink(missing_ok=True)
+                logger.debug("Failed to download %s: response body is not an image", url)
+                return False
 
             # Check if image needs descrambling
             offset = self._current_offsets.get(url, 0)

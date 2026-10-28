@@ -124,7 +124,7 @@ def download_chapter(
         try:
             page_urls = scraper.get_pages(chapter.url)
         except Exception as e:
-            raise DownloaderError(f"Failed to get pages: {e}")
+            raise DownloaderError(f"Failed to get pages: {e}") from e
 
         _check_cancel()
 
