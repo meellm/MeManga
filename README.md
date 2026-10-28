@@ -373,8 +373,10 @@ server after a failed page.
 python -m memanga check "Blue Lock" --from 1 --download --safe
 ```
 
-`--safe` restarts the browser every 3 chapters to keep memory usage
-flat across long bulk runs. Swap `--download` for `--dry-run` first to
+Each browser is already replaced with a fresh one after it has served
+20 searches, chapter lists or chapter pages. `--safe` restarts them
+more often, every 3 chapters, for machines with very little memory.
+Swap `--download` for `--dry-run` first to
 see which chapters it would fetch without downloading or changing
 anything.
 

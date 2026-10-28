@@ -31,7 +31,9 @@ from .base import (
     BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT,
     _identifies_as_image,
 )
-from .playwright_base import BrowserWorker, step_timeout_ms
+from .playwright_base import (
+    BrowserWorker, browser_recycle_due, start_browser_count, step_timeout_ms,
+)
 
 # Try to import playwright
 try:
@@ -235,6 +237,10 @@ class VRFGenerator:
     _worker = BrowserWorker(thread_name_prefix="mangafire-vrf")
     # Budget for one mint, browser startup included.
     _MINT_BUDGET_S = 120.0
+    # Mints one browser serves before it is replaced (#402). Higher than
+    # PlaywrightScraper's limit: a mint loads no new document, and a
+    # replacement has to load the site's generator again.
+    _RECYCLE_AFTER_MINTS = 100
 
     @classmethod
     def _run_serialized(cls, fn, *args, timeout: float, **kwargs):
@@ -272,17 +278,25 @@ class VRFGenerator:
         if not PLAYWRIGHT_AVAILABLE:
             raise RuntimeError("Playwright not available")
 
+        replacing = False
         if (hasattr(_vrf_thread_local, 'playwright')
                 and hasattr(_vrf_thread_local, 'browser')
                 and hasattr(_vrf_thread_local, 'context')
                 and hasattr(_vrf_thread_local, 'page')):
-            return _vrf_thread_local.page
+            if not browser_recycle_due(_vrf_thread_local,
+                                       self._RECYCLE_AFTER_MINTS):
+                return _vrf_thread_local.page
+            logger.debug("Restarting the token browser after %d mints to "
+                         "free memory", _vrf_thread_local.tasks_served)
+            replacing = True
 
         # Drop any half-initialised state from a previous failed attempt
         # so sync_playwright().start() doesn't raise "already started".
         self._close_in_thread()
 
-        logger.info("Starting the browser used to mint API tokens...")
+        # An automatic replacement is routine upkeep and stays quiet.
+        if not replacing:
+            logger.info("Starting the browser used to mint API tokens...")
         pw = sync_playwright().start()
         try:
             # Every startup step is cut to the mint's remaining budget so
@@ -307,6 +321,7 @@ class VRFGenerator:
         _vrf_thread_local.browser = browser
         _vrf_thread_local.context = context
         _vrf_thread_local.page = page
+        start_browser_count(_vrf_thread_local)
         return _vrf_thread_local.page
 
     def _ensure_token_page_in_thread(self):

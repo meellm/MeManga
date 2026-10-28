@@ -26,6 +26,11 @@ STEP_RESERVE_S = 5.0
 # Below this much usable time a browser step is not worth starting.
 _MIN_STEP_S = 1.0
 
+# A long-lived browser keeps growing in memory over a long check or
+# backfill (#402). After this many tasks (search, chapter list, pages)
+# it is closed at the start of the next task and a fresh one launched.
+BROWSER_RECYCLE_AFTER_TASKS = 20
+
 
 class BrowserTimeoutError(TimeoutError):
     """A browser task did not finish within its caller's time budget."""
@@ -66,6 +71,34 @@ def step_timeout_ms(cap_ms: float) -> float:
             f"budget used up before the next browser step"
         )
     return min(cap_ms, usable_s * 1000)
+
+
+def browser_recycle_due(local, limit: int) -> bool:
+    """Count the running task against the browser kept in ``local``.
+
+    Only the first time a ``BrowserWorker`` task asks for the browser
+    counts, so a recycle happens between tasks and never closes a page
+    a task is still using. Returns True when the browser has already
+    served ``limit`` tasks and should be replaced before this one.
+    Calls outside a task, and a ``limit`` of 0, never recycle.
+    """
+    task = getattr(_task_local, "task", None)
+    if task is None or not limit or getattr(local, "last_task", None) is task:
+        return False
+    served = getattr(local, "tasks_served", 0)
+    if served >= limit:
+        return True
+    local.tasks_served = served + 1
+    local.last_task = task
+    return False
+
+
+def start_browser_count(local):
+    """Start counting tasks for a browser just launched into ``local``;
+    the running task, if any, is its first."""
+    task = getattr(_task_local, "task", None)
+    local.tasks_served = 0 if task is None else 1
+    local.last_task = task
 
 
 def _operation_name(fn) -> str:
@@ -210,6 +243,10 @@ class PlaywrightScraper(BaseScraper):
     # Budget for closing one subclass's browser in cleanup().
     _CLEANUP_TIMEOUT_S = 10.0
 
+    # Tasks one browser serves before it is replaced; 0 keeps it for
+    # the whole run. See BROWSER_RECYCLE_AFTER_TASKS.
+    browser_recycle_after = BROWSER_RECYCLE_AFTER_TASKS
+
     # NOTE: do NOT define `_worker` on this base class.
     # `__init_subclass__` below gives every subclass its OWN worker
     # so WeebCentral, MangaKatana, MangaClash, MangaHere etc.
@@ -251,11 +288,16 @@ class PlaywrightScraper(BaseScraper):
         cascading failure took out unrelated scrapers in the same
         worker thread.
         """
-        # Hot path: everything already up.
+        # Hot path: everything already up, unless it has served enough
+        # tasks to be replaced (#402).
         if (hasattr(_thread_local, 'browser')
                 and hasattr(_thread_local, 'context')
                 and hasattr(_thread_local, 'playwright')):
-            return _thread_local.browser, _thread_local.context
+            if not browser_recycle_due(_thread_local,
+                                       self.browser_recycle_after):
+                return _thread_local.browser, _thread_local.context
+            logger.debug("%s: restarting the browser after %d tasks to "
+                         "free memory", self.name, _thread_local.tasks_served)
 
         # Clear any dangling state from a previous partial init before
         # retrying — otherwise sync_playwright().start() raises
@@ -279,6 +321,7 @@ class PlaywrightScraper(BaseScraper):
         _thread_local.playwright = pw
         _thread_local.browser = browser
         _thread_local.context = context
+        start_browser_count(_thread_local)
         return browser, context
 
     def _launch_browser(self, pw):

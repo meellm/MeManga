@@ -586,9 +586,9 @@ run check "One Piece" --from 1 --download --safe
 | `"One Piece"` | Target a specific manga (`-t "One Piece"` also works) |
 | `--from 1` | Start from chapter 1 instead of where you left off |
 | `--download` | Download without prompting for each chapter (`--auto` and `--yes` are aliases) |
-| `--safe` | Restart the browser every 3 chapters to prevent memory buildup |
+| `--safe` | Restart the browser every 3 chapters to keep memory as low as possible |
 
-The `--safe` flag is important for bulk downloads — without it, the browser can consume too much memory after many chapters.
+MeManga already replaces each browser with a fresh one after it has served 20 searches, chapter lists or chapter pages (100 tokens for MangaFire). `--safe` restarts browsers more often; use it on machines with very little memory, such as a small single-board computer.
 
 ---
 

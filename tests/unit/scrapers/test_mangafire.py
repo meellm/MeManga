@@ -833,6 +833,83 @@ class TestVRFWorker:
         for step, limit in seen.items():
             assert 0 < limit <= (30 - STEP_RESERVE_S) * 1000, step
 
+    def test_token_browser_is_replaced_after_its_mint_limit(
+            self, worker, monkeypatch, caplog):
+        """#402: the token browser lives for the whole run, so after a
+        bounded number of mints it is closed between two mints and a
+        fresh one, with the generator reloaded, serves the next. Only
+        the first start is announced at INFO; a replacement is quiet."""
+        import logging
+        from memanga.scrapers import mangafire as mf
+
+        caplog.set_level(logging.DEBUG, logger=mf.logger.name)
+
+        launched = []
+
+        class _Page:
+            closed = False
+
+            def goto(self, url, **kw):
+                pass
+
+            def wait_for_function(self, script, **kw):
+                pass
+
+            def close(self):
+                self.closed = True
+
+        class _Browser:
+            closed = False
+
+            def new_context(self, **kw):
+                return type("_C", (), {"new_page": lambda self: _Page(),
+                                       "close": lambda self: None})()
+
+            def close(self):
+                self.closed = True
+
+        class _Firefox:
+            def launch(self, **kw):
+                launched.append(_Browser())
+                return launched[-1]
+
+        class _PW:
+            firefox = _Firefox()
+
+            def stop(self):
+                pass
+
+        monkeypatch.setattr(mf, "PLAYWRIGHT_AVAILABLE", True)
+        monkeypatch.setattr(
+            mf, "sync_playwright",
+            lambda: type("_S", (), {"start": lambda self: _PW()})())
+        monkeypatch.setattr(mf.VRFGenerator, "_RECYCLE_AFTER_MINTS", 2)
+
+        gen = mf.VRFGenerator()
+
+        def _mint_token_in_thread():
+            # Asking twice in one mint counts once.
+            gen._ensure_token_page_in_thread()
+            return gen._ensure_token_page_in_thread()
+
+        pages = [mf.VRFGenerator._run_serialized(_mint_token_in_thread,
+                                                 timeout=30)
+                 for _ in range(3)]
+        try:
+            assert len(launched) == 2
+            assert pages[0] is pages[1]
+            assert pages[2] is not pages[1]
+            assert pages[1].closed and launched[0].closed
+            assert not pages[2].closed and not launched[1].closed
+            info = [r.getMessage() for r in caplog.records
+                    if r.name == mf.logger.name and r.levelno >= logging.INFO]
+            assert info == ["Starting the browser used to mint API tokens..."]
+            assert any("Restarting the token browser after 2 mints"
+                       in r.getMessage() for r in caplog.records
+                       if r.levelno == logging.DEBUG)
+        finally:
+            mf.VRFGenerator._run_serialized(gen._close_in_thread, timeout=10)
+
 
 class TestVRFPendingPromiseInBrowser:
     """A generator promise that never settles, run in a real headless
