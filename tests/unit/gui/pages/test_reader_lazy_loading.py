@@ -116,6 +116,91 @@ class TestIndexing:
         bad.write_bytes(b"not a zip")
         assert index_chapter_file(bad) == []
 
+    @staticmethod
+    def _encoded(fmt, size) -> bytes:
+        from PIL import Image
+        buf = io.BytesIO()
+        Image.new("RGB", size, (90, 30, 150)).save(buf, fmt)
+        return buf.getvalue()
+
+    def _archive(self, tmp_path, pages):
+        """A CBZ made by the real archive writer from (format, size,
+        local file name) pages; local names deliberately disagree."""
+        from memanga.downloader import _images_to_cbz
+        paths = []
+        for i, (fmt, size, local) in enumerate(pages):
+            path = tmp_path / f"{i}-{local}"
+            path.write_bytes(self._encoded(fmt, size))
+            paths.append(path)
+        cbz = tmp_path / "c.cbz"
+        _images_to_cbz(paths, cbz)
+        return cbz
+
+    def test_writer_archive_with_renamed_pages_is_read_in_full(
+            self, qapp, tmp_path):
+        """BMP pages used to be archived as .jpg and Qt read them by
+        content; named .bmp now, they must still be indexed and shown."""
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        cbz = self._archive(tmp_path, [
+            ("BMP", (30, 50), "p.jpg"),
+            ("JPEG", (40, 60), "p.png"),
+            ("PNG", (20, 70), "p.jpg"),
+            ("GIF", (10, 30), "p"),
+        ])
+        pages = index_chapter_file(cbz)
+        assert [p.member for p in pages] == [
+            "page_000.bmp", "page_001.jpg", "page_002.png", "page_003.gif"]
+        assert [(p.width, p.height) for p in pages] == [
+            (30, 50), (40, 60), (20, 70), (10, 30)]
+        for p in pages:
+            img = decode_page(p)
+            assert not img.isNull()
+            assert (img.width(), img.height()) == (p.width, p.height)
+
+    def test_writer_archive_tiff_page_is_read_when_qt_can(
+            self, qapp, tmp_path):
+        from PySide6.QtGui import QImageReader
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        if b"tiff" not in [bytes(f) for f in
+                           QImageReader.supportedImageFormats()]:
+            pytest.skip("this Qt build has no TIFF image reader")
+        cbz = self._archive(tmp_path, [("TIFF", (25, 35), "p.jpg")])
+        (page,) = index_chapter_file(cbz)
+        assert page.member == "page_000.tif"
+        assert (page.width, page.height) == (25, 35)
+        assert not decode_page(page).isNull()
+
+    def test_writer_archive_ppm_page_is_read_when_qt_can(
+            self, qapp, tmp_path):
+        """PPM passes the page check (Pillow decodes it) and is archived
+        as .ppm; the reader must index and decode it like any page."""
+        from PySide6.QtGui import QImageReader
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        if b"ppm" not in [bytes(f) for f in
+                          QImageReader.supportedImageFormats()]:
+            pytest.skip("this Qt build has no PPM image reader")
+        cbz = self._archive(tmp_path, [("PPM", (26, 34), "p.jpg"),
+                                       ("JPEG", (40, 60), "p.png")])
+        pages = index_chapter_file(cbz)
+        assert [p.member for p in pages] == ["page_000.ppm", "page_001.jpg"]
+        assert (pages[0].width, pages[0].height) == (26, 34)
+        img = decode_page(pages[0])
+        assert not img.isNull()
+        assert (img.width(), img.height()) == (26, 34)
+
+    def test_every_extension_the_writer_names_is_indexed(self, qapp):
+        from memanga.downloader.formats.cbz import (_PAGE_SIGNATURES,
+                                                    archive_page_extensions)
+        from memanga.gui.pages.reader_pages import (IMAGE_EXTENSIONS,
+                                                    archive_member_extensions)
+        assert {ext for ext, _ in _PAGE_SIGNATURES} <= set(IMAGE_EXTENSIONS)
+        # Pillow-identified pages (.ppm, ...) are indexed in archives too.
+        assert archive_page_extensions() <= archive_member_extensions()
+        assert ".ppm" in archive_member_extensions()
+
 
 # ── Decode / scale ───────────────────────────────────────────────────────
 

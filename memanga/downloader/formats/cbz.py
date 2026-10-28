@@ -149,6 +149,103 @@ def _build_comicinfo_xml(
     return tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+# Archive entry extension of each encoded image format, recognised by its
+# leading bytes: the formats the scrapers' page check sniffs
+# (scrapers/base.looks_like_image) plus TIFF. Checked in order; BMP's
+# two-byte mark is the weakest, so it comes last.
+_PAGE_SIGNATURES = (
+    (".jpg", lambda h: h.startswith(b"\xff\xd8\xff")),
+    (".png", lambda h: h.startswith(b"\x89PNG\r\n\x1a\n")),
+    (".gif", lambda h: h.startswith((b"GIF87a", b"GIF89a"))),
+    (".webp", lambda h: h.startswith(b"RIFF") and h[8:12] == b"WEBP"),
+    (".avif", lambda h: h[4:12] in (b"ftypavif", b"ftypavis")),
+    (".heic", lambda h: h[4:12] in (b"ftypheic", b"ftypheix")),
+    (".tif", lambda h: h.startswith((b"II*\x00", b"MM\x00*"))),
+    (".bmp", lambda h: h.startswith(b"BM")),
+)
+# Extension for a Pillow format name where Pillow registers several and
+# one is the usual choice. The first entries keep the names the
+# signatures above give; PPM (which Pillow also opens for .pbm/.pgm/.pnm)
+# and JPEG 2000 (.j2k/.jpc/...) get their common names.
+_PILLOW_EXTENSIONS = {
+    "JPEG": ".jpg", "MPO": ".jpg", "PNG": ".png", "GIF": ".gif",
+    "WEBP": ".webp", "AVIF": ".avif", "HEIF": ".heic", "TIFF": ".tif",
+    "BMP": ".bmp", "PPM": ".ppm", "JPEG2000": ".jp2",
+}
+
+
+def _pillow_extension(fmt: str) -> Optional[str]:
+    """Extension for a format Pillow identified, or None when Pillow
+    gives no unambiguous one.
+
+    In order: the table above; the format's own name when Pillow
+    registers it (ICO -> .ico, TGA -> .tga); the only extension Pillow
+    registers for it. Never a guess among several aliases.
+    """
+    from PIL import Image
+
+    if fmt in _PILLOW_EXTENSIONS:
+        return _PILLOW_EXTENSIONS[fmt]
+    registered = sorted(ext for ext, owner in Image.registered_extensions().items()
+                        if owner == fmt)
+    own = "." + fmt.lower()
+    if own in registered:
+        return own
+    if len(registered) == 1:
+        return registered[0]
+    return None
+
+
+def archive_page_extensions() -> frozenset:
+    """Every extension ``_images_to_cbz`` can give a page here: the
+    signature formats plus each format this Pillow build can open."""
+    from PIL import Image
+
+    Image.init()
+    exts = {ext for ext, _ in _PAGE_SIGNATURES}
+    exts.update(_PILLOW_EXTENSIONS.values())
+    for fmt in Image.OPEN:
+        ext = _pillow_extension(fmt)
+        if ext:
+            exts.add(ext)
+    return frozenset(exts)
+
+
+def _page_extension(path: Path, page_no: int) -> str:
+    """Archive extension for the image in ``path``, from its encoded bytes.
+
+    The common formats are recognised from their leading bytes. Anything
+    else the page check accepted is identified by Pillow from its header
+    (nothing is decoded or re-encoded), which also covers containers
+    the signatures miss, such as AVIF with a "mif1" major brand. The
+    download URL and the temp file's suffix say nothing reliable about
+    the bytes, so they are not used. A page neither can name raises.
+    """
+    with open(path, "rb") as fh:
+        head = fh.read(16)
+    for ext, matches in _PAGE_SIGNATURES:
+        if matches(head):
+            return ext
+
+    from PIL import Image
+
+    try:
+        with Image.open(path) as img:
+            fmt = img.format
+    except Exception as e:
+        raise DownloaderError(
+            f"Page {page_no} ({Path(path).name}) is not a recognised image; "
+            f"archive not written"
+        ) from e
+    ext = _pillow_extension(fmt) if fmt else None
+    if ext is None:
+        raise DownloaderError(
+            f"Page {page_no} ({Path(path).name}) is a {fmt} image with no "
+            f"standard file extension to archive it under; archive not written"
+        )
+    return ext
+
+
 def _images_to_cbz(
     image_paths: List[Path],
     output_path: Path,
@@ -158,7 +255,10 @@ def _images_to_cbz(
     """Convert a list of images to a CBZ (Comic Book ZIP) archive.
 
     Images are stored as-is (no re-encoding) with sequential names
-    for correct reading order.
+    for correct reading order. Each name's extension follows the page's
+    encoded format, not the name it was saved under. Every page is
+    identified before the archive is opened, so an unrecognised or
+    missing page leaves no new or truncated archive behind.
 
     When ``comicinfo_xml`` is provided it is written to the archive root as
     ``ComicInfo.xml`` so offline libraries and e-readers can read chapter
@@ -169,10 +269,12 @@ def _images_to_cbz(
     if not image_paths:
         raise DownloaderError("No images to archive")
 
+    names = [f"page_{i:03d}{_page_extension(img_path, i + 1)}"
+             for i, img_path in enumerate(image_paths)]
+
     with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_STORED) as cbz:
-        for i, img_path in enumerate(image_paths):
-            ext = img_path.suffix.lower() or '.jpg'
-            cbz.write(img_path, f"page_{i:03d}{ext}")
+        for img_path, name in zip(image_paths, names):
+            cbz.write(img_path, name)
         if comicinfo_xml is not None:
             cbz.writestr("ComicInfo.xml", comicinfo_xml)
         if credit:

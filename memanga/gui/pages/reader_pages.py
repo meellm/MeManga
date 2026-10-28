@@ -20,6 +20,7 @@ import zipfile
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -29,7 +30,11 @@ from PySide6.QtGui import QImage, QImageReader, QPixmap
 
 logger = logging.getLogger(__name__)
 
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+# Every extension the archive writer can name a page with
+# (downloader/formats/cbz.py); Qt's content probe below still decides
+# whether a page is actually readable.
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif",
+                    ".bmp", ".tif", ".tiff", ".avif", ".heic")
 
 # Enough to reach the size field of every supported format, including
 # JPEGs with large EXIF/ICC segments. Rarer cases fall back to the whole
@@ -85,11 +90,21 @@ def _probe_bytes(data: bytes) -> Optional[Tuple[int, int]]:
         buf.close()
 
 
+@lru_cache(maxsize=1)
+def archive_member_extensions() -> frozenset:
+    """Extensions of archive members that may be pages: the common image
+    extensions plus every one MeManga's archive writer can name a page
+    with (Pillow-identified formats such as .ppm included)."""
+    from ...downloader.formats.cbz import archive_page_extensions
+    return frozenset(IMAGE_EXTENSIONS) | archive_page_extensions()
+
+
 def _index_zip(filepath: Path, names: Iterable[str]) -> List[PageRef]:
     pages = []
+    accepted = archive_member_extensions()
     with zipfile.ZipFile(filepath, "r") as zf:
         for name in names:
-            if Path(name).suffix.lower() not in IMAGE_EXTENSIONS:
+            if Path(name).suffix.lower() not in accepted:
                 continue
             with zf.open(name) as fh:
                 head = fh.read(_HEADER_BYTES)
