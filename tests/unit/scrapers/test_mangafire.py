@@ -1334,3 +1334,249 @@ class TestMangaFireChapterPagination:
 
         assert [c.numeric for c in chapters] == [float(n) for n in range(1, 1201)]
         assert scraper.session.calls == 12
+
+
+# ─────────────────────────────────────────────────────────────────────
+# ImageDescrambler, checked against an independent reference.
+#
+# Reference: keiyoushi/extensions-source, all/mangafire ImageInterceptor.kt
+# at commit da7ed02e1a48beb716e8d0f6dab6dfbac81f798f (removed upstream on
+# 2026-07-08). Its rule, for a W x H image:
+#   piece_w = min(200, ceil(W / 5)),  x_max = ceil(W / piece_w) - 1
+#   the destination piece in column x < x_max is copied from column
+#   (x_max - x + offset) % x_max; the last column (the margin) stays put.
+#   Rows work the same way with H.
+# The piece sizes and column/row maps below were worked out by hand from
+# that rule for each case and are written as literals; the test never
+# calls or mirrors the implementation's arithmetic. They show agreement
+# with the reference, not with MangaFire's live script (no scrambled
+# sample was available: live page lists carry no offsets).
+# ─────────────────────────────────────────────────────────────────────
+
+
+# (width, height, offset): (piece_w, piece_h, source column of each
+# destination column, source row of each destination row)
+_REFERENCE_MAPS = {
+    (10, 10, 1): (2, 2, [1, 0, 3, 2, 4], [1, 0, 3, 2, 4]),
+    (10, 10, 2): (2, 2, [2, 1, 0, 3, 4], [2, 1, 0, 3, 4]),
+    (10, 10, 5): (2, 2, [1, 0, 3, 2, 4], [1, 0, 3, 2, 4]),  # 5 = 1 (mod 4)
+    (11, 7, 1): (3, 2, [1, 0, 2, 3], [1, 0, 2, 3]),         # 2 px / 1 px margins
+    (4, 4, 1): (1, 1, [1, 0, 2, 3], [1, 0, 2, 3]),
+    (1, 1, 3): (1, 1, [0], [0]),                            # margin only
+    (1150, 450, 3): (200, 90, [3, 2, 1, 0, 4, 5], [3, 2, 1, 0, 4]),  # 200 px cap, 150 px margin
+}
+
+
+def _image_bytes(img, fmt="PNG", **save):
+    import io
+
+    buf = io.BytesIO()
+    img.save(buf, fmt, **save)
+    return buf.getvalue()
+
+
+def _open(data):
+    import io
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(data))
+    img.load()
+    return img
+
+
+def _noise(mode, size, seed=7):
+    import random
+    from PIL import Image
+
+    bands = {"RGB": 3, "RGBA": 4, "L": 1, "P": 1}[mode]
+    data = random.Random(seed).randbytes(size[0] * size[1] * bands)
+    return Image.frombytes(mode, size, data)
+
+
+def _reference_pieces(width, height, piece_w, piece_h, cols, rows):
+    """(destination box, source box) per piece, from a reference map."""
+    for ty, sy in enumerate(rows):
+        for tx, sx in enumerate(cols):
+            x0, y0 = tx * piece_w, ty * piece_h
+            w, h = min(piece_w, width - x0), min(piece_h, height - y0)
+            yield ((x0, y0, x0 + w, y0 + h),
+                   (sx * piece_w, sy * piece_h, sx * piece_w + w, sy * piece_h + h))
+
+
+def _assert_matches_reference(out, src, key):
+    width, height, _offset = key
+    pieces = list(_reference_pieces(width, height, *_REFERENCE_MAPS[key][:2],
+                                    *_REFERENCE_MAPS[key][2:]))
+    # The map's pieces tile the whole image exactly once.
+    assert sum((d[2] - d[0]) * (d[3] - d[1]) for d, _ in pieces) == width * height
+    assert out.size == src.size
+    for dst, srcbox in pieces:
+        assert out.crop(dst).tobytes() == src.crop(srcbox).tobytes(), (dst, srcbox)
+
+
+class TestImageDescrambler:
+    @pytest.mark.parametrize("key", list(_REFERENCE_MAPS))
+    def test_png_pieces_land_where_the_reference_puts_them(self, key):
+        from memanga.scrapers.mangafire import ImageDescrambler
+
+        width, height, offset = key
+        src = _noise("RGB", (width, height))
+
+        out = _open(ImageDescrambler.descramble(_image_bytes(src), offset))
+
+        assert out.format == "PNG" and out.mode == "RGB"
+        _assert_matches_reference(out, src, key)
+        if width * height > 1:
+            assert out.tobytes() != src.tobytes()   # something really moved
+
+    @pytest.mark.parametrize("offset", [0, -1, -200])
+    def test_no_positive_offset_returns_the_original_bytes(self, offset):
+        from memanga.scrapers.mangafire import ImageDescrambler
+
+        data = _image_bytes(_noise("RGB", (10, 10)))
+
+        assert ImageDescrambler.descramble(data, offset) is data
+        # Not even decoded: a non-image passes through untouched too.
+        junk = b"not an image"
+        assert ImageDescrambler.descramble(junk, offset) is junk
+
+    def test_alpha_is_kept(self):
+        from memanga.scrapers.mangafire import ImageDescrambler
+
+        src = _noise("RGBA", (10, 10))
+        out = _open(ImageDescrambler.descramble(_image_bytes(src), 1))
+
+        assert out.mode == "RGBA"
+        _assert_matches_reference(out, src, (10, 10, 1))
+
+    def test_palette_and_its_transparency_are_kept(self):
+        from memanga.scrapers.mangafire import ImageDescrambler
+
+        src = _noise("P", (10, 10))
+        src.putpalette([v for i in range(256) for v in (i, 255 - i, i // 2)])
+        src = _open(_image_bytes(src, transparency=0))
+
+        out = _open(ImageDescrambler.descramble(_image_bytes(src, transparency=0), 1))
+
+        assert out.mode == "P"
+        assert out.getpalette() == src.getpalette()
+        assert out.info.get("transparency") == src.info.get("transparency") == 0
+        _assert_matches_reference(out, src, (10, 10, 1))
+
+    def test_greyscale_stays_greyscale(self):
+        from memanga.scrapers.mangafire import ImageDescrambler
+
+        src = _noise("L", (11, 7))
+        out = _open(ImageDescrambler.descramble(_image_bytes(src), 1))
+
+        assert out.mode == "L"
+        _assert_matches_reference(out, src, (11, 7, 1))
+
+    def test_gif_stays_gif(self):
+        from memanga.scrapers.mangafire import ImageDescrambler
+
+        src = _open(_image_bytes(_noise("P", (10, 10)), "GIF"))
+        out = _open(ImageDescrambler.descramble(_image_bytes(src, "GIF"), 2))
+
+        assert out.format == "GIF"
+        # GIF encoding may renumber the palette, so compare colours.
+        _assert_matches_reference(out.convert("RGB"), src.convert("RGB"),
+                                  (10, 10, 2))
+
+    def test_jpeg_pieces_match_within_lossy_tolerance(self):
+        """JPEG is re-encoded, so pixels are compared with a tolerance,
+        at the centre of each piece (solid colour per piece)."""
+        from PIL import Image
+        from memanga.scrapers.mangafire import ImageDescrambler
+
+        # 80 x 80 -> 16 px pieces, 5 x 5 grid (x_max = 4), like 10 x 10.
+        cols = rows = [1, 0, 3, 2, 4]          # offset 1, from the reference
+        colour = {(x, y): (20 + 50 * x, 20 + 50 * y, 10 + 25 * (x + y))
+                  for x in range(5) for y in range(5)}
+        src = Image.new("RGB", (80, 80))
+        for (x, y), c in colour.items():
+            src.paste(c, (16 * x, 16 * y, 16 * x + 16, 16 * y + 16))
+        src_jpeg = _image_bytes(src, "JPEG", quality=95)
+
+        out = _open(ImageDescrambler.descramble(src_jpeg, 1))
+
+        assert out.format == "JPEG" and out.size == (80, 80)
+        for ty, sy in enumerate(rows):
+            for tx, sx in enumerate(cols):
+                got = out.getpixel((16 * tx + 8, 16 * ty + 8))
+                want = colour[(sx, sy)]
+                assert max(abs(g - w) for g, w in zip(got, want)) <= 12, (
+                    (tx, ty), got, want)
+
+    def test_corrupt_input_raises(self):
+        from PIL import UnidentifiedImageError
+        from memanga.scrapers.mangafire import ImageDescrambler
+
+        with pytest.raises(UnidentifiedImageError):
+            ImageDescrambler.descramble(b"<html>blocked</html>", 1)
+
+    def test_download_turns_a_failed_descramble_into_a_failed_page(
+            self, tmp_path):
+        """A truncated PNG passes the signature check but cannot be
+        decoded: the page fails and nothing is written."""
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        truncated = _image_bytes(_noise("RGB", (10, 10)))[:60]
+        url = "https://cdn.example/5.png"
+        scraper = MangaFireScraper()
+        scraper.session = _Session([_Response(content=truncated)])
+        scraper._current_offsets[url] = 2
+        target = tmp_path / "page_005.png"
+
+        assert scraper.download_image(url, target) is False
+        assert not target.exists()
+
+
+class TestMangaFirePageOffsets:
+    """The page list's scramble offset is a positive integer when a page
+    is scrambled (the reference reads it as an Int and only descrambles
+    when it is > 0). Live page lists sampled 2026-10-28 carried no offset
+    at all, which must keep meaning "not scrambled"."""
+
+    def _pages(self, entries):
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session([
+            _Response(payload={"data": {"pages": entries}}),
+        ])
+        urls = scraper.get_pages("https://mangafire.to/api/chapters/123")
+        return urls, scraper._current_offsets
+
+    def test_live_shape_without_offsets_is_not_scrambled(self):
+        urls, offsets = self._pages([
+            {"url": "https://cdn/1.jpg", "width": 960, "height": 1378},
+            {"url": "https://cdn/2.jpg", "width": 2133, "height": 1600},
+        ])
+
+        assert urls == ["https://cdn/1.jpg", "https://cdn/2.jpg"]
+        assert offsets == {}
+
+    def test_positive_integer_offsets_are_recorded(self):
+        urls, offsets = self._pages([
+            {"url": "https://cdn/1.jpg", "offset": 3},
+            {"url": "https://cdn/2.jpg", "scrambleOffset": 4},
+            {"url": "https://cdn/3.jpg", "offset": 0, "scrambleOffset": 5},
+            {"url": "https://cdn/4.jpg", "offset": 0},
+            {"url": "https://cdn/5.jpg", "offset": -2},
+            {"url": "https://cdn/6.jpg", "offset": None},
+        ])
+
+        assert len(urls) == 6
+        assert offsets == {"https://cdn/1.jpg": 3, "https://cdn/2.jpg": 4,
+                           "https://cdn/3.jpg": 5}
+
+    @pytest.mark.parametrize("bad", [True, False, "3", 3.0, [3], {"v": 3}])
+    @pytest.mark.parametrize("key", ["offset", "scrambleOffset"])
+    def test_an_offset_of_another_type_fails_the_page_list(self, key, bad):
+        """Downloading such a page unscrambled would deliver a shuffled
+        but perfectly valid image, so nothing later would notice."""
+        from memanga.scrapers.mangafire import MangaFireError
+
+        with pytest.raises(MangaFireError, match=f"invalid page {key}"):
+            self._pages([{"url": "https://cdn/1.jpg", key: bad}])

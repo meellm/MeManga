@@ -79,7 +79,10 @@ class ImageDescrambler:
     MangaFire scrambles images by dividing them into pieces and rearranging them.
     The offset parameter determines how pieces are shifted.
 
-    Based on the Tachiyomi extension and MangaFire-API implementation.
+    Based on the Tachiyomi extension (keiyoushi extensions-source,
+    all/mangafire ImageInterceptor.kt) and MangaFire-API implementation.
+    Pieces are moved, never altered: the result keeps the source's mode,
+    palette and transparency and is saved in the source's format.
     """
     PIECE_SIZE = 200
     MIN_SPLIT_COUNT = 5
@@ -108,8 +111,9 @@ class ImageDescrambler:
         img = Image.open(BytesIO(image_data))
         width, height = img.size
 
-        # Create result image
-        result = Image.new('RGB', (width, height))
+        # Start from a copy so mode, palette and info carry over; the
+        # piece grid below covers every pixel, so each one is rewritten.
+        result = img.copy()
 
         # Calculate piece dimensions
         piece_width = min(cls.PIECE_SIZE, cls.ceil_div(width, cls.MIN_SPLIT_COUNT))
@@ -152,7 +156,12 @@ class ImageDescrambler:
         if fmt.upper() == 'JPEG':
             result.save(output, format='JPEG', quality=95)
         else:
-            result.save(output, format=fmt)
+            extra = {}
+            if 'transparency' in img.info:
+                # Palette / colour-key transparency is not kept by save()
+                # unless passed back explicitly.
+                extra['transparency'] = img.info['transparency']
+            result.save(output, format=fmt, **extra)
 
         return output.getvalue()
 
@@ -878,17 +887,40 @@ class MangaFireScraper(BaseScraper):
         for page in pages:
             if isinstance(page, dict):
                 url = page.get('url')
-                offset = page.get('offset') or page.get('scrambleOffset') or 0
+                offset = self._page_offset(page, api_url)
             else:
                 url = page
                 offset = 0
             if not url:
                 continue
             image_urls.append(url)
-            if isinstance(offset, int) and offset > 0:
+            if offset > 0:
                 self._current_offsets[url] = offset
 
         return image_urls
+
+    @staticmethod
+    def _page_offset(page: dict, api_url: str) -> int:
+        """Scramble offset of one page entry; 0 when it is not scrambled.
+
+        The offset is an integer (``offset``, else ``scrambleOffset``) and
+        only a positive one means "descramble". A value of any other type
+        is refused: a page that is still scrambled is a valid image, so
+        nothing downstream would notice and a shuffled page would be
+        delivered as a good one.
+        """
+        for key in ('offset', 'scrambleOffset'):
+            value = page.get(key)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise MangaFireError(
+                    f"MangaFire returned an invalid page {key} {value!r} for "
+                    f"{api_url}; refusing pages that might stay scrambled"
+                )
+            if value > 0:
+                return value
+        return 0
 
     def download_image(self, url: str, path) -> bool:
         """

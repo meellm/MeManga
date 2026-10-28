@@ -31,21 +31,36 @@ from .base import Chapter, Manga
 logger = logging.getLogger(__name__)
 
 
-# Phrases that show up in the title / body of a Cloudflare challenge
-# page. If any of these are present in the rendered HTML we assume the
-# real content didn't load.
-_CF_HINTS = (
+# Phrases in the <title> of a Cloudflare challenge or block page ("Just a
+# moment..." for current challenges, "Attention Required! | Cloudflare"
+# for a deny page). In a title the name itself is a signal.
+_CF_TITLE_HINTS = (
     "just a moment",
     "checking your browser",
-    "cloudflare",
     "ddos protection",
+    "cloudflare",
+)
+# Whole sentences of the classic interstitial's body. Bare words such as
+# "cloudflare" are not a signal: real WeebCentral pages load Cloudflare's
+# analytics beacon, and ordinary text can mention the name.
+_CF_BODY_HINTS = (
+    "checking your browser before accessing",
+    "ddos protection by cloudflare",
 )
 
 
 def _looks_like_cloudflare(html: str, title: str = "") -> bool:
-    """Cheap heuristic — only the first 4 KB is sampled."""
-    sample = (title + " " + html[:4096]).lower()
-    return any(h in sample for h in _CF_HINTS)
+    """Cheap heuristic — the title, plus the first 4 KB of the body."""
+    title = (title or "").lower()
+    if any(h in title for h in _CF_TITLE_HINTS):
+        return True
+    sample = html[:4096].lower()
+    if any(h in sample for h in _CF_BODY_HINTS):
+        return True
+    # A challenge served as raw HTML carries its title in the markup.
+    head_title = re.search(r"<title[^>]*>(.*?)</title>", sample, re.S)
+    return bool(head_title) and any(
+        h in head_title.group(1) for h in _CF_TITLE_HINTS)
 
 
 class WeebCentralError(RuntimeError):
@@ -189,11 +204,10 @@ class WeebCentralScraper(PlaywrightScraper):
                     title = abbr.get("title").strip()
                 if not title:
                     title = link.get_text(separator=" ", strip=True)
-                    for prefix in ("Official ", "Unofficial ",
-                                    "Official", "Unofficial"):
-                        if title.startswith(prefix):
-                            title = title[len(prefix):].lstrip()
-                            break
+                    # Drop the cover's badge word only, never the start
+                    # of a title ("Officially ..." stays whole).
+                    title = re.sub(r"^(?:Unofficial|Official)(?![a-z])\s*",
+                                   "", title)
                 if not title or len(title) < 2:
                     continue
                 if not href.startswith("http"):
@@ -352,8 +366,14 @@ class WeebCentralScraper(PlaywrightScraper):
         return "/404" in url
 
     def _collect_chapters(self, page) -> List[Chapter]:
-        """Pull every `<a href="/chapters/…">` from the rendered DOM."""
+        """Pull every `<a href="/chapters/…">` from the rendered DOM.
+
+        One chapter per link, in DOM order: a link that appears twice is
+        kept once, and "Chapter 0" is a real chapter. Links whose text
+        has no number are skipped.
+        """
         out: List[Chapter] = []
+        seen_urls: set = set()
         for link in page.query_selector_all('a[href*="/chapters/"]'):
             try:
                 chapter_url = link.get_attribute("href")
@@ -361,6 +381,8 @@ class WeebCentralScraper(PlaywrightScraper):
                     continue
                 if not chapter_url.startswith("http"):
                     chapter_url = self.base_url + chapter_url
+                if chapter_url in seen_urls:
+                    continue
 
                 chapter_text = (link.inner_text() or "").strip()
                 # Drop trailing date that follows on its own line.
@@ -370,14 +392,16 @@ class WeebCentralScraper(PlaywrightScraper):
                                    chapter_text, re.I)
                 if not match:
                     match = re.search(r"(\d+\.?\d*)", chapter_text)
-                chapter_num = match.group(1) if match else "0"
+                if not match:
+                    continue
+                chapter_num = match.group(1)
 
-                if chapter_num != "0":
-                    out.append(Chapter(
-                        number=chapter_num,
-                        title=chapter_text or f"Chapter {chapter_num}",
-                        url=chapter_url,
-                    ))
+                seen_urls.add(chapter_url)
+                out.append(Chapter(
+                    number=chapter_num,
+                    title=chapter_text or f"Chapter {chapter_num}",
+                    url=chapter_url,
+                ))
             except Exception as e:
                 logger.debug("chapter parse skipped: %s", e)
                 continue
@@ -547,14 +571,22 @@ class WeebCentralScraper(PlaywrightScraper):
             pass
 
     def _collect_page_images(self, page) -> List[str]:
-        """Pull every chapter image URL from the rendered DOM."""
-        images = page.query_selector_all(
-            "img[alt*='Page'], "
-            "main section img[src*='.png'], "
-            "main section img[src*='.jpg'], "
-            "main section img[src*='.jpeg'], "
-            "main section img[src*='.webp']"
-        )
+        """Pull every chapter image URL from the rendered DOM.
+
+        The reader puts each page as an <img> in section#chapter-images;
+        only that container is read when it exists, so a "Page N" image
+        elsewhere on the page is never taken for a page. Without it, the
+        older selectors are used, kept inside the page's main section.
+        """
+        images = page.query_selector_all("section#chapter-images img")
+        if not images:
+            images = page.query_selector_all(
+                "main section img[alt*='Page'], "
+                "main section img[src*='.png'], "
+                "main section img[src*='.jpg'], "
+                "main section img[src*='.jpeg'], "
+                "main section img[src*='.webp']"
+            )
         out: List[str] = []
         seen: set = set()
         for img in images:

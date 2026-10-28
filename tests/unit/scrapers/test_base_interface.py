@@ -386,10 +386,25 @@ class TestWeebCentralCloudflareDetection:
     def test_looks_like_cloudflare_matches_known_phrases(self):
         from memanga.scrapers.weebcentral import _looks_like_cloudflare
         assert _looks_like_cloudflare("", "Just a moment...")
+        # Body text counts only as the classic interstitial's sentences;
+        # ordinary mentions are covered in test_weebcentral_parsing.py.
         assert _looks_like_cloudflare(
-            "<html><body>Checking your browser…</body></html>",
+            "<html><body>Checking your browser before accessing "
+            "weebcentral.com.</body></html>",
         )
         assert _looks_like_cloudflare("DDoS protection by Cloudflare")
+        # A Cloudflare deny page names Cloudflare in its title, whether
+        # the title comes from the page or only from the raw markup.
+        deny_body = "<html><body>Sorry, you have been blocked</body></html>"
+        assert _looks_like_cloudflare(
+            deny_body, "Attention Required! | Cloudflare")
+        assert _looks_like_cloudflare(
+            "<html><head><title>Attention Required! | Cloudflare</title>"
+            "</head><body>Sorry, you have been blocked</body></html>")
+        # The word in ordinary body text is not a signal.
+        assert not _looks_like_cloudflare(
+            "<html><body>Mirror served via Cloudflare</body></html>",
+            "Blue Lock | Weeb Central")
         # A normal results page must NOT trip the detector.
         assert not _looks_like_cloudflare(
             "<html><a href='/series/abc'>Blue Lock</a></html>",
