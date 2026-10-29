@@ -289,7 +289,9 @@ docker compose run --rm memanga config set delivery.output_format epub
 
 `config set email.app_password -` reads the app password from stdin
 (pipe it in with `docker compose run --rm -T`), so it never appears in
-the command line.
+the command line. Without a keyring it is then kept in plain text in the
+config volume; to keep it out, pass it as a Docker secret instead (see
+[App password as a Docker secret](docs/Guide.md#app-password-as-a-docker-secret)).
 
 For a host cron job, run Compose from the repository directory:
 
