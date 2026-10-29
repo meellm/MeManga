@@ -17,8 +17,10 @@ import memanga
 
 PACKAGE = Path(memanga.__file__).parent
 
-# Modules that run under the CLI or the GUI's background workers.
+# Modules that run under the CLI, the GUI's background workers or the
+# Python API.
 LIBRARY_PATHS = [
+    "api.py",
     "scrapers",
     "downloader",
     "emailer.py",

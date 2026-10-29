@@ -7,6 +7,12 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #359 A small, supported Python API: `memanga.api.Library` reads the
+  tracked manga of a config directory (title, status, sources, last,
+  downloaded and failed chapters) as read-only objects, without printing,
+  locking or writing anything. Every other module is internal; checks,
+  downloads and edits are done with the CLI. See "Python API" in the
+  README.
 - #380 Release downloads and the Docker image ship third-party notices.
   Desktop builds list every component PyInstaller bundled (Python
   packages, the Python runtime, the Qt runtime from PySide6, the

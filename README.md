@@ -510,6 +510,36 @@ python -m memanga failed --json | jq -r '.chapters[] | "\(.title) #\(.chapter)"'
 python -m memanga doctor --json --check browsers --launch-browsers
 ```
 
+#### Python API
+
+`memanga.api` is the supported way to read a library from Python. It
+only reads: opening a `Library` never writes `config.yaml` or
+`state.json`, never repairs a damaged state file, never creates or moves
+the config folder (a library still in the old `~/.config/memanga` is read
+there) and works while a check or the desktop app is running. Checks,
+downloads and edits stay with the commands above; run them with
+`subprocess` and read their exit codes and `--json` output. Every other
+`memanga` module is internal and may change in any release.
+
+```python
+from memanga.api import Library, LibraryError
+
+library = Library()  # or Library("/path/to/config"); $MEMANGA_CONFIG_DIR works too
+for series in library.series(status="reading"):
+    print(series.position, series.title, series.last_chapter,
+          len(series.downloaded_chapters), series.failed_chapters)
+```
+
+Each `Series` has `position` (the `#N` the commands accept), `title`,
+`status`, `mode`, `sources` (each with `name` and `url`, primary first),
+`last_chapter`, `downloaded_chapters`, `failed_chapters` and
+`send_to_kindle`. `library.get(title)` returns one manga by its exact
+title or `None`, `library.download_dir` is where chapters are saved, and
+`library.reload()` reads the files again. Results are snapshots and can't
+be changed. A config folder that doesn't exist, or a config or state
+file that can't be loaded or holds a value of the wrong type, raises
+`LibraryError`.
+
 ### Shell completion
 
 `memanga completion bash` prints a bash completion script for commands,
