@@ -13,7 +13,6 @@ queued signal, and PixmapCache is touched from the GUI thread only.
 
 from __future__ import annotations
 
-import io
 import logging
 import threading
 import zipfile
@@ -169,8 +168,9 @@ def index_chapter_file(filepath: Path) -> List[PageRef]:
             with zipfile.ZipFile(filepath, "r") as zf:
                 names = sorted(zf.namelist())
             return _index_zip(filepath, names)
-    except Exception:
-        logger.debug("Couldn't index chapter %s", filepath, exc_info=True)
+    except Exception as e:
+        logger.warning("Couldn't index chapter %s: %s", filepath, e)
+        logger.debug("Chapter index traceback", exc_info=True)
     return []
 
 
@@ -193,47 +193,122 @@ def index_chapter_folder(folder: Path) -> List[PageRef]:
 # ── Decoding (worker threads) ────────────────────────────────────────────
 
 
+# Pillow modes whose pixel bytes QImage takes as they are.
+_PIL_QT_FORMATS = {
+    "L": QImage.Format.Format_Grayscale8,
+    "RGB": QImage.Format.Format_RGB888,
+    "RGBA": QImage.Format.Format_RGBA8888,
+}
+
+
+def _is_plain_jpeg(pdf_image) -> bool:
+    """True when the PDF image stream is a standard JPEG file as stored:
+    a lone DCTDecode filter, gray or YCbCr-coded RGB, and no /Decode
+    remap — the cases any JPEG reader shows correctly. A colour space
+    pikepdf has no mode for (CalRGB, ...) still gets the direct try: the
+    JPEG's own header says how to read it."""
+    if pdf_image.filters != ["/DCTDecode"]:
+        return False
+    if "/Decode" in pdf_image.obj:
+        return False
+    try:
+        mode = pdf_image.mode
+    except NotImplementedError:
+        mode = None
+    if mode == "L":
+        return True
+    if mode not in ("RGB", None):
+        return False
+    parms = pdf_image.filter_decodeparms[0][1]
+    transform = 1 if parms is None else parms.get("/ColorTransform", 1)
+    return int(transform) == 1
+
+
+def _qimage_from_pil(pil_img) -> QImage:
+    """Copy a Pillow image's pixels into a QImage, without re-encoding."""
+    try:
+        if pil_img.mode not in _PIL_QT_FORMATS:
+            alpha = (pil_img.mode in ("LA", "La", "PA", "RGBa")
+                     or "transparency" in pil_img.info)
+            target = "RGBA" if alpha else ("L" if pil_img.mode == "1"
+                                           else "RGB")
+            converted = pil_img.convert(target)
+            pil_img.close()
+            pil_img = converted
+        width, height = pil_img.size
+        data = pil_img.tobytes()
+        img = QImage(data, width, height,
+                     width * len(pil_img.getbands()),
+                     _PIL_QT_FORMATS[pil_img.mode])
+        # Deep copy: QImage doesn't own *data*.
+        return img.copy()
+    finally:
+        pil_img.close()
+
+
+def _decode_pdf_image(raw) -> QImage:
+    """One embedded PDF image, decoded without PyMuPDF.
+
+    A plain JPEG stream goes to QImage as stored. Anything else is
+    unpacked by pikepdf (filters, palettes, colour spaces) and its pixels
+    copied straight into a QImage — never re-encoded to another format."""
+    import pikepdf
+    pdf_image = pikepdf.PdfImage(raw)
+    if _is_plain_jpeg(pdf_image):
+        img = QImage()
+        if img.loadFromData(raw.read_raw_bytes()):
+            return img
+    img = _qimage_from_pil(pdf_image.as_pil_image())
+    if img.isNull():
+        raise ValueError(f"unsupported PDF image {pdf_image!r}")
+    return img
+
+
+def _decode(ref: PageRef) -> QImage:
+    if ref.kind == KIND_ZIP:
+        with zipfile.ZipFile(ref.source, "r") as zf:
+            data = zf.read(ref.member)
+        img = QImage()
+        img.loadFromData(data)
+        return img
+    if ref.kind == KIND_IMAGE:
+        return QImage(str(ref.source))
+    if ref.kind == KIND_PDF_FITZ:
+        import fitz
+        doc = fitz.open(str(ref.source))
+        try:
+            pix = doc[ref.page].get_pixmap(dpi=_PDF_DPI)
+            img = QImage(pix.samples, pix.width, pix.height, pix.stride,
+                         QImage.Format.Format_RGB888)
+            # Deep copy: pix.samples is transient.
+            return img.copy()
+        finally:
+            doc.close()
+    if ref.kind == KIND_PDF_PIKEPDF:
+        import pikepdf
+        with pikepdf.open(str(ref.source)) as pdf:
+            return _decode_pdf_image(pdf.pages[ref.page].images[ref.member])
+    return QImage()
+
+
 def decode_page(ref: PageRef) -> QImage:
-    """Decode one page at full resolution. Null image on failure.
+    """Decode one page at full resolution. Null image on failure, which
+    is logged as a warning with its cause.
 
     Each call opens and closes its own handle, so concurrent decodes never
     share a file object and no handle outlives the call."""
+    where = ref.member or ref.page
     try:
-        if ref.kind == KIND_ZIP:
-            with zipfile.ZipFile(ref.source, "r") as zf:
-                data = zf.read(ref.member)
-            img = QImage()
-            img.loadFromData(data)
-            return img
-        if ref.kind == KIND_IMAGE:
-            return QImage(str(ref.source))
-        if ref.kind == KIND_PDF_FITZ:
-            import fitz
-            doc = fitz.open(str(ref.source))
-            try:
-                pix = doc[ref.page].get_pixmap(dpi=_PDF_DPI)
-                img = QImage(pix.samples, pix.width, pix.height, pix.stride,
-                             QImage.Format.Format_RGB888)
-                # Deep copy: pix.samples is transient.
-                return img.copy()
-            finally:
-                doc.close()
-        if ref.kind == KIND_PDF_PIKEPDF:
-            from PIL import Image as PILImage
-            import pikepdf
-            with pikepdf.open(str(ref.source)) as pdf:
-                raw = pdf.pages[ref.page].images[ref.member]
-                pil_img = PILImage.open(
-                    io.BytesIO(raw.get_raw_stream_buffer()))
-                buf = io.BytesIO()
-                pil_img.save(buf, format="PNG")
-            img = QImage()
-            img.loadFromData(buf.getvalue())
-            return img
-    except Exception:
-        logger.debug("Couldn't decode reader page %s (%s)", ref.source,
-                     ref.member or ref.page, exc_info=True)
-    return QImage()
+        img = _decode(ref)
+    except Exception as e:
+        logger.warning("Couldn't decode reader page %s (%s): %s",
+                       ref.source, where, e)
+        logger.debug("Reader page decode traceback", exc_info=True)
+        return QImage()
+    if img.isNull():
+        logger.warning("Couldn't decode reader page %s (%s): not a "
+                       "readable image", ref.source, where)
+    return img
 
 
 def display_size(width: int, height: int, target_w: int,
@@ -443,8 +518,10 @@ class PageLoader(QObject):
             return
         try:
             image = render_page(ref, target_w, zoom)
-        except Exception:
-            logger.debug("Reader page render failed", exc_info=True)
+        except Exception as e:
+            logger.warning("Couldn't render reader page %s (%s): %s",
+                           ref.source, ref.member or ref.page, e)
+            logger.debug("Reader page render traceback", exc_info=True)
             image = QImage()
         if self._closed or token != self._token:
             return

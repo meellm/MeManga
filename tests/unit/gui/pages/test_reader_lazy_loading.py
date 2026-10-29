@@ -1,5 +1,5 @@
 """
-Lazy, off-UI-thread reader page loading (issue #389).
+Lazy, off-UI-thread reader page loading (issues #389, #390).
 
 Covers header-only chapter indexing for every format, the per-page decode
 and scale, the bounded pixmap cache, the worker loader's thread handoff
@@ -233,6 +233,148 @@ class TestRenderPage:
         ref = PageRef(tmp_path / "gone.cbz", KIND_ZIP, member="p.jpg",
                       width=10, height=10)
         assert decode_page(ref).isNull()
+
+
+# ── PDF fallback without PyMuPDF (issue #390) ────────────────────────────
+
+
+def _image_pdf(path, images):
+    """Write a PDF with one image XObject per page. Each image is
+    (stream data, /Filter name or None, colour space name or array,
+    (width, height))."""
+    import pikepdf
+    with pikepdf.new() as pdf:
+        for data, filter_, colorspace, (width, height) in images:
+            image = pikepdf.Stream(pdf, b"")
+            image.write(data, filter=(pikepdf.Name(filter_)
+                                      if filter_ else None))
+            image.Type = pikepdf.Name.XObject
+            image.Subtype = pikepdf.Name.Image
+            image.Width = width
+            image.Height = height
+            image.ColorSpace = (pikepdf.Name(colorspace)
+                                if isinstance(colorspace, str)
+                                else colorspace)
+            image.BitsPerComponent = 8
+            page = pdf.add_blank_page(page_size=(width, height))
+            page.obj.Resources = pikepdf.Dictionary(
+                XObject=pikepdf.Dictionary(Im0=image))
+        pdf.save(path)
+    return path
+
+
+class TestPdfFallback:
+    @pytest.fixture(autouse=True)
+    def _no_pymupdf(self, monkeypatch):
+        import sys
+        pytest.importorskip("pikepdf")
+        # A None entry makes ``import fitz`` raise ImportError.
+        monkeypatch.setitem(sys.modules, "fitz", None)
+
+    @pytest.fixture
+    def pil_saves(self, monkeypatch):
+        from PIL import Image
+        saves = []
+        real_save = Image.Image.save
+
+        def spy(img, fp, format=None, **params):
+            saves.append(format)
+            return real_save(img, fp, format, **params)
+        monkeypatch.setattr(Image.Image, "save", spy)
+        return saves
+
+    @staticmethod
+    def _pages(pdf):
+        from memanga.gui.pages.reader_pages import (KIND_PDF_PIKEPDF,
+                                                    index_chapter_file)
+        pages = index_chapter_file(pdf)
+        assert pages and all(p.kind == KIND_PDF_PIKEPDF for p in pages)
+        return pages
+
+    def test_jpeg_page_loads_straight_into_qimage(
+            self, qapp, tmp_path, monkeypatch, pil_saves):
+        import pikepdf
+        from memanga.gui.pages.reader_pages import decode_page
+        jpg = _jpg((80, 120), "red")
+        pdf = _image_pdf(tmp_path / "c.pdf",
+                         [(jpg, "/DCTDecode", "/DeviceRGB", (80, 120))])
+        ref = self._pages(pdf)[0]
+        pil_saves.clear()
+
+        def no_pillow(self):
+            raise AssertionError("JPEG page went through Pillow")
+        monkeypatch.setattr(pikepdf.PdfImage, "as_pil_image", no_pillow)
+        img = decode_page(ref)
+        assert (img.width(), img.height()) == (80, 120)
+        assert pil_saves == []
+
+    def test_jpeg_in_calibrated_colour_space_still_loads(
+            self, qapp, tmp_path, pil_saves):
+        # pikepdf has no Pillow mode for /CalRGB; the stream is still a
+        # plain JPEG that Qt reads as stored.
+        import pikepdf
+        from memanga.gui.pages.reader_pages import decode_page
+        cal_rgb = pikepdf.Array([pikepdf.Name.CalRGB, pikepdf.Dictionary(
+            WhitePoint=pikepdf.Array([0.9505, 1.0, 1.089]))])
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", cal_rgb, (80, 120)),
+        ])
+        ref = self._pages(pdf)[0]
+        pil_saves.clear()
+        img = decode_page(ref)
+        assert (img.width(), img.height()) == (80, 120)
+        color = img.pixelColor(40, 60)
+        assert color.red() > 200 and color.green() < 60
+        assert pil_saves == []
+
+    @pytest.mark.parametrize("colorspace, pixel, expected", [
+        ("/DeviceRGB", bytes((200, 30, 60)), (200, 30, 60)),
+        ("/DeviceGray", bytes((128,)), (128, 128, 128)),
+    ])
+    def test_flate_page_decodes_without_reencoding(
+            self, qapp, tmp_path, pil_saves, colorspace, pixel, expected):
+        import zlib
+        from memanga.gui.pages.reader_pages import decode_page
+        width, height = 40, 60
+        data = zlib.compress(pixel * (width * height))
+        pdf = _image_pdf(tmp_path / "c.pdf",
+                         [(data, "/FlateDecode", colorspace, (width, height))])
+        ref = self._pages(pdf)[0]
+        assert (ref.width, ref.height) == (width, height)
+        img = decode_page(ref)
+        assert (img.width(), img.height()) == (width, height)
+        color = img.pixelColor(width // 2, height // 2)
+        assert (color.red(), color.green(), color.blue()) == expected
+        assert pil_saves == []
+
+    def test_pages_keep_their_order(self, qapp, tmp_path):
+        import zlib
+        from memanga.gui.pages.reader_pages import decode_page
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((30, 50)), "/DCTDecode", "/DeviceRGB", (30, 50)),
+            (zlib.compress(b"\x00" * (20 * 70)), "/FlateDecode",
+             "/DeviceGray", (20, 70)),
+        ])
+        pages = self._pages(pdf)
+        assert [decode_page(p).size().toTuple() for p in pages] == \
+            [(30, 50), (20, 70)]
+
+    def test_broken_page_decodes_null_and_logs_a_warning(
+            self, qapp, tmp_path, caplog):
+        import logging
+        from memanga.gui.pages.reader_pages import decode_page
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (b"\xff\xd8 not a jpeg", "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        ref = self._pages(pdf)[0]
+        with caplog.at_level(logging.WARNING,
+                             logger="memanga.gui.pages.reader_pages"):
+            assert decode_page(ref).isNull()
+        warnings = [r for r in caplog.records
+                    if r.name == "memanga.gui.pages.reader_pages"
+                    and r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "c.pdf" in warnings[0].getMessage()
 
 
 # ── Cache ────────────────────────────────────────────────────────────────
