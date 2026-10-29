@@ -55,6 +55,9 @@ DIST_TMP = ROOT / "dist"
 # `memanga/` source directory and Path.unlink() fails with EPERM
 # trying to remove what is actually a directory.
 RELEASE_DIR = ROOT / "release"
+# Written by the release spec next to the binary; see
+# packaging/third_party_notices.py.
+NOTICES = "THIRD_PARTY_NOTICES.txt"
 
 
 def install_dependencies() -> bool:
@@ -171,6 +174,17 @@ def collect_artifact() -> Path | None:
         dest.chmod(dest.stat().st_mode | 0o755)
     except Exception:
         pass
+    # The release spec writes the third-party notices next to the binary
+    # (issue #380); every release asset ships them, so a build without
+    # them is incomplete.
+    notices_src = DIST_TMP / NOTICES
+    if not notices_src.is_file():
+        print(f"\n! Third-party notices not found: {notices_src}")
+        return None
+    notices_dest = RELEASE_DIR / NOTICES
+    if notices_dest.exists():
+        notices_dest.unlink()
+    shutil.move(str(notices_src), str(notices_dest))
     # Sweep PyInstaller scratch dirs — only the release/ output remains.
     for d in (BUILD_TMP, DIST_TMP):
         if d.exists():
@@ -193,7 +207,8 @@ def main() -> int:
     size_mb = artifact.stat().st_size / (1024 * 1024)
     print(f"\n=== Release build complete ===")
     print(f"Output: {artifact}  ({size_mb:.1f} MB)")
-    print("Upload this single file to the GitHub release page.")
+    print(f"Notices: {RELEASE_DIR / NOTICES}")
+    print("Ship the notices file with the binary on the GitHub release page.")
     return 0
 
 

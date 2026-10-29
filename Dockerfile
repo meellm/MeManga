@@ -39,6 +39,24 @@ RUN python -m pip install --no-deps . \
     && rm -f /usr/local/bin/memanga-gui \
     && test ! -f /usr/local/bin/memanga-gui
 
+# Third-party notices (issue #380): MeManga's license plus the license
+# texts of every installed Python distribution, the Python runtime and the
+# Playwright browser builds, in /usr/share/doc/memanga. The generator and
+# its license texts are bind-mounted for this step only, so they do not
+# stay in the image. The check fails the build if any entry lacks a
+# license text or a browser build is missing.
+COPY LICENSE /usr/share/doc/memanga/LICENSE
+RUN --mount=type=bind,source=packaging,target=/tmp/memanga-packaging \
+    python /tmp/memanga-packaging/third_party_notices.py generate \
+        --label "Docker image" \
+        --browsers-dir "$PLAYWRIGHT_BROWSERS_PATH" \
+        --project-license /usr/share/doc/memanga/LICENSE \
+        --output /usr/share/doc/memanga/THIRD_PARTY_NOTICES.txt \
+    && python /tmp/memanga-packaging/third_party_notices.py check \
+        /usr/share/doc/memanga/THIRD_PARTY_NOTICES.txt \
+        --require playwright --require certifi --require pikepdf \
+        --require-browser chromium --require-browser firefox
+
 USER memanga
 
 VOLUME ["/home/memanga/.config/memanga", "/home/memanga/Downloads/MeManga"]

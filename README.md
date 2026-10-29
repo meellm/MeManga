@@ -71,6 +71,11 @@ On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double
 > If a file manager still clears the permission, restore it with
 > `chmod +x MeManga-linux-x64`.
 
+Each download has a matching `<file>-THIRD_PARTY_NOTICES.txt` on the release
+page with the licenses of the third-party software it contains. The same file
+is inside `MeManga.app` (`Contents/Resources/THIRD_PARTY_NOTICES.txt`) and next
+to the binary in the Linux `.tar.gz`.
+
 You can also build from the source following [Build from source](#-build-from-source) below.
 
 ---
@@ -723,3 +728,12 @@ For security-sensitive reports, see [SECURITY.md](SECURITY.md).
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The release downloads and the Docker image include third-party software under
+its own licenses. Their notices ship with every release asset
+(`THIRD_PARTY_NOTICES.txt`) and in the Docker image under
+`/usr/share/doc/memanga/`, for example:
+
+```bash
+docker run --rm --entrypoint cat meellm/memanga:latest /usr/share/doc/memanga/THIRD_PARTY_NOTICES.txt
+```

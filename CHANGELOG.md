@@ -7,6 +7,23 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #380 Release downloads and the Docker image ship third-party notices.
+  Desktop builds list every component PyInstaller bundled (Python
+  packages, the Python runtime, the Qt runtime from PySide6, the
+  PyInstaller bootloader and native libraries from the build system) with
+  the license and notice files each one ships, plus the LGPL/GPL texts
+  for the PySide6 wheels, which ship none. Every release asset gets a
+  matching `<asset>-THIRD_PARTY_NOTICES.txt`; the file is also inside
+  `MeManga.app`, next to the binary in the Linux `.tar.gz` and embedded
+  in the binary. The Docker image has the notices for its Python packages,
+  Python runtime and Playwright browser builds in
+  `/usr/share/doc/memanga/`. Builds fail when a component has no license
+  text. A desktop build's native library that no Python package or system
+  package owns needs an entry in `packaging/third_party_overrides.json`,
+  which ships that component's own license text (OpenSSL, libffi and the
+  Visual C++ runtime for the Windows build). Attributions for the
+  third-party code inside Qt and the browser builds are not reproduced;
+  the file says where they are published.
 - #345 Turning on email delivery asks which manga to send: only the
   manga you turn on, or every manga. The desktop app's Settings and the
   `config` wizard propose "only manga I choose", so a library is never
