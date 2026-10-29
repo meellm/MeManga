@@ -460,6 +460,13 @@ class TestSettingsPage:
     def test_renders(self, app_window, qapp):
         app_window.show_page("settings"); qapp.processEvents()
 
+    def test_header_shows_config_file_in_use(self, app_window, qapp):
+        """#259: the header names the config file actually loaded."""
+        page = app_window._pages["settings"]
+        text = page._config_path_label.text()
+        assert text.endswith(f"Config: {app_window.config.config_path}")
+        assert "config.toml" not in text
+
     def test_tab_switch_visibility(self, app_window, qapp):
         app_window.show_page("settings"); qapp.processEvents()
         page = app_window._pages["settings"]
@@ -1554,6 +1561,9 @@ class TestSettingsPage:
         w = MeMangaApp(explicit_config_dir=root)
         try:
             assert w.config.config_dir == w.app_state.config_dir == root
+            # #259: Settings names the chosen directory's config file.
+            label = w._pages["settings"]._config_path_label.text()
+            assert label.endswith(f"Config: {root / 'config.yaml'}")
             w.reload_data()
             assert w.config.config_dir == w.app_state.config_dir == root
         finally:

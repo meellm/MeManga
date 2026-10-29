@@ -306,6 +306,10 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #259 The desktop app's Settings header shows the config file it really
+  uses, including one chosen with `--config-dir` or `MEMANGA_CONFIG_DIR`,
+  and the path can be selected and copied. It used to name a
+  `~/.memanga/config.toml` that MeManga never reads or writes.
 - #389 The desktop reader opens long chapters without freezing the
   window. It used to decode every page up front, which on long webtoon
   chapters took seconds and hundreds of MB to several GB of memory.

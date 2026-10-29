@@ -172,8 +172,12 @@ class SettingsPage(BasePage):
         top_row.addWidget(reset_btn)
         h_layout.addLayout(top_row)
 
-        meta = QLabel(f"MeManga v{__version__}  ·  Config: ~/.memanga/config.toml")
+        # The config file this window really uses: the platform folder,
+        # --config-dir or $MEMANGA_CONFIG_DIR (issue #259).
+        meta = QLabel(f"MeManga v{__version__}  ·  Config: {self.app.config.config_path}")
         meta.setProperty("role", "meta")
+        meta.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._config_path_label = meta
         h_layout.addWidget(meta)
         root.addWidget(header_w)
 
