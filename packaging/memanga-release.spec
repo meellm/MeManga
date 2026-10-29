@@ -157,6 +157,41 @@ a = Analysis(
     noarchive=False,
 )
 
+# Third-party notices (issue #380). Every file Analysis collected is
+# mapped back to the distribution, Python runtime or system package it came
+# from, so the notices list what this binary actually contains; the
+# PyInstaller bootloader is added explicitly because it is not a collected
+# file. The file is written next to the binary (build_app.py moves it into
+# release/ and the workflow ships it with every asset) and is also embedded
+# in the binary. Generation fails if any bundled component, native
+# libraries included, has no license text.
+import importlib.util as _ilu
+
+_notices_spec = _ilu.spec_from_file_location(
+    "memanga_third_party_notices",
+    os.path.join(project_root, "packaging", "third_party_notices.py"),
+)
+_notices = _ilu.module_from_spec(_notices_spec)
+sys.modules[_notices_spec.name] = _notices
+_notices_spec.loader.exec_module(_notices)
+_notices_label = {
+    "win32": "Windows desktop app",
+    "darwin": "macOS desktop app",
+}.get(sys.platform, "Linux desktop app")
+_notices_path = os.path.join(DISTPATH, _notices.FILENAME)
+try:
+    _notices.write_bundle_notices(
+        [src for toc in (a.scripts, a.pure, a.binaries, a.datas, a.zipfiles)
+         for _, src, _ in toc],
+        _notices_path,
+        label=_notices_label,
+        project_root=Path(project_root),
+        generated_dirs=(workpath,),
+    )
+except _notices.NoticesError as exc:
+    raise SystemExit(f"third-party notices: {exc}")
+a.datas.append((_notices.FILENAME, _notices_path, "DATA"))
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # Pick the right platform-specific icon file. PyInstaller wants .ico

@@ -205,12 +205,16 @@ def test_linux_binary_is_packaged_as_targz():
 
 def test_upload_step_uses_packaged_path():
     """The upload must ship whatever the packaging step produced (the
-    tarball on Linux, the raw binary elsewhere), not a hard-coded name."""
+    tarball on Linux, the raw binary elsewhere), not a hard-coded name,
+    plus the matching third-party notices asset (issue #380)."""
     step = _step_named("Upload artifact")
     assert step is not None
     path = step.get("with", {}).get("path", "")
-    assert path == "${{ steps.package.outputs.upload_path }}", \
-        f"upload path not wired to the packaging output: {path!r}"
+    # One path per line; each line is a whole `${{ … }}` expression.
+    lines = [line.strip() for line in path.splitlines() if line.strip()]
+    assert lines == ["${{ steps.package.outputs.upload_path }}",
+                     "${{ steps.package.outputs.notices_path }}"], \
+        f"upload path not wired to the packaging outputs: {path!r}"
 
 
 def test_workflow_gates_linux_executable_bit_before_upload():
@@ -368,6 +372,73 @@ def test_build_app_bundle_without_icon_omits_icon_key(tmp_path):
     assert not (app / "Contents" / "Resources" / "icon.icns").exists()
     # Default version falls back to the source __version__ (non-empty).
     assert info["CFBundleShortVersionString"]
+
+
+def test_build_app_bundle_copies_resources(tmp_path):
+    """Issue #380: the third-party notices go into Contents/Resources, so
+    the bundle seal made by `codesign` afterwards covers them."""
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("arm64"))
+    notices = tmp_path / "THIRD_PARTY_NOTICES.txt"
+    notices.write_text("notices\n", encoding="utf-8")
+
+    app = macos_app.build_app_bundle(exe, tmp_path / "out", version="1.0.0",
+                                     resources=[notices])
+
+    copied = app / "Contents" / "Resources" / "THIRD_PARTY_NOTICES.txt"
+    assert copied.read_text(encoding="utf-8") == "notices\n"
+    assert not copied.stat().st_mode & stat.S_IXUSR
+
+
+def test_build_app_bundle_missing_resource_raises(tmp_path):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("arm64"))
+    try:
+        macos_app.build_app_bundle(exe, tmp_path / "out",
+                                   resources=[tmp_path / "nope.txt"])
+    except FileNotFoundError:
+        assert not (tmp_path / "out" / "MeManga.app").exists()
+        return
+    raise AssertionError("expected FileNotFoundError for a missing resource")
+
+
+def test_validate_require_resource_dir_and_zip(tmp_path):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("x86_64"))
+    notices = tmp_path / "THIRD_PARTY_NOTICES.txt"
+    notices.write_text("notices\n", encoding="utf-8")
+    with_notices = macos_app.build_app_bundle(
+        exe, tmp_path / "with", version="1.0.0", resources=[notices])
+    without = macos_app.build_app_bundle(exe, tmp_path / "without",
+                                         version="1.0.0")
+    zip_with = macos_app.zip_app_bundle(with_notices, tmp_path / "with.zip")
+    zip_without = macos_app.zip_app_bundle(without, tmp_path / "without.zip")
+    required = ["THIRD_PARTY_NOTICES.txt"]
+
+    for path in (with_notices, zip_with):
+        assert macos_app.validate_app_bundle(
+            path, expected_arch="x86_64", require_resources=required) == []
+    for path in (without, zip_without):
+        problems = macos_app.validate_app_bundle(
+            path, expected_arch="x86_64", require_resources=required)
+        assert problems == [
+            "missing MeManga.app/Contents/Resources/THIRD_PARTY_NOTICES.txt"]
+
+
+def test_macos_cli_resource_flags(tmp_path, capsys):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("arm64"))
+    notices = tmp_path / "THIRD_PARTY_NOTICES.txt"
+    notices.write_text("notices\n", encoding="utf-8")
+    out = tmp_path / "out"
+    assert macos_app.main(["build", "--exe", str(exe), "--dest", str(out),
+                           "--resource", str(notices)]) == 0
+    app = out / "MeManga.app"
+    assert macos_app.main(["validate", "--path", str(app), "--arch", "arm64",
+                           "--require-resource", "THIRD_PARTY_NOTICES.txt"]) == 0
+    assert macos_app.main(["validate", "--path", str(app),
+                           "--require-resource", "OTHER.txt"]) == 1
+    assert "Contents/Resources/OTHER.txt" in capsys.readouterr().out
 
 
 def test_build_app_bundle_missing_exe_raises(tmp_path):

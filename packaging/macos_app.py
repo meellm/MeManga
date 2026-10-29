@@ -21,6 +21,7 @@ an application:
         PkgInfo                 ("APPL????")
         MacOS/MeManga           (the one-file exe, mode 0755)
         Resources/icon.icns     (optional app icon)
+        Resources/THIRD_PARTY_NOTICES.txt  (license notices, issue #380)
 
 We wrap the already-built binary rather than switching the PyInstaller
 spec to a BUNDLE target: the one-file exe is the artifact the release
@@ -48,9 +49,11 @@ unstapled zip. Without the credentials the zip is validated without the
 `--require-*` flags and ships unsigned.
 
 CLI:
-    python packaging/macos_app.py build    --exe release/MeManga --dest release
+    python packaging/macos_app.py build    --exe release/MeManga --dest release \
+        --resource release/THIRD_PARTY_NOTICES.txt
     python packaging/macos_app.py zip      --app release/MeManga.app --out out.zip
-    python packaging/macos_app.py validate --path out.zip --arch x86_64
+    python packaging/macos_app.py validate --path out.zip --arch x86_64 \
+        --require-resource THIRD_PARTY_NOTICES.txt
     python packaging/macos_app.py validate --path out.zip --arch arm64 \
         --require-signed --require-stapled
 """
@@ -193,24 +196,33 @@ def build_app_bundle(
     icon_path=None,
     version: str | None = None,
     app_name: str = APP_NAME,
+    resources=(),
 ) -> Path:
     """Wrap the one-file executable `exe_path` in `<dest_dir>/<app_name>.app`
     and return the bundle path. The inner binary is written mode 0755 — that
-    executable bit is the whole point of #163."""
+    executable bit is the whole point of #163.
+
+    Each file in `resources` (e.g. the third-party notices, issue #380) is
+    copied into Contents/Resources under its own name. The bundle is built
+    before it is signed, so the code signature seal covers them."""
     exe_path = Path(exe_path)
     dest_dir = Path(dest_dir)
     if not exe_path.is_file():
         raise FileNotFoundError(f"executable not found: {exe_path}")
+    resources = [Path(r) for r in resources]
+    for resource in resources:
+        if not resource.is_file():
+            raise FileNotFoundError(f"resource not found: {resource}")
 
     app = dest_dir / f"{app_name}.app"
     contents = app / "Contents"
     macos = contents / "MacOS"
-    resources = contents / "Resources"
+    resources_dir = contents / "Resources"
     # Start clean so a rerun never leaves stale files inside the bundle.
     if app.exists():
         shutil.rmtree(app)
     macos.mkdir(parents=True)
-    resources.mkdir(parents=True)
+    resources_dir.mkdir(parents=True)
 
     inner = macos / app_name
     shutil.copyfile(exe_path, inner)
@@ -220,8 +232,11 @@ def build_app_bundle(
     if icon_path:
         icon_path = Path(icon_path)
         if icon_path.is_file():
-            shutil.copyfile(icon_path, resources / "icon.icns")
+            shutil.copyfile(icon_path, resources_dir / "icon.icns")
             has_icon = True
+    for resource in resources:
+        shutil.copyfile(resource, resources_dir / resource.name)
+        (resources_dir / resource.name).chmod(0o644)
 
     (contents / "Info.plist").write_bytes(
         _info_plist(app_name, version or _source_version(), has_icon)
@@ -330,8 +345,15 @@ def _check_signed_shape(exe_data: bytes | None, present, app_name: str, *,
     return problems
 
 
+def _check_resources(present, names, app_name: str) -> list[str]:
+    """`present(rel)` reports whether `<app_name>.app/<rel>` exists."""
+    return [f"missing {app_name}.app/Contents/Resources/{name}"
+            for name in names if not present(f"Contents/Resources/{name}")]
+
+
 def _validate_dir(app: Path, app_name: str, expected_arch, *,
-                  require_signed=False, require_stapled=False) -> list[str]:
+                  require_signed=False, require_stapled=False,
+                  require_resources=()) -> list[str]:
     problems: list[str] = []
     exe = app / "Contents" / "MacOS" / app_name
     plist = app / "Contents" / "Info.plist"
@@ -351,11 +373,14 @@ def _validate_dir(app: Path, app_name: str, expected_arch, *,
     problems += _check_signed_shape(
         exe_data, lambda rel: (app / rel).is_file(), app_name,
         require_signed=require_signed, require_stapled=require_stapled)
+    problems += _check_resources(lambda rel: (app / rel).is_file(),
+                                 require_resources, app_name)
     return problems
 
 
 def _validate_zip(zip_path: Path, app_name: str, expected_arch, *,
-                  require_signed=False, require_stapled=False) -> list[str]:
+                  require_signed=False, require_stapled=False,
+                  require_resources=()) -> list[str]:
     exe_rel = f"{app_name}.app/Contents/MacOS/{app_name}"
     plist_rel = f"{app_name}.app/Contents/Info.plist"
     problems: list[str] = []
@@ -383,13 +408,16 @@ def _validate_zip(zip_path: Path, app_name: str, expected_arch, *,
     problems += _check_signed_shape(
         exe_data, lambda rel: f"{app_name}.app/{rel}" in by_name, app_name,
         require_signed=require_signed, require_stapled=require_stapled)
+    problems += _check_resources(lambda rel: f"{app_name}.app/{rel}" in by_name,
+                                 require_resources, app_name)
     return problems
 
 
 def validate_app_bundle(path, *, app_name: str = APP_NAME,
                         expected_arch: str | None = None,
                         require_signed: bool = False,
-                        require_stapled: bool = False) -> list[str]:
+                        require_stapled: bool = False,
+                        require_resources=()) -> list[str]:
     """Return a list of problems (empty == a launchable app package) for a
     `.app` directory or a `.zip` archive of one. Checks the launcher binary
     exists with its exec bit, the Info.plist names it, and — when
@@ -399,10 +427,12 @@ def validate_app_bundle(path, *, app_name: str = APP_NAME,
     embedded Mach-O signature on the launcher; `require_stapled` demands a
     stapled notarization ticket. These are shape checks only: whether
     Gatekeeper accepts the signature is proven by `codesign`/`spctl` on
-    macOS."""
+    macOS. `require_resources` names files that must be present in
+    Contents/Resources (the third-party notices, issue #380)."""
     path = Path(path)
     opts = dict(require_signed=require_signed,
-                require_stapled=require_stapled)
+                require_stapled=require_stapled,
+                require_resources=tuple(require_resources))
     if path.is_dir():
         app = path if path.suffix == ".app" else path / f"{app_name}.app"
         if not app.is_dir():
@@ -416,7 +446,7 @@ def validate_app_bundle(path, *, app_name: str = APP_NAME,
 # ── CLI ─────────────────────────────────────────────────────────────────
 def _cmd_build(args) -> int:
     app = build_app_bundle(args.exe, args.dest, icon_path=args.icon,
-                           version=args.version)
+                           version=args.version, resources=args.resource)
     print(f"built {app}")
     if args.zip:
         zip_app_bundle(app, args.zip)
@@ -433,7 +463,8 @@ def _cmd_zip(args) -> int:
 def _cmd_validate(args) -> int:
     problems = validate_app_bundle(args.path, expected_arch=args.arch,
                                    require_signed=args.require_signed,
-                                   require_stapled=args.require_stapled)
+                                   require_stapled=args.require_stapled,
+                                   require_resources=args.require_resource)
     if problems:
         print(f"INVALID macOS app package: {args.path}")
         for p in problems:
@@ -459,6 +490,8 @@ def main(argv=None) -> int:
     b.add_argument("--icon", help="optional .icns for Contents/Resources")
     b.add_argument("--version", help="override CFBundleShortVersionString")
     b.add_argument("--zip", help="also write a .zip of the built bundle here")
+    b.add_argument("--resource", action="append", default=[],
+                   help="file to copy into Contents/Resources; repeatable")
     b.set_defaults(func=_cmd_build)
 
     z = sub.add_parser("zip", help="zip an existing .app, preserving exec bits")
@@ -473,6 +506,8 @@ def main(argv=None) -> int:
                    help="require a code signature seal + embedded signature")
     v.add_argument("--require-stapled", action="store_true",
                    help="require a stapled notarization ticket")
+    v.add_argument("--require-resource", action="append", default=[],
+                   help="file name required in Contents/Resources; repeatable")
     v.set_defaults(func=_cmd_validate)
 
     args = parser.parse_args(argv)
