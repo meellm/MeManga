@@ -141,6 +141,9 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #329 The guide shows how to pass the app password to the Docker image
+  as a secret file, with Compose (`compose.override.yaml`) or
+  `docker run`, and how to check it with `memanga doctor`.
 - #402 Browsers are replaced during long runs without `--safe`: a
   source's headless browser is replaced with a fresh one after it has
   served 20 searches, chapter lists or chapter pages (100 tokens for

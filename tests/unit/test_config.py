@@ -413,7 +413,13 @@ class TestConfigKeys:
     def test_defaults_are_valid(self, isolated_home):
         from memanga.config import CONFIG_KEYS, Config, config_value_problem
         cfg = Config()
+        # Issue #345: no default on purpose; unset keeps "all" for configs
+        # that already used email delivery.
+        unset = {"email.kindle_scope"}
         for key in CONFIG_KEYS:
+            if key in unset:
+                assert cfg.get(key) is None, key
+                continue
             assert config_value_problem(key, cfg.get(key)) is None, key
 
     @pytest.mark.parametrize("key,value", [

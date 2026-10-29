@@ -354,6 +354,55 @@ Docker secret, mounted under `/run/secrets/`), or set
 `MEMANGA_SMTP_PASSWORD`. A password passed this way is never saved and
 is used instead of a stored one.
 
+#### App password as a Docker secret
+
+Keep the password in a file outside the repository, readable only by the
+container user (UID 1000). The commands below read it from the terminal,
+so it never lands in your shell history:
+
+```bash
+( umask 077; cat > "$HOME/.memanga-smtp-password" )
+# paste the app password, press Enter, then Ctrl-D
+sudo chown 1000 "$HOME/.memanga-smtp-password"   # skip if your user is UID 1000
+```
+
+Then add a `compose.override.yaml` next to `compose.yaml`. Compose reads
+it automatically, so `compose.yaml` stays unchanged:
+
+```yaml
+services:
+  memanga:
+    environment:
+      MEMANGA_SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+    secrets:
+      - smtp_password
+
+secrets:
+  smtp_password:
+    file: ${HOME}/.memanga-smtp-password
+```
+
+Compose mounts the file at `/run/secrets/smtp_password` with its owner
+and permissions from the host, which is why it must be readable by
+UID 1000. Without Compose, mount it read-only yourself:
+
+```bash
+docker run --rm \
+  -v "$HOME/.memanga-smtp-password:/run/secrets/smtp_password:ro" \
+  -e MEMANGA_SMTP_PASSWORD_FILE=/run/secrets/smtp_password \
+  -v "$PWD/memanga-data/config:/home/memanga/.config/memanga" \
+  -v "$PWD/memanga-data/downloads:/home/memanga/Downloads/MeManga" \
+  memanga:cli status
+```
+
+Check it with `docker compose run --rm memanga doctor`: the keyring line
+reads "App password comes from MEMANGA_SMTP_PASSWORD_FILE; keyring not
+used", and the email line names the problem if the file cannot be read.
+`doctor --smtp` also tries a login, without sending anything. With the
+secret in place, answer "no" to "Update app password?" in
+`memanga config`. If a password was saved in the config volume earlier,
+`doctor` keeps warning that it is in plain text in `config.yaml`.
+
 ---
 
 ## Your First Manga
