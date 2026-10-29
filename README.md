@@ -22,7 +22,7 @@ Works offline once chapters are downloaded.
 
 ## Highlights
 
-- **Single-file desktop app** — `MeManga.exe` / `MeManga`
+- **Portable desktop app** — extract and run `MeManga.exe` / `MeManga` / `MeManga.app`
 - **Library tracking** — your read/unread state survives reboots
 - **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
 - **Built-in reader** — zoom, fit-to-page, keyboard nav, no external viewer needed
@@ -41,11 +41,13 @@ The fastest path is the release download for your platform.
 
 | OS | File |
 |---|---|
-| Windows | [`MeManga-windows-x64.exe`](https://github.com/meellm/MeManga/releases/latest) |
+| Windows | [`MeManga-windows-x64.zip`](../../releases/latest) |
 | macOS (Apple Silicon) | [`MeManga-macos-arm64.zip`](https://github.com/meellm/MeManga/releases/latest) |
 | macOS (Intel) | [`MeManga-macos-x64.zip`](https://github.com/meellm/MeManga/releases/latest) |
 | Linux (x86_64) | [`MeManga-linux-x64.tar.gz`](https://github.com/meellm/MeManga/releases/latest) |
 
+On Windows the download is a `.zip` — extract it and run `MeManga.exe` from the
+`MeManga-windows-x64` folder (keep the `_internal` folder next to it).
 On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double-click.
 
 > **First launch downloads Firefox** (~80 MB download, one-time.)
@@ -65,16 +67,23 @@ On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double
 >
 > ```bash
 > tar xzf MeManga-linux-x64.tar.gz
-> ./MeManga-linux-x64
+> ./MeManga-linux-x64/MeManga
 > ```
 >
 > If a file manager still clears the permission, restore it with
-> `chmod +x MeManga-linux-x64`.
+> `chmod +x MeManga-linux-x64/MeManga`.
 
 Each download has a matching `<file>-THIRD_PARTY_NOTICES.txt` on the release
 page with the licenses of the third-party software it contains. The same file
-is inside `MeManga.app` (`Contents/Resources/THIRD_PARTY_NOTICES.txt`) and next
-to the binary in the Linux `.tar.gz`.
+is inside `MeManga.app` (`Contents/Resources/THIRD_PARTY_NOTICES.txt`) and at the
+top of the Windows and Linux folders.
+
+The desktop app bundles Qt, PySide6, Shiboken6 and img2pdf, which are used under
+the GNU LGPL. The notices file opens with a section that links the exact source
+code of the shipped versions and explains how to use modified versions. On
+Windows and Linux the app is a folder rather than a single compressed file, so
+these components stay separate files under `_internal` that you can replace; on
+macOS you rebuild the app from source with the modified component.
 
 You can also build from the source following [Build from source](#-build-from-source) below.
 
@@ -562,12 +571,16 @@ python scripts/bootstrap.py   # one-time venv setup
 python build.py            # → ./MeManga-Dev.exe (or ./MeManga-Dev)
 
 # Release build — no console, identical pins as the GitHub release
-python build_app.py        # → ./MeManga.exe (or ./MeManga)
+python build_app.py        # → release/MeManga/ (release/MeManga on macOS)
 ```
 
-Both scripts produce a single file at the repo root and sweep their
-`build/` + `dist/` scratch dirs after. The release build pulls from
-`requirements-lock.txt` (exact pins for every transitive dep).
+Both scripts sweep their `build/` + `dist/` scratch dirs after. The dev
+build is a single file at the repo root. The release build is a folder
+with the `MeManga` launcher and its `_internal/` files on Windows and
+Linux (so the bundled LGPL libraries stay replaceable) and a single file
+on macOS, which the release workflow wraps in `MeManga.app`. The release
+build pulls from `requirements-lock.txt` (exact pins for every transitive
+dep).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for project layout, test
 commands, scraper-add walkthroughs, and the lock-refresh flow.

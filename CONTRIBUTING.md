@@ -132,11 +132,13 @@ docs: clarify Playwright first-launch download
 
 ```bash
 python build.py        # Single-file dev exe with console (MeManga-Dev.exe)
-python build_app.py    # Single-file release exe, no console (MeManga.exe)
+python build_app.py    # Release app, no console (release/MeManga/)
 ```
 
-Both scripts move the final binary to the repo root and sweep the
-`build/` + `dist/` scratch directories.
+`build.py` moves the dev exe to the repo root. `build_app.py` puts the
+release app under `release/`: a one-folder app (`MeManga[.exe]` plus
+`_internal/`) on Windows and Linux, a one-file binary on macOS. Both
+sweep the `build/` + `dist/` scratch directories.
 
 ### macOS signing and notarization
 

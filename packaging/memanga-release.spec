@@ -1,17 +1,28 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec — MeManga RELEASE build (one-file, GUI-only).
+PyInstaller spec — MeManga RELEASE build (GUI-only).
 
-Used by `python build_app.py`. Produces MeManga[.exe] under the
+Used by `python build_app.py`, which moves the result under the
 `release/` subdir for shipping to end users (e.g. via the GitHub
 release page). The dedicated subdir dodges the case-insensitive
-filesystem collision between a `MeManga` binary and the lowercase
+filesystem collision between a `MeManga` output and the lowercase
 `memanga/` source package on macOS / Windows.
+
+Layout (issue #381):
+  - Windows / Linux: one folder, `MeManga/` with the MeManga[.exe]
+    launcher and its `_internal/` files. The LGPL components (Qt,
+    PySide6, Shiboken6, img2pdf) stay separate files a user can
+    replace; their Python parts are collected as .py source.
+  - macOS: one file, which packaging/macos_app.py wraps in MeManga.app
+    and the release workflow signs and notarizes. Its notices explain
+    how to rebuild with a modified component instead.
+  - No UPX anywhere: it would rewrite the bundled LGPL libraries, and
+    packed Mach-O binaries invalidate their code signature.
 
 Differences from the dev spec:
   - console=False → no terminal window pops behind the app
   - Same bundled deps as dev (cert chain, playwright driver,
-    scrapers) so the user only has to download ONE file.
+    scrapers).
 
 Playwright Firefox itself is NOT bundled — it'd add ~200 MB. The
 GUI's `_ensure_playwright_browser_installed()` hook downloads it on
@@ -27,6 +38,8 @@ import playwright_stealth
 from PyInstaller.utils.hooks import collect_data_files
 
 _IS_WINDOWS = sys.platform == "win32"
+# One-folder everywhere but macOS (see the docstring).
+_ONEDIR = sys.platform != "darwin"
 
 
 block_cipher = None
@@ -110,6 +123,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
+    # LGPL Python code is collected as plain .py files instead of bytecode
+    # inside the executable's archive, so a user can replace it (issue #381).
+    module_collection_mode={"img2pdf": "py", "PySide6": "py", "shiboken6": "py"},
     excludes=[
         # General data-science junk that gets transitively pulled in
         # by some sub-deps (e.g. lxml-via-pandas-by-mistake).
@@ -120,6 +136,10 @@ a = Analysis(
         # AGPL EPUB library; EPUB output is written with zipfile now,
         # so keep a stale build venv from bundling it.
         "ebooklib",
+        # Interactive-console line editing. On Linux it links GNU Readline,
+        # which is GPL-3.0-or-later, not LGPL (issue #381); a windowed app
+        # never uses it.
+        "readline",
 
         # ── PySide6 modules we don't import ────────────────────────
         # PyInstaller defaults to bundling every Qt6.dll PySide6 ships,
@@ -174,6 +194,16 @@ _notices_spec = _ilu.spec_from_file_location(
 _notices = _ilu.module_from_spec(_notices_spec)
 sys.modules[_notices_spec.name] = _notices
 _notices_spec.loader.exec_module(_notices)
+
+# Issue #381: PyInstaller's QtGui hook collects every input-context plugin,
+# which drags in Qt Virtual Keyboard (GPL-3.0 or commercial only, not LGPL);
+# MeManga never uses it. Drop it here, and anything else GPL_ONLY lists;
+# write_bundle_notices() fails the build if one is still collected.
+a.binaries = [e for e in a.binaries if not _notices.gpl_only(e[0])]
+a.datas = [e for e in a.datas if not _notices.gpl_only(e[0])]
+
+from PySide6.QtCore import qVersion as _qt_version
+
 _notices_label = {
     "win32": "Windows desktop app",
     "darwin": "macOS desktop app",
@@ -187,6 +217,8 @@ try:
         label=_notices_label,
         project_root=Path(project_root),
         generated_dirs=(workpath,),
+        layout="onedir" if _ONEDIR else "onefile",
+        qt=_qt_version(),
     )
 except _notices.NoticesError as exc:
     raise SystemExit(f"third-party notices: {exc}")
@@ -241,20 +273,23 @@ if _sys.platform == "darwin":
         if not os.path.isabs(_entitlements_file):
             _entitlements_file = os.path.join(project_root, _entitlements_file)
 
+# One-folder (Windows / Linux): the EXE holds only the bootloader and the
+# Python archive, and COLLECT lays the libraries out next to it as
+# separate files. One-file (macOS): everything is packed into the EXE.
+_exe_contents = [a.scripts] if _ONEDIR else [a.scripts, a.binaries, a.zipfiles, a.datas]
+
 exe = EXE(
     pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    *_exe_contents,
     [],
+    exclude_binaries=_ONEDIR,
     name="MeManga",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    # UPX-packed Mach-O binaries invalidate their code signature, so
-    # compression stays off on macOS.
-    upx=_sys.platform != "darwin",
+    # No UPX (issue #381): it rewrites the bundled LGPL libraries, and
+    # UPX-packed Mach-O binaries invalidate their code signature.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     # No terminal — release exes shouldn't flash a black box at the
@@ -268,3 +303,15 @@ exe = EXE(
     codesign_identity=_codesign_identity,
     entitlements_file=_entitlements_file,
 )
+
+if _ONEDIR:
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=False,
+        upx_exclude=[],
+        name="MeManga",
+    )

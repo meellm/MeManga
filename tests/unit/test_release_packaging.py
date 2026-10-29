@@ -192,10 +192,11 @@ def test_linux_binary_is_packaged_as_targz():
     assert step is not None, "packaging step missing"
     assert step.get("id") == "package", "upload step can't reference the path"
     run = step.get("run", "")
-    # Linux-only branch: make it executable, then wrap it in a tarball.
+    # Linux-only branch: make the launcher executable, then wrap the
+    # one-folder app (issue #381) in a tarball.
     assert "runner.os" in run and "Linux" in run
-    assert "chmod +x" in run
-    assert "tar -czf" in run
+    assert 'chmod +x "$base/${{ matrix.artifact_name }}"' in run
+    assert 'tar -czf "${base}.tar.gz" "$base"' in run
     assert ".tar.gz" in run
     # The final upload path is threaded out as a step output so a single
     # upload step serves every OS.
@@ -252,18 +253,21 @@ def test_targz_roundtrip_preserves_executable_bit(tmp_path):
     import stat
     import tarfile
 
-    binary = tmp_path / "MeManga-linux-x64"
+    # The tarball holds the one-folder app (issue #381).
+    folder = tmp_path / "MeManga-linux-x64"
+    (folder / "_internal").mkdir(parents=True)
+    binary = folder / "MeManga"
     binary.write_bytes(b"\x7fELF fake binary")
     binary.chmod(0o755)
 
     archive = tmp_path / "MeManga-linux-x64.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
-        tar.add(binary, arcname="MeManga-linux-x64")
+        tar.add(folder, arcname="MeManga-linux-x64")
 
     # The archived member itself must carry the owner-execute bit — that
     # is the byte-level guarantee a bare release asset cannot make.
     with tarfile.open(archive, "r:gz") as tar:
-        member = tar.getmember("MeManga-linux-x64")
+        member = tar.getmember("MeManga-linux-x64/MeManga")
         assert member.mode & stat.S_IXUSR, "tar member lost the +x bit"
 
     dest = tmp_path / "out"
@@ -273,7 +277,7 @@ def test_targz_roundtrip_preserves_executable_bit(tmp_path):
         # it keeps an executable file at 0o755, so the +x bit survives.
         tar.extractall(dest, filter="data")
 
-    extracted = dest / "MeManga-linux-x64"
+    extracted = dest / "MeManga-linux-x64" / "MeManga"
     assert extracted.stat().st_mode & stat.S_IXUSR, \
         "extracted binary is not owner-executable"
 
@@ -286,9 +290,9 @@ def test_readme_documents_linux_targz_launch_path():
     assert "MeManga-linux-x64.tar.gz" in text
     # Concrete extract + run instructions.
     assert "tar xzf MeManga-linux-x64.tar.gz" in text
-    assert "./MeManga-linux-x64" in text
+    assert "./MeManga-linux-x64/MeManga" in text
     # The chmod fallback for file managers that still strip the bit.
-    assert "chmod +x MeManga-linux-x64" in text
+    assert "chmod +x MeManga-linux-x64/MeManga" in text
 
 # ── issue #163: macOS assets ship as launchable .app packages ───────────
 def test_workflow_packages_macos_app_bundle():
@@ -325,7 +329,9 @@ def test_package_step_handles_macos_without_renaming():
     run = step.get("run", "")
     assert 'if [ "${{ runner.os }}" = "macOS" ]' in run
     assert 'echo "upload_path=$asset"' in run
-    assert 'mv "$bin" "$asset"' in run
+    # Windows / Linux: the one-folder app is renamed to the asset's base
+    # name before it is archived (issue #381).
+    assert 'mv release/MeManga "$base"' in run
 
 # ── issue #163: packaging/macos_app.py behaviour (runs off macOS) ────────
 def test_read_macho_arch_identifies_slices():
@@ -646,8 +652,9 @@ def test_spec_parameterizes_codesign_identity_from_env():
     assert "codesign_identity=_codesign_identity" in text
     assert "entitlements_file=_entitlements_file" in text
     assert "codesign_identity=None" not in text
-    # UPX would invalidate the Mach-O signatures.
-    assert 'upx=_sys.platform != "darwin"' in text
+    # UPX would invalidate the Mach-O signatures; since issue #381 it is
+    # off on every platform.
+    assert "upx=False" in text and "upx=True" not in text
 
 
 def test_entitlements_are_minimal_for_hardened_runtime():
@@ -806,8 +813,8 @@ def test_signing_steps_leave_windows_and_linux_alone():
     linux = _step_named("Verify Linux archive preserves the executable bit")
     assert linux is not None and linux.get("if") == "runner.os == 'Linux'"
     by_asset = {e["asset_name"]: e for e in _build_matrix()}
-    assert "MeManga-windows-x64.exe" in by_asset
-    assert by_asset["MeManga-windows-x64.exe"]["os"] == "windows-latest"
+    assert "MeManga-windows-x64.zip" in by_asset
+    assert by_asset["MeManga-windows-x64.zip"]["os"] == "windows-latest"
 
 
 def test_workflow_removes_signing_keychain():

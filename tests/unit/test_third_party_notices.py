@@ -628,10 +628,13 @@ def _step(name):
 def test_release_spec_generates_and_embeds_notices():
     text = SPEC.read_text(encoding="utf-8")
     assert "third_party_notices.py" in text
-    assert "write_bundle_notices(" in text
+    # Anchor on the call itself; comments may mention the function by name.
+    call = "_notices.write_bundle_notices(\n"
+    assert text.count(call) == 1
     # From what Analysis collected, not from a requirements list.
+    args = text.split(call, 1)[1].split(")", 1)[0]
     for toc in ("a.scripts", "a.pure", "a.binaries", "a.datas"):
-        assert toc in text.split("write_bundle_notices(", 1)[1].split(")", 1)[0]
+        assert toc in args
     assert "generated_dirs=(workpath,)" in text
     assert "os.path.join(DISTPATH, _notices.FILENAME)" in text
     assert 'a.datas.append((_notices.FILENAME, _notices_path, "DATA"))' in text
@@ -661,10 +664,12 @@ def test_workflow_ships_notices_with_every_asset():
     run = package["run"]
     assert 'notices="${base}-THIRD_PARTY_NOTICES.txt"' in run
     assert "notices_path=$notices" in run
-    assert 'tar -czf "${asset}.tar.gz" "$asset" "$notices"' in run
+    # The Linux tarball holds the one-folder app, whose notices sit at its
+    # top level (issue #381).
+    assert 'tar -czf "${base}.tar.gz" "$base"' in run
     _, gate = _step("Verify Linux archive preserves the executable bit")
     assert 'third_party_notices.py check \\\n' in gate["run"]
-    assert '"$workdir/${asset}-THIRD_PARTY_NOTICES.txt"' in gate["run"]
+    assert '"$workdir/$asset/THIRD_PARTY_NOTICES.txt"' in gate["run"]
 
 
 def test_workflow_bundles_notices_in_macos_app():
@@ -696,3 +701,367 @@ def test_dockerfile_generates_and_checks_notices():
 def test_docker_build_context_includes_generator_and_license():
     ignored = {line.strip() for line in DOCKERIGNORE.read_text(encoding="utf-8").splitlines()}
     assert not ignored & {"packaging", "packaging/", "LICENSE", "packaging/licenses"}
+
+
+# ── issue #381: LGPL components ─────────────────────────────────────────
+# Onefile/UPX builds kept Qt, PySide6, Shiboken6 and img2pdf inside one
+# self-extracting executable, and the notices named no exact source and no
+# way to use a modified library. The notices now open with an LGPL section
+# (LGPL-3.0 section 4), Windows / Linux ship a one-folder app that
+# `check-bundle` verifies, and GPL-only files stop the build.
+def _lgpl_components(tmp_path):
+    site = tmp_path / "site"
+    return [notices.dist_component(d) for d in (
+        _dist(site, "foo", "1.0", license_expr="MIT",
+              files={"foo/LICENSE": "Copyright foo\n"}),
+        _dist(site, "img2pdf", "0.6.3",
+              classifiers=["License :: OSI Approved :: GNU Lesser General "
+                           "Public License v3 (LGPLv3)"],
+              files={"img2pdf-0.6.3.dist-info/licenses/LICENSE": "LGPL text\n"}),
+        _dist(site, "PySide6_Essentials", "6.11.1",
+              license_expr="LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+        _dist(site, "shiboken6", "6.11.1",
+              license_expr="LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"),
+    )]
+
+
+def _lgpl_text(text):
+    start = text.index(notices.RULE + "\n" + notices.LGPL_HEADING + "\n")
+    return text[start:text.index("\n" + notices.SUBRULE + "\n", start)]
+
+
+def test_lgpl_section_gives_exact_sources_and_project_source(tmp_path, project, python):
+    text = _render(project, python, _lgpl_components(tmp_path), layout="onedir",
+                   qt="6.11.1")
+
+    section = _lgpl_text(text)
+    # Near the top: before the first component section.
+    assert text.index(notices.LGPL_HEADING) < text.index("\n" + notices.PROJECT_SECTION + "\n")
+    assert "  img2pdf 0.6.3 (GNU Lesser General Public License v3 (LGPLv3))" in section
+    assert "  PySide6_Essentials 6.11.1 (LGPL-3.0-only OR GPL-2.0-only OR " \
+           "GPL-3.0-only)" in section
+    assert "  shiboken6 6.11.1 (" in section
+    assert "foo 1.0" not in section
+    assert ("https://download.qt.io/official_releases/QtForPython/pyside6/"
+            "PySide6-6.11.1-src/") in section
+    assert "https://download.qt.io/official_releases/qt/6.11/6.11.1/single/" in section
+    assert "https://pypi.org/project/img2pdf/0.6.3/#files" in section
+    # Shiboken6 has no Qt runtime of its own.
+    shiboken = section.split("  shiboken6 6.11.1 (", 1)[1].split("\n\n", 1)[0]
+    assert "Qt for Python 6.11.1 source" in shiboken
+    assert "Qt 6.11.1 source" not in shiboken
+    flat = " ".join(section.split())
+    assert notices.PROJECT_HOMEPAGE in flat
+    assert "release tag v9.9.9" in flat
+    assert "requirements-lock.txt" in flat
+    assert "_internal/img2pdf.py" in flat and "_internal/PySide6" in flat
+    # LGPL-3.0 section 4(b): both texts travel with an LGPL component even
+    # when it ships its own license file.
+    assert "----- LGPL-3.0.txt -----" in text and "----- GPL-3.0.txt -----" in text
+    assert notices.check_text(text, ["img2pdf", "pyside6-essentials", "shiboken6"]) == []
+
+
+def test_lgpl_section_qt_version_defaults_to_the_wheel_version(tmp_path, project, python):
+    text = _render(project, python, _lgpl_components(tmp_path), layout="onedir")
+    assert "/official_releases/qt/6.11/6.11.1/single/" in _lgpl_text(text)
+    assert notices.qt_version("6.4.0.1") == "6.4.0"
+
+
+@pytest.mark.parametrize("layout, phrase", [
+    ("onedir", "replace those files"),
+    ("onefile", "run `python build_app.py --no-install`"),
+    ("site-packages", "with pip"),
+])
+def test_lgpl_section_explains_replacement_per_layout(tmp_path, project, python,
+                                                      layout, phrase):
+    text = _render(project, python, _lgpl_components(tmp_path), layout=layout)
+    assert phrase in " ".join(_lgpl_text(text).split())
+
+
+def test_lgpl_section_rejects_unknown_layout(tmp_path):
+    with pytest.raises(ValueError, match="unknown layout"):
+        notices.lgpl_section(_lgpl_components(tmp_path), layout="installer")
+
+
+def test_no_lgpl_section_without_lgpl_components(tmp_path, project, python):
+    site = tmp_path / "site"
+    foo = notices.dist_component(_dist(site, "foo", "1.0", license_expr="MIT",
+                                       files={"foo/LICENSE": "Copyright foo\n"}))
+    text = _render(project, python, [foo])
+    assert notices.LGPL_HEADING not in text
+    assert "----- LGPL-3.0.txt -----" not in text
+    assert notices.check_text(text) == []
+
+
+def test_browser_lgpl_builds_do_not_need_the_lgpl_section(tmp_path, project, python):
+    text = _render(project, python, [],
+                   browsers=notices.browser_components(_browsers(tmp_path)))
+    assert notices.LGPL_HEADING not in text
+    assert notices.check_text(text) == []
+
+
+def test_check_flags_missing_lgpl_section(tmp_path, project, python):
+    text = _render(project, python, _lgpl_components(tmp_path), layout="onedir")
+    without = text.replace(_lgpl_text(text), "")
+    assert f"lacks the {notices.LGPL_HEADING!r} section" in notices.check_text(without)
+
+
+def test_check_flags_lgpl_component_missing_from_section(tmp_path, project, python):
+    text = _render(project, python, _lgpl_components(tmp_path), layout="onedir")
+    section = _lgpl_text(text)
+    text = text.replace(section, section.replace("  img2pdf 0.6.3 (", "  other ("))
+    assert f"{notices.LGPL_HEADING!r} section does not list img2pdf 0.6.3" \
+        in notices.check_text(text)
+
+
+@pytest.mark.parametrize("name, blocked", [
+    ("PySide6/Qt/plugins/platforminputcontexts/libqtvirtualkeyboardplugin.so", True),
+    ("PySide6/Qt/lib/libQt6VirtualKeyboard.so.6", True),
+    (r"PySide6\plugins\platforminputcontexts\qtvirtualkeyboardplugin.dll", True),
+    ("PySide6/Qt6VirtualKeyboard.dll", True),
+    ("/usr/lib/x86_64-linux-gnu/libreadline.so.8", True),
+    ("lib-dynload/readline.cpython-312-x86_64-linux-gnu.so", True),
+    ("PySide6/Qt/lib/libQt6Core.so.6", False),
+    ("PySide6/Qt/plugins/platforminputcontexts/libcomposeplatforminputcontextplugin.so",
+     False),
+    ("_pyrepl/readline.py", False),
+])
+def test_gpl_only_names(name, blocked):
+    assert notices.gpl_only(name) is blocked
+
+
+def test_bundle_notices_fail_on_gpl_only_file(tmp_path, project):
+    plugin = tmp_path / "libqtvirtualkeyboardplugin.so"
+    plugin.write_bytes(b"\x7fELF")
+    out = tmp_path / "dist" / "THIRD_PARTY_NOTICES.txt"
+    with pytest.raises(notices.NoticesError, match="libqtvirtualkeyboardplugin.so"):
+        notices.write_bundle_notices([str(plugin)], out, label="Linux desktop app",
+                                     project_root=project, dists=[])
+    assert not out.exists()
+
+
+def _onedir_app(tmp_path, project, python, *, windows=False):
+    """A one-folder app as build_app.py leaves it: launcher, _internal/ with
+    the LGPL files, notices at the top."""
+    root = tmp_path / "MeManga"
+    internal = root / notices.CONTENTS_DIR
+    files = {
+        "PySide6/__init__.py": b"",
+        "shiboken6/__init__.py": b"",
+        "img2pdf.py": b"# img2pdf\n",
+    }
+    if windows:
+        files.update({"PySide6/Qt6Core.dll": b"MZ", "PySide6/pyside6.abi3.dll": b"MZ",
+                      "shiboken6/shiboken6.abi3.dll": b"MZ"})
+    else:
+        files.update({"PySide6/Qt/lib/libQt6Core.so.6": b"\x7fELF",
+                      "PySide6/libpyside6.abi3.so.6.11": b"\x7fELF",
+                      "shiboken6/libshiboken6.abi3.so.6.11": b"\x7fELF"})
+    for rel, data in files.items():
+        (internal / rel).parent.mkdir(parents=True, exist_ok=True)
+        (internal / rel).write_bytes(data)
+    (root / ("MeManga.exe" if windows else "MeManga")).write_bytes(
+        b"MZ" if windows else b"\x7fELF")
+    text = _render(project, python, _lgpl_components(tmp_path), layout="onedir")
+    (root / notices.FILENAME).write_text(text, encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_check_bundle_accepts_replaceable_onedir_app(tmp_path, project, python, windows):
+    assert notices.bundle_problems(_onedir_app(tmp_path, project, python,
+                                               windows=windows)) == []
+
+
+def test_check_bundle_flags_onefile_build(tmp_path):
+    (tmp_path / "MeManga").write_bytes(b"\x7fELF")
+    assert notices.bundle_problems(tmp_path) == [
+        f"{tmp_path} has no _internal folder (not a one-folder build)"]
+
+
+@pytest.mark.parametrize("mutate, problem", [
+    (lambda r: (r / "_internal" / "img2pdf.py").unlink(),
+     "img2pdf module source is not a separate file"),
+    (lambda r: (r / "_internal" / "PySide6" / "Qt" / "lib" / "libQt6Core.so.6").unlink(),
+     "Qt Core library is not a separate file"),
+    (lambda r: (r / "_internal" / "shiboken6" / "__init__.py").unlink(),
+     "Shiboken6 Python package source is not a separate file"),
+    (lambda r: (r / "MeManga").unlink(), "has no MeManga launcher"),
+    (lambda r: (r / notices.FILENAME).unlink(), "is missing or empty"),
+    (lambda r: (r / "_internal" / "libQt6VirtualKeyboard.so.6").write_bytes(b"\x7fELF"),
+     "ships libQt6VirtualKeyboard.so.6, which is not available under the LGPL"),
+    (lambda r: (r / "_internal" / "shiboken6" / "libshiboken6.abi3.so.6.11")
+     .write_bytes(b"\x7fELF" + b"\x00" * 200 + b"UPX!"),
+     "shiboken6/libshiboken6.abi3.so.6.11 is UPX-packed"),
+    (lambda r: (r / "MeManga").write_bytes(b"\x7fELF" + b"\x00" * 64 + b"UPX!"),
+     "MeManga is UPX-packed"),
+])
+def test_check_bundle_flags_problems(tmp_path, project, python, mutate, problem):
+    root = _onedir_app(tmp_path, project, python)
+    mutate(root)
+    problems = notices.bundle_problems(root)
+    assert any(problem in p for p in problems), problems
+
+
+def test_check_bundle_cli(tmp_path, project, python, capsys):
+    root = _onedir_app(tmp_path, project, python)
+    assert notices.main(["check-bundle", str(root)]) == 0
+    assert f"OK: {root}" in capsys.readouterr().out
+    (root / "_internal" / "img2pdf.py").unlink()
+    assert notices.main(["check-bundle", str(root)]) == 1
+    assert "img2pdf module source" in capsys.readouterr().err
+
+
+def test_release_spec_builds_replaceable_onedir_without_upx():
+    text = SPEC.read_text(encoding="utf-8")
+    assert '_ONEDIR = sys.platform != "darwin"' in text
+    assert "exclude_binaries=_ONEDIR" in text
+    assert "coll = COLLECT(" in text and "if _ONEDIR:" in text
+    assert text.index("exe = EXE(") < text.index("coll = COLLECT(")
+    assert "upx=True" not in text and "upx=_sys" not in text
+    assert text.count("upx=False") == 2
+    assert ('module_collection_mode={"img2pdf": "py", "PySide6": "py", '
+            '"shiboken6": "py"}') in text
+    assert '"readline",' in text.split("excludes=[", 1)[1].split("]", 1)[0]
+    # GPL-only files are dropped before the notices are generated from
+    # what is left.
+    drop = text.index("a.binaries = [e for e in a.binaries if not _notices.gpl_only(e[0])]")
+    assert "a.datas = [e for e in a.datas if not _notices.gpl_only(e[0])]" in text
+    assert drop < text.index("_notices.write_bundle_notices(")
+    assert 'layout="onedir" if _ONEDIR else "onefile"' in text
+    assert "qt=_qt_version()" in text
+
+
+def test_build_app_collects_onedir_and_checks_it():
+    text = BUILD_APP.read_text(encoding="utf-8")
+    assert 'ONEDIR = platform.system() != "Darwin"' in text
+    assert 'DIST_TMP / "MeManga" if ONEDIR' in text
+    assert "shutil.copy2(notices_src, dest / NOTICES)" in text
+    assert '"check-bundle"' in text
+    assert "if ONEDIR and not check_bundle(artifact):" in text
+
+
+def test_workflow_ships_windows_as_zipped_onedir_and_gates_it():
+    data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    matrix = {e["asset_name"]: e for e in data["jobs"]["build"]["strategy"]["matrix"]["include"]}
+    assert matrix["MeManga-windows-x64.zip"]["artifact_name"] == "MeManga.exe"
+    _, playwright = _step("Verify Playwright works inside the built executable (Windows)")
+    assert r'.\release\MeManga\${{ matrix.artifact_name }}' in playwright["run"]
+    package_i, package = _step("Package artifact for upload")
+    assert 'mv release/MeManga "$base"' in package["run"]
+    assert "shutil.make_archive(sys.argv[1], 'zip', '.', sys.argv[1])" in package["run"]
+    gate_i, gate = _step("Verify Windows archive keeps LGPL files replaceable")
+    assert gate["if"] == "runner.os == 'Windows'"
+    assert "shutil.unpack_archive" in gate["run"]
+    assert 'third_party_notices.py check-bundle "$workdir/$base"' in gate["run"]
+    upload_i, _ = _step("Upload artifact")
+    assert package_i < gate_i < upload_i
+
+
+def test_workflow_checks_linux_archive_keeps_lgpl_files_replaceable():
+    _, gate = _step("Verify Linux archive preserves the executable bit")
+    assert 'extracted="$workdir/$asset/${{ matrix.artifact_name }}"' in gate["run"]
+    assert 'third_party_notices.py check-bundle "$workdir/$asset"' in gate["run"]
+    _, check = _step("Check third-party notices")
+    assert "--require img2pdf" in check["run"]
+
+
+def test_readme_documents_onedir_downloads_and_lgpl_replacement():
+    text = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "MeManga-windows-x64.zip" in text and "MeManga-windows-x64.exe" not in text
+    flat = " ".join(text.split())
+    assert "used under the GNU LGPL" in flat
+    assert "separate files under `_internal` that you can replace" in flat
+
+
+# ── issue #381: the notices point at the tree that built the download ───
+# The LGPL section names tag v<pyproject version> as the source and build
+# files of the download, and tells macOS users how to rebuild with a
+# modified component. The release fails on any other tag, and the rebuild
+# route must not reinstall the pinned component over the modified one.
+@pytest.mark.parametrize("tag, ok", [
+    ("v9.9.9", True),
+    ("v9.9.8", False),
+    ("9.9.9", False),
+    ("v9.9.9-rc1", False),
+])
+def test_release_tag_must_match_project_version(project, tag, ok):
+    problems = notices.release_tag_problems(tag, project)
+    assert (problems == []) is ok
+    if not ok:
+        assert len(problems) == 1
+        assert f"release tag {tag!r} does not match" in problems[0]
+        assert "(expected 'v9.9.9')" in problems[0]
+
+
+def test_release_tag_needs_a_project_version(tmp_path):
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    missing = ["pyproject.toml declares no project version"]
+    assert notices.release_tag_problems("v1.0.0", tmp_path) == missing
+    assert notices.release_tag_problems("v1.0.0", tmp_path / "absent") == missing
+
+
+def test_repo_version_passes_the_release_tag_check():
+    version = notices._project_version(REPO_ROOT)
+    assert notices.release_tag_problems(f"v{version}", REPO_ROOT) == []
+    assert notices.release_tag_problems(f"v{version}.1", REPO_ROOT) != []
+
+
+def test_cli_check_tag(project, capsys):
+    assert notices.main(["check-tag", "v9.9.9", "--project-root", str(project)]) == 0
+    assert "OK: v9.9.9" in capsys.readouterr().out
+    assert notices.main(["check-tag", "v1.0.0", "--project-root", str(project)]) == 1
+    assert "does not match the project version" in capsys.readouterr().err
+
+
+def test_workflow_checks_release_tag_before_building():
+    tag_i, tag = _step("Check release tag matches the project version")
+    build_i, _ = _step("Build release executable")
+    assert tag_i < build_i
+    assert "if" not in tag, "every leg must check the tag"
+    assert tag["run"].strip() == (
+        'python packaging/third_party_notices.py check-tag "${{ github.ref_name }}"')
+
+
+def test_onefile_rebuild_route_keeps_the_modified_component(tmp_path, project, python):
+    section = _lgpl_text(_render(project, python, _lgpl_components(tmp_path),
+                                 layout="onefile"))
+    flat = " ".join(section.split())
+    # Pins first, then the modified component, then a build that does not
+    # reinstall the pins over it, then the macOS wrapper.
+    steps = ("pip install --no-deps -r requirements-lock.txt",
+             'pip install "pyinstaller>=6.0,<7.0"',
+             "install the modified component",
+             "run `python build_app.py --no-install`",
+             "packaging/macos_app.py build --exe release/MeManga --dest release")
+    positions = [flat.index(s) for s in steps]
+    assert positions == sorted(positions)
+    # Wrapping never splits a command at a hyphen.
+    for line in section.splitlines():
+        assert not line.rstrip().endswith("-"), line
+
+
+def _load_build_app():
+    spec = importlib.util.spec_from_file_location("memanga_build_app", BUILD_APP)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize("argv, expected", [
+    ([], ["chdir", "install", "verify", "build"]),
+    (["--no-install"], ["chdir", "verify", "build"]),
+])
+def test_build_app_no_install_builds_from_installed_packages(monkeypatch, argv, expected):
+    build_app = _load_build_app()
+    calls = []
+    monkeypatch.setattr(build_app.os, "chdir", lambda path: calls.append("chdir"))
+    monkeypatch.setattr(build_app, "install_dependencies",
+                        lambda: calls.append("install") or True)
+    monkeypatch.setattr(build_app, "verify_imports",
+                        lambda: calls.append("verify") or True)
+    # Stop before PyInstaller would run.
+    monkeypatch.setattr(build_app, "run_pyinstaller",
+                        lambda: calls.append("build") or False)
+    assert build_app.main(argv) == 1
+    assert calls == expected

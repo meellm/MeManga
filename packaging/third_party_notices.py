@@ -39,9 +39,19 @@ CLI:
         --project-license LICENSE --output THIRD_PARTY_NOTICES.txt
     python packaging/third_party_notices.py check THIRD_PARTY_NOTICES.txt \\
         --require pyside6 --require playwright --require-browser firefox
+    python packaging/third_party_notices.py check-bundle release/MeManga
+    python packaging/third_party_notices.py check-tag v1.2.3
 
 The release spec calls `write_bundle_notices()` directly with the paths
 PyInstaller collected.
+
+LGPL components (issue #381): when anything listed is LGPL-licensed, the
+file opens with a section naming those components, the exact source
+archives of the shipped versions, MeManga's own source and build files, and
+how to use a modified version in this kind of distribution. Bundled files
+that are not available under the LGPL (GPL_ONLY) stop the build, and
+`check-bundle` verifies that a one-folder app keeps the LGPL components as
+separate, unpacked files.
 """
 
 from __future__ import annotations
@@ -114,7 +124,29 @@ _APPENDIX_REF = re.compile(r"^License text: .* \(Appendix: (\S+\.txt)\)$", re.M)
 # third-party code compiled into Qt. Qt publishes them per minor release.
 _QT_DISTS = {"pyside6", "pyside6-essentials", "pyside6-addons"}
 _QT_ATTRIBUTIONS = "https://doc.qt.io/qt-{minor}/licenses-used-in-qt.html"
-_QT_SOURCE = "https://download.qt.io/official_releases/QtForPython/"
+
+# LGPL components (issue #381). LGPL-3.0 section 4 needs a prominent notice
+# with each copy and the source of the library; GPL-3.0 section 6(d) lets
+# that source sit on another server when the notices say exactly where. The
+# Qt for Python source archive holds PySide6 and Shiboken6; the Qt runtime
+# inside the wheels comes from the matching Qt release.
+LGPL_HEADING = "LGPL components: source code and replacement"
+_QT_FOR_PYTHON_DISTS = _QT_DISTS | {"shiboken6"}
+_QT_FOR_PYTHON_SOURCE = ("https://download.qt.io/official_releases/QtForPython/"
+                         "pyside6/PySide6-{version}-src/")
+_QT_RUNTIME_SOURCE = "https://download.qt.io/official_releases/qt/{minor}/{version}/single/"
+_PYPI_SOURCE = "https://pypi.org/project/{name}/{version}/#files"
+
+# How a user replaces the LGPL components in each kind of distribution.
+LAYOUTS = ("onedir", "onefile", "site-packages")
+
+# Bundled files that are not available under the LGPL and that MeManga does
+# not use: Qt Virtual Keyboard (GPL-3.0 or commercial only) arrives through
+# PyInstaller's input-context plugin collection, GNU Readline (GPL-3.0)
+# through CPython's readline module. The release spec drops them; a build
+# that still collects one fails.
+GPL_ONLY = ("*virtualkeyboard*", "libreadline.*", "libreadline*.dll",
+            "readline.cpython-*", "readline.pyd", "readline.*.pyd")
 
 _LIBPYTHON = re.compile(r"^(lib)?python3[\d.]*(t|d|m)?\.(so|dll|dylib)", re.I)
 # Prefixes shared with other software. The Python runtime is only matched
@@ -259,8 +291,8 @@ def dist_component(dist: metadata.Distribution) -> Component:
         comp.note = "\n".join([
             "This wheel ships no license file. It carries the Qt " + minor
             + " runtime (native",
-            "libraries and plugins), used under the LGPL-3.0. Source code:",
-            "  " + _QT_SOURCE,
+            "libraries and plugins), used under the LGPL-3.0. Source code: see",
+            "\"" + LGPL_HEADING + "\" above.",
             "Qt itself contains third-party code under its own licenses. Their",
             "copyright notices are not reproduced in this file; Qt lists them at",
             "  " + _QT_ATTRIBUTIONS.format(minor=minor),
@@ -278,6 +310,24 @@ def _project_version(project_root: Path) -> str:
         return metadata.version("memanga")
     except metadata.PackageNotFoundError:
         return "unknown"
+
+
+def release_tag_problems(tag: str, project_root: Path = ROOT) -> list[str]:
+    """Problems with building a release from the git tag `tag` (issue #381).
+    The notices direct users to tag v<pyproject version> for the source and
+    build files of their download, so the tag being built must be exactly
+    that one; anything else would point them at a different tree."""
+    pyproject = Path(project_root) / "pyproject.toml"
+    m = (re.search(r'^version\s*=\s*"([^"]+)"', _read_text(pyproject), re.M)
+         if pyproject.is_file() else None)
+    if not m:
+        return ["pyproject.toml declares no project version"]
+    expected = f"v{m.group(1)}"
+    if tag != expected:
+        return [f"release tag {tag!r} does not match the project version in "
+                f"pyproject.toml (expected {expected!r}); the notices would "
+                f"point users to the wrong source"]
+    return []
 
 
 def python_license_path() -> Path | None:
@@ -613,6 +663,110 @@ def browser_components(browsers_dir: Path) -> list[Component]:
     return comps
 
 
+# ── LGPL components (issue #381) ────────────────────────────────────────
+def is_lgpl(comp: Component) -> bool:
+    lowered = comp.license.lower()
+    return "lgpl" in lowered or "lesser general public" in lowered
+
+
+def gpl_only(name: str) -> bool:
+    """True when the bundled file `name` belongs to a component that is not
+    available under the LGPL (see GPL_ONLY)."""
+    base = os.path.basename(name.replace("\\", "/")).lower()
+    return any(fnmatch.fnmatchcase(base, p) for p in GPL_ONLY)
+
+
+def qt_version(pyside_version: str) -> str:
+    """The Qt release a PySide6 wheel version carries: PySide6 X.Y.Z ships
+    Qt X.Y.Z (a PySide-only rebuild such as 6.4.0.1 keeps the Qt 6.4.0)."""
+    return ".".join(pyside_version.split(".")[:3])
+
+
+def lgpl_sources(comp: Component, qt: str = "") -> list[tuple[str, str]]:
+    """(what, URL) pairs for the complete source of an LGPL component at the
+    shipped version."""
+    if canonical(comp.name) in _QT_FOR_PYTHON_DISTS:
+        out = [(f"Qt for Python {comp.version} source (PySide6 and Shiboken6)",
+                _QT_FOR_PYTHON_SOURCE.format(version=comp.version))]
+        if canonical(comp.name) in _QT_DISTS:
+            qt = qt or qt_version(comp.version)
+            minor = ".".join(qt.split(".")[:2])
+            out.append((f"Qt {qt} source (the Qt runtime in this wheel)",
+                        _QT_RUNTIME_SOURCE.format(minor=minor, version=qt)))
+        return out
+    return [(f"{comp.name} {comp.version} source (PyPI release files)",
+             _PYPI_SOURCE.format(name=canonical(comp.name), version=comp.version))]
+
+
+_REPLACEMENT = {
+    "onedir": (
+        "This download is a folder, and the LGPL components are separate, "
+        "uncompressed files in its _internal folder: the Qt libraries and "
+        "plugins and the PySide6 modules under _internal/PySide6, Shiboken6 "
+        "under _internal/shiboken6 and img2pdf as _internal/img2pdf.py. The "
+        "Python parts are plain .py source files. To use a modified version, "
+        "replace those files with an interface-compatible build of the same "
+        "release and start MeManga as usual. The native libraries the build "
+        "copied from the build system (listed below) are separate files in "
+        "_internal as well.",
+    ),
+    "onefile": (
+        "This download is a single executable (inside MeManga.app on macOS), "
+        "so the LGPL components cannot be swapped in place. To use a modified "
+        "version, build MeManga from its source at the release tag that "
+        "matches this download: install the pinned dependencies with `pip "
+        "install --no-deps -r requirements-lock.txt` and PyInstaller with `pip "
+        "install \"pyinstaller>=6.0,<7.0\"`, install the modified component in "
+        "their place, "
+        "then run `python build_app.py --no-install`, which builds from the "
+        "packages already installed (without --no-install it reinstalls the "
+        "pinned versions over yours), and on macOS then `python "
+        "packaging/macos_app.py build --exe release/MeManga --dest release`.",
+    ),
+    "site-packages": (
+        "The LGPL components are ordinary Python packages installed in this "
+        "image's Python environment. To use a modified version, install it "
+        "over the shipped one with pip, for example in an image built FROM "
+        "this one.",
+    ),
+}
+
+
+def lgpl_section(components, *, layout: str, qt: str = "",
+                 project_version: str = "") -> list[str]:
+    """The LGPL notice placed near the top of the file: which components are
+    LGPL, where their exact source is, where MeManga's own source and build
+    files are, and how to use a modified version. Empty when nothing listed
+    is LGPL-licensed."""
+    if layout not in _REPLACEMENT:
+        raise ValueError(f"unknown layout {layout!r}; expected one of {LAYOUTS}")
+    lgpl = [c for c in components if is_lgpl(c)]
+    if not lgpl:
+        return []
+    out = textwrap.wrap(
+        "MeManga's own code is MIT-licensed. This distribution also contains "
+        "the components below, which are licensed under the GNU Lesser General "
+        "Public License (LGPL) and used under it; the GNU LGPL and GPL texts are "
+        "in the Appendix. You may modify them and use MeManga with your modified "
+        "versions. Their complete source code for the versions shipped here is "
+        "available at:", width=79, break_on_hyphens=False) + [""]
+    for comp in lgpl:
+        out.append(f"  {comp.title} ({comp.license})")
+        for what, url in lgpl_sources(comp, qt):
+            out += [f"    {what}:", f"      {url}"]
+    tag = f"v{project_version}" if project_version and project_version != "unknown" \
+        else "matching this download"
+    out += [""] + textwrap.wrap(
+        "MeManga's own source code, including the files this download is built "
+        "from (packaging/memanga-release.spec, build_app.py and "
+        f"requirements-lock.txt), is at {PROJECT_HOMEPAGE} under the MIT "
+        f"license; use the release tag {tag}.", width=79, break_on_hyphens=False)
+    # Keep commands such as `build_app.py --no-install` whole.
+    out += [""] + textwrap.wrap(" ".join(_REPLACEMENT[layout]), width=79,
+                                break_on_hyphens=False)
+    return _heading(LGPL_HEADING, *out)
+
+
 # ── Rendering ───────────────────────────────────────────────────────────
 def _appendix_line(keys) -> str:
     return "\n".join(f"License text: {_APPENDIX[k][0]} (Appendix: {_APPENDIX[k][1]})"
@@ -640,7 +794,8 @@ def _heading(title: str, *lines: str) -> list[str]:
 def render(components: list[Component], *, label: str, notes: list[str] = (),
            browsers: list[Component] = (),
            project_license: Path = ROOT / "LICENSE",
-           project_root: Path = ROOT, python: Component | None = None) -> str:
+           project_root: Path = ROOT, python: Component | None = None,
+           layout: str = "site-packages", qt: str = "") -> str:
     project_license = Path(project_license)
     if not project_license.is_file() or MIT_MARKER not in _read_text(project_license):
         raise NoticesError(f"MeManga license text not found: {project_license.name}")
@@ -661,10 +816,17 @@ def render(components: list[Component], *, label: str, notes: list[str] = (),
     ]
     for note in notes:
         out += textwrap.wrap(note, width=79) + [""]
+    # Browser builds are downloaded by Playwright, not shipped as part of the
+    # app, and their sections already name their source.
+    lgpl = lgpl_section(components, layout=layout, qt=qt,
+                        project_version=_project_version(Path(project_root)))
+    out += lgpl
     out += _section(Component(PROJECT_SECTION, "", "MIT", PROJECT_HOMEPAGE,
                               [("LICENSE", _read_text(project_license))]))
     out += _section(python)
-    needed = []
+    # LGPL-3.0 section 4(b): the LGPL and the GPL it builds on travel with
+    # every LGPL component, whether or not the component ships them.
+    needed = ["LGPL-3.0", "GPL-3.0"] if lgpl else []
     for comp in components:
         out += _section(comp)
         needed += comp.appendix
@@ -706,11 +868,22 @@ DOCKER_NOTE = (
 
 def write_bundle_notices(paths, output, *, label: str, project_root: Path = ROOT,
                          extra: tuple[str, ...] = ("pyinstaller",),
-                         generated_dirs=(), dists=None, overrides=None) -> Path:
+                         generated_dirs=(), dists=None, overrides=None,
+                         layout: str = "onefile", qt: str = "") -> Path:
     """Write the notices for a PyInstaller bundle whose collected source
     files are `paths`. Called from packaging/memanga-release.spec. Raises
     NoticesError, writing nothing, when any bundled file has no license
-    text: the release gate has no warning-only path."""
+    text or is not available under the LGPL (GPL_ONLY): the release gate
+    has no warning-only path. `layout` ("onedir" or "onefile") selects the
+    replacement instructions in the LGPL section; `qt` is the Qt version
+    the PySide6 wheels carry."""
+    paths = list(paths)
+    blocked = sorted({os.path.basename(os.fspath(p)) for p in paths
+                      if gpl_only(os.fspath(p))})
+    if blocked:
+        raise NoticesError(
+            "bundled files that are not available under the LGPL and must not "
+            "ship: " + ", ".join(blocked) + "; exclude them in the release spec")
     comps, unidentified = bundle_components(
         paths, project_root=Path(project_root), dists=dists, extra=extra,
         generated_dirs=generated_dirs, overrides=overrides)
@@ -722,7 +895,7 @@ def write_bundle_notices(paths, output, *, label: str, project_root: Path = ROOT
             "license text to packaging/third_party_overrides.json")
     text = render(comps, label=label, notes=[DESKTOP_NOTE],
                   project_license=Path(project_root) / "LICENSE",
-                  project_root=Path(project_root))
+                  project_root=Path(project_root), layout=layout, qt=qt)
     return _write(text, output)
 
 
@@ -765,6 +938,26 @@ def check_text(text: str, required=(), browsers=()) -> list[str]:
                 problems.append(f"lacks the {filename} text referenced by {title}")
         if "\n----- " not in body and not refs:
             problems.append(f"has no license text for {title}")
+    # Shipped components only: the browser builds and the Appendix follow
+    # their own headings.
+    shipped_end = min((i for i in (
+        text.find("\n" + RULE + "\n" + BROWSERS_HEADING + "\n"), appendix_start)
+        if i != -1), default=len(text))
+    lgpl_titles = [t for t, b in sections.items()
+                   if text.find(SUBRULE + "\n" + t + "\n") < shipped_end
+                   and (m := re.search(r"^License: (.*)$", b, re.M))
+                   and is_lgpl(Component(t, license=m.group(1)))]
+    lgpl_start = text.find("\n" + RULE + "\n" + LGPL_HEADING + "\n")
+    if lgpl_titles and lgpl_start == -1:
+        problems.append(f"lacks the {LGPL_HEADING!r} section")
+    elif lgpl_titles:
+        lgpl_end = text.find("\n" + SUBRULE + "\n", lgpl_start)
+        lgpl_text = text[lgpl_start:lgpl_end if lgpl_end != -1 else len(text)]
+        for title in lgpl_titles:
+            if f"\n  {title} (" not in lgpl_text:
+                problems.append(f"{LGPL_HEADING!r} section does not list {title}")
+        if "\n      https://" not in lgpl_text:
+            problems.append(f"{LGPL_HEADING!r} section gives no source location")
     present = {m.group(1) for t in sections if (m := _BROWSER_TITLE.match(t))}
     for prefix in browsers:
         if not any((b := browser_for(n)) and b.prefix == prefix for n in present):
@@ -779,6 +972,61 @@ def check(path: Path, required=(), browsers=()) -> list[str]:
         return [f"{path} is missing or empty"]
     text = path.read_text(encoding="utf-8", errors="replace")
     return [f"{path} {p}" for p in check_text(text, required, browsers)]
+
+
+# ── Checking a one-folder desktop app (issue #381) ──────────────────────
+CONTENTS_DIR = "_internal"
+# Each LGPL component must be a separate file in the folder; one pattern
+# set per platform's wheel layout (Linux .so, Windows .dll).
+REPLACEABLE = (
+    ("Qt Core library", ("libQt6Core.so*", "Qt6Core.dll")),
+    ("PySide6 library", ("libpyside6.abi3.so*", "pyside6.abi3.dll")),
+    ("Shiboken6 library", ("libshiboken6.abi3.so*", "shiboken6.abi3.dll")),
+    ("PySide6 Python package source", ("PySide6/__init__.py",)),
+    ("Shiboken6 Python package source", ("shiboken6/__init__.py",)),
+    ("img2pdf module source", ("img2pdf.py",)),
+)
+# UPX writes these into the headers of every file it packs (ELF "UPX!"
+# header, PE section names); they sit within the first few KB.
+_UPX_MARKERS = (b"UPX!", b"UPX0\x00", b"UPX1\x00")
+_BINARY = re.compile(r"(\.so(\.[\d.]+)?|\.dll|\.pyd|\.exe|\.dylib)$", re.I)
+
+
+def _upx_packed(path: Path, scan: int = 4096) -> bool:
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(scan)
+    except OSError:
+        return False
+    return any(marker in head for marker in _UPX_MARKERS)
+
+
+def bundle_problems(root: Path) -> list[str]:
+    """Problems with a one-folder desktop app at `root`; empty when the
+    LGPL components are separate, unpacked files next to valid notices."""
+    root = Path(root)
+    internal = root / CONTENTS_DIR
+    if not internal.is_dir():
+        return [f"{root} has no {CONTENTS_DIR} folder (not a one-folder build)"]
+    problems = []
+    launchers = [root / n for n in (PROJECT_SECTION, PROJECT_SECTION + ".exe")]
+    launcher = next((p for p in launchers if p.is_file()), None)
+    if launcher is None:
+        problems.append(f"{root} has no {PROJECT_SECTION} launcher")
+    problems += check(root / FILENAME)
+    files = [p for p in internal.rglob("*") if p.is_file()]
+    rels = [p.relative_to(internal).as_posix() for p in files]
+    for what, patterns in REPLACEABLE:
+        if not any(fnmatch.fnmatchcase(rel, p) or fnmatch.fnmatchcase(rel, "*/" + p)
+                   for rel in rels for p in patterns):
+            problems.append(f"{root}: {what} is not a separate file in {CONTENTS_DIR}")
+    for rel in rels:
+        if gpl_only(rel):
+            problems.append(f"{root}: ships {rel}, which is not available under the LGPL")
+    for path in files + ([launcher] if launcher else []):
+        if (path is launcher or _BINARY.search(path.name)) and _upx_packed(path):
+            problems.append(f"{root}: {path.relative_to(root).as_posix()} is UPX-packed")
+    return problems
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────
@@ -804,7 +1052,24 @@ def main(argv: list[str] | None = None) -> int:
                      help="browser build (%s) that must have an entry; repeatable"
                           % ", ".join(BROWSER_PREFIXES))
 
+    bundle = sub.add_parser("check-bundle", help="validate a one-folder desktop app: "
+                                                 "notices, separate LGPL files, no UPX")
+    bundle.add_argument("path", type=Path)
+
+    tag = sub.add_parser("check-tag", help="fail unless the release tag is "
+                                           "v<version from pyproject.toml>")
+    tag.add_argument("tag")
+    tag.add_argument("--project-root", type=Path, default=ROOT)
+
     args = parser.parse_args(argv)
+    if args.cmd in ("check-bundle", "check-tag"):
+        problems = (bundle_problems(args.path) if args.cmd == "check-bundle"
+                    else release_tag_problems(args.tag, args.project_root))
+        for problem in problems:
+            print(f"error: {problem}", file=sys.stderr)
+        if not problems:
+            print(f"OK: {args.path if args.cmd == 'check-bundle' else args.tag}")
+        return 1 if problems else 0
     if args.cmd == "generate":
         try:
             browsers = browser_components(args.browsers_dir) if args.browsers_dir else []
