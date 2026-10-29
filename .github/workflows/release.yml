@@ -13,9 +13,12 @@ jobs:
     strategy:
       matrix:
         include:
+          # Windows and Linux ship the one-folder app (issue #381) archived
+          # under the asset's base name; artifact_name is the launcher inside
+          # release/MeManga/. macOS ships the one-file executable in an .app.
           - os: windows-latest
             artifact_name: MeManga.exe
-            asset_name: MeManga-windows-x64.exe
+            asset_name: MeManga-windows-x64.zip
           # macos-latest is an Apple Silicon (arm64) runner. The built
           # binary ships wrapped in MeManga.app inside a .zip (issue #163)
           # so the download is a normal double-clickable app, not a raw
@@ -88,6 +91,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Check release tag matches the project version
+        # Issue #381: the notices direct users to tag v<pyproject version>
+        # for the source and build files of their download. A tag that
+        # differs (a typo, or a version bump that was not tagged) would
+        # point them at a different tree, so it fails before any build.
+        shell: bash
+        run: python packaging/third_party_notices.py check-tag "${{ github.ref_name }}"
+
       - name: Install Linux system libraries for Qt/XCB + image plugins
         # The Qt6 XCB platform plugin (libqxcb.so) and the imageformats
         # plugins link against a set of XCB / xkbcommon / TIFF / JPEG
@@ -153,9 +164,11 @@ jobs:
           fi
 
       - name: Build release executable
-        # build_app.py produces a single-file binary under `release/`
-        # (release/MeManga.exe on Windows, release/MeManga elsewhere)
-        # and sweeps the build/ + dist/ scratch dirs afterwards.
+        # build_app.py produces the app under `release/` (the one-folder
+        # release/MeManga/ on Windows / Linux, which it checks with
+        # `third_party_notices.py check-bundle`; the one-file
+        # release/MeManga on macOS) and sweeps the build/ + dist/ scratch
+        # dirs afterwards.
         #
         # MEMANGA_TARGET_ARCH pins the macOS CPU slice (see
         # packaging/memanga-release.spec). It is empty on Windows/Linux,
@@ -182,7 +195,7 @@ jobs:
         run: |
           python packaging/third_party_notices.py check release/THIRD_PARTY_NOTICES.txt \
             --require pyside6-essentials --require shiboken6 --require playwright \
-            --require pyinstaller --require certifi --require pikepdf
+            --require pyinstaller --require certifi --require pikepdf --require img2pdf
 
       - name: Verify macOS artifact architecture
         # Guard against the release silently shipping the wrong slice
@@ -215,7 +228,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath ".\release\${{ matrix.artifact_name }}" `
+          $p = Start-Process -FilePath ".\release\MeManga\${{ matrix.artifact_name }}" `
                  -ArgumentList "--verify-playwright" -PassThru -Wait
           Write-Host "----- runtime.log -----"
           Get-Content "$env:USERPROFILE\.config\memanga\runtime.log" -ErrorAction SilentlyContinue
@@ -433,26 +446,26 @@ jobs:
         shell: bash
         # Every leg also ships the third-party notices (issue #380) as a
         # separate <asset>-THIRD_PARTY_NOTICES.txt release asset, so they can
-        # be read before download and accompany the bare Windows .exe. The
-        # Linux tarball carries the same file next to the binary; the macOS
-        # app has it in Contents/Resources.
+        # be read before download. The Windows .zip and Linux tarball hold
+        # the one-folder app (issue #381) under the asset's base name, with
+        # the same file at its top level; the macOS app has it in
+        # Contents/Resources.
         run: |
           asset="${{ matrix.asset_name }}"
-          base="${asset%.exe}"
-          base="${base%.zip}"
+          base="${asset%.zip}"
           notices="${base}-THIRD_PARTY_NOTICES.txt"
           cp release/THIRD_PARTY_NOTICES.txt "$notices"
           echo "notices_path=$notices" >> "$GITHUB_OUTPUT"
           if [ "${{ runner.os }}" = "macOS" ]; then
             echo "upload_path=$asset" >> "$GITHUB_OUTPUT"
           else
-            bin="release/${{ matrix.artifact_name }}"
-            mv "$bin" "$asset"
+            mv release/MeManga "$base"
             if [ "${{ runner.os }}" = "Linux" ]; then
-              chmod +x "$asset"
-              tar -czf "${asset}.tar.gz" "$asset" "$notices"
-              echo "upload_path=${asset}.tar.gz" >> "$GITHUB_OUTPUT"
+              chmod +x "$base/${{ matrix.artifact_name }}"
+              tar -czf "${base}.tar.gz" "$base"
+              echo "upload_path=${base}.tar.gz" >> "$GITHUB_OUTPUT"
             else
+              python -c "import shutil, sys; shutil.make_archive(sys.argv[1], 'zip', '.', sys.argv[1])" "$base"
               echo "upload_path=$asset" >> "$GITHUB_OUTPUT"
             fi
           fi
@@ -469,7 +482,7 @@ jobs:
           asset="${{ matrix.asset_name }}"
           workdir="$(mktemp -d)"
           tar -xzf "${asset}.tar.gz" -C "$workdir"
-          extracted="$workdir/$asset"
+          extracted="$workdir/$asset/${{ matrix.artifact_name }}"
           ls -l "$extracted"
           if [ ! -x "$extracted" ]; then
             echo "::error::Extracted Linux binary is not executable — release would ship an unlaunchable file"
@@ -478,7 +491,26 @@ jobs:
           echo "OK: extracted binary is executable"
           # Issue #380: the tarball must carry valid third-party notices.
           python packaging/third_party_notices.py check \
-            "$workdir/${asset}-THIRD_PARTY_NOTICES.txt" --require pyside6-essentials
+            "$workdir/$asset/THIRD_PARTY_NOTICES.txt" --require pyside6-essentials
+          # Issue #381: the LGPL components must still be separate,
+          # unpacked files in the extracted folder.
+          python packaging/third_party_notices.py check-bundle "$workdir/$asset"
+
+      - name: Verify Windows archive keeps LGPL files replaceable
+        # Issue #381 gate on the exact .zip that gets uploaded: extract it
+        # as a user would and check the folder holds the launcher, valid
+        # notices at its top level and the LGPL components as separate,
+        # unpacked files.
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          asset="${{ matrix.asset_name }}"
+          base="${asset%.zip}"
+          # A native Windows path for the native Python below.
+          workdir="$RUNNER_TEMP/memanga-zip-check"
+          rm -rf "$workdir"
+          python -c "import shutil, sys; shutil.unpack_archive(sys.argv[1], sys.argv[2])" "$asset" "$workdir"
+          python packaging/third_party_notices.py check-bundle "$workdir/$base"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

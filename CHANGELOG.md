@@ -158,6 +158,26 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #381 The Windows and Linux desktop downloads are a folder instead of a
+  single self-extracting file, and no release build is UPX-compressed, so
+  the LGPL components (Qt, PySide6, Shiboken6, img2pdf) stay separate files
+  under `_internal` that users can replace; their Python parts ship as
+  `.py` source. Windows now downloads as `MeManga-windows-x64.zip` (run
+  `MeManga.exe` from the extracted folder) and the Linux tarball extracts
+  to a `MeManga-linux-x64/` folder (run `./MeManga-linux-x64/MeManga`).
+  The macOS app keeps its single executable. The notices file now opens
+  with an LGPL section: the exact source archives of the shipped Qt for
+  Python, Qt and img2pdf versions, where MeManga's own source and build
+  files are, and how to use a modified component (replace the files, or
+  rebuild from source on macOS with the new `python build_app.py
+  --no-install`, which builds from the installed packages instead of
+  reinstalling the pinned ones over the modified component). A release
+  fails when its tag is not `v` plus the version in `pyproject.toml`, so
+  the tag the notices name is the one the download was built from.
+  Builds drop Qt Virtual Keyboard (GPL or
+  commercial only) and Python's `readline` module (it links GNU Readline,
+  GPL), which the app never uses, and fail if either is still bundled; the release checks the extracted Windows and
+  Linux archives keep the LGPL files separate and unpacked.
 - #329 The guide shows how to pass the app password to the Docker image
   as a secret file, with Compose (`compose.override.yaml`) or
   `docker run`, and how to check it with `memanga doctor`.
