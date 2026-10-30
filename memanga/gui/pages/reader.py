@@ -14,8 +14,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget,
 )
 from PySide6.QtGui import QPixmap, QKeyEvent, QShortcut
-from PySide6.QtCore import (Qt, QByteArray, QBuffer, QEvent, QObject, QSize,
-                            QTimer)
+from PySide6.QtCore import (Qt, QByteArray, QBuffer, QEvent, QObject, QRect,
+                            QSize, QTimer)
 
 from ...chapters import chapter_value
 from .base import BasePage
@@ -1078,7 +1078,23 @@ class ReaderPage(BasePage):
         try:
             label.setStyleSheet(
                 f"color: {T.FG_MUTED}; font-size: {T.FONT_SIZE_SM}pt;")
+            label.setWordWrap(True)
             label.setText(f"Page {index + 1} couldn't be loaded.")
+            # A small page's slot can be too small for the message: grow
+            # it until the message fits, wrapped to the page width.
+            label.ensurePolished()
+            metrics = label.fontMetrics()
+            pad = 16
+            width = max(label.width(), min(
+                metrics.horizontalAdvance(label.text()) + pad,
+                max(label.width(), self._page_target_w)))
+            text = metrics.boundingRect(
+                QRect(0, 0, max(1, width - pad), 10000),
+                Qt.TextFlag.TextWordWrap, label.text())
+            height = max(label.height(), text.height() + pad)
+            if (width, height) != (label.width(), label.height()):
+                label.setFixedSize(width, height)
+                self._recompute_page_offsets()
         except RuntimeError:
             pass  # deleted by a rebuild
 
