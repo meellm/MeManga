@@ -79,7 +79,8 @@ is inside `MeManga.app` (`Contents/Resources/THIRD_PARTY_NOTICES.txt`) and at th
 top of the Windows and Linux folders.
 
 The desktop app bundles Qt, PySide6, Shiboken6 and img2pdf, which are used under
-the GNU LGPL. The notices file opens with a section that links the exact source
+the GNU LGPL. The notices also reproduce the licenses of PDFium and the other
+third-party code built into Qt PDF, which the reader uses for PDF pages. The notices file opens with a section that links the exact source
 code of the shipped versions and explains how to use modified versions. On
 Windows and Linux the app is a folder rather than a single compressed file, so
 these components stay separate files under `_internal` that you can replace; on
@@ -134,6 +135,17 @@ Click any downloaded chapter on the Detail page to open it in the built-in reade
 | `Ctrl/Cmd + 0` | Reset zoom |
 | Click-drag while zoomed | Pan |
 | `Esc` | Back to Detail |
+
+PDF chapters MeManga wrote show each page's image exactly as stored, at its
+original resolution. Any other PDF page, such as one with text, drawings, links
+or other annotations, a rotated or cropped page, or a PDF made by another
+program, is drawn as a whole page at 150 dpi with Qt PDF, which is part of
+Qt. Filled-in form fields are drawn too: their appearance is merged into a
+copy of the page in memory first, and the file itself is never changed. A
+filled-in field that has no appearance to draw, as in an incomplete form, is
+not left out silently: its page shows as a page that couldn't be loaded. A
+page that can't be read shows "Page N couldn't be loaded." in its place.
+PyMuPDF is not used, even when it is installed.
 
 ## Search
 

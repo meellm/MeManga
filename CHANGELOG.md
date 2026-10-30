@@ -328,6 +328,22 @@ All notable changes are recorded here. Format loosely follows
   after reading" on, a finished chapter's file is now removed when you
   leave the chapter rather than the moment you reach its end, so you can
   still scroll back through it.
+- #382 The desktop reader no longer switches silently to PyMuPDF, an
+  AGPL-licensed library MeManga does not declare, whenever that happens to
+  be installed, which also changed the page sizes. Desktop builds now
+  exclude PyMuPDF so a build environment that has it can't bundle it. PDF
+  pages MeManga wrote, one image each, show that image as stored. Every
+  other PDF page (text, drawings, links and other annotations, rotated or
+  cropped pages, PDFs from other programs) is drawn whole with Qt PDF,
+  which ships with Qt, instead of showing only the images on it. Filled-in
+  form fields are merged into an in-memory copy of their page so they are
+  drawn as well; the file is never changed. A filled-in field with no
+  appearance to draw makes its page show as one that couldn't be loaded,
+  instead of the page without the field. Desktop builds' third-party
+  notices reproduce the licenses of PDFium and the other components Qt PDF
+  contains, taken from the Qt release the build ships, and the build stops
+  when the Qt version changes until they are updated. A failed page's
+  "couldn't be loaded" message now stays readable on very small pages.
 - #324, #336 The downloaded desktop app no longer offers to install a
   scheduled check it cannot run. Its only executable starts the app, so
   the daily task opened the window instead of checking while Settings

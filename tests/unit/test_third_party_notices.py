@@ -382,6 +382,103 @@ def test_override_without_license_text_is_rejected(tmp_path, license_file):
         notices.load_overrides(spec, licenses_dir=tmp_path)
 
 
+# ── Third-party code compiled into Qt PDF (issue #382) ──────────────────
+# As the README.chromium files at the pinned commit give them.
+QT_PDF_PARTS = {"PDFium", "The Chromium Project", "Abseil 56945519b5d1",
+                "FreeType 2.13.3-307-g27c1cb10a", "fast_float 7.0.0",
+                "ICU 74.2", "libjpeg-turbo 3.1.0", "libpng 1.6.58",
+                "zlib 1.3.1"}
+
+
+def test_qt_pdf_entry_covers_every_component_qt_lists():
+    """The components the Qt PDF licensing page lists for the shipped Qt
+    release, each with the license text its source names."""
+    (entry,) = notices.load_embedded()
+    assert entry.library == "Qt PDF"
+    lock = (REPO_ROOT / "requirements-lock.txt").read_text(encoding="utf-8")
+    pyside = next(l.split("==")[1].strip() for l in lock.splitlines()
+                  if l.startswith("pyside6=="))
+    # A PySide6 update must refresh the texts from the matching Qt release.
+    assert entry.qt == notices.qt_version(pyside)
+    assert {c.title for c in entry.components} == {
+        f"{part} (in Qt PDF 6.11.1)" for part in QT_PDF_PARTS}
+    texts = {c.title.split(" ")[0]: "\n".join(t for _, t in c.files)
+             for c in entry.components}
+    assert "The PDFium Authors" in texts["PDFium"]
+    assert "Apache License" in texts["PDFium"]
+    assert "Apache License" in texts["Abseil"]
+    assert "The FreeType Project LICENSE" in texts["FreeType"]
+    assert "Independent JPEG Group" in texts["libjpeg-turbo"]
+    assert "Jean-loup Gailly" in texts["zlib"]
+    for comp in entry.components:
+        assert comp.files and all(text.strip() for _, text in comp.files)
+        assert "qtwebengine-chromium/blob/58c11ad" in comp.note
+
+
+def test_embedded_entry_without_license_text_is_rejected(tmp_path):
+    spec = tmp_path / "embedded.json"
+    spec.write_text(json.dumps({"libraries": [{
+        "library": "Thing", "files": ["libthing.so*"], "qt": "6.11.1",
+        "source": "https://example.org/thing", "components": [{
+            "name": "Part", "version": "1", "license": "MIT",
+            "source_files": ["LICENSE"], "license_files": ["absent.txt"]}],
+    }]}), encoding="utf-8")
+    with pytest.raises(notices.NoticesError, match="Part"):
+        notices.load_embedded(spec, licenses_dir=tmp_path)
+
+
+def _qt_pdf_bundle(tmp_path):
+    """The Qt PDF library as the PySide6-Addons wheel ships it."""
+    site = tmp_path / "site"
+    addons = _dist(site, "PySide6_Addons", "6.11.1",
+                   license_expr="LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+                   files={"PySide6/Qt/lib/libQt6Pdf.so.6": b"\x7fELF"})
+    return addons, site / "PySide6" / "Qt" / "lib" / "libQt6Pdf.so.6"
+
+
+def test_bundle_with_qt_pdf_reproduces_its_third_party_licenses(
+        tmp_path, project, psf):
+    addons, lib = _qt_pdf_bundle(tmp_path)
+    out = tmp_path / "dist" / "THIRD_PARTY_NOTICES.txt"
+    notices.write_bundle_notices([str(lib)], out, label="Linux desktop app",
+                                 project_root=project, extra=(), dists=[addons],
+                                 qt="6.11.1")
+    text = out.read_text(encoding="utf-8")
+    sections = notices._sections(text)
+    (entry,) = notices.load_embedded()
+    for comp in entry.components:
+        assert comp.title in sections
+        for _, body in comp.files:
+            assert body.strip() in sections[comp.title]
+    assert "Unless\nthis file gives them entries of their own" in text
+    assert notices.check(out) == []
+
+
+def test_bundle_without_qt_pdf_has_no_qt_pdf_entries(tmp_path, project, psf):
+    site = tmp_path / "site"
+    essentials = _dist(site, "PySide6_Essentials", "6.11.1",
+                       license_expr="LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+                       files={"PySide6/Qt/lib/libQt6Core.so.6": b"\x7fELF"})
+    out = tmp_path / "dist" / "THIRD_PARTY_NOTICES.txt"
+    notices.write_bundle_notices(
+        [str(site / "PySide6" / "Qt" / "lib" / "libQt6Core.so.6")], out,
+        label="Linux desktop app", project_root=project, extra=(),
+        dists=[essentials], qt="6.11.1")
+    assert "(in Qt PDF" not in out.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("qt", ["6.12.0", ""])
+def test_qt_pdf_texts_for_another_qt_release_fail_closed(
+        tmp_path, project, psf, qt):
+    addons, lib = _qt_pdf_bundle(tmp_path)
+    out = tmp_path / "dist" / "THIRD_PARTY_NOTICES.txt"
+    with pytest.raises(notices.NoticesError, match=r"Qt PDF.*Qt 6\.11\.1"):
+        notices.write_bundle_notices([str(lib)], out, label="Linux desktop app",
+                                     project_root=project, extra=(),
+                                     dists=[addons], qt=qt)
+    assert not out.exists()
+
+
 def test_unmatched_native_file_fails_until_attribution_is_supplied(
         tmp_path, project, monkeypatch):
     psf = tmp_path / "python-LICENSE.txt"
@@ -867,6 +964,22 @@ def _onedir_app(tmp_path, project, python, *, windows=False):
     return root
 
 
+def test_check_bundle_requires_qt_pdf_entries_when_it_ships_qt_pdf(
+        tmp_path, project, python):
+    root = _onedir_app(tmp_path, project, python)
+    lib = root / notices.CONTENTS_DIR / "PySide6" / "Qt" / "lib" / "libQt6Pdf.so.6"
+    lib.write_bytes(b"\x7fELF")
+    problems = notices.bundle_problems(root)
+    assert any("ships Qt PDF but THIRD_PARTY_NOTICES.txt has no entry for PDFium"
+               in p for p in problems), problems
+    # Notices that carry the entries pass. _onedir_app already built the
+    # components' distributions under tmp_path.
+    text = _render(project, python, _lgpl_components(tmp_path / "entries")
+                   + notices.load_embedded()[0].components, layout="onedir")
+    (root / notices.FILENAME).write_text(text, encoding="utf-8")
+    assert notices.bundle_problems(root) == []
+
+
 @pytest.mark.parametrize("windows", [False, True])
 def test_check_bundle_accepts_replaceable_onedir_app(tmp_path, project, python, windows):
     assert notices.bundle_problems(_onedir_app(tmp_path, project, python,
@@ -930,6 +1043,22 @@ def test_release_spec_builds_replaceable_onedir_without_upx():
     assert drop < text.index("_notices.write_bundle_notices(")
     assert 'layout="onedir" if _ONEDIR else "onefile"' in text
     assert "qt=_qt_version()" in text
+
+
+def test_builds_exclude_agpl_pymupdf_and_bundle_qt_pdf():
+    # PyMuPDF is AGPL; the reader never uses it (issue #382), and a build
+    # venv that has it installed must not bundle it.
+    for spec in (SPEC, REPO_ROOT / "packaging" / "memanga-dev.spec"):
+        excludes = spec.read_text(encoding="utf-8").split(
+            "excludes=[", 1)[1].split("]", 1)[0]
+        assert '"fitz"' in excludes and '"pymupdf"' in excludes, spec.name
+        # The reader renders whole PDF pages with Qt PDF instead.
+        assert '"PySide6.QtPdf"' not in excludes, spec.name
+        assert '"PySide6.QtPdf",' in spec.read_text(encoding="utf-8"), spec.name
+    for name in ("pyproject.toml", "requirements.txt",
+                 "requirements-docker.txt", "requirements-lock.txt"):
+        text = (REPO_ROOT / name).read_text(encoding="utf-8").lower()
+        assert "pymupdf" not in text and "fitz" not in text, name
 
 
 def test_build_app_collects_onedir_and_checks_it():

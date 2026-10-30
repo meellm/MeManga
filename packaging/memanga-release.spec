@@ -83,6 +83,8 @@ hidden_imports += [
     "PySide6.QtGui",
     "PySide6.QtWidgets",
     "PySide6.QtSvg",
+    # Reader: whole-page PDF rendering (issue #382). Imported lazily.
+    "PySide6.QtPdf",
 ]
 
 # Windows Credential Manager backend + its ctypes shim. PyInstaller
@@ -136,6 +138,10 @@ a = Analysis(
         # AGPL EPUB library; EPUB output is written with zipfile now,
         # so keep a stale build venv from bundling it.
         "ebooklib",
+        # AGPL PDF renderer (PyMuPDF); the reader reads PDFs with pikepdf
+        # and Qt PDF, so keep a build venv that has it from bundling it
+        # (issue #382).
+        "fitz", "pymupdf",
         # Interactive-console line editing. On Linux it links GNU Readline,
         # which is GPL-3.0-or-later, not LGPL (issue #381); a windowed app
         # never uses it.
@@ -145,7 +151,7 @@ a = Analysis(
         # PyInstaller defaults to bundling every Qt6.dll PySide6 ships,
         # which on Windows adds 80-100 MB of unused code (Qt6Quick,
         # Qt6WebEngine, Qt6Multimedia, …). We only use QtCore /
-        # QtGui / QtWidgets / QtSvg — see the grep audit in
+        # QtGui / QtWidgets / QtSvg / QtPdf — see the grep audit in
         # `from PySide6.X import …` lines under memanga/.
         "PySide6.Qt3DAnimation", "PySide6.Qt3DCore",
         "PySide6.Qt3DExtras", "PySide6.Qt3DInput",
@@ -158,7 +164,7 @@ a = Analysis(
         "PySide6.QtMultimediaWidgets", "PySide6.QtNetwork",
         "PySide6.QtNetworkAuth", "PySide6.QtNfc",
         "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
-        "PySide6.QtPdf", "PySide6.QtPdfWidgets",
+        "PySide6.QtPdfWidgets",
         "PySide6.QtPositioning", "PySide6.QtPrintSupport",
         "PySide6.QtQml", "PySide6.QtQuick",
         "PySide6.QtQuick3D", "PySide6.QtQuickControls2",

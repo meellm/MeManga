@@ -8,7 +8,10 @@ position. The reader keeps a bounded cache of the scaled results.
 
 Thread rules (Qt): QImage may be created and scaled on any thread; QPixmap
 only on the GUI thread. Workers therefore hand QImages back through a
-queued signal, and PixmapCache is touched from the GUI thread only.
+queued signal, and PixmapCache is touched from the GUI thread only. Qt PDF
+runs every PDFium call under one process-wide lock (PDFium is not
+reentrant), so each decode opens, renders and drops its own QPdfDocument
+on its worker thread.
 """
 
 from __future__ import annotations
@@ -18,14 +21,14 @@ import threading
 import zipfile
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from PySide6.QtCore import (QBuffer, QByteArray, QIODevice, QObject, QSize,
                             Qt, Signal)
-from PySide6.QtGui import QImage, QImageReader, QPixmap
+from PySide6.QtGui import QImage, QImageReader, QPainter, QPixmap
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +43,26 @@ IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif",
 # entry.
 _HEADER_BYTES = 64 * 1024
 
-# Same render resolution the reader has always used for PyMuPDF pages.
+# Render resolution of whole PDF pages, the one the reader has always used
+# for them, and a cap on the longest side so an oversized page (a poster,
+# a broken page box) can't exhaust memory.
 _PDF_DPI = 150
+_PDF_MAX_SIDE = 8192
 
-# Backend kinds a PageRef can name.
+# Backend kinds a PageRef can name. A PDF page that is exactly one image
+# covering the whole page, which is how MeManga writes every page, shows
+# that image as stored (pikepdf, no re-encode, native size). Every other
+# PDF page is rendered whole with Qt PDF (PDFium, part of PySide6): text,
+# drawings, annotations, rotation and cropping appear as in a PDF viewer.
+# A page with form fields is rendered the same way after qpdf has burned
+# the fields into it. PyMuPDF is never used, even when installed, because
+# it is AGPL-licensed (issue #382).
 KIND_ZIP = "zip"
 KIND_IMAGE = "image"
-KIND_PDF_FITZ = "pdf-fitz"
 KIND_PDF_PIKEPDF = "pdf-pikepdf"
+KIND_PDF_RENDER = "pdf-render"
+KIND_PDF_FORM = "pdf-form"
+_RENDERED_PDF_KINDS = (KIND_PDF_RENDER, KIND_PDF_FORM)
 
 
 @dataclass(frozen=True)
@@ -117,39 +132,145 @@ def _index_zip(filepath: Path, names: Iterable[str]) -> List[PageRef]:
     return pages
 
 
-def _index_pdf(filepath: Path) -> List[PageRef]:
-    try:
-        import fitz
-    except ImportError:
-        fitz = None
-    if fitz is not None:
-        pages = []
-        zoom = _PDF_DPI / 72
-        doc = fitz.open(str(filepath))
-        try:
-            for i, page in enumerate(doc):
-                rect = page.rect * fitz.Matrix(zoom, zoom)
-                irect = rect.irect
-                pages.append(PageRef(filepath, KIND_PDF_FITZ, page=i,
-                                     width=irect.width, height=irect.height))
-        finally:
-            doc.close()
-        return pages
+def _page_attr(page_obj, key):
+    """A page attribute, inherited from the page tree when the page
+    itself doesn't set it (Rotate, MediaBox, CropBox, Resources)."""
+    node = page_obj
+    for _ in range(64):  # bound a malformed /Parent loop
+        if node is None:
+            return None
+        if key in node:
+            return node[key]
+        node = node.get("/Parent")
+    return None
 
+
+def _close(a: float, b: float) -> bool:
+    return abs(a - b) <= 0.01
+
+
+def _single_image_page(page) -> Optional[str]:
+    """Name of the image XObject when the PDF page is exactly that image
+    stretched over the whole page, as MeManga (img2pdf) writes every
+    page, so showing the image as stored loses nothing. None for any
+    other page: text, drawings, annotations, several or masked images,
+    rotation, cropping, other placement, or a content stream pikepdf
+    can't parse."""
+    import pikepdf
+    obj = page.obj
+    if obj.get("/Annots"):
+        return None
+    rotate = _page_attr(obj, "/Rotate")
+    if rotate is not None and int(rotate) % 360:
+        return None
+    media = _page_attr(obj, "/MediaBox")
+    if media is None or len(media) != 4:
+        return None
+    box = [float(v) for v in media]
+    crop = _page_attr(obj, "/CropBox")
+    if crop is not None and [float(v) for v in crop] != box:
+        return None
+    names = list(page.images)
+    if len(names) != 1:
+        return None
+    raw = page.images[names[0]]
+    if any(key in raw for key in ("/SMask", "/Mask", "/Decode")):
+        return None
+    if bool(raw.get("/ImageMask", False)):
+        return None
+    try:
+        instructions = pikepdf.parse_content_stream(page)
+    except Exception:
+        return None
+    if [str(ins.operator) for ins in instructions] != ["q", "cm", "Do", "Q"]:
+        return None
+    matrix = instructions[1].operands
+    target = instructions[2].operands
+    if len(matrix) != 6 or len(target) != 1 or str(target[0]) != names[0]:
+        return None
+    a, b, c, d, e, f = (float(v) for v in matrix)
+    x0, x1 = sorted(box[0::2])
+    y0, y1 = sorted(box[1::2])
+    if not (_close(a, x1 - x0) and _close(d, y1 - y0) and _close(b, 0)
+            and _close(c, 0) and _close(e, x0) and _close(f, y0)):
+        return None
+    return names[0]
+
+
+def _has_form_fields(page) -> bool:
+    import pikepdf
+    for annot in page.obj.get("/Annots", None) or ():
+        if (isinstance(annot, pikepdf.Dictionary)
+                and annot.get("/Subtype") == pikepdf.Name.Widget):
+            return True
+    return False
+
+
+def _open_qt_pdf(source):
+    """A loaded QPdfDocument for a file path or an open QIODevice, which
+    must outlive the document. Both load synchronously: a local file and
+    an in-memory buffer are complete when load() returns."""
+    from PySide6.QtPdf import QPdfDocument
+    doc = QPdfDocument()
+    doc.load(str(source) if isinstance(source, Path) else source)
+    if doc.status() != QPdfDocument.Status.Ready:
+        error = doc.error()
+        doc.close()
+        raise ValueError(f"Qt PDF can't open it ({error.name})")
+    return doc
+
+
+def _render_size(doc, page: int) -> Tuple[int, int]:
+    """Pixel size of a whole page at _PDF_DPI. Qt PDF gives the visible
+    page (crop box, page rotation applied) in points."""
+    points = doc.pagePointSize(page)
+    width = points.width() * _PDF_DPI / 72
+    height = points.height() * _PDF_DPI / 72
+    if width <= 0 or height <= 0:
+        return (0, 0)
+    shrink = min(1.0, _PDF_MAX_SIDE / max(width, height))
+    return (max(1, round(width * shrink)), max(1, round(height * shrink)))
+
+
+def _index_pdf(filepath: Path) -> List[PageRef]:
+    """One reader page per PDF page. Image pages report their image's
+    size; whole-page renders their size at _PDF_DPI, read by Qt PDF only
+    when the file has such pages."""
     import pikepdf
     pages = []
     with pikepdf.open(str(filepath)) as pdf:
         for i, page in enumerate(pdf.pages):
-            for img_key in page.images:
-                raw = page.images[img_key]
-                try:
-                    width = int(raw.get("/Width", 0))
-                    height = int(raw.get("/Height", 0))
-                except Exception:
-                    width = height = 0
-                pages.append(PageRef(filepath, KIND_PDF_PIKEPDF,
-                                     member=str(img_key), page=i,
-                                     width=width, height=height))
+            name = _single_image_page(page)
+            if name is None:
+                kind = (KIND_PDF_FORM if _has_form_fields(page)
+                        else KIND_PDF_RENDER)
+                pages.append(PageRef(filepath, kind, page=i))
+                continue
+            raw = page.images[name]
+            try:
+                width = int(raw.get("/Width", 0))
+                height = int(raw.get("/Height", 0))
+            except Exception:
+                width = height = 0
+            pages.append(PageRef(filepath, KIND_PDF_PIKEPDF, member=name,
+                                 page=i, width=width, height=height))
+    if any(p.kind in _RENDERED_PDF_KINDS for p in pages):
+        try:
+            doc = _open_qt_pdf(filepath)
+        except Exception as e:
+            # Pages keep no size; their decode fails and shows as such.
+            logger.warning("Couldn't read page sizes of %s: %s", filepath, e)
+        else:
+            try:
+                sized = []
+                for p in pages:
+                    if p.kind in _RENDERED_PDF_KINDS:
+                        width, height = _render_size(doc, p.page)
+                        p = replace(p, width=width, height=height)
+                    sized.append(p)
+                pages = sized
+            finally:
+                doc.close()
     return pages
 
 
@@ -247,7 +368,7 @@ def _qimage_from_pil(pil_img) -> QImage:
 
 
 def _decode_pdf_image(raw) -> QImage:
-    """One embedded PDF image, decoded without PyMuPDF.
+    """One embedded PDF image, decoded with pikepdf.
 
     A plain JPEG stream goes to QImage as stored. Anything else is
     unpacked by pikepdf (filters, palettes, colour spaces) and its pixels
@@ -264,6 +385,173 @@ def _decode_pdf_image(raw) -> QImage:
     return img
 
 
+# Annotation flags (PDF 32000-1:2008, 12.5.3) that keep a field off screen.
+_ANNOT_HIDDEN = 1 << 1
+_ANNOT_NO_VIEW = 1 << 5
+
+
+def _field_attr(widget, key):
+    """A form field attribute, inherited from the parent fields when the
+    widget doesn't set it (/FT, /V, ...)."""
+    node = widget
+    for _ in range(64):  # bound a malformed /Parent loop
+        if node is None:
+            return None
+        if key in node:
+            return node[key]
+        node = node.get("/Parent")
+    return None
+
+
+# Button field flag (PDF 32000-1:2008, 12.7.4.2.1): a radio button group.
+_FIELD_RADIO = 1 << 15
+
+
+def _visible_widgets(page):
+    """The page's form field widgets that are shown on screen."""
+    import pikepdf
+    for annot in page.obj.get("/Annots", None) or ():
+        if (isinstance(annot, pikepdf.Dictionary)
+                and annot.get("/Subtype") == pikepdf.Name.Widget
+                and not int(annot.get("/F", 0))
+                & (_ANNOT_HIDDEN | _ANNOT_NO_VIEW)):
+            yield annot
+
+
+def _normal_appearance(annot):
+    """The widget's normal appearance: a stream, a dictionary of
+    appearance states (buttons), or None."""
+    import pikepdf
+    ap = annot.get("/AP")
+    return ap.get("/N") if isinstance(ap, pikepdf.Dictionary) else None
+
+
+def _button_state(annot):
+    """The appearance state a button widget shows: its /AS, else the state
+    its field's value (/V, inherited from the parent field) selects. A
+    radio button whose appearances lack the group's value is not the
+    selected one, so it shows /Off."""
+    import pikepdf
+    state = annot.get("/AS")
+    if state is not None:
+        return state
+    value = _field_attr(annot, "/V")
+    if not isinstance(value, pikepdf.Name):
+        return None
+    normal = _normal_appearance(annot)
+    if (isinstance(normal, pikepdf.Dictionary) and value not in normal
+            and int(_field_attr(annot, "/Ff") or 0) & _FIELD_RADIO):
+        return pikepdf.Name.Off
+    return value
+
+
+def _select_button_states(page):
+    """Give each button widget without /AS the state its field's value
+    selects, when it has an appearance for it. qpdf draws a button's
+    state dictionary only through /AS; the copy is in memory only."""
+    import pikepdf
+    for annot in _visible_widgets(page):
+        if (_field_attr(annot, "/FT") != pikepdf.Name.Btn
+                or "/AS" in annot):
+            continue
+        state = _button_state(annot)
+        normal = _normal_appearance(annot)
+        if (state is not None and isinstance(normal, pikepdf.Dictionary)
+                and state in normal):
+            annot.AS = state
+
+
+def _undrawable_filled_fields(page) -> int:
+    """How many visible, filled-in form fields on *page* have no
+    appearance stream to draw. Their value would be lost without a trace:
+    PDF viewers draw a field from its appearance, and qpdf only generates
+    one when the form sets NeedAppearances (and never for buttons). A
+    button is filled when the state it shows (/AS, else its value) is not
+    /Off."""
+    import pikepdf
+    count = 0
+    for annot in _visible_widgets(page):
+        normal = _normal_appearance(annot)
+        if _field_attr(annot, "/FT") == pikepdf.Name.Btn:
+            state = _button_state(annot)
+            if state is None or state == pikepdf.Name.Off:
+                continue
+            if isinstance(normal, pikepdf.Stream) or (
+                    isinstance(normal, pikepdf.Dictionary)
+                    and state in normal):
+                continue
+        else:
+            value = _field_attr(annot, "/V")
+            if value is None or str(value) == "":
+                continue
+            if isinstance(normal, pikepdf.Stream):
+                continue
+        count += 1
+    return count
+
+
+def _flattened_form_page(ref: PageRef) -> bytes:
+    """The PDF page alone, with its form fields burned into its content.
+
+    Qt PDF draws no form fields: PDFium shows them only through its
+    form-fill layer, which Qt PDF doesn't run. qpdf merges each visible
+    field's appearance stream into the page, after generating text and
+    choice fields' appearances when the form asks for that
+    (NeedAppearances). All of it happens in memory; the file on disk is
+    only read. A visible, filled-in field that still has no appearance
+    raises, so its page shows as failed rather than without the field."""
+    import io
+    import pikepdf
+    with pikepdf.open(str(ref.source)) as pdf:
+        for i in reversed(range(len(pdf.pages))):
+            if i != ref.page:
+                del pdf.pages[i]
+        pdf.generate_appearance_streams()
+        _select_button_states(pdf.pages[0])
+        missing = _undrawable_filled_fields(pdf.pages[0])
+        if missing:
+            raise ValueError(f"{missing} filled-in form field(s) on the page "
+                             f"have no appearance to draw")
+        pdf.flatten_annotations("screen")
+        out = io.BytesIO()
+        pdf.save(out)
+    return out.getvalue()
+
+
+def _render_pdf_page(ref: PageRef) -> QImage:
+    """The whole PDF page, annotations and form fields included, on
+    white paper."""
+    from PySide6.QtPdf import QPdfDocumentRenderOptions
+    buf = None
+    if ref.kind == KIND_PDF_FORM:
+        buf = QBuffer()
+        buf.setData(QByteArray(_flattened_form_page(ref)))
+        buf.open(QIODevice.OpenModeFlag.ReadOnly)
+        doc, index = _open_qt_pdf(buf), 0
+    else:
+        doc, index = _open_qt_pdf(ref.source), ref.page
+    try:
+        size = ((ref.width, ref.height) if ref.width and ref.height
+                else _render_size(doc, index))
+        options = QPdfDocumentRenderOptions()
+        options.setRenderFlags(
+            QPdfDocumentRenderOptions.RenderFlag.Annotations)
+        page = doc.render(index, QSize(*size), options)
+    finally:
+        doc.close()
+        if buf is not None:
+            buf.close()
+    if page.isNull():
+        raise ValueError("Qt PDF couldn't render the page")
+    # Qt PDF leaves every part of the page nothing paints transparent.
+    img = QImage(page.size(), QImage.Format.Format_RGB32)
+    img.fill(Qt.GlobalColor.white)
+    painter = QPainter(img)
+    painter.drawImage(0, 0, page)
+    painter.end()
+    return img
+
+
 def _decode(ref: PageRef) -> QImage:
     if ref.kind == KIND_ZIP:
         with zipfile.ZipFile(ref.source, "r") as zf:
@@ -273,21 +561,12 @@ def _decode(ref: PageRef) -> QImage:
         return img
     if ref.kind == KIND_IMAGE:
         return QImage(str(ref.source))
-    if ref.kind == KIND_PDF_FITZ:
-        import fitz
-        doc = fitz.open(str(ref.source))
-        try:
-            pix = doc[ref.page].get_pixmap(dpi=_PDF_DPI)
-            img = QImage(pix.samples, pix.width, pix.height, pix.stride,
-                         QImage.Format.Format_RGB888)
-            # Deep copy: pix.samples is transient.
-            return img.copy()
-        finally:
-            doc.close()
     if ref.kind == KIND_PDF_PIKEPDF:
         import pikepdf
         with pikepdf.open(str(ref.source)) as pdf:
             return _decode_pdf_image(pdf.pages[ref.page].images[ref.member])
+    if ref.kind in _RENDERED_PDF_KINDS:
+        return _render_pdf_page(ref)
     return QImage()
 
 

@@ -106,8 +106,8 @@ class TestIndexing:
         pdf.write_bytes(img2pdf.convert([_jpg((40, 60)), _jpg((40, 60))]))
         pages = index_chapter_file(pdf)
         assert len(pages) == 2
-        if pages[0].kind == KIND_PDF_PIKEPDF:
-            assert (pages[0].width, pages[0].height) == (40, 60)
+        assert all(p.kind == KIND_PDF_PIKEPDF for p in pages)
+        assert (pages[0].width, pages[0].height) == (40, 60)
         assert all(not decode_page(p).isNull() for p in pages)
 
     def test_unreadable_archive_indexes_empty(self, qapp, tmp_path):
@@ -235,13 +235,13 @@ class TestRenderPage:
         assert decode_page(ref).isNull()
 
 
-# ── PDF fallback without PyMuPDF (issue #390) ────────────────────────────
+# ── PDF pages via pikepdf (issues #390, #382) ────────────────────────────
 
 
 def _image_pdf(path, images):
-    """Write a PDF with one image XObject per page. Each image is
-    (stream data, /Filter name or None, colour space name or array,
-    (width, height))."""
+    """Write a PDF with one image XObject per page, drawn over the whole
+    page the way img2pdf does. Each image is (stream data, /Filter name
+    or None, colour space name or array, (width, height))."""
     import pikepdf
     with pikepdf.new() as pdf:
         for data, filter_, colorspace, (width, height) in images:
@@ -259,17 +259,40 @@ def _image_pdf(path, images):
             page = pdf.add_blank_page(page_size=(width, height))
             page.obj.Resources = pikepdf.Dictionary(
                 XObject=pikepdf.Dictionary(Im0=image))
+            page.obj.Contents = pdf.make_stream(
+                b"q %d 0 0 %d 0 0 cm /Im0 Do Q" % (width, height))
         pdf.save(path)
     return path
 
 
+def _edit_pdf(path, edit):
+    """Change a saved PDF in place: edit(pdf) gets the open document."""
+    import pikepdf
+    with pikepdf.open(path, allow_overwriting_input=True) as pdf:
+        edit(pdf)
+        pdf.save(path)
+    return path
+
+
+def _blue_square_form(pdf):
+    """A 30x30 pt form XObject that paints itself blue."""
+    import pikepdf
+    form = pdf.make_stream(b"0 0 1 rg 0 0 30 30 re f")
+    form.Type = pikepdf.Name.XObject
+    form.Subtype = pikepdf.Name.Form
+    form.BBox = pikepdf.Array([0, 0, 30, 30])
+    return form
+
+
+def _rendered(pt):
+    """Pixels of *pt* points at the reader's PDF render resolution."""
+    return round(pt * 150 / 72)
+
+
 class TestPdfFallback:
     @pytest.fixture(autouse=True)
-    def _no_pymupdf(self, monkeypatch):
-        import sys
+    def _pikepdf(self):
         pytest.importorskip("pikepdf")
-        # A None entry makes ``import fitz`` raise ImportError.
-        monkeypatch.setitem(sys.modules, "fitz", None)
 
     @pytest.fixture
     def pil_saves(self, monkeypatch):
@@ -375,6 +398,439 @@ class TestPdfFallback:
                     and r.levelno == logging.WARNING]
         assert len(warnings) == 1
         assert "c.pdf" in warnings[0].getMessage()
+
+    def test_installed_pymupdf_is_never_used(
+            self, qapp, tmp_path, monkeypatch):
+        # PyMuPDF is AGPL and undeclared (issue #382): having it installed
+        # must not change how the reader reads a PDF.
+        import sys
+        import types
+        from memanga.gui.pages.reader_pages import decode_page
+        touched = []
+
+        def stub(name):
+            mod = types.ModuleType(name)
+
+            def getattr_(attr):
+                if attr.startswith("__"):
+                    raise AttributeError(attr)
+                touched.append((name, attr))
+                raise AttributeError(attr)
+            mod.__getattr__ = getattr_
+            return mod
+        for name in ("fitz", "pymupdf"):
+            monkeypatch.setitem(sys.modules, name, stub(name))
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        pages = self._pages(pdf)
+        assert [(p.width, p.height) for p in pages] == [(80, 120)]
+        assert decode_page(pages[0]).size().toTuple() == (80, 120)
+        assert touched == []
+
+    def test_reader_pages_do_not_import_pymupdf(self):
+        import subprocess
+        import sys
+        code = (
+            "import sys, memanga.gui.pages.reader_pages; "
+            "sys.exit(1 if any(m.split('.')[0] in ('fitz', 'pymupdf') "
+            "for m in sys.modules) else 0)"
+        )
+        assert subprocess.run([sys.executable, "-c", code],
+                              timeout=60).returncode == 0
+
+    def test_own_pdf_pages_are_shown_as_stored(self, qapp, tmp_path):
+        # A MeManga (img2pdf) page is exactly one image: pikepdf, native
+        # size, Qt PDF not even loaded.
+        import subprocess
+        import sys
+        import img2pdf
+        pdf = tmp_path / "c.pdf"
+        pdf.write_bytes(img2pdf.convert([_jpg((40, 60)), _png((30, 90))]))
+        assert [(p.width, p.height) for p in self._pages(pdf)] == \
+            [(40, 60), (30, 90)]
+        code = (
+            "import sys; from pathlib import Path; "
+            "from memanga.gui.pages.reader_pages import index_chapter_file; "
+            "index_chapter_file(Path(sys.argv[1])); "
+            "sys.exit(1 if 'PySide6.QtPdf' in sys.modules else 0)"
+        )
+        assert subprocess.run([sys.executable, "-c", code, str(pdf)],
+                              timeout=60).returncode == 0
+
+    @staticmethod
+    def _add_text(pdf, page):
+        import pikepdf
+        page.obj.Resources.Font = pikepdf.Dictionary(F1=pikepdf.Dictionary(
+            Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1,
+            BaseFont=pikepdf.Name.Helvetica))
+        page.contents_add(pdf.make_stream(
+            b"BT 0 g /F1 40 Tf 5 10 Td (HI) Tj ET"))
+
+    @staticmethod
+    def _add_vector(pdf, page):
+        page.contents_add(pdf.make_stream(b"0 0 1 rg 10 10 30 30 re f"))
+
+    @staticmethod
+    def _add_link(pdf, page):
+        # A link whose appearance stream paints a visible blue box.
+        import pikepdf
+        page.obj.Annots = pdf.make_indirect(pikepdf.Array([
+            pikepdf.Dictionary(
+                Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Link,
+                Rect=pikepdf.Array([10, 10, 40, 40]),
+                Border=pikepdf.Array([0, 0, 0]),
+                AP=pikepdf.Dictionary(N=_blue_square_form(pdf)))]))
+
+    @staticmethod
+    def _add_form_xobject(pdf, page):
+        page.obj.Resources.XObject.Fx0 = _blue_square_form(pdf)
+        page.contents_add(pdf.make_stream(b"q 1 0 0 1 10 10 cm /Fx0 Do Q"))
+
+    @pytest.mark.parametrize("extra", [
+        "_add_text", "_add_vector", "_add_link", "_add_form_xobject",
+    ], ids=["text", "vector", "visible-link", "form-xobject"])
+    def test_page_with_more_than_its_image_is_rendered_whole(
+            self, qapp, tmp_path, extra):
+        # Showing only the image would drop the rest of the page
+        # (issue #382): such a page is rendered whole, at 150 dpi.
+        from memanga.gui.pages.reader_pages import (KIND_PDF_PIKEPDF,
+                                                    KIND_PDF_RENDER,
+                                                    decode_page,
+                                                    index_chapter_file)
+        jpg = _jpg((80, 120), "red")
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (jpg, "/DCTDecode", "/DeviceRGB", (80, 120)),
+            (jpg, "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        # The second page gets the extra content.
+        _edit_pdf(pdf, lambda doc: getattr(self, extra)(doc, doc.pages[1]))
+        pages = index_chapter_file(pdf)
+        assert [(p.kind, p.page) for p in pages] == [
+            (KIND_PDF_PIKEPDF, 0), (KIND_PDF_RENDER, 1)]
+        size = (_rendered(80), _rendered(120))
+        assert (pages[1].width, pages[1].height) == size
+        img = decode_page(pages[1])
+        assert img.size().toTuple() == size
+        # Top of the page: the image, red.
+        top = img.pixelColor(_rendered(40), _rendered(20))
+        assert top.red() > 200 and top.blue() < 60
+        # Bottom left: the extra content, not the image's red.
+        bottom = [img.pixelColor(x, y)
+                  for x in range(_rendered(10), _rendered(40))
+                  for y in range(_rendered(80), _rendered(110))]
+        if extra == "_add_text":
+            assert any(c.red() < 100 for c in bottom)
+        else:
+            centre = img.pixelColor(_rendered(25), _rendered(120 - 25))
+            assert centre.blue() > 200 and centre.red() < 60
+
+    @pytest.mark.parametrize("change, size", [
+        ("rotate", (120, 80)),
+        ("crop", (40, 60)),
+    ])
+    def test_rotated_or_cropped_page_is_rendered_as_shown(
+            self, qapp, tmp_path, change, size):
+        import pikepdf
+        from memanga.gui.pages.reader_pages import (KIND_PDF_RENDER,
+                                                    decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+
+        def edit(doc):
+            if change == "rotate":
+                doc.pages[0].obj.Rotate = 90
+            else:
+                doc.pages[0].obj.CropBox = pikepdf.Array([0, 0, 40, 60])
+        _edit_pdf(pdf, edit)
+        (ref,) = index_chapter_file(pdf)
+        expected = (_rendered(size[0]), _rendered(size[1]))
+        assert ref.kind == KIND_PDF_RENDER
+        assert (ref.width, ref.height) == expected
+        assert decode_page(ref).size().toTuple() == expected
+
+    def test_page_without_image_is_rendered_on_white(self, qapp, tmp_path):
+        from memanga.gui.pages.reader_pages import (KIND_PDF_PIKEPDF,
+                                                    KIND_PDF_RENDER,
+                                                    decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120)), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        _edit_pdf(pdf, lambda doc: doc.add_blank_page(page_size=(72, 144)))
+        pages = index_chapter_file(pdf)
+        assert [p.kind for p in pages] == [KIND_PDF_PIKEPDF, KIND_PDF_RENDER]
+        img = decode_page(pages[1])
+        assert img.size().toTuple() == (150, 300)
+        corner = img.pixelColor(5, 5)
+        assert (corner.red(), corner.green(), corner.blue(),
+                corner.alpha()) == (255, 255, 255, 255)
+
+    @staticmethod
+    def _add_text_field(pdf, page, *, appearance, need_appearances=None,
+                        value="HI", flags=4):
+        """A text field over the image's bottom left, filled with *value*.
+        With *appearance* it carries its own blue appearance stream;
+        without, by default the form asks the viewer to draw the value
+        (NeedAppearances)."""
+        import pikepdf
+        field = pikepdf.Dictionary(
+            Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Widget,
+            FT=pikepdf.Name.Tx, T=pikepdf.String("name"),
+            F=flags, DA=pikepdf.String("/Helv 30 Tf 0 g"),
+            Rect=pikepdf.Array([10, 10, 40, 40]),
+            P=page.obj)
+        if value is not None:
+            field.V = pikepdf.String(value)
+        if appearance:
+            field.AP = pikepdf.Dictionary(N=_blue_square_form(pdf))
+        if need_appearances is None:
+            need_appearances = not appearance
+        field = pdf.make_indirect(field)
+        page.obj.Annots = pdf.make_indirect(pikepdf.Array([field]))
+        pdf.Root.AcroForm = pdf.make_indirect(pikepdf.Dictionary(
+            Fields=pikepdf.Array([field]),
+            NeedAppearances=need_appearances,
+            DA=pikepdf.String("/Helv 30 Tf 0 g"),
+            DR=pikepdf.Dictionary(Font=pikepdf.Dictionary(
+                Helv=pikepdf.Dictionary(
+                    Type=pikepdf.Name.Font, Subtype=pikepdf.Name.Type1,
+                    BaseFont=pikepdf.Name.Helvetica)))))
+
+    @pytest.mark.parametrize("appearance", [True, False],
+                             ids=["own-appearance", "need-appearances"])
+    def test_filled_form_field_is_drawn(self, qapp, tmp_path, appearance):
+        # Qt PDF draws no form fields: the page's fields are burned into a
+        # one-page copy in memory first (issue #382). The file is only read.
+        from memanga.gui.pages.reader_pages import (KIND_PDF_FORM,
+                                                    decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        _edit_pdf(pdf, lambda doc: self._add_text_field(
+            doc, doc.pages[1], appearance=appearance))
+        before = pdf.read_bytes()
+        pages = index_chapter_file(pdf)
+        assert pages[1].kind == KIND_PDF_FORM
+        size = (_rendered(80), _rendered(120))
+        assert (pages[1].width, pages[1].height) == size
+        img = decode_page(pages[1])
+        assert img.size().toTuple() == size
+        top = img.pixelColor(_rendered(40), _rendered(20))
+        assert top.red() > 200 and top.blue() < 60
+        field = [img.pixelColor(x, y)
+                 for x in range(_rendered(10), _rendered(40))
+                 for y in range(_rendered(80), _rendered(110))]
+        if appearance:
+            centre = img.pixelColor(_rendered(25), _rendered(120 - 25))
+            assert centre.blue() > 200 and centre.red() < 60
+        else:
+            # qpdf drew the value "HI" in black from the field's /DA.
+            assert any(c.red() < 100 for c in field)
+        assert pdf.read_bytes() == before
+
+    def test_filled_field_without_appearance_fails_visibly(
+            self, qapp, tmp_path, caplog):
+        # No /AP and no NeedAppearances: nothing can draw the value, so the
+        # page is a failed page, not the page without its field.
+        import logging
+        from memanga.gui.pages.reader_pages import (KIND_PDF_FORM,
+                                                    decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120)), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        _edit_pdf(pdf, lambda doc: self._add_text_field(
+            doc, doc.pages[0], appearance=False, need_appearances=False))
+        (ref,) = index_chapter_file(pdf)
+        assert ref.kind == KIND_PDF_FORM
+        with caplog.at_level(logging.WARNING,
+                             logger="memanga.gui.pages.reader_pages"):
+            assert decode_page(ref).isNull()
+        warnings = [r.getMessage() for r in caplog.records
+                    if r.name == "memanga.gui.pages.reader_pages"
+                    and r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "no appearance to draw" in warnings[0]
+
+    @pytest.mark.parametrize("value, flags", [
+        (None, 4),   # empty field: nothing to lose
+        ("", 4),
+        ("HI", 4 | 2),   # hidden
+        ("HI", 4 | 32),  # not shown on screen (NoView)
+    ], ids=["no-value", "empty-value", "hidden", "no-view"])
+    def test_field_with_nothing_to_show_does_not_fail_the_page(
+            self, qapp, tmp_path, value, flags):
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        _edit_pdf(pdf, lambda doc: self._add_text_field(
+            doc, doc.pages[0], appearance=False, need_appearances=False,
+            value=value, flags=flags))
+        (ref,) = index_chapter_file(pdf)
+        img = decode_page(ref)
+        assert img.size().toTuple() == (_rendered(80), _rendered(120))
+        top = img.pixelColor(_rendered(40), _rendered(20))
+        assert top.red() > 200 and top.blue() < 60
+
+    @staticmethod
+    def _add_checkbox_from_parent(pdf, page, *, value, appearance):
+        """A checkbox widget with no /AS whose parent field holds the
+        value; with *appearance* the widget has a blue /Yes state."""
+        import pikepdf
+        parent = pdf.make_indirect(pikepdf.Dictionary(
+            FT=pikepdf.Name.Btn, T=pikepdf.String("box"),
+            V=pikepdf.Name(value)))
+        widget = pikepdf.Dictionary(
+            Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Widget, F=4,
+            Parent=parent, Rect=pikepdf.Array([10, 10, 40, 40]),
+            P=page.obj)
+        if appearance:
+            widget.AP = pikepdf.Dictionary(N=pikepdf.Dictionary(
+                Yes=_blue_square_form(pdf)))
+        widget = pdf.make_indirect(widget)
+        parent.Kids = pikepdf.Array([widget])
+        page.obj.Annots = pdf.make_indirect(pikepdf.Array([widget]))
+        pdf.Root.AcroForm = pdf.make_indirect(pikepdf.Dictionary(
+            Fields=pikepdf.Array([parent])))
+
+    def test_checkbox_checked_by_parent_value_without_appearance_fails(
+            self, qapp, tmp_path, caplog):
+        # /V /Yes on the parent, no /AS and no /AP on the widget: the
+        # checked state can't be drawn, so the page fails visibly.
+        import logging
+        from memanga.gui.pages.reader_pages import (KIND_PDF_FORM,
+                                                    decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120)), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        _edit_pdf(pdf, lambda doc: self._add_checkbox_from_parent(
+            doc, doc.pages[0], value="/Yes", appearance=False))
+        (ref,) = index_chapter_file(pdf)
+        assert ref.kind == KIND_PDF_FORM
+        with caplog.at_level(logging.WARNING,
+                             logger="memanga.gui.pages.reader_pages"):
+            assert decode_page(ref).isNull()
+        warnings = [r.getMessage() for r in caplog.records
+                    if r.name == "memanga.gui.pages.reader_pages"
+                    and r.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "1 filled-in form field(s)" in warnings[0]
+
+    def test_checkbox_checked_by_parent_value_draws_its_state(
+            self, qapp, tmp_path):
+        # No /AS, but the parent's /V names a state the widget can draw.
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        _edit_pdf(pdf, lambda doc: self._add_checkbox_from_parent(
+            doc, doc.pages[0], value="/Yes", appearance=True))
+        before = pdf.read_bytes()
+        (ref,) = index_chapter_file(pdf)
+        img = decode_page(ref)
+        centre = img.pixelColor(_rendered(25), _rendered(120 - 25))
+        assert centre.blue() > 200 and centre.red() < 60
+        assert pdf.read_bytes() == before
+
+    @pytest.mark.parametrize("appearance", [False, True],
+                             ids=["no-appearance", "with-appearance"])
+    def test_unchecked_parent_value_does_not_fail_the_page(
+            self, qapp, tmp_path, appearance):
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        _edit_pdf(pdf, lambda doc: self._add_checkbox_from_parent(
+            doc, doc.pages[0], value="/Off", appearance=appearance))
+        (ref,) = index_chapter_file(pdf)
+        img = decode_page(ref)
+        assert img.size().toTuple() == (_rendered(80), _rendered(120))
+        # Nothing drawn over the image where the box would be.
+        centre = img.pixelColor(_rendered(25), _rendered(120 - 25))
+        assert centre.red() > 200 and centre.blue() < 60
+
+    @pytest.mark.parametrize("state, drawn", [
+        ("/Yes", True), ("/Maybe", False),
+    ], ids=["state-with-appearance", "state-without-appearance"])
+    def test_checked_box_needs_an_appearance_for_its_state(
+            self, qapp, tmp_path, state, drawn):
+        # A checkbox's appearance is a dictionary of states; the one /AS
+        # names must exist, as qpdf never generates button appearances.
+        import pikepdf
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+
+        def add_box(doc):
+            page = doc.pages[0]
+            box = doc.make_indirect(pikepdf.Dictionary(
+                Type=pikepdf.Name.Annot, Subtype=pikepdf.Name.Widget,
+                FT=pikepdf.Name.Btn, T=pikepdf.String("box"), F=4,
+                V=pikepdf.Name(state), AS=pikepdf.Name(state),
+                Rect=pikepdf.Array([10, 10, 40, 40]), P=page.obj,
+                AP=pikepdf.Dictionary(N=pikepdf.Dictionary(
+                    Yes=_blue_square_form(doc)))))
+            page.obj.Annots = doc.make_indirect(pikepdf.Array([box]))
+            doc.Root.AcroForm = doc.make_indirect(pikepdf.Dictionary(
+                Fields=pikepdf.Array([box])))
+        _edit_pdf(pdf, add_box)
+        (ref,) = index_chapter_file(pdf)
+        img = decode_page(ref)
+        if drawn:
+            centre = img.pixelColor(_rendered(25), _rendered(120 - 25))
+            assert centre.blue() > 200 and centre.red() < 60
+        else:
+            assert img.isNull()
+
+    def test_broken_form_page_fails_visibly(self, qapp, tmp_path,
+                                            monkeypatch):
+        # A form page that can't be flattened is a failed page, never the
+        # page without its fields.
+        from memanga.gui.pages import reader_pages
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120)), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ])
+        _edit_pdf(pdf, lambda doc: self._add_text_field(
+            doc, doc.pages[0], appearance=True))
+        (ref,) = reader_pages.index_chapter_file(pdf)
+
+        def broken(ref):
+            raise RuntimeError("flatten failed")
+        monkeypatch.setattr(reader_pages, "_flattened_form_page", broken)
+        assert reader_pages.decode_page(ref).isNull()
+
+    def test_rendered_pages_decode_concurrently(self, qapp, tmp_path):
+        # The reader decodes on a worker pool; Qt PDF serializes PDFium.
+        from concurrent.futures import ThreadPoolExecutor
+        from memanga.gui.pages.reader_pages import (KIND_PDF_RENDER,
+                                                    decode_page,
+                                                    index_chapter_file)
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (_jpg((80, 120), "red"), "/DCTDecode", "/DeviceRGB", (80, 120)),
+        ] * 6)
+
+        def rotate(doc):
+            for page in doc.pages:
+                page.obj.Rotate = 180
+        _edit_pdf(pdf, rotate)
+        pages = index_chapter_file(pdf)
+        assert all(p.kind == KIND_PDF_RENDER for p in pages)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            images = list(pool.map(decode_page, pages * 3))
+        assert all(img.size().toTuple() == (_rendered(80), _rendered(120))
+                   for img in images)
 
 
 # ── Cache ────────────────────────────────────────────────────────────────
@@ -648,6 +1104,35 @@ class TestReaderLazyLoading:
         assert key not in reader._page_cache
         assert reader._page_slots[3].pixmap().isNull() or \
             reader._page_slots[3].pixmap().width() != 7
+
+    def test_failed_small_page_keeps_its_message_readable(
+            self, app_window, qapp, qtbot, sample_manga, monkeypatch,
+            tmp_path):
+        from PySide6.QtGui import QImage
+        from memanga.gui.pages import reader_pages
+
+        def tiny_cbz(pages, name):
+            out = tmp_path / name
+            with zipfile.ZipFile(out, "w") as zf:
+                for i in range(pages):
+                    zf.writestr(f"page{i:03d}.jpg", _jpg((12, 12)))
+            return out
+        monkeypatch.setattr(reader_pages, "decode_page",
+                            lambda ref: QImage())
+        _stage_chapter(app_window, sample_manga, tiny_cbz, pages=2)
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        reader = app_window._pages["reader"]
+        _settle(qtbot, reader)
+
+        label = reader._page_slots[0]
+        metrics = label.fontMetrics()
+        assert "couldn't be loaded" in label.text()
+        assert label.height() >= metrics.height()
+        assert label.width() >= min(metrics.horizontalAdvance(label.text()),
+                                    reader._page_target_w)
+        # The next page moved down with it.
+        assert reader._page_offsets[1] >= (reader._page_offsets[0]
+                                           + label.height())
 
     def test_failed_page_shows_placeholder_and_is_not_retried(
             self, app_window, qapp, qtbot, sample_manga, make_cbz,

@@ -16,7 +16,10 @@ listing what a distribution actually contains:
     python.org Windows build ships next to the interpreter, are covered by
     curated entries in packaging/third_party_overrides.json that ship the
     component's actual license text. Anything still unmatched stops the
-    build; there is no warning-only path.
+    build; there is no warning-only path. Third-party code compiled into a
+    bundled library whose package ships no attribution for it (PDFium and
+    its dependencies inside Qt PDF) gets entries of its own from
+    packaging/third_party_embedded.json.
   * Docker (`installed_components`): every installed Python distribution,
     plus the Playwright browser builds under `--browsers-dir`.
 
@@ -30,8 +33,8 @@ no build-host paths.
 
 The texts are reproduced as each component ships them; MeManga does not
 audit them. The file says so, and it says where it does not reproduce
-attributions (the third-party code inside Qt, the browser builds' own
-credits pages).
+attributions (the third-party code inside Qt other than Qt PDF's, the
+browser builds' own credits pages).
 
 CLI:
     python packaging/third_party_notices.py generate \\
@@ -170,6 +173,7 @@ def _stdlib_extension(path: str) -> bool:
 _CELLAR = re.compile(r"^(.*/Cellar/([^/]+)/([^/]+))/")
 # Curated license texts for bundled files nothing else owns; see the file.
 OVERRIDES = Path(__file__).resolve().parent / "third_party_overrides.json"
+EMBEDDED = Path(__file__).resolve().parent / "third_party_embedded.json"
 
 
 class NoticesError(Exception):
@@ -293,8 +297,9 @@ def dist_component(dist: metadata.Distribution) -> Component:
             + " runtime (native",
             "libraries and plugins), used under the LGPL-3.0. Source code: see",
             "\"" + LGPL_HEADING + "\" above.",
-            "Qt itself contains third-party code under its own licenses. Their",
-            "copyright notices are not reproduced in this file; Qt lists them at",
+            "Qt itself contains third-party code under its own licenses. Unless",
+            "this file gives them entries of their own, their copyright notices",
+            "are not reproduced here; Qt lists them at",
             "  " + _QT_ATTRIBUTIONS.format(minor=minor),
         ])
     return comp
@@ -505,6 +510,73 @@ def system_components(paths: list[str], overrides=None,
                 comps["override:" + override.component.name] = override.component
     ordered = [comps[k] for k in sorted(comps, key=lambda k: canonical(comps[k].name))]
     return ordered, sorted(set(unidentified))
+
+
+@dataclass
+class Embedded:
+    """Third-party code compiled into a bundled library (`library`) whose
+    own package ships no attribution for it, e.g. PDFium inside Qt PDF.
+    `qt` is the Qt release the license texts were taken from."""
+    library: str
+    patterns: tuple[str, ...]
+    qt: str
+    components: list[Component]
+
+    def found_in(self, names) -> bool:
+        return any(fnmatch.fnmatchcase(os.path.basename(n).lower(), p)
+                   for n in names for p in self.patterns)
+
+
+def load_embedded(path: Path = EMBEDDED, licenses_dir: Path = LICENSES_DIR,
+                  ) -> list[Embedded]:
+    """The entries of `path`. Every component must ship at least one
+    non-empty license file from `licenses_dir`."""
+    out = []
+    for entry in json.loads(Path(path).read_text(encoding="utf-8"))["libraries"]:
+        library, qt = entry["library"], entry["qt"]
+        comps = []
+        for part in entry["components"]:
+            files = []
+            for name in part["license_files"]:
+                file = Path(licenses_dir) / name
+                text = _read_text(file) if file.is_file() else ""
+                if not text.strip():
+                    raise NoticesError(f"{library}: {part['name']}: license file "
+                                       f"{name} is missing or empty")
+                files.append((Path(name).name, text))
+            if not files:
+                raise NoticesError(f"{library}: {part['name']} ships no license file")
+            title = f"{part['name']} {part['version']}".strip()
+            comps.append(Component(
+                f"{title} (in {library} {qt})", "", part["license"],
+                part.get("homepage", ""), files,
+                note="\n".join([f"Compiled into {library}; its package ships no "
+                                "attribution for it.", "License text from"]
+                               + [f"  {entry['source']}/{p}"
+                                  for p in part["source_files"]])))
+        out.append(Embedded(library, tuple(p.lower() for p in entry["files"]),
+                            qt, comps))
+    return out
+
+
+def embedded_components(paths, *, qt: str, embedded=None) -> list[Component]:
+    """Components compiled into the bundled libraries among `paths`. Raises
+    NoticesError when the bundle's Qt is not the release the texts were
+    recorded for, so a Qt update can't ship stale attributions."""
+    embedded = load_embedded() if embedded is None else embedded
+    paths = [os.fspath(p) for p in paths]
+    out = []
+    for entry in embedded:
+        if not entry.found_in(paths):
+            continue
+        if qt != entry.qt:
+            raise NoticesError(
+                f"the bundle ships {entry.library} from Qt {qt or '(unknown)'}, "
+                f"but packaging/third_party_embedded.json has its third-party "
+                f"license texts for Qt {entry.qt}; take them from that Qt "
+                f"release before shipping")
+        out += entry.components
+    return out
 
 
 @dataclass
@@ -869,7 +941,8 @@ DOCKER_NOTE = (
 def write_bundle_notices(paths, output, *, label: str, project_root: Path = ROOT,
                          extra: tuple[str, ...] = ("pyinstaller",),
                          generated_dirs=(), dists=None, overrides=None,
-                         layout: str = "onefile", qt: str = "") -> Path:
+                         layout: str = "onefile", qt: str = "",
+                         embedded=None) -> Path:
     """Write the notices for a PyInstaller bundle whose collected source
     files are `paths`. Called from packaging/memanga-release.spec. Raises
     NoticesError, writing nothing, when any bundled file has no license
@@ -893,6 +966,7 @@ def write_bundle_notices(paths, output, *, label: str, project_root: Path = ROOT
             "package owns them and no override covers them): "
             + ", ".join(unidentified) + "; add an entry with the component's "
             "license text to packaging/third_party_overrides.json")
+    comps += embedded_components(paths, qt=qt, embedded=embedded)
     text = render(comps, label=label, notes=[DESKTOP_NOTE],
                   project_license=Path(project_root) / "LICENSE",
                   project_root=Path(project_root), layout=layout, qt=qt)
@@ -1001,9 +1075,10 @@ def _upx_packed(path: Path, scan: int = 4096) -> bool:
     return any(marker in head for marker in _UPX_MARKERS)
 
 
-def bundle_problems(root: Path) -> list[str]:
+def bundle_problems(root: Path, embedded=None) -> list[str]:
     """Problems with a one-folder desktop app at `root`; empty when the
-    LGPL components are separate, unpacked files next to valid notices."""
+    LGPL components are separate, unpacked files next to valid notices
+    that list the third-party code compiled into the bundled libraries."""
     root = Path(root)
     internal = root / CONTENTS_DIR
     if not internal.is_dir():
@@ -1020,6 +1095,15 @@ def bundle_problems(root: Path) -> list[str]:
         if not any(fnmatch.fnmatchcase(rel, p) or fnmatch.fnmatchcase(rel, "*/" + p)
                    for rel in rels for p in patterns):
             problems.append(f"{root}: {what} is not a separate file in {CONTENTS_DIR}")
+    notices = root / FILENAME
+    sections = (_sections(notices.read_text(encoding="utf-8", errors="replace"))
+                if notices.is_file() else {})
+    for entry in load_embedded() if embedded is None else embedded:
+        if entry.found_in(rels):
+            for comp in entry.components:
+                if comp.title not in sections:
+                    problems.append(f"{root}: ships {entry.library} but "
+                                    f"{FILENAME} has no entry for {comp.title}")
     for rel in rels:
         if gpl_only(rel):
             problems.append(f"{root}: ships {rel}, which is not available under the LGPL")
