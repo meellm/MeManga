@@ -5,6 +5,7 @@ from typing import List
 
 from PIL import Image
 
+from ...image_limits import open_image
 from ..errors import DownloaderError
 
 
@@ -30,7 +31,7 @@ def _images_to_folder(image_paths: List[Path], output_dir: Path, img_format: str
     pil_format, ext, save_kwargs = pillow_format_map[img_format]
 
     for i, img_path in enumerate(image_paths):
-        img = Image.open(img_path)
+        img = open_image(img_path)
         try:
             # JPEG requires RGB (no alpha channel)
             if pil_format == "JPEG" and img.mode in ('RGBA', 'P', 'LA', 'PA'):

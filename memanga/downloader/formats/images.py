@@ -5,13 +5,16 @@ from pathlib import Path
 
 from PIL import Image
 
+from ...image_limits import open_image
+
 
 def _image_to_jpeg_bytes(img_path: Path) -> tuple:
     """Convert any image to JPEG bytes suitable for EPUB/Kindle.
 
-    Returns (jpeg_bytes, width, height).
+    Returns (jpeg_bytes, width, height). Raises ImageTooLargeError for
+    an image over the page pixel limit.
     """
-    img = Image.open(img_path)
+    img = open_image(img_path)
     try:
         width, height = img.size
         # Flatten transparency onto white background

@@ -396,3 +396,31 @@ def make_cbz(tmp_path):
                 zf.writestr(f"page{i:03d}.jpg", buf.getvalue())
         return out
     return _make
+
+
+@pytest.fixture
+def declared_png():
+    """Factory: PNG bytes whose header declares *width* x *height* pixels
+    with no image data behind it, the shape of a decompression bomb. Only
+    the header is real, so building one costs nothing. With
+    ``filled=True`` it is a real, white RGB image instead, compressed row
+    by row so even a huge one is cheap to build."""
+    import struct, zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data)))
+
+    def _make(width: int, height: int, filled: bool = False) -> bytes:
+        colour_type = 2 if filled else 0
+        ihdr = struct.pack(">IIBBBBB", width, height, 8, colour_type, 0, 0, 0)
+        if filled:
+            comp = zlib.compressobj(9)
+            row = b"\x00" + b"\xff" * (width * 3)
+            idat = b"".join(comp.compress(row) for _ in range(height))
+            idat += comp.flush()
+        else:
+            idat = zlib.compress(b"")
+        return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+                + chunk(b"IDAT", idat) + chunk(b"IEND", b""))
+    return _make

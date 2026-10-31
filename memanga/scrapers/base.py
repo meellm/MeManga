@@ -70,10 +70,13 @@ def _identifies_as_image(content: bytes) -> bool:
         return True
     if not content:
         return False
+    from ..image_limits import ImageTooLargeError, open_image
     try:
-        from PIL import Image
-        with Image.open(io.BytesIO(content)):
+        with open_image(io.BytesIO(content)):
             return True
+    except ImageTooLargeError:
+        # An image all the same; is_image_file() reports why it's refused.
+        return True
     except Exception:
         return False
 
@@ -105,6 +108,10 @@ def is_image_file(path) -> bool:
     truncated or corrupt body behind a valid signature is rejected too.
     A sniffed format this Pillow build cannot decode is accepted on its
     signature alone.
+
+    Raises ImageTooLargeError, before decoding anything, when the image
+    is over the pixel limit for page images (issue #386), so the caller
+    can say why the page was refused.
     """
     try:
         data = Path(path).read_bytes()
@@ -112,15 +119,18 @@ def is_image_file(path) -> bool:
         return False
     if not data:
         return False
-    from PIL import Image, UnidentifiedImageError
+    from PIL import UnidentifiedImageError
+    from ..image_limits import ImageTooLargeError, open_image
     try:
         # verify() checks structure (e.g. PNG CRCs) but leaves the image
         # unusable, so a second open does the full decode.
-        with Image.open(io.BytesIO(data)) as img:
+        with open_image(io.BytesIO(data)) as img:
             img.verify()
-        with Image.open(io.BytesIO(data)) as img:
+        with open_image(io.BytesIO(data)) as img:
             img.load()
         return True
+    except ImageTooLargeError:
+        raise
     except UnidentifiedImageError:
         return looks_like_image(data) and _no_decoder_for(data)
     except Exception:

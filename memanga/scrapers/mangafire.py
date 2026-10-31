@@ -25,8 +25,7 @@ from typing import List, Optional, Dict, Sequence, Tuple
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse
 
-from PIL import Image
-
+from ..image_limits import ImageTooLargeError, open_image
 from .base import (
     BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT,
     _identifies_as_image,
@@ -110,7 +109,7 @@ class ImageDescrambler:
             # Not scrambled, return as-is
             return image_data
 
-        img = Image.open(BytesIO(image_data))
+        img = open_image(BytesIO(image_data))
         width, height = img.size
 
         # Start from a copy so mode, palette and info carry over; the
@@ -973,6 +972,9 @@ class MangaFireScraper(BaseScraper):
 
             return True
 
+        except ImageTooLargeError:
+            # Refused before decoding; the downloader reports it.
+            raise
         except Exception as e:
             logger.debug("Failed to download %s: %s", url, e)
             return False

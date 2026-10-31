@@ -235,6 +235,110 @@ class TestRenderPage:
         assert decode_page(ref).isNull()
 
 
+# ── Page pixel limit (issue #386) ───────────────────────────────────────
+
+
+def _reader_warnings(caplog):
+    import logging
+    return [r.getMessage() for r in caplog.records
+            if r.name == "memanga.gui.pages.reader_pages"
+            and r.levelno == logging.WARNING]
+
+
+class TestPagePixelLimit:
+    def test_qt_allocation_limit_covers_every_accepted_page(self, qapp):
+        from PySide6.QtGui import QImageReader
+        from memanga.gui.pages import reader_pages  # noqa: F401 (sets it)
+        from memanga.image_limits import MAX_PAGE_PIXELS
+        # 4 bytes per pixel, as Qt holds an RGB32/ARGB32 page.
+        assert QImageReader.allocationLimit() * (1 << 20) > MAX_PAGE_PIXELS * 4
+
+    @pytest.mark.slow
+    def test_tall_strip_over_qts_default_limit_is_shown(
+            self, qapp, tmp_path, declared_png):
+        """1,024 x 66,000 RGB decodes to about 270 MB, over Qt's default
+        256 MiB allocation limit but within the page limit."""
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        cbz = tmp_path / "c.cbz"
+        with zipfile.ZipFile(cbz, "w") as zf:
+            zf.writestr("page000.png", declared_png(1024, 66_000, filled=True))
+        ref = index_chapter_file(cbz)[0]
+        assert (ref.width, ref.height) == (1024, 66_000)
+        img = decode_page(ref)
+        assert (img.width(), img.height()) == (1024, 66_000)
+
+    @pytest.mark.parametrize("size", [(2048, 65536), (100_000, 100_000)],
+                             ids=["just-over", "far-over"])
+    def test_over_limit_archive_page_is_refused_before_decoding(
+            self, qapp, tmp_path, caplog, declared_png, size):
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file)
+        cbz = tmp_path / "c.cbz"
+        with zipfile.ZipFile(cbz, "w") as zf:
+            zf.writestr("page000.png", declared_png(*size))
+        ref = index_chapter_file(cbz)[0]
+        # Indexed with its declared size, so the reader can say why.
+        assert (ref.width, ref.height) == size
+        # Refused by the header check (a decode attempt of this data-less
+        # PNG would log "not a readable image" instead).
+        assert decode_page(ref).isNull()
+        assert any("megapixel limit" in m for m in _reader_warnings(caplog))
+
+    def test_over_limit_folder_page_is_refused(self, qapp, tmp_path, caplog,
+                                               declared_png):
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_folder)
+        (tmp_path / "001.png").write_bytes(declared_png(2048, 65536))
+        ref = index_chapter_folder(tmp_path)[0]
+        assert decode_page(ref).isNull()
+        assert any("megapixel limit" in m for m in _reader_warnings(caplog))
+
+    def test_page_within_limit_decodes_as_before(self, qapp, tmp_path,
+                                                 monkeypatch):
+        from memanga import image_limits
+        from memanga.gui.pages.reader_pages import (decode_page,
+                                                    index_chapter_file,
+                                                    index_chapter_folder)
+        monkeypatch.setattr(image_limits, "MAX_PAGE_PIXELS", 40 * 60)
+        cbz = tmp_path / "c.cbz"
+        with zipfile.ZipFile(cbz, "w") as zf:
+            zf.writestr("page000.png", _png((40, 60)))
+        folder = tmp_path / "ch"
+        folder.mkdir()
+        (folder / "001.jpg").write_bytes(_jpg((40, 60)))
+        for ref in (index_chapter_file(cbz)[0],
+                    index_chapter_folder(folder)[0]):
+            img = decode_page(ref)
+            assert (img.width(), img.height()) == (40, 60)
+
+    def test_over_limit_pdf_image_is_refused_before_decoding(
+            self, qapp, tmp_path, caplog, monkeypatch):
+        pikepdf = pytest.importorskip("pikepdf")
+        from memanga.gui.pages.reader_pages import (KIND_PDF_PIKEPDF,
+                                                    decode_page,
+                                                    index_chapter_file)
+        # A valid-size page whose image stream is tiny; only the image's
+        # dictionary declares the oversized canvas, as a hostile file would.
+        pdf = _image_pdf(tmp_path / "c.pdf", [
+            (b"\x00" * 12, None, "/DeviceGray", (32, 1024))])
+
+        def declare_oversized(doc):
+            image = doc.pages[0].images["/Im0"]
+            image.Width = 2048
+            image.Height = 65536
+        _edit_pdf(pdf, declare_oversized)
+        ref = index_chapter_file(pdf)[0]
+        assert ref.kind == KIND_PDF_PIKEPDF
+        assert (ref.width, ref.height) == (2048, 65536)
+
+        def no_decode(self):
+            raise AssertionError("over-limit PDF image was decoded")
+        monkeypatch.setattr(pikepdf.PdfImage, "as_pil_image", no_decode)
+        assert decode_page(ref).isNull()
+        assert any("megapixel limit" in m for m in _reader_warnings(caplog))
+
+
 # ── PDF pages via pikepdf (issues #390, #382) ────────────────────────────
 
 
@@ -1133,6 +1237,29 @@ class TestReaderLazyLoading:
         # The next page moved down with it.
         assert reader._page_offsets[1] >= (reader._page_offsets[0]
                                            + label.height())
+
+    def test_over_limit_page_says_it_is_too_large(
+            self, app_window, qapp, qtbot, sample_manga, tmp_path,
+            declared_png):
+        """Issue #386: the reader says why the page is missing, and the
+        page's declared size doesn't stretch its slot."""
+        def cbz_with_bomb(pages, name):
+            out = tmp_path / name
+            with zipfile.ZipFile(out, "w") as zf:
+                zf.writestr("page000.jpg", _jpg((400, 600)))
+                zf.writestr("page001.png", declared_png(2048, 65536))
+            return out
+        _stage_chapter(app_window, sample_manga, cbz_with_bomb, pages=2)
+        app_window.show_page("reader", manga=sample_manga, chapter="1")
+        reader = app_window._pages["reader"]
+        _settle(qtbot, reader)
+
+        assert 1 in reader._failed_pages
+        label = reader._page_slots[1]
+        assert label.text() == ("Page 2 is too large to show "
+                                "(2048 x 65536 pixels).")
+        assert label.height() <= 2 * reader._page_target_w
+        assert "couldn't be loaded" not in label.text()
 
     def test_failed_page_shows_placeholder_and_is_not_retried(
             self, app_window, qapp, qtbot, sample_manga, make_cbz,

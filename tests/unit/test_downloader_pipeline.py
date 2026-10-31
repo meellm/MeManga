@@ -1183,6 +1183,82 @@ class TestInvalidPageBytes:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Page pixel limit (issue #386) — an over-limit page is refused before it
+# is decoded, never retried, and the error says why.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.filterwarnings("ignore::PIL.Image.DecompressionBombWarning")
+class TestPagePixelLimit:
+    _manga = {"title": "X", "url": "https://cdn.test/x", "source": "cdn.test"}
+
+    def _patch(self, monkeypatch, scraper):
+        import memanga.downloader as dl
+        monkeypatch.setattr(dl.chapter, "get_scraper", lambda d: scraper)
+        monkeypatch.setattr(dl.chapter.time, "sleep", lambda s: None)
+
+    # Just over the limit, and beyond twice it, where Pillow itself
+    # refuses the image while opening it.
+    @pytest.mark.parametrize("size", [(2048, 65536), (100_000, 100_000)],
+                             ids=["just-over", "far-over"])
+    def test_over_limit_page_fails_with_its_reason_and_is_not_retried(
+            self, tmp_path, fake_state, monkeypatch, declared_png, size):
+        from memanga.downloader import download_chapter, DownloaderError
+        scraper = _InvalidPageScraper(4, {2: declared_png(*size)})
+        self._patch(monkeypatch, scraper)
+        with pytest.raises(DownloaderError) as exc:
+            download_chapter(self._manga, _partial_chapter(), tmp_path, "cbz",
+                             fake_state, max_retries=3)
+        assert exc.value.failed_pages == [3]
+        assert exc.value.total_pages == 4
+        message = str(exc.value)
+        assert f"page 3: image is {size[0]} x {size[1]} pixels" in message
+        assert "134.2-megapixel limit" in message
+        # Never Pillow's own threshold (twice the page limit).
+        assert str(2 * 2048 * 65535) not in message
+        assert scraper.calls[2] == 1
+        assert not any(p.is_file() for p in tmp_path.rglob("*"))
+
+    def test_over_limit_page_counts_toward_partial_tolerance(
+            self, tmp_path, fake_state, monkeypatch, declared_png):
+        from memanga.downloader import download_chapter
+        self._patch(monkeypatch, _InvalidPageScraper(
+            10, {4: declared_png(100_000, 100_000)}))
+        seen = {}
+        out = download_chapter(
+            self._manga, _partial_chapter(), tmp_path, "zip", fake_state,
+            max_retries=2, allow_partial=True, partial_threshold=10,
+            on_partial=lambda failed, total: seen.update(failed=failed,
+                                                         total=total))
+        assert seen == {"failed": [5], "total": 10}
+        with zipfile.ZipFile(out) as zf:
+            pages = [n for n in zf.namelist() if n.startswith("page_")]
+            assert len(pages) == 9
+
+    @pytest.mark.parametrize("fmt", ["pdf", "epub", "jpg"])
+    def test_converting_writers_refuse_over_limit_pages(
+            self, jpg_paths, tmp_path, monkeypatch, fmt):
+        """The writers that decode pages hold them to the same limit
+        (pages arriving there already passed the page check)."""
+        from memanga import image_limits
+        from memanga.downloader import DownloaderError
+        from memanga.downloader.formats import (_images_to_epub,
+                                                _images_to_folder,
+                                                _images_to_pdf)
+        from memanga.image_limits import ImageTooLargeError
+        monkeypatch.setattr(image_limits, "MAX_PAGE_PIXELS", 400 * 600 - 1)
+        out = tmp_path / "out"
+        with pytest.raises((ImageTooLargeError, DownloaderError),
+                           match="megapixel limit"):
+            if fmt == "pdf":
+                _images_to_pdf(jpg_paths, out.with_suffix(".pdf"))
+            elif fmt == "epub":
+                _images_to_epub(jpg_paths, out.with_suffix(".epub"), "X", "1")
+            else:
+                _images_to_folder(jpg_paths, out, "jpg")
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Restart browsers — Playwright pool reset, used by GUI memory-pressure
 # ─────────────────────────────────────────────────────────────────────────
 

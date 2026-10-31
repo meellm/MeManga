@@ -1608,6 +1608,27 @@ class TestImageDescrambler:
         assert scraper.download_image(url, target) is False
         assert not target.exists()
 
+    @pytest.mark.filterwarnings(
+        "ignore::PIL.Image.DecompressionBombWarning")
+    def test_over_limit_page_is_refused_before_descrambling(
+            self, tmp_path, declared_png):
+        """Descrambling decodes the page, so an image over the page pixel
+        limit (issue #386) is refused first, and the refusal reaches the
+        downloader instead of passing as an ordinary failed page."""
+        from memanga.image_limits import ImageTooLargeError
+        from memanga.scrapers.mangafire import MangaFireScraper
+
+        url = "https://cdn.example/6.png"
+        scraper = MangaFireScraper()
+        scraper.session = _Session([_Response(
+            content=declared_png(2048, 65536))])
+        scraper._current_offsets[url] = 2
+        target = tmp_path / "page_006.png"
+
+        with pytest.raises(ImageTooLargeError):
+            scraper.download_image(url, target)
+        assert not target.exists()
+
 
 class TestMangaFirePageOffsets:
     """The page list's scramble offset is a positive integer when a page

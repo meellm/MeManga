@@ -164,6 +164,16 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #386 Page images are held to one explicit pixel limit, 2,048 x 65,535
+  pixels (about 134 megapixels), checked against the image header before
+  anything is decoded, by the downloader and by the desktop reader. Tall
+  webtoon strips up to the tallest possible JPEG fit; the desktop reader
+  used to refuse colour strips over about 67 megapixels that downloaded
+  fine. A downloaded page over the limit is not retried, and the
+  chapter's "Incomplete download" error names the page, its size and the
+  limit (with partial chapters allowed, it counts as a missing page). The
+  reader shows such a page as "Page N is too large to show (W x H
+  pixels)." instead of "couldn't be loaded".
 - #381 The Windows and Linux desktop downloads are a folder instead of a
   single self-extracting file, and no release build is UPX-compressed, so
   the LGPL components (Qt, PySide6, Shiboken6, img2pdf) stay separate files

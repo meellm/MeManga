@@ -30,7 +30,16 @@ from PySide6.QtCore import (QBuffer, QByteArray, QIODevice, QObject, QSize,
                             Qt, Signal)
 from PySide6.QtGui import QImage, QImageReader, QPainter, QPixmap
 
+from ...image_limits import MAX_PAGE_PIXELS, check_image_size
+
 logger = logging.getLogger(__name__)
+
+# Pages are held to the pixel limit for page images (issue #386), checked
+# against each image's header before decoding. Qt's own allocation limit
+# (256 MiB by default, which refuses tall webtoon strips the downloader
+# accepts) is raised to the same budget, 4 bytes per pixel, and stays the
+# backstop for images whose header gives no size. Process-wide in Qt.
+QImageReader.setAllocationLimit(-(-MAX_PAGE_PIXELS * 4 // (1 << 20)))
 
 # Every extension the archive writer can name a page with
 # (downloader/formats/cbz.py); Qt's content probe below still decides
@@ -372,8 +381,10 @@ def _decode_pdf_image(raw) -> QImage:
 
     A plain JPEG stream goes to QImage as stored. Anything else is
     unpacked by pikepdf (filters, palettes, colour spaces) and its pixels
-    copied straight into a QImage — never re-encoded to another format."""
+    copied straight into a QImage — never re-encoded to another format.
+    An image over the pixel limit is refused before either."""
     import pikepdf
+    check_image_size(int(raw.get("/Width", 0)), int(raw.get("/Height", 0)))
     pdf_image = pikepdf.PdfImage(raw)
     if _is_plain_jpeg(pdf_image):
         img = QImage()
@@ -552,15 +563,29 @@ def _render_pdf_page(ref: PageRef) -> QImage:
     return img
 
 
+def _read_image(device) -> QImage:
+    """The image on *device* (a file name or an open QIODevice), refused
+    before decoding when its header declares more than the pixel limit."""
+    reader = QImageReader(device)
+    size = reader.size()
+    if size.isValid():
+        check_image_size(size.width(), size.height())
+    return reader.read()
+
+
 def _decode(ref: PageRef) -> QImage:
     if ref.kind == KIND_ZIP:
         with zipfile.ZipFile(ref.source, "r") as zf:
             data = zf.read(ref.member)
-        img = QImage()
-        img.loadFromData(data)
-        return img
+        buf = QBuffer()
+        buf.setData(QByteArray(data))
+        buf.open(QIODevice.OpenModeFlag.ReadOnly)
+        try:
+            return _read_image(buf)
+        finally:
+            buf.close()
     if ref.kind == KIND_IMAGE:
-        return QImage(str(ref.source))
+        return _read_image(str(ref.source))
     if ref.kind == KIND_PDF_PIKEPDF:
         import pikepdf
         with pikepdf.open(str(ref.source)) as pdf:

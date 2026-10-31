@@ -594,3 +594,34 @@ class TestIsImageFile:
 
     def test_missing_file(self, tmp_path):
         assert is_image_file(tmp_path / "nope.jpg") is False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Page pixel limit (issue #386)
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.filterwarnings("ignore::PIL.Image.DecompressionBombWarning")
+class TestPagePixelLimit:
+    @pytest.mark.parametrize("size", [(2048, 65536), (100_000, 100_000)],
+                             ids=["just-over", "far-over"])
+    def test_over_limit_page_raises_instead_of_failing_silently(
+            self, tmp_path, declared_png, size):
+        from memanga.image_limits import ImageTooLargeError
+        p = tmp_path / "page.png"
+        p.write_bytes(declared_png(*size))
+        with pytest.raises(ImageTooLargeError):
+            is_image_file(p)
+
+    def test_over_limit_page_still_identifies_as_an_image(self, declared_png):
+        # Its download is kept so the page check can say why it's refused.
+        from memanga.scrapers.base import _identifies_as_image
+        assert _identifies_as_image(declared_png(100_000, 100_000)) is True
+
+    def test_page_at_the_limit_is_decoded_as_before(self, tmp_path,
+                                                    monkeypatch):
+        from memanga import image_limits
+        monkeypatch.setattr(image_limits, "MAX_PAGE_PIXELS", 32 * 32)
+        p = tmp_path / "page"
+        p.write_bytes(_image_bytes("PNG"))
+        assert is_image_file(p) is True
