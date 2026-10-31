@@ -39,6 +39,13 @@ def _is_smoke_run(step):
     return "docker run --rm memanga:smoke --help" in str(step.get("run", ""))
 
 
+def _is_browser_smoke_run(step):
+    return (
+        "docker run --rm memanga:smoke memanga doctor --check browsers"
+        in str(step.get("run", ""))
+    )
+
+
 def _publish_build_indices():
     return [
         i
@@ -64,6 +71,22 @@ def test_smoke_run_follows_smoke_build_unconditionally():
     assert build != -1 and run != -1
     assert build < run
     assert "if" not in _steps()[run]
+
+
+def test_browser_smoke_follows_help_smoke_unconditionally():
+    help_run = _index(_is_smoke_run)
+    browser = _index(_is_browser_smoke_run)
+    assert help_run != -1 and browser != -1
+    assert help_run < browser
+    assert "if" not in _steps()[browser]
+
+
+def test_browser_smoke_gate_precedes_every_publish_build():
+    browser = _index(_is_browser_smoke_run)
+    publish = _publish_build_indices()
+    assert browser != -1
+    assert len(publish) == 2
+    assert all(browser < i for i in publish)
 
 
 def test_smoke_gate_precedes_every_publish_build():
