@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 from ..chapters import Chapter, ChapterWithSource
+from ..image_limits import ImageTooLargeError
 from ..scrapers import get_scraper
 from ..scrapers.base import BaseScraper, is_image_file
 from ..state import State
@@ -155,12 +156,26 @@ def download_chapter(
             # A page counts only when the saved bytes are an image, whatever
             # the scraper returned: an HTML block page or empty body is a
             # failed page that goes through retry/partial handling (#229).
-            if not _page_scraper().download_image(url, img_path):
-                return False
-            if is_image_file(img_path):
-                return True
+            # A page over the pixel limit raises ImageTooLargeError (#386).
+            try:
+                if not _page_scraper().download_image(url, img_path):
+                    return False
+                if is_image_file(img_path):
+                    return True
+            except ImageTooLargeError:
+                Path(img_path).unlink(missing_ok=True)
+                raise
             Path(img_path).unlink(missing_ok=True)
             return False
+
+        # Pages refused for their size (#386): failed pages that are never
+        # retried, since the same image is refused again.
+        too_large: Dict[int, ImageTooLargeError] = {}
+
+        def _refuse_page(idx, error):
+            too_large[idx] = error
+            logger.warning("Page %d of %s chapter %s refused: %s",
+                           idx + 1, title, chapter.number, error)
 
         # Download images concurrently
         download_tasks = []
@@ -186,6 +201,8 @@ def download_chapter(
                 try:
                     if future.result():
                         results[idx] = img_path
+                except ImageTooLargeError as e:
+                    _refuse_page(idx, e)
                 except Exception:
                     # Per-page failure — silent; retry loop below decides
                     # whether to give up. Old code printed a warning but
@@ -224,7 +241,7 @@ def download_chapter(
             for attempt in range(1, max_retries + 1):
                 failed = [(idx, url, img_path)
                           for idx, url, img_path in download_tasks
-                          if idx not in results]
+                          if idx not in results and idx not in too_large]
                 if not failed:
                     break
                 logger.debug(
@@ -237,6 +254,8 @@ def download_chapter(
                     try:
                         if _fetch_page(url, img_path):
                             results[idx] = img_path
+                    except ImageTooLargeError as e:
+                        _refuse_page(idx, e)
                     except Exception:
                         pass
 
@@ -256,9 +275,11 @@ def download_chapter(
                 and failed_pct <= partial_threshold
             )
             if not partial_ok:
+                reasons = "".join(f"; page {idx + 1}: {too_large[idx]}"
+                                  for idx in sorted(too_large))
                 raise DownloaderError(
                     f"Incomplete download: {len(still_failed)}/{len(page_urls)} "
-                    f"pages failed (pages {failed_page_nums})",
+                    f"pages failed (pages {failed_page_nums}){reasons}",
                     failed_pages=failed_page_nums,
                     total_pages=total_pages,
                 )

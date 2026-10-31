@@ -18,6 +18,7 @@ from PySide6.QtCore import (Qt, QByteArray, QBuffer, QEvent, QObject, QRect,
                             QSize, QTimer)
 
 from ...chapters import chapter_value
+from ...image_limits import exceeds_pixel_limit
 from .base import BasePage
 from .reader_pages import (PageLoader, PageRef, PixmapCache, display_size,
                            index_chapter_file, index_chapter_folder)
@@ -928,10 +929,13 @@ class ReaderPage(BasePage):
         return lbl
 
     def _placeholder_size(self, ref: PageRef, target_w: int) -> QSize:
-        if ref.width > 0 and ref.height > 0:
+        # A page over the pixel limit is never shown, so its declared size
+        # mustn't stretch the layout either.
+        if (ref.width > 0 and ref.height > 0
+                and not exceeds_pixel_limit(ref.width, ref.height)):
             return display_size(ref.width, ref.height, target_w,
                                 self._zoom_level)
-        # The header gave no size: reserve a typical page shape until
+        # No usable header size: reserve a typical page shape until
         # the decoded page sets the real one.
         return QSize(target_w, int(target_w * 1.5))
 
@@ -1079,7 +1083,13 @@ class ReaderPage(BasePage):
             label.setStyleSheet(
                 f"color: {T.FG_MUTED}; font-size: {T.FONT_SIZE_SM}pt;")
             label.setWordWrap(True)
-            label.setText(f"Page {index + 1} couldn't be loaded.")
+            ref = (self._images[index] if 0 <= index < len(self._images)
+                   else None)
+            if ref is not None and exceeds_pixel_limit(ref.width, ref.height):
+                label.setText(f"Page {index + 1} is too large to show "
+                              f"({ref.width} x {ref.height} pixels).")
+            else:
+                label.setText(f"Page {index + 1} couldn't be loaded.")
             # A small page's slot can be too small for the message: grow
             # it until the message fits, wrapped to the page width.
             label.ensurePolished()
