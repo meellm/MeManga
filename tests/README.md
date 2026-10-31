@@ -26,6 +26,7 @@ pytest --cov=memanga --cov-report=html   # HTML coverage report
 | `unit/gui/theme/` | Token table, flat() helper, QSS builder substitution. |
 | `unit/gui/components/` | One file per widget — instantiation, theme reactivity, signal emission. |
 | `unit/gui/pages/` | One file per page — header rendering, event subscription, `on_show`, refresh on event. |
+| `unit/gui/pages/test_page_modules.py` | Settings and Reader page layout — tab and reader mixins, import direction, Qt class names, reader input dispatch, reader view-mode resolution. |
 | `unit/gui/test_workers.py` | BackgroundWorker pool, pause/resume, ping_sources, cancel_download. |
 | `unit/gui/test_events.py` | EventBus pub/sub, polling, thread safety. |
 | `unit/gui/test_cache.py` | CoverCache disk/memory LRU, placeholders. |

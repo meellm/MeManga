@@ -1160,6 +1160,7 @@ class TestSettingsPage:
 
         assert list(titles) == [
             "Reader",
+            "Network & Privacy",
             "Scheduled Checks",
             "Partial Chapters",
             "Post-Processing",
@@ -1170,6 +1171,13 @@ class TestSettingsPage:
             titles["Reader"]
             < positions[page._prefetch_check]
             < positions[page._remove_after_read_check]
+            < titles["Network & Privacy"]
+        )
+        # Issue #337: the connection and cover toggles follow Reader.
+        assert (
+            titles["Network & Privacy"]
+            < positions[page._network_check]
+            < positions[page._mangadex_cover_check]
             < titles["Scheduled Checks"]
         )
 
