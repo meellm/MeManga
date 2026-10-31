@@ -412,3 +412,25 @@ class TestJumpSlider:
         assert s.value() == 1
         self._click_at(s, s.width() - 1)
         assert s.value() == 8
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# WrappingLabel
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestWrappingLabel:
+    def test_size_hints_follow_wrapped_text_height(self, theme):
+        from memanga.gui.components.wrapping_label import WrappingLabel
+        label = WrappingLabel()
+        label.resize(120, 20)
+        label.setText("a long hint that has to wrap " * 6)
+        tall = label.heightForWidth(120)
+        assert tall > label.fontMetrics().height()
+        assert label.wordWrap()
+        assert label.sizeHint().height() == tall
+        assert label.minimumSizeHint().height() == tall
+
+        # A shorter status text shrinks the hint at the same width.
+        label.setText("Done")
+        assert label.sizeHint().height() == label.heightForWidth(120) < tall
