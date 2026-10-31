@@ -38,6 +38,7 @@ WRAPPERS = {
     "is_external_chapter": ("library", "is_external"),
     "reset_manga_progress": ("library", "reset_progress"),
     "rename_manga": ("library", "rename"),
+    "has_manga_history": ("library", "has_history"),
     "remove_manga": ("library", "remove"),
     # state.backups
     "get_pending_backup": ("backups", "get_pending"),
@@ -64,6 +65,7 @@ WRAPPERS = {
     "get_stats": ("activity", "get_stats"),
     "add_download_history": ("activity", "add_download"),
     "get_download_history": ("activity", "get_download_history"),
+    "remove_download_history": ("activity", "remove_downloads"),
     # state.reading
     "set_reading_progress": ("reading", "set_progress"),
     "get_reading_progress": ("reading", "get_progress"),
@@ -728,6 +730,42 @@ class TestCliFlow:
         assert s.get_manga_state("Old") == {}
         assert s.get_downloaded_chapters("New") == ["1"]
         assert s.get_last_chapter("New") is None
+
+    def test_rename_moves_download_history(self, state):
+        # Issue #392: history rows follow a rename, so deleting the
+        # manga's history finds them; a manga added later under the old
+        # title keeps its own rows.
+        state.library.add_downloaded("A", "1")
+        state.activity.add_download("A", "1", "pdf")
+        state.activity.add_download("Other", "1", "pdf")
+        assert state.library.rename("A", "B") is True
+        state.activity.add_download("A", "7", "pdf")
+        assert state.activity.remove_downloads("B") == 1
+        s = _reload(state)
+        assert [(e["title"], e["chapter"]) for e in s.get_download_history()] == [
+            ("A", "7"), ("Other", "1")]
+
+    def test_has_history_sees_state_entries_and_history_rows(self, state):
+        # Issue #392: rename flows refuse titles that still have either.
+        state.library.add_downloaded("Kept", "1")
+        state.activity.add_download("Logged", "1", "pdf")
+        assert state.library.has_history("Kept") is True
+        assert state.library.has_history("Logged") is True
+        assert state.library.has_history("kept") is False
+        assert state.library.has_history("Fresh") is False
+
+    def test_rename_moves_download_history_without_a_state_entry(self, state):
+        # Issue #392: history kept without a state entry still follows
+        # the rename, so purging the new title finds it.
+        state.activity.add_download("A", "1", "pdf")
+        state.activity.add_download("Other", "1", "pdf")
+        assert state.library.rename("A", "B") is True
+        state.activity.add_download("A", "7", "pdf")
+        assert state.activity.remove_downloads("B") == 1
+        s = _reload(state)
+        assert s.get_manga_state("B") == {}
+        assert [(e["title"], e["chapter"]) for e in s.get_download_history()] == [
+            ("A", "7"), ("Other", "1")]
 
     def test_mark_download_sent_updates_only_the_unsent_entry(self, state):
         # Issue #338: a later successful send updates the chapter's own

@@ -93,6 +93,21 @@ class ActivityStore(StateDomain):
                 return True
         return False
 
+    def remove_downloads(self, manga_title: str) -> int:
+        """Drop every logged download of ``manga_title`` (issue #392).
+
+        Used when the user asks to delete a removed manga's history.
+        Returns how many entries were dropped.
+        """
+        with self._backend._locked() as data:
+            history = data.get("download_history", [])
+            kept = [e for e in history if e.get("title") != manga_title]
+            removed = len(history) - len(kept)
+            if removed:
+                data["download_history"] = kept
+                self._backend.save()
+            return removed
+
     def get_download_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get recent download history, newest first."""
         with self._backend._locked() as data:

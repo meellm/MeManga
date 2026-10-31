@@ -179,14 +179,37 @@ class LibraryStore(StateDomain):
 
         Issue #110: replaces the GUI's direct ``_data`` pokes so renames go
         through the lock like every other mutation.
+
+        Issue #392: its download-history rows move with it, so deleting
+        its history later finds them. A manga added under the old title
+        afterwards logs new rows, which stay its own. The rows move even
+        without a state entry (history kept from an earlier removal);
+        returns whether anything moved.
         """
         with self._backend._locked() as data:
             manga = data.get("manga", {})
-            if old_title not in manga:
-                return False
-            manga[new_title] = manga.pop(old_title)
-            self._backend.save()
-            return True
+            moved = old_title in manga
+            if moved:
+                manga[new_title] = manga.pop(old_title)
+            for entry in data.get("download_history", []):
+                if entry.get("title") == old_title:
+                    entry["title"] = new_title
+                    moved = True
+            if moved:
+                self._backend.save()
+            return moved
+
+    def has_history(self, manga_title: str) -> bool:
+        """Whether anything is still saved under ``manga_title``: a state
+        entry or download-history rows (issue #392).
+
+        Renaming a manga onto such a title would mix its history with
+        records that can't be told apart from it, so rename flows refuse.
+        """
+        with self._backend._locked() as data:
+            return (manga_title in data.get("manga", {})
+                    or any(e.get("title") == manga_title
+                           for e in data.get("download_history", [])))
 
     def remove(self, manga_title: str) -> bool:
         """Remove a manga from state."""

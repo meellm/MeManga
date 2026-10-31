@@ -13,7 +13,9 @@ from ...chapters import format_chapter_value
 from .base import BasePage
 from .. import theme as T
 from ..components.toast import Toast
-from ..components.dialogs import ConfirmDialog, InputDialog
+from ..components.dialogs import InputDialog
+from ..components.remove_manga_modal import (RemoveMangaModal, remove_manga,
+                                              removed_message)
 from ..components.error_details import detail_tooltip
 
 
@@ -969,6 +971,19 @@ class DetailPage(BasePage):
             Toast(self, "Title cannot be empty", kind="error")
             return
 
+        # Issue #392: a rename must not merge this manga's history with
+        # another manga's: a tracked one, or one whose history was kept.
+        if new_title != old_title:
+            if any(m.get("title", "").lower() == new_title.lower()
+                   and m.get("title") != old_title
+                   for m in self.app.config.get("manga", [])):
+                Toast(self, f"'{new_title}' is already in your library", kind="error")
+                return
+            if self.app.app_state.has_manga_history(new_title):
+                Toast(self, f"'{new_title}' still has history from an earlier manga",
+                      kind="error")
+                return
+
         # Fallback delay — only meaningful with a backup source. Drop the
         # field entirely when the user removes the backup so config stays clean.
         try:
@@ -1131,24 +1146,17 @@ class DetailPage(BasePage):
     def _confirm_remove(self):
         if not self._manga:
             return
-        title = self._manga.get("title", "Unknown")
-        ConfirmDialog(
-            self, title="Remove Manga",
-            message=f"Remove '{title}' from your library?\nThis also removes download history.",
-            on_confirm=self._do_remove,
-        )
+        RemoveMangaModal(
+            self, self._manga.get("title", ""),
+            on_confirm=lambda purge: self._do_remove(purge_history=purge),
+        ).exec()
 
-    def _do_remove(self):
+    def _do_remove(self, purge_history=False):
         title = self._manga.get("title", "")
-        manga_list = self.app.config.get("manga", [])
-        manga_list = [m for m in manga_list if m.get("title") != title]
-        self.app.config.set("manga", manga_list)
-        self.app.config.save()
-        self.app.app_state.remove_manga(title)
-        self.app.events.publish(
-            "library_updated", {"title": title, "action": "remove"}
-        )
+        remove_manga(self.app, title, purge_history=purge_history)
         self.app.show_page("library")
+        # This page is hidden now; show the toast on the window.
+        Toast(self.app, removed_message(title, purge_history), kind="success")
 
     # ── Reader ──
 

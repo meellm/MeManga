@@ -900,6 +900,8 @@ def cmd_remove(args):
         if title in manga_state:
             del manga_state[title]
             state.set("manga", manga_state)
+        # Issue #392: the Downloads History rows are history too.
+        state.remove_download_history(title)
 
     console.print(f"[red]🗑️  Removed:[/red] {_esc(title)}")
     if purge_history:
@@ -1330,6 +1332,13 @@ def cmd_update(args):
             return _error(
                 f"[red]Error:[/red] '{_esc(title)}' would use the same download "
                 f"folder as '{_esc(owner['title'])}'; pick another title"
+            )
+        # Issue #392: history saved under that title (an earlier manga's)
+        # can't be told apart from this manga's once they share it.
+        if title != old_title and state.has_manga_history(title):
+            return _error(
+                f"[red]Error:[/red] '{_esc(title)}' still has history from an "
+                f"earlier manga; pick another title"
             )
 
     # Legacy entries keep `source`/`url`; multi-source entries keep a

@@ -538,6 +538,23 @@ directory. It refuses, before changing anything, if that folder is a
 symlink or another tracked manga uses the same folder. Files saved at the
 top of the download directory by old versions are left alone.
 
+In the desktop app, **Remove** in a manga's right-click menu on the
+Library page and the **Remove** button on its page ask the same question.
+Read progress and download history are kept unless you tick **Also delete
+progress and history**, so adding the manga again picks up
+where you left off. The desktop app never deletes downloaded files.
+Ticking it also clears the manga's rows from **Downloads > History**,
+including rows from before a rename. Rows from a rename made with an
+older version still carry the old title, can't be matched to the manga
+for sure, and are kept.
+
+Renaming a manga, in the app or with `edit --title`, is refused when the
+new title still has saved history from an earlier manga, so a rename
+never mixes two manga's history. Adding a manga under such a title picks
+that history up, as above. To reuse the title without it, add it again
+and remove it with its history deleted (`--purge-history` in the
+terminal, which also clears its Downloads History rows).
+
 ---
 
 ## Checking for New Chapters

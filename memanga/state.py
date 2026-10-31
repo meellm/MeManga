@@ -419,6 +419,10 @@ class State:
         """See :meth:`LibraryStore.rename`."""
         return self.library.rename(old_title, new_title)
 
+    def has_manga_history(self, manga_title: str) -> bool:
+        """See :meth:`LibraryStore.has_history`."""
+        return self.library.has_history(manga_title)
+
     def remove_manga(self, manga_title: str) -> bool:
         """See :meth:`LibraryStore.remove`."""
         return self.library.remove(manga_title)
@@ -541,6 +545,10 @@ class State:
     def get_download_history(self, limit: int = 50) -> List[Dict[str, Any]]:
         """See :meth:`ActivityStore.get_download_history`."""
         return self.activity.get_download_history(limit)
+
+    def remove_download_history(self, manga_title: str) -> int:
+        """See :meth:`ActivityStore.remove_downloads`."""
+        return self.activity.remove_downloads(manga_title)
 
     # ── Reading progress, positions, read set: state.reading ───────────
 

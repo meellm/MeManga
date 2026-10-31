@@ -249,6 +249,73 @@ class TestDownloadFromModal:
         assert captured == []
 
 
+class TestRemoveMangaModal:
+    def test_defaults_keep_history_and_cancel_is_default(self, qapp, theme):
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        captured = []
+        m = RemoveMangaModal(None, "T", on_confirm=captured.append)
+        assert m._purge_check.isChecked() is False
+        assert "kept" in m._effects.text()
+        assert "Downloaded files stay" in m._effects.text()
+        assert m.cancel_btn.isDefault() and not m.remove_btn.isDefault()
+        m._do_confirm()
+        assert captured == [False]
+
+    def test_checkbox_updates_text_and_result(self, qapp, theme):
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        captured = []
+        m = RemoveMangaModal(None, "T", on_confirm=captured.append)
+        m._purge_check.setChecked(True)
+        # Only what is saved under this title is deleted (issue #392).
+        assert "history saved under 'T' are deleted" in m._effects.text()
+        assert "can't be undone" in m._effects.text()
+        assert "Downloaded files stay" in m._effects.text()
+        m._do_confirm()
+        assert captured == [True]
+
+    def test_checkbox_label_fits_the_modal(self, qapp, theme):
+        # A QCheckBox label never wraps, so it must fit the body width.
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        m = RemoveMangaModal(None, "T", on_confirm=None)
+        margins = m.body_layout.contentsMargins()
+        available = m.panel.width() - margins.left() - margins.right()
+        assert m._purge_check.sizeHint().width() <= available
+
+    @pytest.mark.parametrize("length", [13, 72, 160])
+    def test_long_title_text_is_not_clipped_after_ticking(self, qapp, theme,
+                                                         length):
+        # Live check: from about 71 characters the ticked text was cut off
+        # and the files line hidden, because the panel did not regrow.
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        title = ("Long manga title " * 10)[:length]
+        m = RemoveMangaModal(None, title, on_confirm=None)
+        m.show()
+        qapp.processEvents()
+        try:
+            label = m._effects
+            # Ticked, then unticked again: the panel must fit at once,
+            # without waiting for further event-loop passes.
+            for checked in (True, False):
+                m._purge_check.setChecked(checked)
+                assert label.text().endswith(
+                    "Downloaded files stay in your download folder.")
+                assert label.height() >= label.heightForWidth(label.width())
+                bottom = label.mapTo(m.panel, label.rect().bottomLeft()).y()
+                assert bottom <= m.panel.height()
+        finally:
+            m.close()
+
+    def test_title_markup_is_shown_literally(self, qapp, theme):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QLabel
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        m = RemoveMangaModal(None, "<b>T</b>", on_confirm=None)
+        q = next(w for w in m.findChildren(QLabel)
+                 if w.text().startswith("Remove '"))
+        assert q.textFormat() == Qt.TextFormat.PlainText
+        assert "<b>T</b>" in q.text()
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Toast — fire-and-forget popup
 # ─────────────────────────────────────────────────────────────────────────

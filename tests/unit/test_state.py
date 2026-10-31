@@ -758,6 +758,15 @@ class TestDownloadHistory:
         assert (entry["source"], entry["from_backup"], entry["partial"]) == \
             ("backup.test", True, True)
 
+    def test_remove_download_history_drops_only_that_title(self, state):
+        # Issue #392: deleting a removed manga's history clears its log.
+        state.add_download_history("X", "1", "pdf", "/tmp/x1.pdf", 1.0)
+        state.add_download_history("Y", "1", "pdf", "/tmp/y1.pdf", 1.0)
+        state.add_download_history("X", "2", "pdf", "/tmp/x2.pdf", 1.0)
+        assert state.remove_download_history("X") == 2
+        assert [e["title"] for e in state.get_download_history()] == ["Y"]
+        assert state.remove_download_history("X") == 0
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Stats helpers used by Library + Downloads
