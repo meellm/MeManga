@@ -75,15 +75,113 @@ class TestIndexing:
         assert [p.member for p in pages] == ["page000.png", "page001.jpg"]
         assert [(p.width, p.height) for p in pages] == [(40, 60), (50, 70)]
 
-    def test_epub_index_lists_every_image(self, qapp, tmp_path):
-        # The duplicate EPUB cover is a separate issue; the reader still
-        # shows what the archive holds.
-        from memanga.gui.pages.reader_pages import index_chapter_file
+    @staticmethod
+    def _writer_epub(tmp_path, cover=None):
+        """A three-page EPUB made by the real writer; pages differ."""
+        from memanga.downloader import _images_to_epub
+        paths = []
+        for i, color in enumerate(("red", "green", "blue")):
+            path = tmp_path / f"{i}.png"
+            path.write_bytes(_png(color=color))
+            paths.append(path)
+        cover_path = None
+        if cover is not None:
+            cover_path = tmp_path / "cover.png"
+            cover_path.write_bytes(_png(color=cover))
+        epub = tmp_path / "c.epub"
+        _images_to_epub(paths, epub, "Example", "1", cover_path)
+        return epub
+
+    @staticmethod
+    def _epub(tmp_path, members, opf=None, opf_path="OEBPS/content.opf"):
         epub = tmp_path / "c.epub"
         with zipfile.ZipFile(epub, "w") as zf:
             zf.writestr("mimetype", b"application/epub+zip")
-            zf.writestr("images/cover.jpg", _jpg())
-            zf.writestr("images/page000.jpg", _jpg())
+            if opf is not None:
+                zf.writestr("META-INF/container.xml", f"""<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="{opf_path}"
+    media-type="application/oebps-package+xml"/></rootfiles>
+</container>""")
+                zf.writestr(opf_path, opf)
+            for name, data in members:
+                zf.writestr(name, data)
+        return epub
+
+    def test_epub_cover_copy_of_first_page_is_shown_once(self, qapp,
+                                                         tmp_path):
+        # Without a separate cover the writer repeats page 1 as the
+        # cover image (issue #391).
+        from memanga.gui.pages.reader_pages import index_chapter_file
+        pages = index_chapter_file(self._writer_epub(tmp_path))
+        assert [p.member for p in pages] == [
+            "EPUB/images/page_000.jpg", "EPUB/images/page_001.jpg",
+            "EPUB/images/page_002.jpg"]
+
+    def test_epub_distinct_cover_is_kept(self, qapp, tmp_path):
+        from memanga.gui.pages.reader_pages import index_chapter_file
+        pages = index_chapter_file(self._writer_epub(tmp_path,
+                                                     cover="white"))
+        assert [p.member for p in pages] == [
+            "EPUB/images/cover.jpg", "EPUB/images/page_000.jpg",
+            "EPUB/images/page_001.jpg", "EPUB/images/page_002.jpg"]
+
+    def test_epub2_cover_meta_is_resolved_against_the_package(
+            self, qapp, tmp_path):
+        # EPUB 2 names the cover only by <meta name="cover">; the href is
+        # a URL relative to the package document.
+        from memanga.gui.pages.reader_pages import index_chapter_file
+        opf = """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata><meta name="cover" content="art"/></metadata>
+  <manifest>
+    <item id="art" href="img/front%20art.jpg" media-type="image/jpeg"/>
+    <item id="p1" href="img/a.jpg" media-type="image/jpeg"/>
+  </manifest>
+</package>"""
+        epub = self._epub(tmp_path, [
+            ("OEBPS/img/front art.jpg", _jpg(color="red")),
+            ("OEBPS/img/a.jpg", _jpg(color="red")),
+            ("OEBPS/img/b.jpg", _jpg(color="blue"))], opf)
+        pages = index_chapter_file(epub)
+        assert [p.member for p in pages] == ["OEBPS/img/a.jpg",
+                                             "OEBPS/img/b.jpg"]
+
+    def test_epub_cover_matching_a_later_page_is_kept(self, qapp, tmp_path):
+        from memanga.gui.pages.reader_pages import index_chapter_file
+        opf = """<?xml version="1.0"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <manifest>
+    <item id="c" href="c.jpg" media-type="image/jpeg"
+          properties="cover-image"/>
+  </manifest>
+</package>"""
+        epub = self._epub(tmp_path, [
+            ("OEBPS/c.jpg", _jpg(color="blue")),
+            ("OEBPS/p1.jpg", _jpg(color="red")),
+            ("OEBPS/p2.jpg", _jpg(color="blue"))], opf)
+        pages = index_chapter_file(epub)
+        assert [p.member for p in pages] == ["OEBPS/c.jpg", "OEBPS/p1.jpg",
+                                             "OEBPS/p2.jpg"]
+
+    @pytest.mark.parametrize("opf", [None, "<package><manifest>"])
+    def test_epub_without_readable_package_uses_cover_name(
+            self, qapp, tmp_path, opf):
+        from memanga.gui.pages.reader_pages import index_chapter_file
+        epub = self._epub(tmp_path, [
+            ("images/cover.jpg", _jpg()),
+            ("images/page000.jpg", _jpg()),
+            ("images/page001.jpg", _jpg(color="red"))], opf)
+        pages = index_chapter_file(epub)
+        assert [p.member for p in pages] == ["images/page000.jpg",
+                                             "images/page001.jpg"]
+
+    def test_epub_distinct_cover_without_package_is_kept(self, qapp,
+                                                         tmp_path):
+        from memanga.gui.pages.reader_pages import index_chapter_file
+        epub = self._epub(tmp_path, [
+            ("images/cover.jpg", _jpg(color="red")),
+            ("images/page000.jpg", _jpg())])
         pages = index_chapter_file(epub)
         assert [p.member for p in pages] == ["images/cover.jpg",
                                              "images/page000.jpg"]

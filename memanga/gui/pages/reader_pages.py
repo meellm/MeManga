@@ -17,6 +17,7 @@ on its worker thread.
 from __future__ import annotations
 
 import logging
+import posixpath
 import threading
 import zipfile
 from collections import OrderedDict
@@ -24,7 +25,9 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
+from urllib.parse import unquote
+from xml.etree import ElementTree
 
 from PySide6.QtCore import (QBuffer, QByteArray, QIODevice, QObject, QSize,
                             Qt, Signal)
@@ -139,6 +142,102 @@ def _index_zip(filepath: Path, names: Iterable[str]) -> List[PageRef]:
             pages.append(PageRef(filepath, KIND_ZIP, member=name,
                                  width=size[0], height=size[1]))
     return pages
+
+
+# Largest container.xml or package document read to find an EPUB cover;
+# real ones are a few KiB. Anything bigger is skipped, not parsed.
+_EPUB_XML_MAX = 4 << 20
+
+
+def _local_name(tag) -> str:
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
+def _read_epub_xml(zf: zipfile.ZipFile, name: str):
+    info = zf.getinfo(name)
+    if info.file_size > _EPUB_XML_MAX:
+        raise ValueError(f"{name} is too large")
+    return ElementTree.fromstring(zf.read(info))
+
+
+def _epub_package_path(zf: zipfile.ZipFile) -> Optional[str]:
+    """The package document (OPF) named by META-INF/container.xml."""
+    root = _read_epub_xml(zf, "META-INF/container.xml")
+    rootfiles = [el for el in root.iter() if _local_name(el.tag) == "rootfile"
+                 and el.get("full-path")]
+    for el in rootfiles:
+        if el.get("media-type") == "application/oebps-package+xml":
+            return el.get("full-path")
+    return rootfiles[0].get("full-path") if rootfiles else None
+
+
+def _declared_epub_covers(zf: zipfile.ZipFile) -> Set[str]:
+    """Archive members the package declares as the cover image: the EPUB 3
+    manifest property cover-image, and the EPUB 2 <meta name="cover">
+    that Kindle reads. Manifest hrefs are URLs relative to the OPF."""
+    opf = _epub_package_path(zf)
+    if not opf:
+        return set()
+    root = _read_epub_xml(zf, opf)
+    base = posixpath.dirname(opf)
+    items: Dict[str, str] = {}
+    covers: Set[str] = set()
+    cover_ids: Set[str] = set()
+    for el in root.iter():
+        name = _local_name(el.tag)
+        if name == "item" and el.get("href"):
+            href = unquote(el.get("href").split("#", 1)[0])
+            member = posixpath.normpath(posixpath.join(base, href))
+            if el.get("id"):
+                items[el.get("id")] = member
+            if "cover-image" in (el.get("properties") or "").split():
+                covers.add(member)
+        elif name == "meta" and el.get("name") == "cover":
+            cover_ids.add(el.get("content", ""))
+    covers.update(items[i] for i in cover_ids if i in items)
+    return covers
+
+
+def _epub_cover_members(zf: zipfile.ZipFile, names: Iterable[str]) -> Set[str]:
+    """Members that may be the cover image. Without a declared cover (or a
+    readable package), a member named cover.* is taken as one."""
+    try:
+        covers = _declared_epub_covers(zf)
+    except Exception as e:
+        logger.debug("Couldn't read the EPUB cover metadata: %s", e)
+        covers = set()
+    if covers:
+        return covers
+    return {n for n in names if Path(n).stem.lower() == "cover"}
+
+
+def _same_member(zf: zipfile.ZipFile, a: str, b: str) -> bool:
+    """True when two members hold the same bytes. Size and CRC-32 from
+    the archive directory settle most pairs without reading either; a
+    member that can't be read counts as different, so it stays a page."""
+    ia, ib = zf.getinfo(a), zf.getinfo(b)
+    if ia.file_size != ib.file_size or ia.CRC != ib.CRC:
+        return False
+    try:
+        return zf.read(ia) == zf.read(ib)
+    except Exception:
+        return False
+
+
+def _index_epub(filepath: Path) -> List[PageRef]:
+    """Image pages of an EPUB. A cover image identical to the first page,
+    which is what an EPUB without a separate cover holds (MeManga writes
+    the first page again as its cover), is shown once; a distinct cover
+    stays a page of its own."""
+    with zipfile.ZipFile(filepath, "r") as zf:
+        names = sorted(zf.namelist())
+        pages = _index_zip(filepath, names)
+        covers = _epub_cover_members(zf, names)
+        first = next((p for p in pages if p.member not in covers), None)
+        if first is None:
+            return pages
+        return [p for p in pages if p.member not in covers
+                or not _same_member(zf, p.member, first.member)]
 
 
 def _page_attr(page_obj, key):
@@ -295,9 +394,7 @@ def index_chapter_file(filepath: Path) -> List[PageRef]:
         if suffix == ".pdf":
             return _index_pdf(filepath)
         if suffix == ".epub":
-            with zipfile.ZipFile(filepath, "r") as zf:
-                names = sorted(zf.namelist())
-            return _index_zip(filepath, names)
+            return _index_epub(filepath)
     except Exception as e:
         logger.warning("Couldn't index chapter %s: %s", filepath, e)
         logger.debug("Chapter index traceback", exc_info=True)
