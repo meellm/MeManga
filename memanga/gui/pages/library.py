@@ -15,7 +15,8 @@ from ..components.manga_card import MangaCard
 from ..components.manga_row import MangaRow
 from ..components.context_menu import ContextMenu
 from ..components.toast import Toast
-from ..components.dialogs import ConfirmDialog
+from ..components.remove_manga_modal import (RemoveMangaModal, remove_manga,
+                                              removed_message)
 
 
 class LibraryPage(BasePage):
@@ -287,7 +288,7 @@ class LibraryPage(BasePage):
         """
         try:
             from datetime import datetime
-            stats = self.app.app_state.get_stats()
+            stats = self._tracked_stats()
             last_check = self.app.app_state.get("last_check")
             check_text = "never"
             if last_check:
@@ -320,6 +321,17 @@ class LibraryPage(BasePage):
             # Tick must never raise — it fires on a timer.
             pass
 
+    def _tracked_stats(self):
+        """Header counts for tracked manga only. Removing a manga can
+        keep its state entry (issue #392), which must not be counted."""
+        titles = [m.get("title", "") for m in self.app.config.get("manga", []) or []]
+        return {
+            "total_manga": len(titles),
+            "total_chapters": sum(
+                len(self.app.app_state.get_downloaded_chapters(t)) for t in titles
+            ),
+        }
+
     @timed("gui.library.refresh")
     def _refresh(self):
         # Continue Reading rail first
@@ -335,7 +347,7 @@ class LibraryPage(BasePage):
         manga_list = self._get_filtered_manga()
 
         # Update stats
-        stats = self.app.app_state.get_stats()
+        stats = self._tracked_stats()
         last_check = self.app.app_state.get("last_check")
         check_text = "never"
         if last_check:
@@ -590,19 +602,16 @@ class LibraryPage(BasePage):
         self._refresh()
 
     def _ctx_remove(self, manga):
-        title = manga.get("title", "Unknown")
-        ConfirmDialog(self, title="Remove", message=f"Remove '{title}'?",
-                      on_confirm=lambda: self._do_remove(title))
+        title = manga.get("title", "")
+        RemoveMangaModal(
+            self, title,
+            on_confirm=lambda purge: self._do_remove(title, purge_history=purge),
+        ).exec()
 
-    def _do_remove(self, title):
-        manga_list = [m for m in self.app.config.get("manga", []) if m.get("title") != title]
-        self.app.config.set("manga", manga_list)
-        self.app.config.save()
-        self.app.app_state.remove_manga(title)
-        self.app.events.publish(
-            "library_updated", {"title": title, "action": "remove"}
-        )
+    def _do_remove(self, title, purge_history=False):
+        remove_manga(self.app, title, purge_history=purge_history)
         self._refresh()
+        Toast(self, removed_message(title, purge_history), kind="success")
 
     def _open_add_dialog(self, prefill=None):
         from .add_manga import AddMangaDialog

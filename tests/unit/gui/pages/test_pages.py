@@ -2428,6 +2428,181 @@ class TestDetailPage:
         assert app_window.app_state.failures.get_undelivered(manga["title"])
 
 
+class TestMangaRemoval:
+    """Issue #392: Library and Detail share one removal flow. History is
+    kept unless the user opts in, and downloaded files are never touched."""
+
+    @pytest.fixture
+    def tracked(self, app_window, qapp, sample_manga, tmp_path, monkeypatch):
+        title = sample_manga["title"]
+        app_window.config.set("delivery.download_dir", str(tmp_path / "dl"))
+        app_window.config.set("manga", [sample_manga, {"title": "Other"}])
+        app_window.app_state.add_downloaded_chapter(title, "1")
+        app_window.app_state.mark_chapter_read(title, "1")
+        app_window.app_state.add_download_history(title, "1", "pdf")
+        app_window.app_state.add_download_history("Other", "1", "pdf")
+        chapter_file = tmp_path / "dl" / title / "Chapter 1.pdf"
+        chapter_file.parent.mkdir(parents=True)
+        chapter_file.write_bytes(b"pdf")
+        # Record the modal instead of blocking on exec().
+        from memanga.gui.components import remove_manga_modal as modal_mod
+        opened = []
+        monkeypatch.setattr(modal_mod.RemoveMangaModal, "exec",
+                            lambda self: opened.append(self))
+        return title, chapter_file, opened
+
+    def _open(self, app_window, qapp, entry, manga):
+        if entry == "library":
+            app_window.show_page("library"); qapp.processEvents()
+            app_window._pages["library"]._ctx_remove(manga)
+        else:
+            app_window.show_page("detail", manga=manga); qapp.processEvents()
+            app_window._pages["detail"]._confirm_remove()
+
+    def _tracked_titles(self, app_window):
+        return [m.get("title") for m in app_window.config.get("manga", [])]
+
+    def _history_titles(self, app_window):
+        return [h["title"] for h in app_window.app_state.get_download_history(200)]
+
+    def test_both_entry_points_show_the_same_dialog(self, app_window, qapp,
+                                                    sample_manga, tracked):
+        from PySide6.QtWidgets import QLabel
+        _, _, opened = tracked
+        self._open(app_window, qapp, "library", sample_manga)
+        self._open(app_window, qapp, "detail", sample_manga)
+        assert len(opened) == 2
+        texts = [[w.text() for w in m.findChildren(QLabel)] for m in opened]
+        assert texts[0] == texts[1]
+        body = "\n".join(texts[0])
+        assert "Remove 'Test Manga' from your library?" in body
+        assert "download history are kept" in body
+        assert "Downloaded files stay in your download folder." in body
+        assert all(m.remove_btn.text() == "Remove" for m in opened)
+
+    @pytest.mark.parametrize("entry", ["library", "detail"])
+    def test_default_keeps_history_and_files(self, app_window, qapp,
+                                             sample_manga, tracked, entry):
+        title, chapter_file, opened = tracked
+        self._open(app_window, qapp, entry, sample_manga)
+        opened[0]._do_confirm()
+        qapp.processEvents()
+        assert self._tracked_titles(app_window) == ["Other"]
+        assert app_window.app_state.get_downloaded_chapters(title) == ["1"]
+        assert app_window.app_state.is_chapter_read(title, "1")
+        assert self._history_titles(app_window) == ["Other", title]
+        assert chapter_file.exists()
+        assert app_window._current_page == "library"
+
+    @pytest.mark.parametrize("entry", ["library", "detail"])
+    def test_opt_in_deletes_history_but_not_files(self, app_window, qapp,
+                                                  sample_manga, tracked, entry):
+        title, chapter_file, opened = tracked
+        self._open(app_window, qapp, entry, sample_manga)
+        modal = opened[0]
+        modal._purge_check.setChecked(True)
+        assert "deleted. This can't be undone." in modal._effects.text()
+        modal._do_confirm()
+        qapp.processEvents()
+        assert self._tracked_titles(app_window) == ["Other"]
+        assert app_window.app_state.get_downloaded_chapters(title) == []
+        assert not app_window.app_state.is_chapter_read(title, "1")
+        assert self._history_titles(app_window) == ["Other"]
+        assert chapter_file.exists()
+        # The Downloads History tab no longer lists it either.
+        from PySide6.QtWidgets import QLabel
+        app_window.show_page("downloads")
+        page = app_window._pages["downloads"]
+        page._switch_tab("history")
+        qapp.processEvents()
+        shown = [w.text() for w in page._history_content.findChildren(QLabel)]
+        assert "Other" in shown and title not in shown
+        assert page._tab_buttons["history"].text().endswith("  1")
+
+    def test_opt_in_deletes_history_logged_before_a_rename(
+            self, app_window, qapp, sample_manga, tracked):
+        title, chapter_file, opened = tracked
+        renamed = {**sample_manga, "title": "Renamed"}
+        app_window.app_state.rename_manga(title, "Renamed")
+        # A new manga reuses the old title and logs its own download.
+        app_window.config.set("manga", [renamed, {"title": "Other"},
+                                        {"title": title}])
+        app_window.app_state.add_download_history(title, "9", "pdf")
+        self._open(app_window, qapp, "library", renamed)
+        opened[0]._purge_check.setChecked(True)
+        opened[0]._do_confirm()
+        qapp.processEvents()
+        assert self._tracked_titles(app_window) == ["Other", title]
+        history = app_window.app_state.get_download_history(200)
+        assert [(h["title"], h["chapter"]) for h in history] == [
+            (title, "9"), ("Other", "1")]
+        assert chapter_file.exists()
+
+    @pytest.mark.parametrize("new_title", ["Other", "other", "Kept", "Logged"])
+    def test_rename_onto_a_title_with_history_is_refused(
+            self, app_window, qapp, sample_manga, tracked, new_title):
+        # Issue #392: merged histories could not be told apart later.
+        title, _, _ = tracked
+        app_window.app_state.add_downloaded_chapter("Kept", "1")
+        app_window.app_state.add_download_history("Logged", "1", "pdf")
+        app_window.show_page("detail", manga=sample_manga); qapp.processEvents()
+        page = app_window._pages["detail"]
+        page._edit_title.setText(new_title)
+        page._save_edit()
+        assert self._tracked_titles(app_window) == [title, "Other"]
+        assert app_window.app_state.get_downloaded_chapters(title) == ["1"]
+        assert app_window.app_state.get_downloaded_chapters("Kept") == ["1"]
+        assert sorted(self._history_titles(app_window)) == sorted(
+            [title, "Other", "Logged"])
+
+    def test_purge_after_renaming_history_without_a_state_entry(
+            self, app_window, qapp, sample_manga, tracked, monkeypatch):
+        # Issue #392: the manga's history rows exist but its state entry
+        # does not (kept history, re-added); a rename must carry the rows.
+        title, chapter_file, opened = tracked
+        app_window.app_state.remove_manga(title)
+        app_window.show_page("detail", manga=sample_manga); qapp.processEvents()
+        page = app_window._pages["detail"]
+        monkeypatch.setattr(page, "_refetch_cover", lambda *a: None)
+        assert title not in app_window.app_state.get("manga", {})
+        page._edit_title.setText("Renamed")
+        page._save_edit()
+        assert self._tracked_titles(app_window) == ["Renamed", "Other"]
+        # A new manga reuses the old title and logs its own download.
+        app_window.app_state.add_download_history(title, "9", "pdf")
+        renamed = app_window.config.get("manga", [])[0]
+        self._open(app_window, qapp, "library", renamed)
+        opened[0]._purge_check.setChecked(True)
+        opened[0]._do_confirm()
+        qapp.processEvents()
+        history = app_window.app_state.get_download_history(200)
+        assert [(h["title"], h["chapter"]) for h in history] == [
+            (title, "9"), ("Other", "1")]
+        downloads = chapter_file.parent.parent
+        assert [p.name for p in downloads.rglob("*.pdf")]
+
+    @pytest.mark.parametrize("entry", ["library", "detail"])
+    def test_cancel_changes_nothing(self, app_window, qapp, sample_manga,
+                                    tracked, entry):
+        title, chapter_file, opened = tracked
+        self._open(app_window, qapp, entry, sample_manga)
+        opened[0].cancel_btn.click()
+        qapp.processEvents()
+        assert self._tracked_titles(app_window) == [title, "Other"]
+        assert app_window.app_state.get_downloaded_chapters(title) == ["1"]
+        assert chapter_file.exists()
+
+    def test_library_counts_ignore_kept_history(self, app_window, qapp,
+                                                sample_manga, tracked):
+        _, _, opened = tracked
+        self._open(app_window, qapp, "library", sample_manga)
+        opened[0]._do_confirm()
+        qapp.processEvents()
+        page = app_window._pages["library"]
+        assert page._stats_label.text().startswith("1 manga  ·  0 chapters")
+        assert page._count_label.text() == "1 of 1 shown"
+
+
 class TestDownloadsQueueing:
     """Issue #50: an explicit "Download All" / "Download from chapter"
     must queue the resolved chapters even for manual-mode manga, which

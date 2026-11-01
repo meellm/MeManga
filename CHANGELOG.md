@@ -164,6 +164,22 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #392 Removing a manga in the desktop app asks the same question from the
+  Library right-click menu and from the manga's page. It says what
+  happens: read progress and download history are kept unless you tick
+  "Also delete progress and history", and downloaded files
+  always stay in the download folder. Adding the manga again picks up its
+  kept progress. Both used to delete the history, and only one said so.
+  The Library header counts only tracked manga, so kept history no longer
+  inflates the manga and chapter counts. Deleting the history also clears
+  the manga's Downloads History rows. Renaming a manga now moves its
+  History rows to the new title; rows from a rename made with an older
+  version keep the old title and are not deleted, and the dialog says it
+  deletes the history saved under the manga's current title. A rename in
+  the app or with `edit --title` is refused when the new title is already
+  in the library (the app did not check this before) or still has history
+  from an earlier manga, so a rename never mixes two manga's history.
+  `remove --purge-history` also clears the manga's Downloads History rows.
 - #386 Page images are held to one explicit pixel limit, 2,048 x 65,535
   pixels (about 134 megapixels), checked against the image header before
   anything is decoded, by the downloader and by the desktop reader. Tall

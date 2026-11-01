@@ -767,6 +767,20 @@ class TestUpdatePolicyFields:
         assert "same download folder as 'Multi'" in capsys.readouterr().err
         assert path.read_bytes() == before
 
+    def test_rename_to_title_with_kept_history_rejected(
+            self, run_cli, config, seed, cli_state, capsys):
+        # Issue #392: a removed manga's kept history under that title
+        # could not be told apart from this manga's later.
+        path = seed(LEGACY)
+        cli_state.add_downloaded_chapter("Gone", "1")
+        cli_state.save()
+        before = path.read_bytes()
+        capsys.readouterr()
+        assert run_cli("update", "Legacy", "--title", "Gone") == 1
+        assert "still has history from an earlier manga" in capsys.readouterr().err
+        assert path.read_bytes() == before
+        assert cli_state.get_downloaded_chapters("Gone") == ["1"]
+
     def test_title_case_only_rename(self, run_cli, config, seed):
         seed(LEGACY)
         assert run_cli("update", "Legacy", "--title", "LEGACY") == 0
@@ -7094,6 +7108,21 @@ class TestRemoveHistoryAndFiles:
         assert (self._history(history) == ["1"]) is history_kept
         assert (downloads / "Goner").exists() is files_kept
         self._untouched(downloads)
+
+    @pytest.mark.parametrize("flags, logged", [
+        ((), ["Keeper", "Goner"]),
+        (("--purge-history",), ["Keeper"]),
+    ])
+    def test_purge_history_also_clears_download_log(
+            self, run_cli, config, downloads, history, flags, logged):
+        # Issue #392: Downloads History rows are history too.
+        history.add_download_history("Goner", "1", "cbz")
+        history.add_download_history("Keeper", "1", "cbz")
+        history.save()
+        assert run_cli("rm", "Goner", "--yes", *flags) == 0
+        from memanga.state import State
+        reloaded = State(config_dir=history.state_path.parent)
+        assert [e["title"] for e in reloaded.get_download_history()] == logged
 
     def test_keep_and_delete_files_conflict_changes_nothing(
             self, run_cli, config, downloads, history):
