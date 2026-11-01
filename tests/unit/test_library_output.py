@@ -83,7 +83,7 @@ def test_source_fetch_failure_is_a_warning_not_stdout(state, capsys, caplog,
 
 def test_page_download_failure_is_debug_not_stdout(tmp_path, capsys, caplog,
                                                    monkeypatch):
-    from memanga.scrapers.kaijuno8manga import KaijuNo8MangaScraper
+    from memanga.scrapers.single_title_sites import KaijuNo8MangaScraper
 
     scraper = KaijuNo8MangaScraper()
 
@@ -97,6 +97,6 @@ def test_page_download_failure_is_debug_not_stdout(tmp_path, capsys, caplog,
 
     assert capsys.readouterr().out == ""
     records = [r for r in caplog.records
-               if r.name == "memanga.scrapers.kaijuno8manga"]
+               if r.name == "memanga.scrapers.single_title_base"]
     assert [r.levelno for r in records] == [logging.DEBUG]
     assert "https://cdn.example/1.jpg" in records[0].getMessage()

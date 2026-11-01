@@ -1,6 +1,6 @@
 """
 MangaPanda scraper
-https://mangapanda.onl
+https://mangapanda.onl and https://mangafox.fun
 
 React-based manga site with api.mghcdn.com backend.
 Uses cloudscraper for Cloudflare bypass.
@@ -167,3 +167,10 @@ class MangaPandaScraper(BaseScraper):
         except Exception as e:
             logger.debug("Failed to download %s: %s", url, e)
             return False
+
+
+class MangaFoxFunScraper(MangaPandaScraper):
+    """Scraper for MangaFox.fun (same MangaHub network site as MangaPanda)."""
+
+    name = "mangafoxfun"
+    base_url = "https://mangafox.fun"

@@ -1,6 +1,6 @@
 """
 CoffeeManga scraper
-https://coffeemanga.io / coffeemanga.ink
+https://coffeemanga.io / coffeemanga.ink, and MangaRead (mangaread.org)
 
 Madara-based WordPress manga site - simple requests-based scraper.
 """
@@ -117,3 +117,10 @@ class CoffeeMangaScraper(BaseScraper):
         except Exception as e:
             logger.debug("Failed to download %s: %s", url, e)
             return False
+
+
+class MangaReadScraper(CoffeeMangaScraper):
+    """Scraper for MangaRead (same Madara layout as CoffeeManga)."""
+
+    name = "mangaread"
+    base_url = "https://www.mangaread.org"
