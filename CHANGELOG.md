@@ -164,6 +164,11 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #393 "Remove chapters after reading" moves a finished chapter's
+  download to the system trash (Recycle Bin on Windows, Trash on macOS and
+  Linux) instead of deleting it for good, so a chapter finished by
+  accident can be restored. A notification says where it went. If the
+  trash can't take it, the download is kept and stays downloaded.
 - #392 Removing a manga in the desktop app asks the same question from the
   Library right-click menu and from the manga's page. It says what
   happens: read progress and download history are kept unless you tick

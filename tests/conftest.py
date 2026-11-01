@@ -203,8 +203,37 @@ def qapp_session():
 
 
 @pytest.fixture
-def qapp(qapp_session, isolated_home):
-    """Per-test alias that pulls in HOME isolation automatically."""
+def fake_trash(monkeypatch, tmp_path) -> Path:
+    """Stand in for the system trash (issue #393) so GUI tests never move
+    anything into the developer's real Trash or Recycle Bin. Files moved
+    to the trash land in the returned folder instead. Mirrors the QFile
+    member API: moveToTrash() returns a bool and, on success, fileName()
+    becomes the path in the trash."""
+    from memanga.gui import trash
+    trash_dir = tmp_path / "fake-trash"
+
+    class _FakeQFile:
+        def __init__(self, path: str):
+            self._path = path
+
+        def fileName(self) -> str:
+            return self._path
+
+        def moveToTrash(self) -> bool:
+            trash_dir.mkdir(exist_ok=True)
+            target = trash_dir / Path(self._path).name
+            os.replace(self._path, target)
+            self._path = str(target)
+            return True
+
+    monkeypatch.setattr(trash, "QFile", _FakeQFile)
+    return trash_dir
+
+
+@pytest.fixture
+def qapp(qapp_session, isolated_home, fake_trash):
+    """Per-test alias that pulls in HOME and trash isolation
+    automatically."""
     return qapp_session
 
 

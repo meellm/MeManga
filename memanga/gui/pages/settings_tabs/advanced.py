@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from ... import theme as T
+from ...trash import trash_name
 
 # Shown instead of installing a scheduled check from the desktop app
 # (issues #324, #336).
@@ -44,9 +45,11 @@ class AdvancedTabMixin:
 
         # Remove chapters after reading (issue #104)
         remove_read_hint = QLabel(
-            "Delete a chapter's local download once you finish it in the "
-            "built-in reader. Read progress is kept, so the chapter simply "
-            "returns to the Download state on the Detail page."
+            "Move a chapter's local download to the "
+            f"{trash_name()} once you finish it in the built-in reader, so "
+            "it can still be restored from there. If that isn't possible, "
+            "the download is kept. Read progress is kept, so the chapter "
+            "simply returns to the Download state on the Detail page."
         )
         remove_read_hint.setProperty("role", "hint")
         remove_read_hint.setWordWrap(True)
