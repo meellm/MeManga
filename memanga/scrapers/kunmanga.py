@@ -1,6 +1,6 @@
 """
 KunManga scraper - Manga aggregator
-Site: kunmanga.com
+Site: kunmanga.com (and mangaclash.com, same layout)
 
 Uses Playwright for Cloudflare bypass.
 WordPress Madara theme based.
@@ -123,3 +123,10 @@ class KunMangaScraper(PlaywrightScraper):
                 pages.append(src.strip())
         
         return pages
+
+
+class MangaClashScraper(KunMangaScraper):
+    """Scraper for MangaClash (same Madara layout as KunManga)."""
+
+    name = "mangaclash"
+    base_url = "https://mangaclash.com"

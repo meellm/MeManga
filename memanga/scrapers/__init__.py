@@ -22,9 +22,13 @@ do. Request spacing is shared by the whole class in every thread (see
 ``base.BaseScraper._rate_lock``).
 """
 
+import sys
 import threading
+import warnings
 from collections.abc import Iterator, Mapping
 from importlib import import_module
+from importlib.abc import Loader, MetaPathFinder
+from importlib.util import spec_from_loader
 from typing import Dict, Optional, Type, Union
 
 from .base import BaseScraper, Chapter, Manga
@@ -137,7 +141,7 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "manhuafast.com": "manhuafast:ManhuaFastScraper",
 
     # MangaRead/MangaEffect
-    "mangaeffect.com": "mangaeffect:MangaReadScraper",
+    "mangaeffect.com": "coffeemanga:MangaReadScraper",
 
     # ManhuaPlus
     "manhuaplus.org": "manhuaplus:ManhuaPlusScraper",
@@ -218,7 +222,7 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "mangabolt.com": "mangabolt:MangaBoltScraper",
 
     # MangaFox.fun - MangaHub network (cloudscraper)
-    "mangafox.fun": "mangafoxfun:MangaFoxFunScraper",
+    "mangafox.fun": "mangapanda:MangaFoxFunScraper",
 
     # MangaHub.us - MangaHub network (cloudscraper)
     "mangahub.us": "mangahubus:MangaHubUsScraper",
@@ -288,7 +292,7 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # MangaClash - Manga aggregator (Playwright + Madara + CF).
     # Site unreachable (#179); kept so saved library entries still
     # resolve, but skipped by the search sweep.
-    "mangaclash.com": "mangaclash:MangaClashScraper",
+    "mangaclash.com": "kunmanga:MangaClashScraper",
 
     # KunManga - Manga aggregator (Playwright + Madara + CF)
     "kunmanga.com": "kunmanga:KunMangaScraper",
@@ -309,99 +313,99 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "mangahere.onl": "mangahereonl:MangaHereOnlScraper",
 
     # BeastarsManga - Beastars dedicated (WordPress + cdn.readkakegurui.com)
-    "beastarsmanga.com": "beastarsmanga:BeastarsMangaScraper",
+    "beastarsmanga.com": "single_title_sites:BeastarsMangaScraper",
 
     # VagabondManga - Vagabond dedicated (WordPress + cdn.mangaclash.com)
-    "vagabondmanga.org": "vagabondmanga:VagabondMangaScraper",
-    "www.vagabondmanga.org": "vagabondmanga:VagabondMangaScraper",
+    "vagabondmanga.org": "single_title_sites:VagabondMangaScraper",
+    "www.vagabondmanga.org": "single_title_sites:VagabondMangaScraper",
 
     # MonsterManga - Monster (Naoki Urasawa) dedicated (WordPress + official.lowee.us)
-    "monstermanga.org": "monstermanga:MonsterMangaScraper",
-    "www.monstermanga.org": "monstermanga:MonsterMangaScraper",
+    "monstermanga.org": "single_title_sites:MonsterMangaScraper",
+    "www.monstermanga.org": "single_title_sites:MonsterMangaScraper",
 
     # DeathNoteManga - Death Note dedicated (WordPress + Blogger CDN)
-    "death-note-manga.com": "deathnotemanga:DeathNoteMangaScraper",
-    "w13.death-note-manga.com": "deathnotemanga:DeathNoteMangaScraper",
+    "death-note-manga.com": "single_title_sites:DeathNoteMangaScraper",
+    "w13.death-note-manga.com": "single_title_sites:DeathNoteMangaScraper",
 
     # TGManga - Tokyo Ghoul dedicated (WordPress + wp-content)
-    "tgmanga.com": "tgmanga:TGMangaScraper",
+    "tgmanga.com": "single_title_sites:TGMangaScraper",
 
     # ReadIchiTheWitch - Ichi the Witch dedicated (cdn.readichithewitch.com)
-    "readichithewitch.com": "readichithewitch:ReadIchiTheWitchScraper",
-    "ww1.readichithewitch.com": "readichithewitch:ReadIchiTheWitchScraper",
+    "readichithewitch.com": "single_title_sites:ReadIchiTheWitchScraper",
+    "ww1.readichithewitch.com": "single_title_sites:ReadIchiTheWitchScraper",
 
     # DemonSlayerManga - Demon Slayer / Kimetsu no Yaiba dedicated (cdn.demonslayermanga.com)
     "demonslayermanga.com": "demonslayermanga:DemonSlayerMangaScraper",
     "ww9.demonslayermanga.com": "demonslayermanga:DemonSlayerMangaScraper",
 
     # DrStoneManga - Dr. Stone dedicated (assets.drstonemanga.com)
-    "drstonemanga.com": "drstonemanga:DrStoneMangaScraper",
+    "drstonemanga.com": "single_title_sites:DrStoneMangaScraper",
 
     # SakamotoManga - Sakamoto Days dedicated (cdn3.mangaclash.com)
     "sakamotomanga.com": "sakamotomanga:SakamotoMangaScraper",
 
     # ElusiveSamurai - The Elusive Samurai dedicated (pic.readkakegurui.com)
-    "elusive-samurai.com": "elusivesamurai:ElusiveSamuraiScraper",
-    "w4.elusive-samurai.com": "elusivesamurai:ElusiveSamuraiScraper",
+    "elusive-samurai.com": "single_title_sites:ElusiveSamuraiScraper",
+    "w4.elusive-samurai.com": "single_title_sites:ElusiveSamuraiScraper",
 
     # ReadBlueLockOrg - Blue Lock dedicated (images.asuratoon.top)
-    "readbluelock.org": "readbluelockorg:ReadBlueLockOrgScraper",
+    "readbluelock.org": "single_title_sites:ReadBlueLockOrgScraper",
 
     # BocchiTheRockManga - Bocchi the Rock! dedicated (cdn.black-clover.org)
-    "bocchitherockmanga.com": "bocchitherockmanga:BocchiTheRockMangaScraper",
-    "w5.bocchitherockmanga.com": "bocchitherockmanga:BocchiTheRockMangaScraper",
+    "bocchitherockmanga.com": "single_title_sites:BocchiTheRockMangaScraper",
+    "w5.bocchitherockmanga.com": "single_title_sites:BocchiTheRockMangaScraper",
 
     # SpyXFamilyManga - Spy x Family dedicated (cdn3.mangaclash.com)
-    "spyxfamilymanga.org": "spyxfamilymanga:SpyXFamilyMangaScraper",
+    "spyxfamilymanga.org": "single_title_sites:SpyXFamilyMangaScraper",
 
     # BlueExorcistManga - Blue Exorcist / Ao no Exorcist dedicated (cdn.readkakegurui.com)
-    "blueexorcistmanga.com": "blueexorcistmanga:BlueExorcistMangaScraper",
+    "blueexorcistmanga.com": "single_title_sites:BlueExorcistMangaScraper",
 
     # AjimeNoIppo - Hajime no Ippo dedicated (WordPress + cdn.mangaclash.com)
-    "ajimenoippo.com": "ajimenoippo:AjimeNoIppoScraper",
-    "www.ajimenoippo.com": "ajimenoippo:AjimeNoIppoScraper",
+    "ajimenoippo.com": "single_title_sites:AjimeNoIppoScraper",
+    "www.ajimenoippo.com": "single_title_sites:AjimeNoIppoScraper",
 
     # HajimeNoIppoOnline - Hajime no Ippo dedicated (WordPress + laiond.com)
-    "hajime-no-ippo-manga.online": "hajimenoippoonline:HajimeNoIppoOnlineScraper",
+    "hajime-no-ippo-manga.online": "single_title_sites:HajimeNoIppoOnlineScraper",
 
     # HajimNoIppo - Hajime no Ippo dedicated (WordPress + planeptune.us)
-    "hajimnoippo.com": "hajimnoippo:HajimNoIppoScraper",
+    "hajimnoippo.com": "single_title_sites:HajimNoIppoScraper",
 
     # HajimeNoIppoBlogger - Hajime no Ippo dedicated (WordPress + Blogger CDN)
-    "hajime-noippo.com": "hajimenoippoblogger:HajimeNoIppoBloggerScraper",
-    "w22.hajime-noippo.com": "hajimenoippoblogger:HajimeNoIppoBloggerScraper",
+    "hajime-noippo.com": "single_title_sites:HajimeNoIppoBloggerScraper",
+    "w22.hajime-noippo.com": "single_title_sites:HajimeNoIppoBloggerScraper",
 
     # BlueLockReadOnline - Blue Lock dedicated (WordPress + wp-content)
-    "bluelockread.online": "bluelockreadonline:BlueLockReadOnlineScraper",
+    "bluelockread.online": "single_title_sites:BlueLockReadOnlineScraper",
 
     # ReadSlamDunkOnline - Slam Dunk dedicated (WordPress + cdn.mangaclash.com)
-    "read-slamdunk.online": "readslamdunkonline:ReadSlamDunkOnlineScraper",
+    "read-slamdunk.online": "single_title_sites:ReadSlamDunkOnlineScraper",
 
     # ReadTokyoRevengers - Tokyo Revengers dedicated (WordPress + wp-content/mangaread.org)
-    "read-tokyorevengers.com": "readtokyorevengers:ReadTokyoRevengersScraper",
-    "w20.read-tokyorevengers.com": "readtokyorevengers:ReadTokyoRevengersScraper",
-    "w23.read-tokyorevengers.com": "readtokyorevengers:ReadTokyoRevengersScraper",
+    "read-tokyorevengers.com": "single_title_sites:ReadTokyoRevengersScraper",
+    "w20.read-tokyorevengers.com": "single_title_sites:ReadTokyoRevengersScraper",
+    "w23.read-tokyorevengers.com": "single_title_sites:ReadTokyoRevengersScraper",
 
     # DragonBallSuperOnline - Dragon Ball Super dedicated (WordPress + wp-content/uploads)
-    "thedragonballsuper.online": "dragonballsuperonline:DragonBallSuperOnlineScraper",
+    "thedragonballsuper.online": "single_title_sites:DragonBallSuperOnlineScraper",
 
     # DragonBallSuperOrg - Dragon Ball Super dedicated (WordPress + mangaread.org CDN)
-    "dragonballsuper.org": "dragonballsuperorg:DragonBallSuperOrgScraper",
-    "www.dragonballsuper.org": "dragonballsuperorg:DragonBallSuperOrgScraper",
+    "dragonballsuper.org": "single_title_sites:DragonBallSuperOrgScraper",
+    "www.dragonballsuper.org": "single_title_sites:DragonBallSuperOrgScraper",
 
     # FairyTailMangaFree - Fairy Tail 100 Years Quest dedicated (WordPress + cdn.mangaclash.com)
-    "fairytailmangafree.com": "fairytailmangafree:FairyTailMangaFreeScraper",
-    "www.fairytailmangafree.com": "fairytailmangafree:FairyTailMangaFreeScraper",
+    "fairytailmangafree.com": "single_title_sites:FairyTailMangaFreeScraper",
+    "www.fairytailmangafree.com": "single_title_sites:FairyTailMangaFreeScraper",
 
     # JoJolionManga - JoJo Part 8: JoJolion dedicated (WordPress + Blogger CDN)
     "jojolionmanga.com": "jojolionmanga:JoJolionMangaScraper",
 
     # HomunculusManga - Homunculus dedicated (WordPress + mangaread.org CDN)
-    "homunculusmanga.com": "homunculusmanga:HomunculusMangaScraper",
-    "www.homunculusmanga.com": "homunculusmanga:HomunculusMangaScraper",
+    "homunculusmanga.com": "single_title_sites:HomunculusMangaScraper",
+    "www.homunculusmanga.com": "single_title_sites:HomunculusMangaScraper",
 
     # SousouNoFrieren - Frieren dedicated (WordPress + cdn.mangaclash.com)
-    "sousou-no-frieren.com": "sousnofrierenga:SousouNoFrierenScraper",
+    "sousou-no-frieren.com": "single_title_sites:SousouNoFrierenScraper",
 
     # DemonSlayerOnline - Demon Slayer dedicated (WordPress Ifenzi + cdn.readkakegurui.com)
     "demon-slayer.online": "demonslayeronline:DemonSlayerOnlineScraper",
@@ -419,24 +423,24 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "sakamoto-days.online": "sakamotodaysonline:SakamotoDaysOnlineScraper",
 
     # OnePieceManga1 - One Piece dedicated (WordPress + Contabo storage CDN)
-    "1piecemanga.com": "onepiecemanga1:OnePieceManga1Scraper",
-    "w064.1piecemanga.com": "onepiecemanga1:OnePieceManga1Scraper",
+    "1piecemanga.com": "single_title_sites:OnePieceManga1Scraper",
+    "w064.1piecemanga.com": "single_title_sites:OnePieceManga1Scraper",
 
     # KaijuNo8Manga - Kaiju No. 8 dedicated (WordPress + wp-content CDN)
-    "kaijuno8-manga.com": "kaijuno8manga:KaijuNo8MangaScraper",
+    "kaijuno8-manga.com": "single_title_sites:KaijuNo8MangaScraper",
 
     # BlueLockMangaNet - Blue Lock dedicated (WordPress + Blogger CDN)
-    "bluelockmanga.net": "bluelockmangaorg:BlueLockMangaNetScraper",
+    "bluelockmanga.net": "single_title_sites:BlueLockMangaNetScraper",
 
     # TokyoGhoulClub - Tokyo Ghoul dedicated (WordPress Toivo Lite + cdn.mangaclash.com)
-    "tokyoghoul.club": "tokyoghoulclub:TokyoGhoulClubScraper",
+    "tokyoghoul.club": "single_title_sites:TokyoGhoulClubScraper",
 
     # FireForceMangaOrg - Fire Force dedicated (WordPress Toivo Lite + cdn.mangaclash.com)
-    "fireforcemanga.org": "fireforcemangaorg:FireForceMangaOrgScraper",
-    "w1.fireforcemanga.org": "fireforcemangaorg:FireForceMangaOrgScraper",
+    "fireforcemanga.org": "single_title_sites:FireForceMangaOrgScraper",
+    "w1.fireforcemanga.org": "single_title_sites:FireForceMangaOrgScraper",
 
     # ReadKenganAshura - Kengan Ashura dedicated (WordPress Comic Easel + Blogger CDN)
-    "read-kengan-ashura.com": "readkenganashura:ReadKenganAshuraScraper",
+    "read-kengan-ashura.com": "single_title_sites:ReadKenganAshuraScraper",
 
     # BlueLockReadCom - Blue Lock dedicated (custom site + attachment CDN)
     "bluelock-read.com": "bluelockreadcom:BlueLockReadComScraper",
@@ -502,8 +506,8 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "bakirahen.com": "bakirahen:BakiRahenScraper",
 
     # BlameManga - BLAME! dedicated (WordPress Comic Easel + Blogger CDN)
-    "blame-manga.com": "blamemanga:BlameMangaScraper",
-    "w9.blame-manga.com": "blamemanga:BlameMangaScraper",
+    "blame-manga.com": "single_title_sites:BlameMangaScraper",
+    "w9.blame-manga.com": "single_title_sites:BlameMangaScraper",
 
     # JJKManga - Jujutsu Kaisen dedicated (cloudscraper + pic.readkakegurui.com CDN)
     "jjkmanga.net": "jjkmanga:JJKMangaScraper",
@@ -593,6 +597,51 @@ def __getattr__(name: str):
 
 def __dir__():
     return sorted(set(globals()) | set(_CLASS_PATHS))
+
+
+# Scraper modules folded into a shared module (#251): old name -> new.
+# Their import paths still resolve, with a DeprecationWarning, to a
+# module carrying the same names; the package itself never uses them.
+_MOVED_MODULES: Dict[str, str] = {
+    **dict.fromkeys((
+        "beastarsmanga", "monstermanga", "readichithewitch", "ajimenoippo",
+        "hajimenoippoonline", "hajimnoippo", "hajimenoippoblogger",
+        "bluelockreadonline", "vagabondmanga", "sousnofrierenga",
+        "spyxfamilymanga", "tgmanga", "blueexorcistmanga", "blamemanga",
+        "homunculusmanga", "fireforcemangaorg", "tokyoghoulclub", "deathnotemanga",
+        "bluelockmangaorg", "kaijuno8manga", "dragonballsuperonline",
+        "dragonballsuperorg", "onepiecemanga1", "readslamdunkonline",
+        "readtokyorevengers", "fairytailmangafree", "readkenganashura",
+        "bocchitherockmanga", "elusivesamurai", "readbluelockorg", "drstonemanga",
+    ), "single_title_sites"),
+    "mangaclash": "kunmanga",
+    "mangaeffect": "coffeemanga",
+    "mangafoxfun": "mangapanda",
+}
+
+
+class _MovedModuleFinder(MetaPathFinder, Loader):
+    """Import ``memanga.scrapers.<old>`` as an alias of its new module."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        package, _, module = fullname.rpartition(".")
+        if package != __name__ or module not in _MOVED_MODULES:
+            return None
+        return spec_from_loader(fullname, self)
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        new = f"{__name__}.{_MOVED_MODULES[module.__name__.rpartition('.')[2]]}"
+        warnings.warn(f"{module.__name__} has moved to {new}",
+                      DeprecationWarning, stacklevel=2)
+        target = import_module(new)
+        module.__dict__.update((k, v) for k, v in vars(target).items()
+                               if not k.startswith("__"))
+
+
+sys.meta_path.append(_MovedModuleFinder())
 
 
 # Per-thread scraper instances, keyed by scraper class.
