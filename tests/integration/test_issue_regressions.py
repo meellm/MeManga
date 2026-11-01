@@ -436,7 +436,7 @@ def test_issue_45_reader_marks_read_at_end(app_window, qapp, sample_manga,
 
 
 def test_issue_104_removes_chapter_after_read(app_window, qapp, sample_manga,
-                                              make_cbz):
+                                              make_cbz, fake_trash):
     from pathlib import Path
     app_window.config.set("reader.remove_after_read", True)
     reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
@@ -461,6 +461,16 @@ def test_issue_104_removes_chapter_after_read(app_window, qapp, sample_manga,
     assert not artifact.exists()
     assert not app_window.app_state.is_chapter_downloaded(title, "1")
     assert app_window.app_state.is_chapter_read(title, "1")
+    # #393: moved to the trash, not deleted, and the user is told where.
+    from memanga.gui.trash import trash_name
+    trashed = fake_trash / artifact.name
+    assert trashed.exists()
+    [note] = [n for n in app_window.app_state.get_notifications()
+              if "after reading" in n["message"]]
+    assert note["type"] == "system"
+    assert note["message"] == (
+        f"Moved {title} Chapter 1 to the {trash_name()} after reading.")
+    assert trashed.name in note["details"]
 
 
 def test_issue_104_next_survives_current_download_cleanup(
@@ -564,33 +574,55 @@ def test_issue_104_disabled_keeps_chapter(app_window, qapp, sample_manga,
     assert app_window.app_state.is_chapter_read(title, "1")
 
 
+@pytest.mark.parametrize("outcome", [False, TypeError("bad binding")],
+                         ids=["refused", "raised"])
 def test_issue_104_deletion_failure_keeps_downloaded(app_window, qapp,
-                                                     sample_manga, make_cbz):
-    # If the artifact can't be deleted, the chapter must stay downloaded
-    # (state must not desync from disk) and the reader must not crash.
+                                                     sample_manga, make_cbz,
+                                                     monkeypatch, outcome):
+    # If the artifact can't be moved to the trash, the chapter must stay
+    # downloaded (state must not desync from disk) and the reader must not
+    # crash. #393: it is never deleted for good instead, whether the trash
+    # refuses the file or the Qt call itself fails.
     from pathlib import Path
+    from memanga.gui import trash
     app_window.config.set("reader.remove_after_read", True)
     reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
     title = sample_manga["title"]
     artifact = Path(app_window.config.download_dir) / title / \
         f"{title} - Chapter 1.cbz"
 
-    # Force the (file) deletion to fail, as a locked/permission-denied
-    # artifact would in the wild.
-    import unittest.mock as mock
-    with mock.patch.object(type(artifact), "unlink",
-                           side_effect=OSError("boom")):
-        bar = reader._scroll.verticalScrollBar()
-        bar.setValue(bar.maximum())
-        qapp.processEvents()
-        # The deferred removal runs when the reader leaves the chapter.
-        app_window.show_page("detail", manga=sample_manga)
-        qapp.processEvents()
+    # The trash refuses the file, as a volume without a usable trash or
+    # a locked/permission-denied artifact would in the wild.
+    class _FailingQFile:
+        def __init__(self, path):
+            self._path = path
+
+        def fileName(self):
+            return self._path
+
+        def moveToTrash(self):
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    monkeypatch.setattr(trash, "QFile", _FailingQFile)
+    bar = reader._scroll.verticalScrollBar()
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+    # The deferred removal runs when the reader leaves the chapter.
+    app_window.show_page("detail", manga=sample_manga)
+    qapp.processEvents()
 
     # Non-fatal: file untouched, chapter stays downloaded and read.
     assert artifact.exists()
     assert app_window.app_state.is_chapter_downloaded(title, "1")
     assert app_window.app_state.is_chapter_read(title, "1")
+    [note] = [n for n in app_window.app_state.get_notifications()
+              if "after reading" in n["message"]]
+    assert note["type"] == "error"
+    assert note["message"].startswith(
+        f"Couldn't move {title} Chapter 1 to the {trash.trash_name()} "
+        "after reading, so it was kept")
 
 
 # ─────────────────────────────────────────────────────────────────────────

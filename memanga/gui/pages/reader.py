@@ -3,7 +3,6 @@ Reader page - Built-in manga reader with keyboard shortcuts and zoom.
 Three layouts: continuous vertical scroll, single page, two-up spreads.
 """
 
-import shutil
 import time
 from bisect import bisect_left, bisect_right
 from pathlib import Path
@@ -25,6 +24,7 @@ from .reader_view_modes import ReaderViewModeMixin
 from .reader_pages import (PageLoader, PageRef, PixmapCache, display_size,
                            index_chapter_file, index_chapter_folder)
 from .. import theme as T
+from .. import trash
 
 
 def _is_inside_download_dir(candidate: Path, download_dir: Path) -> bool:
@@ -326,13 +326,15 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
 
     def _remove_after_read(self, title: str, chapter: str,
                            path: Optional[Path]):
-        """Delete the just-read chapter's local artifact and drop it from
-        downloaded-state when the "remove chapters after reading" setting
-        is on (issue #104).
+        """Move the just-read chapter's local artifact to the system trash
+        and drop it from downloaded-state when the "remove chapters after
+        reading" setting is on (issue #104).
 
         Read-state is intentionally left intact — only the downloaded
         record and the on-disk file/folder go away, so the Detail row
-        returns to the Download state. Deletion failures are non-fatal:
+        returns to the Download state. Issue #393: the file goes to the
+        trash, never deleted for good, so a chapter finished by accident
+        can be restored. If the trash can't take it, the file is kept,
         the chapter stays marked downloaded and a notification is logged
         instead of desyncing state from disk or crashing the reader.
         """
@@ -340,19 +342,26 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
             return
         if path is None:
             return
-        try:
-            if path.is_dir():
-                shutil.rmtree(path)
-            elif path.exists():
-                path.unlink()
-            # If the file is already gone, treat that as success and let
-            # the downloaded-state removal below reconcile with disk.
-        except OSError as exc:
+        # If the file is already gone, treat that as success and let the
+        # downloaded-state removal below reconcile with disk.
+        if path.exists() or path.is_symlink():
+            try:
+                location = trash.move_to_trash(path)
+            except OSError as exc:
+                self.app.app_state.add_notification(
+                    "error",
+                    f"Couldn't move {title} Chapter {chapter} to the "
+                    f"{trash.trash_name()} after reading, so it was kept: "
+                    f"{exc}",
+                )
+                return
             self.app.app_state.add_notification(
-                "error",
-                f"Couldn't remove {title} Chapter {chapter} after reading: {exc}",
+                "system",
+                f"Moved {title} Chapter {chapter} to the "
+                f"{trash.trash_name()} after reading.",
+                f"Now in the {trash.trash_name()} at: {location}"
+                if location else None,
             )
-            return
         if self._artifact_path == path:
             self._artifact_path = None
         self.app.app_state.remove_downloaded_chapter(title, chapter)
@@ -784,8 +793,9 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         for title, chapter, _path in self._removal_queue:
             self.app.app_state.add_notification(
                 "error",
-                f"Couldn't remove {title} Chapter {chapter} after reading: "
-                "the file was still in use.",
+                f"Couldn't move {title} Chapter {chapter} to the "
+                f"{trash.trash_name()} after reading: the file was still "
+                "in use, so it was kept.",
             )
         self._removal_queue.clear()
 
