@@ -30,7 +30,10 @@ import requests
 from typing import List, Optional
 from pathlib import Path
 
-from .base import BaseScraper, Chapter, Manga, _retry, is_retryable_request_error, BROWSER_USER_AGENT
+from .base import (
+    BaseScraper, Chapter, Manga, _retry, is_retryable_request_error, BROWSER_USER_AGENT,
+    CLOUDSCRAPER_CHROME_DESKTOP,
+)
 from .playwright_base import PlaywrightScraper
 
 logger = logging.getLogger(__name__)
@@ -50,13 +53,7 @@ class KaganeScraper(PlaywrightScraper):
         self._rate_limit = 1.0
 
         # Use cloudscraper for API calls (Cloudflare-protected)
-        try:
-            import cloudscraper
-            self.session = cloudscraper.create_scraper(
-                browser={"browser": "chrome", "platform": "windows", "desktop": True}
-            )
-        except ImportError:
-            pass
+        self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
 
         self.session.headers.update({
             "User-Agent": BROWSER_USER_AGENT,

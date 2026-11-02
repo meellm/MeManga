@@ -1,0 +1,12 @@
+# Docker-only constraints, applied together with requirements-lock.txt.
+# requirements-lock.txt is compiled on a non-Linux host, so it has no rows
+# for the packages keyring pulls in only on Linux (its Secret Service
+# backend). These pins cover them, so every package the image installs
+# from requirements-docker.txt resolves to an exact version.
+# Versions are the ones the python:3.12-slim build resolves. Refresh them
+# together with requirements-lock.txt (see CONTRIBUTING.md).
+cffi==2.1.1
+cryptography==50.0.2
+jeepney==0.9.0
+pycparser==3.12
+SecretStorage==3.5.0

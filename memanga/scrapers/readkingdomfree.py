@@ -12,9 +12,8 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 from bs4 import BeautifulSoup
-import cloudscraper
 
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, CLOUDSCRAPER_CHROME_DESKTOP
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +25,7 @@ class ReadKingdomFreeScraper(BaseScraper):
     
     def __init__(self):
         super().__init__()
-        self.session = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
-            }
-        )
+        self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
         self.session.headers.update({
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',

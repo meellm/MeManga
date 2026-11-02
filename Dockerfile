@@ -20,9 +20,16 @@ WORKDIR /app
 # Firefox.
 # requirements-docker.txt mirrors requirements.txt but omits PySide6 and
 # other GUI-only packages so the container stays lean and headless.
-COPY requirements-docker.txt ./
+# requirements-lock.txt is applied as constraints, so the packages the image
+# shares with the release builds get the same exact versions.
+# requirements-docker-constraints.txt pins the Linux-only packages keyring
+# adds, which that lock has no rows for. Together they pin every package
+# installed from requirements-docker.txt; only pip itself is upgraded
+# unpinned.
+COPY requirements-docker.txt requirements-lock.txt requirements-docker-constraints.txt ./
 RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements-docker.txt \
+        -c requirements-lock.txt -c requirements-docker-constraints.txt \
     && python -m playwright install --with-deps firefox chromium \
     && useradd --create-home --home-dir /home/memanga --shell /usr/sbin/nologin --uid 1000 memanga \
     && mkdir -p /home/memanga/.config/memanga /home/memanga/Downloads/MeManga \

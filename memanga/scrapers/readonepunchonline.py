@@ -7,7 +7,6 @@ WordPress + cache.imagemanga.online CDN
 
 import logging
 import re
-import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
@@ -23,7 +22,7 @@ class ReadOnePunchOnlineScraper(BaseScraper):
         super().__init__()
         self.base_url = "https://read.one-punch.online"
         self.landing_url = "https://one-punch.online"
-        self.session = cloudscraper.create_scraper()
+        self._use_cloudscraper()
         self.session.headers.update({
             'User-Agent': BROWSER_USER_AGENT,
             'Referer': self.base_url,

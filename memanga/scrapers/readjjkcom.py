@@ -9,7 +9,6 @@ JJK (Jujutsu Kaisen) dedicated manga site.
 
 import logging
 import re
-import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
@@ -23,7 +22,7 @@ class ReadJJKComScraper(BaseScraper):
     def __init__(self):
         super().__init__()
         self.base_url = "https://read-jjk.com"
-        self.session = cloudscraper.create_scraper()
+        self._use_cloudscraper()
         self.session.headers.update({
             "User-Agent": BROWSER_USER_AGENT,
             "Referer": self.base_url,

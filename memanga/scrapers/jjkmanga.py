@@ -6,7 +6,6 @@ WordPress + pic.readkakegurui.com CDN.
 """
 
 import logging
-import cloudscraper
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
 
@@ -19,7 +18,7 @@ class JJKMangaScraper(BaseScraper):
     def __init__(self):
         super().__init__()
         self.base_url = "https://jjkmanga.net"
-        self.session = cloudscraper.create_scraper()
+        self._use_cloudscraper()
         self.session.headers.update({
             "Referer": f"{self.base_url}/",
             "User-Agent": BROWSER_USER_AGENT

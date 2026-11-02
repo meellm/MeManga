@@ -20,7 +20,7 @@ from typing import List
 from pathlib import Path
 from urllib.parse import quote
 from bs4 import BeautifulSoup
-from ..base import BaseScraper, Chapter, Manga
+from ..base import BaseScraper, Chapter, Manga, CLOUDSCRAPER_CHROME_DESKTOP
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +39,7 @@ class WordPressMadaraScraper(BaseScraper):
     def __init__(self):
         super().__init__()
         if self.uses_cloudscraper:
-            try:
-                import cloudscraper
-                self.session = cloudscraper.create_scraper(
-                    browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-                )
-            except ImportError:
-                pass
+            self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
         self.session.headers.update({
             "Referer": self.base_url,
         })

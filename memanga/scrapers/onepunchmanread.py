@@ -7,7 +7,6 @@ One Punch Man Read (onepunchmanread.com)
 
 import re
 import logging
-import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
@@ -23,7 +22,7 @@ class OnePunchManReadScraper(BaseScraper):
     
     def __init__(self):
         super().__init__()
-        self.session = cloudscraper.create_scraper()
+        self._use_cloudscraper()
         self.session.headers.update({
             "User-Agent": BROWSER_USER_AGENT_SHORT,
             "Referer": self.BASE_URL,

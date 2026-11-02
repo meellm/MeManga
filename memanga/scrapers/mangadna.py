@@ -8,13 +8,12 @@ General manga/manhwa aggregator with clean image CDN.
 
 import re
 import logging
-import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from urllib.parse import urljoin
 
-from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, CLOUDSCRAPER_CHROME_DESKTOP
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +24,7 @@ class MangaDNAScraper(BaseScraper):
     
     def __init__(self):
         super().__init__()
-        self.scraper = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
-            }
-        )
-        self.session = self.scraper
+        self.scraper = self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
     
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title."""
