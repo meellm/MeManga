@@ -2,6 +2,8 @@
 #   pip install -r tests/requirements-test.txt
 #
 # pytest-qt provides the qapp/qtbot fixtures used by every GUI test.
+# It needs PySide6, which is the package's gui extra:
+#   pip install -e ".[gui]"
 # pytest-mock is the project standard for monkey-patching.
 
 pytest>=8.0

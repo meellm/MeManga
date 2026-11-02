@@ -275,6 +275,22 @@ you, so it also works in provisioning scripts:
 memanga --config-dir /srv/memanga setup --install-browsers
 ```
 
+The default install is the CLI only: it does not pull in PySide6 or any
+other GUI package, so it suits servers, containers, a Raspberry Pi or a
+cron job. To run the desktop app from a pip install, add the `gui`
+extra, which installs PySide6 and enables `memanga --gui` and the
+`memanga-gui` command. Put `memanga[gui] @` in front of the `git+` URL
+of the install command above, or run this in a clone of the repository:
+
+```bash
+python -m pip install ".[gui]"
+memanga-gui
+```
+
+Without the extra, `memanga --gui` and `memanga-gui` exit with that
+install command instead of starting. The release downloads already
+include everything.
+
 From a clone, the bootstrap script creates a venv and installs
 everything, including system packages:
 

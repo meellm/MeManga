@@ -425,6 +425,106 @@ def _ensure_logging() -> None:
     configure_logging(resolve_log_level(default=logging.INFO), timestamps=True)
 
 
+# Issue #219: the Qt runtime comes with the ``gui`` extra, not with the
+# default install the CLI and servers use. Import name -> the gui extra's
+# requirement in pyproject.toml.
+GUI_REQUIREMENTS = {"PySide6": "PySide6>=6.5.0"}
+
+
+def _repository_url():
+    """The Repository URL from the installed package metadata, or None."""
+    try:
+        from importlib import metadata
+        urls = metadata.metadata("memanga").get_all("Project-URL") or []
+    except Exception:
+        return None
+    for entry in urls:
+        label, _, url = entry.partition(",")
+        if label.strip().lower() == "repository" and url.strip():
+            return url.strip()
+    return None
+
+
+def _windows():
+    import os
+    return os.name == "nt"
+
+
+def _python_commands(arguments):
+    """Indented shell lines that run ``arguments`` with this Python.
+
+    pip has to install into the environment MeManga runs in; a bare
+    ``python`` may be another one (a venv that is not activated, pipx),
+    so the interpreter path is kept and quoted where the shell needs it.
+    On Windows a path that needs quotes gets a cmd line and a PowerShell
+    line, which runs a quoted path only after ``&``.
+    """
+    import re
+    exe = sys.executable or "python"
+    if not _windows():
+        import shlex
+        return [f"    {shlex.quote(exe)} {arguments}"]
+    if re.fullmatch(r"[A-Za-z0-9_.:\\/-]+", exe):
+        return [f"    {exe} {arguments}"]
+    powershell = "'" + exe.replace("'", "''") + "'"
+    return [f'    "{exe}" {arguments}',
+            f"    & {powershell} {arguments}  # PowerShell"]
+
+
+def _gui_install_hint():
+    """How to add the ``gui`` extra, for the missing-dependency error.
+
+    The first command works for any install, without knowing where
+    MeManga was installed from.
+    """
+    packages = " ".join(f'"{r}"' for r in GUI_REQUIREMENTS.values())
+    lines = [
+        "Install the gui extra's packages into the Python environment "
+        "MeManga runs in:",
+        *_python_commands(f"-m pip install {packages}"),
+    ]
+    url = _repository_url()
+    if url:
+        lines += [
+            "or reinstall MeManga with the gui extra:",
+            *_python_commands(f'-m pip install "memanga[gui] @ git+{url}"'),
+        ]
+    lines += [
+        "In the folder of a source checkout, use instead:",
+        *_python_commands('-m pip install -e ".[gui]"'),
+        "The memanga command works without it.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _missing_gui_dependency():
+    """Name of the first GUI package that is not installed, else None.
+
+    Only looks the package up: an installed Qt that fails to import
+    (missing system libraries, for example) keeps its own error.
+    """
+    import importlib.util
+    for name in GUI_REQUIREMENTS:
+        try:
+            if importlib.util.find_spec(name) is None:
+                return name
+        except (ImportError, ValueError):
+            return name
+    return None
+
+
+def _require_gui_dependencies():
+    """Exit with install guidance when the ``gui`` extra is missing."""
+    missing = _missing_gui_dependency()
+    if missing is None:
+        return
+    sys.stderr.write(
+        f"error: the MeManga desktop app needs {missing}, which is not "
+        "installed.\n" + _gui_install_hint()
+    )
+    sys.exit(1)
+
+
 def launch_gui(config=None, state=None, explicit_config_dir=None):
     """Launch the MeManga GUI application.
 
@@ -438,6 +538,9 @@ def launch_gui(config=None, state=None, explicit_config_dir=None):
     """
     # Before anything can log, imports included (issue #342).
     _ensure_logging()
+    # Before any Qt import: without the gui extra this exits with the
+    # install command instead of a ModuleNotFoundError traceback.
+    _require_gui_dependencies()
 
     from PySide6.QtWidgets import QApplication, QMessageBox
     from PySide6.QtCore import QTimer

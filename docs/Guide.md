@@ -298,6 +298,25 @@ Each step prints a line; the run exits `0` when everything is ready and
 memanga --config-dir /srv/memanga setup --install-browsers
 ```
 
+### Desktop app from pip
+
+The default install is the CLI only and has no GUI packages, so it fits
+headless servers, containers and scheduled checks. The desktop app needs
+the `gui` extra, which adds PySide6. To install MeManga with it, put
+`memanga[gui] @` in front of the `git+` URL of the install command
+above. To add it to an existing install, install the extra's package
+into the same environment, then start the app:
+
+```bash
+python -m pip install "PySide6>=6.5.0"
+memanga-gui            # or: memanga --gui
+```
+
+In the folder of a source checkout, use `python -m pip install -e
+".[gui]"`. Without the extra, `memanga --gui` and `memanga-gui` exit
+with status `1` and print these commands. Installing `requirements.txt`, the bootstrap
+script and the release downloads include the GUI already.
+
 ---
 
 ## Setup — Docker

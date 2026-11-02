@@ -54,17 +54,21 @@ dependencies = [
     "pikepdf>=8.0.0",
     "keyring>=24.0.0",
     "playwright-stealth>=2.0,<3",
-    "PySide6>=6.5.0",
 ]
 
 [project.optional-dependencies]
+# The desktop app. The default install is the CLI only, for servers,
+# containers and scheduled checks.
+gui = ["PySide6>=6.5.0"]
+# The GUI tests and the desktop build need the app's Qt runtime.
 dev = [
+    "memanga[gui]",
     "pytest>=7.4.0",
     "pytest-qt>=4.2.0",
     "pytest-mock>=3.12.0",
     "pytest-env>=1.1.0",
 ]
-build = ["pyinstaller>=6.0", "certifi>=2024.7.0"]
+build = ["memanga[gui]", "pyinstaller>=6.0", "certifi>=2024.7.0"]
 
 [project.urls]
 Homepage = "https://github.com/meellm/MeManga"
