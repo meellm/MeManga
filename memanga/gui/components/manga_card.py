@@ -311,6 +311,11 @@ class MangaCard(QFrame):
         self._read_count = int(read_count or 0)
         self._total_count = int(total_count or 0)
         self.setMouseTracking(True)
+        # The cover and its badges are painted, so screen readers get the
+        # title and what the overlays show from here (issue #394).
+        self.setAccessibleName(manga.get("title", "Unknown"))
+        self.setAccessibleDescription(self._accessible_text(
+            manga, new_count, self._read_count, self._total_count))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -447,6 +452,24 @@ class MangaCard(QFrame):
         if new_count > 0:
             return f"{base} · +{new_count}"
         return base
+
+    @staticmethod
+    def _accessible_text(manga: dict, new_count: int,
+                         read_count: int = 0, total_count: int = 0) -> str:
+        """Spoken summary of the painted status pill, progress and NEW
+        badge, plus what activating the card does."""
+        status = (manga.get("status") or "reading").replace("-", " ")
+        parts = [status.capitalize()]
+        if total_count > 0:
+            parts.append(f"read {read_count} of {total_count} chapters")
+        else:
+            ch_total = manga.get("chapters_total") or "?"
+            ch_done = manga.get("chapters_downloaded") or 0
+            parts.append(f"{ch_done} of {ch_total} chapters downloaded")
+        if new_count > 0:
+            parts.append(f"{new_count} new")
+        parts.append("opens details")
+        return ", ".join(parts)
 
     @staticmethod
     def _on_theme(title_lbl: QLabel, sub_lbl: QLabel):

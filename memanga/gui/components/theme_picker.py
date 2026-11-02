@@ -126,6 +126,8 @@ class _ThemeCard(QFrame):
         title_row = QHBoxLayout()
         label = QLabel(THEMES[theme_name]["label"].split("—")[0].strip())
         label.setProperty("role", "card_title")
+        # Painted preview card: name it for screen readers (issue #394).
+        self.setAccessibleName(f"{label.text()} theme")
         title_row.addWidget(label)
 
         title_row.addStretch(1)
@@ -148,12 +150,20 @@ class _ThemeCard(QFrame):
                       if "—" in THEMES[theme_name]["label"] else "")
         desc.setProperty("role", "hint")
         layout.addWidget(desc)
+        self._desc_text = desc.text()
+        self.setAccessibleDescription(self._desc_text)
 
     def set_selected(self, selected: bool):
         self.setProperty("selected", "true" if selected else "false")
         self.style().unpolish(self)
         self.style().polish(self)
         self._check.setVisible(selected)
+        # The check mark is visual only; say the state in words.
+        self.setAccessibleDescription(", ".join(
+            part for part in (
+                "Selected" if selected else "", self._desc_text,
+            ) if part
+        ))
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.MouseButton.LeftButton:

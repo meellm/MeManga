@@ -262,6 +262,7 @@ class SourcesPage(BasePage):
         filter_row.setSpacing(10)
         self._filter_entry = QLineEdit()
         self._filter_entry.setPlaceholderText("Filter sources by domain…")
+        self._filter_entry.setAccessibleName("Filter sources")
         self._filter_entry.setMinimumWidth(220)
         self._filter_entry.setMaximumWidth(300)
         self._filter_entry.textChanged.connect(self._on_filter_changed)
@@ -417,6 +418,9 @@ class SourcesPage(BasePage):
             head.addWidget(name, 1)
             # "..." more menu — opens a small QMenu with quick actions.
             more_btn = QPushButton("⋯")
+            more_btn.setToolTip("More actions")
+            more_btn.setAccessibleName("More actions")
+            more_btn.setAccessibleDescription(domain)
             more_btn.setFixedSize(24, 22)
             more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             more_btn.setStyleSheet(
@@ -631,6 +635,9 @@ class SourcesPage(BasePage):
                 row_layout.setSpacing(10)
 
                 check = QCheckBox()
+                # The domain sits in a separate label; give the bare
+                # checkbox its source as a name (issue #394).
+                check.setAccessibleName(source)
                 check.setChecked(source not in disabled)
                 check.stateChanged.connect(
                     lambda _=None, s=source, c=check: self._on_toggle(s, c.isChecked())

@@ -158,6 +158,8 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         ]
         for key, label, icon_name in nav_items:
             btn = QPushButton("  " + label)
+            # Leading spaces pad the icon only (issue #394).
+            btn.setAccessibleName(label)
             btn.setProperty("variant", "nav")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             # 42 px — same as the sidebar nav buttons. The nav QSS

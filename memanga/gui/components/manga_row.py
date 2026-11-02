@@ -78,6 +78,18 @@ class MangaRow(QFrame):
 
         layout.addLayout(right)
 
+        # Whole-row click target: name it for screen readers (issue #394).
+        self.setAccessibleName(manga.get("title", "Unknown"))
+        details = [status.replace("-", " ").capitalize()]
+        if source:
+            details.append(source)
+        if state_data:
+            details.append(f"{dl_count} chapters downloaded")
+        if new_count > 0:
+            details.append(f"{new_count} new")
+        details.append("opens details")
+        self.setAccessibleDescription(", ".join(details))
+
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton and self._on_click:
             self._on_click(self._manga)

@@ -351,6 +351,8 @@ class DetailPage(BasePage):
         remove_btn.setProperty("size", "sm")
         remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         remove_btn.clicked.connect(self._confirm_remove)
+        remove_btn.setAccessibleDescription(
+            f"Remove {title} from the library (asks first)")
         actions.addWidget(remove_btn)
 
         info_layout.addLayout(actions)
@@ -735,7 +737,9 @@ class DetailPage(BasePage):
                 date_lbl.setFixedWidth(96)
                 ch_row.addWidget(date_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
 
-            # Action column
+            # Action column. Every row repeats the same button labels,
+            # so each one says which chapter it acts on (issue #394).
+            ch_context = f"Chapter {num}"
             if partial_info or undelivered_info:
                 actions = QHBoxLayout()
                 actions.setSpacing(8)
@@ -743,6 +747,7 @@ class DetailPage(BasePage):
                     retry_btn = QPushButton("Retry")
                     retry_btn.setProperty("size", "sm")
                     retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                    retry_btn.setAccessibleDescription(ch_context)
                     retry_btn.clicked.connect(
                         lambda _, e=entry, b=retry_btn: self._download_chapter(
                             e, b, retry_partial=True
@@ -754,6 +759,8 @@ class DetailPage(BasePage):
                     send_btn.setProperty("size", "sm")
                     send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
                     send_btn.setToolTip("Send this chapter to Kindle again")
+                    send_btn.setAccessibleDescription(
+                        f"Send {ch_context} to Kindle again")
                     if (title, num) in self._sending:
                         send_btn.setEnabled(False)
                         send_btn.setText("Sending…")
@@ -766,6 +773,7 @@ class DetailPage(BasePage):
                 read_btn.setProperty("variant", "primary")
                 read_btn.setProperty("size", "sm")
                 read_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                read_btn.setAccessibleDescription(ch_context)
                 read_btn.clicked.connect(lambda _, c=num: self._read_chapter(c))
                 actions.addWidget(read_btn, 0, Qt.AlignmentFlag.AlignVCenter)
                 ch_row.addLayout(actions)
@@ -774,12 +782,14 @@ class DetailPage(BasePage):
                 btn.setProperty("variant", "primary")
                 btn.setProperty("size", "sm")
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setAccessibleDescription(ch_context)
                 btn.clicked.connect(lambda _, c=num: self._read_chapter(c))
                 ch_row.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
             else:
                 btn = QPushButton("Download")
                 btn.setProperty("size", "sm")
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setAccessibleDescription(ch_context)
                 btn.clicked.connect(
                     lambda _, e=entry, b=btn: self._download_chapter(e, b)
                 )

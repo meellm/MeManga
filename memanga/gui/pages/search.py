@@ -137,6 +137,7 @@ class SearchPage(BasePage):
 
         self._search_entry = QLineEdit()
         self._search_entry.setPlaceholderText("Search for manga across enabled sources…")
+        self._search_entry.setAccessibleName("Search manga")
         self._search_entry.setFixedHeight(40)
         self._search_entry.setStyleSheet("border: none; background: transparent; font-size: 13pt;")
         self._search_entry.returnPressed.connect(self._do_search)

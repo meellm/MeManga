@@ -13,6 +13,7 @@ class SettingsFormMixin:
         label.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
         label.setContentsMargins(0, T.PAD_LG, 0, T.PAD_SM)
         parent_layout.addWidget(label)
+        return label
 
     def _labeled_entry(self, parent_layout, label_text, value, placeholder="", password=False):
         row = QHBoxLayout()
@@ -22,6 +23,10 @@ class SettingsFormMixin:
         row.addWidget(lbl)
 
         entry = QLineEdit()
+        # Tie the visible label to the field so screen readers announce
+        # it; a placeholder is not a label (issue #394).
+        lbl.setBuddy(entry)
+        entry.setAccessibleName(label_text.rstrip(":"))
         # Narrow enough for the Email tab to fit the 900 px minimum
         # window width; the entry still stretches when there is room.
         entry.setMinimumWidth(160)

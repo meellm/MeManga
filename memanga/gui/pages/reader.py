@@ -897,15 +897,19 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         # continuous scroll, single page, two-up. The active layout's
         # icon is accent-tinted in _refresh_mode_btns.
         self._mode_btns = {}
-        for mode, icon_name, tip in (
-            ("continuous", "view_continuous", "Continuous vertical scroll"),
-            ("single", "view_single", "Single page at a time"),
-            ("double", "view_dual", "Two-page spreads"),
+        for mode, icon_name, label, tip in (
+            ("continuous", "view_continuous", "Continuous scroll",
+             "Continuous vertical scroll"),
+            ("single", "view_single", "Single page", "Single page at a time"),
+            ("double", "view_dual", "Two-page spread", "Two-page spreads"),
         ):
             btn = QPushButton()
             btn.setFixedSize(36, 28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setToolTip(tip)
+            # Icon-only: the tooltip alone ends up as the description,
+            # leaving no name (issue #394).
+            btn.setAccessibleName(label)
             btn.clicked.connect(lambda checked=False, m=mode: self._set_view_mode(m))
             self._mode_btns[mode] = (btn, icon_name)
             top_layout.addWidget(btn)
@@ -913,6 +917,8 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
 
         # Zoom chip
         zoom_minus = QPushButton("−")
+        zoom_minus.setToolTip("Zoom out")
+        zoom_minus.setAccessibleName("Zoom out")
         zoom_minus.setFixedSize(28, 28)
         zoom_minus.setCursor(Qt.CursorShape.PointingHandCursor)
         zoom_minus.clicked.connect(self._zoom_out)
@@ -926,6 +932,8 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         top_layout.addWidget(self._zoom_label)
 
         zoom_plus = QPushButton("+")
+        zoom_plus.setToolTip("Zoom in")
+        zoom_plus.setAccessibleName("Zoom in")
         zoom_plus.setFixedSize(28, 28)
         zoom_plus.setCursor(Qt.CursorShape.PointingHandCursor)
         zoom_plus.clicked.connect(self._zoom_in)
@@ -1088,6 +1096,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         self._progress_track.setValue(0)
         self._progress_track.setTextVisible(False)
         self._progress_track.setFixedHeight(4)
+        self._progress_track.setAccessibleName("Reading progress")
         pb_l.addWidget(self._progress_track, 1)
 
         self._progress_pct = QLabel("0%")

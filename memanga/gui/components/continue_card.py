@@ -28,6 +28,11 @@ class ContinueCard(QFrame):
         self._manga = manga
         self._on_click = on_click
         self._hover_offset = 0
+        # Whole-card click target: name it for screen readers (issue #394).
+        self.setAccessibleName(manga.get("title", "Unknown"))
+        self.setAccessibleDescription(
+            f"Continue reading, last read chapter {last_chapter or 'unknown'}"
+        )
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -82,6 +87,7 @@ class ContinueCard(QFrame):
         bar.setValue(max(0, min(100, int(progress_pct))))
         bar.setTextVisible(False)
         bar.setFixedHeight(3)
+        bar.setAccessibleName("Reading progress")
         info.addWidget(bar)
 
         layout.addLayout(info, 1)

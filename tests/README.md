@@ -74,6 +74,8 @@ pytest --cov=memanga --cov-report=html   # HTML coverage report
 - Live scraper HTTP (mocked instead — see `MockScraper`)
 - PyInstaller packaging (separate `python build.py`)
 - macOS-specific frame chrome (`launch_gui` ensure-browsers flow)
+- How a real screen reader speaks the GUI (accessible names are unit-tested;
+  see `docs/ACCESSIBILITY.md` for the manual pass)
 
 ## Adding a test
 
