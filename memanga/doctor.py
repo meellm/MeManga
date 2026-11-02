@@ -58,8 +58,8 @@ CHECK_NAMES = (
 )
 
 # Browsers the Playwright scrapers launch. Mirrors
-# memanga.gui._REQUIRED_BROWSERS; kept here because the CLI-only Docker
-# image ships without the gui package.
+# memanga.gui._REQUIRED_BROWSERS; kept here so doctor does not import the
+# gui package.
 REQUIRED_BROWSERS = ("firefox", "chromium")
 
 

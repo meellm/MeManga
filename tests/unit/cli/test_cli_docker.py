@@ -96,3 +96,22 @@ class TestCliOnlyEnvVar:
         monkeypatch.setitem(sys.modules, "memanga.gui", fake_gui)
         cli.main()
         assert launched == [True]
+
+
+class TestGuiLauncherInCliOnlyImage:
+    """#314: the image keeps the memanga-gui launcher; it exits like --gui."""
+
+    def test_launch_gui_rejected_before_dependency_check(
+            self, monkeypatch, isolated_home, capsys):
+        monkeypatch.setenv("MEMANGA_CLI_ONLY", "1")
+        # The image has no Qt; the error must not be the pip install hint.
+        for name in ("PySide6", "shiboken6"):
+            monkeypatch.setitem(sys.modules, name, None)
+        import memanga.gui as gui
+        with pytest.raises(SystemExit) as exc:
+            gui.launch_gui()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "not available in this image" in err
+        assert "pip install" not in err
+        assert "Traceback" not in err

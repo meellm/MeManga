@@ -177,6 +177,12 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #314 The Docker image installs the package unmodified: it keeps the
+  `memanga-gui` launcher instead of deleting it after the install, and
+  the build fails if the pinned dependencies do not satisfy the package
+  (`pip check`). In the image, `memanga-gui` and `python -m memanga.gui`
+  exit with status 1 and the same "not available in this image" error
+  as `memanga --gui`.
 - #219 PySide6 is no longer a default dependency. `pip install` gives the
   CLI only, for servers, containers and scheduled checks; the desktop app
   needs the new `gui` extra (`memanga[gui]`). The `dev` and `build` extras

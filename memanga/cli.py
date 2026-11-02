@@ -4394,7 +4394,7 @@ Examples:
              f"(default: ${CONFIG_DIR_ENV} or the platform config folder). "
              "Goes before the command.",
     )
-    # In CLI-only Docker images (MEMANGA_CLI_ONLY=1) the GUI is not installed;
+    # In CLI-only Docker images (MEMANGA_CLI_ONLY=1) Qt is not installed;
     # suppress the flag from help and reject it at runtime with a clear message.
     parser.add_argument(
         "--gui",
