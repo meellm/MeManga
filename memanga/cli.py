@@ -4399,7 +4399,8 @@ Examples:
     parser.add_argument(
         "--gui",
         action="store_true",
-        help=argparse.SUPPRESS if _cli_only else "Launch the graphical user interface",
+        help=(argparse.SUPPRESS if _cli_only else
+              "Launch the graphical user interface (needs the gui extra)"),
     )
     # Issue #226: output and logging. Like --config-dir these go before
     # the command; `check -q` keeps its own meaning (never prompt).

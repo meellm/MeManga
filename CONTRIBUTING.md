@@ -19,7 +19,7 @@ cd MeManga
 python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-pip install -e ".[dev]"           # also pulls pytest, pyinstaller, etc.
+pip install -e ".[dev]"           # the package with the gui extra + test tools
 python -m playwright install chromium firefox   # browsers for the scrapers
 
 # Or run the one-step setup instead (venv, deps, browsers, config folder):
@@ -34,6 +34,24 @@ python -m memanga --help
 
 The GUI launches in offscreen mode in CI (`QT_QPA_PLATFORM=offscreen`);
 locally it opens the real Qt window.
+
+### Package extras
+
+`pip install .` installs the CLI only; PySide6 is not a default
+dependency. The extras in `pyproject.toml`:
+
+| Extra | Adds | Use it for |
+|---|---|---|
+| `gui` | PySide6 | Running the desktop app (`memanga --gui`, `memanga-gui`) |
+| `dev` | `gui` plus pytest, pytest-qt, pytest-mock, pytest-env | Running the test suite; the GUI tests need Qt |
+| `build` | `gui` plus PyInstaller and certifi | Desktop builds from the package metadata |
+
+`requirements.txt` stays the desktop and release build set and keeps
+PySide6; `requirements-docker.txt` stays the CLI-only set. A new
+dependency that only the GUI imports goes in the `gui` extra and
+`requirements.txt`, never in `dependencies` or `requirements-docker.txt`.
+Code outside `memanga/gui/` must not import Qt at import time;
+`tests/unit/test_optional_gui.py` checks that and the metadata.
 
 ## Project layout
 

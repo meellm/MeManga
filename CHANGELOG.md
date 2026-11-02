@@ -177,6 +177,13 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #219 PySide6 is no longer a default dependency. `pip install` gives the
+  CLI only, for servers, containers and scheduled checks; the desktop app
+  needs the new `gui` extra (`memanga[gui]`). The `dev` and `build` extras
+  include it. Without it, `memanga --gui`, `memanga-gui` and
+  `python -m memanga.gui` exit with status 1 and print the install
+  command instead of a traceback. Release downloads, the Docker image,
+  `requirements.txt` and the bootstrap script are unchanged.
 - #215 The version is set in one place, `__version__` in
   `memanga/__init__.py`; `pyproject.toml` reads it at build time and the
   release tag check reads it from there. The package metadata now has an

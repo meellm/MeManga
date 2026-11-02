@@ -2,7 +2,12 @@
 
 Run the whole suite:
 
+The GUI tests need Qt, which is the package's `gui` extra. Install
+the project with it (`pip install -e ".[dev]"` includes it) or from
+`requirements.txt`, then the test tools:
+
 ```bash
+pip install -e ".[gui]"
 pip install -r tests/requirements-test.txt
 pytest                          # full suite
 pytest -x                       # stop on first failure
