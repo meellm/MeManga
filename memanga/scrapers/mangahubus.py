@@ -25,12 +25,7 @@ class MangaHubUsScraper(BaseScraper):
     
     def __init__(self):
         super().__init__()
-        try:
-            import cloudscraper
-            self.session = cloudscraper.create_scraper()
-        except ImportError:
-            import requests
-            self.session = requests.Session()
+        self._use_cloudscraper()
         self.session.headers.update({
             "User-Agent": BROWSER_USER_AGENT_SHORT
         })

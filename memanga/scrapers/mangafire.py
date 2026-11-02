@@ -44,13 +44,6 @@ except ImportError:
     BrowserContext = None
     Page = None
 
-# Try cloudscraper
-try:
-    import cloudscraper
-    CLOUDSCRAPER_AVAILABLE = True
-except ImportError:
-    CLOUDSCRAPER_AVAILABLE = False
-
 import requests
 
 logger = logging.getLogger(__name__)
@@ -509,12 +502,9 @@ class MangaFireScraper(BaseScraper):
         super().__init__()
 
         # Use cloudscraper for Cloudflare bypass
-        if CLOUDSCRAPER_AVAILABLE:
-            self.session = cloudscraper.create_scraper(
-                browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False}
-            )
-        else:
-            self.session = requests.Session()
+        self._use_cloudscraper(
+            {'browser': 'chrome', 'platform': 'windows', 'mobile': False}
+        )
 
         self.session.headers.update({
             'User-Agent': BROWSER_USER_AGENT,

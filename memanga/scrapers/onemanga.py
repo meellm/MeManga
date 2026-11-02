@@ -7,7 +7,6 @@ Uses MangaHub CDN for images.
 
 import re
 import logging
-import cloudscraper
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from pathlib import Path
@@ -26,7 +25,7 @@ class OneMangaScraper(BaseScraper):
     
     def __init__(self):
         super().__init__()
-        self.session = cloudscraper.create_scraper()
+        self._use_cloudscraper()
         self.session.headers.update({
             "User-Agent": BROWSER_USER_AGENT_SHORT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

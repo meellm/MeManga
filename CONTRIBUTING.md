@@ -94,7 +94,13 @@ every push.
 1. Drop `memanga/scrapers/newsite.py` (or pick a template under
    `memanga/scrapers/templates/` and add an entry to
    `memanga/scrapers/registry.py`).
-2. Subclass `BaseScraper` (or `PlaywrightScraper` if JS-rendered).
+2. Subclass `BaseScraper` (or `PlaywrightScraper` if JS-rendered). If the
+   site sits behind Cloudflare's JavaScript check, call
+   `self._use_cloudscraper()` in `__init__` (optionally with a browser
+   profile such as `CLOUDSCRAPER_CHROME_DESKTOP`) instead of importing
+   `cloudscraper` yourself. cloudscraper is best-effort: it stops working
+   when a site raises its protection, so a source that needs a real
+   browser should use `PlaywrightScraper`.
 3. Implement `search()`, `get_chapters()`, `get_pages()`.
 4. Register the domain in `_SCRAPER_PATHS` in `memanga/scrapers/__init__.py`
    as `"newsite:NewSiteScraper"` (module and class; it is imported on first
@@ -196,6 +202,43 @@ row per package with the resolved version + the chain that pulled
 it in. If a security advisory drops, bump the offending package in
 `requirements.txt` and re-run pip-compile — the lock will
 recompute consistently.
+
+### Docker image dependencies
+
+The Docker image installs **`requirements-docker.txt`**, the CLI-only
+subset of `requirements.txt` (no PySide6, no frozen-build entries such
+as `pywin32-ctypes`), with two pip constraints files:
+
+```bash
+pip install -r requirements-docker.txt \
+    -c requirements-lock.txt -c requirements-docker-constraints.txt
+```
+
+`requirements-lock.txt` gives the packages the image shares with the
+release builds the same exact versions. It is compiled on a non-Linux
+host, so it has no rows for the Linux-only packages keyring adds there
+(`jeepney`, `SecretStorage`, `cryptography`, `cffi`, `pycparser`);
+`requirements-docker-constraints.txt` pins those. Together they pin
+every package installed from `requirements-docker.txt`. Only pip itself,
+upgraded at the start of the build, is not pinned.
+
+When you add or bump a CLI dependency, change both `requirements.txt`
+and `requirements-docker.txt`, then refresh `requirements-lock.txt` as
+above. Then refresh `requirements-docker-constraints.txt`: resolve the
+Docker set against the lock alone in the image base, and copy the
+versions of the packages the lock does not pin:
+
+```bash
+docker run --rm -v "$PWD":/src -w /src python:3.12-slim sh -c \
+    "pip install -q -r requirements-docker.txt -c requirements-lock.txt && pip freeze"
+```
+
+A floor in `requirements-docker.txt` that the pins do not satisfy (for
+example a security floor such as `urllib3>=2.8.0`) makes the Docker
+build fail until they are refreshed. `tests/unit/test_dependency_hygiene.py`
+catches that, and any Linux dependency left without a pin, before the
+build does. It walks the installed package metadata, so run it in an
+environment with the Docker dependencies installed.
 
 ## Reporting issues
 

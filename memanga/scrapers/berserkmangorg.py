@@ -7,10 +7,12 @@ import logging
 import re
 from pathlib import Path
 from urllib.parse import urljoin
-import cloudscraper
 from bs4 import BeautifulSoup
 
-from .base import BaseScraper, Manga, Chapter, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
+from .base import (
+    BaseScraper, Manga, Chapter, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT,
+    CLOUDSCRAPER_CHROME_DESKTOP,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +25,7 @@ class BerserkMangOrgScraper(BaseScraper):
     
     def __init__(self):
         super().__init__()
-        self.session = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
-            }
-        )
+        self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
         self.session.headers.update({
             'User-Agent': BROWSER_USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',

@@ -32,6 +32,9 @@ BROWSER_USER_AGENT = (
     + " (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+# The cloudscraper browser profile most Cloudflare-fronted sources use.
+CLOUDSCRAPER_CHROME_DESKTOP = {"browser": "chrome", "platform": "windows", "desktop": True}
+
 
 _IMAGE_MAGIC_PREFIXES = (
     b"\xff\xd8\xff",        # JPEG
@@ -347,6 +350,34 @@ class BaseScraper(ABC):
             "Accept-Language": "en-US,en;q=0.5",
         })
         self._rate_limit = 1.0  # Seconds between requests
+
+    def _use_cloudscraper(self, browser: Optional[dict] = None) -> requests.Session:
+        """Send this scraper's requests through a cloudscraper session.
+
+        cloudscraper is a best-effort helper for sources behind
+        Cloudflare's JavaScript check: it stops working whenever a site
+        raises its protection, and sources that need a real browser use
+        Playwright instead. Every scraper that wants it comes through
+        here, so replacing it or changing how its sessions are built is
+        a one-place edit.
+
+        ``browser`` is cloudscraper's browser profile (for example
+        ``CLOUDSCRAPER_CHROME_DESKTOP``); without it cloudscraper picks
+        one. The new session starts with cloudscraper's own headers, not
+        the base ones, so set the headers the site needs afterwards.
+        Without cloudscraper installed the plain session stays.
+        """
+        try:
+            import cloudscraper
+        except ImportError:
+            logger.debug("cloudscraper not installed; %s uses a plain session",
+                         type(self).__name__)
+            return self.session
+        if browser is None:
+            self.session = cloudscraper.create_scraper()
+        else:
+            self.session = cloudscraper.create_scraper(browser=dict(browser))
+        return self.session
 
     # Request spacing belongs to the scraper class, not the instance:
     # get_scraper() gives each thread its own instance and session, and

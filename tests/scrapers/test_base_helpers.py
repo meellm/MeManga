@@ -625,3 +625,79 @@ class TestPagePixelLimit:
         p = tmp_path / "page"
         p.write_bytes(_image_bytes("PNG"))
         assert is_image_file(p) is True
+
+
+# ──────────────────────────────────────────────────────────────────────
+# cloudscraper sessions (issue #214)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _FakeCloudscraper:
+    """Stand-in for the cloudscraper module: records create_scraper calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    def create_scraper(self, **kwargs):
+        self.calls.append(kwargs)
+        return requests.Session()
+
+
+@pytest.fixture
+def fake_cloudscraper(monkeypatch):
+    import sys
+    fake = _FakeCloudscraper()
+    monkeypatch.setitem(sys.modules, "cloudscraper", fake)
+    return fake
+
+
+class TestUseCloudscraper:
+    def test_default_profile_replaces_session(self, fake_cloudscraper):
+        s = _DummyScraper()
+        base = s.session
+        session = s._use_cloudscraper()
+        assert fake_cloudscraper.calls == [{}]
+        assert session is s.session
+        assert session is not base
+
+    def test_browser_profile_is_passed_as_a_copy(self, fake_cloudscraper):
+        from memanga.scrapers.base import CLOUDSCRAPER_CHROME_DESKTOP
+        _DummyScraper()._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
+        (call,) = fake_cloudscraper.calls
+        assert call == {"browser": {"browser": "chrome", "platform": "windows",
+                                    "desktop": True}}
+        assert call["browser"] is not CLOUDSCRAPER_CHROME_DESKTOP
+
+    def test_without_cloudscraper_the_base_session_stays(self, monkeypatch):
+        import sys
+        monkeypatch.setitem(sys.modules, "cloudscraper", None)
+        s = _DummyScraper()
+        base = s.session
+        assert s._use_cloudscraper() is base
+        assert s.session is base
+
+    def test_scrapers_keep_their_own_profile_and_headers(self, fake_cloudscraper):
+        from memanga.scrapers.mangadna import MangaDNAScraper
+        from memanga.scrapers.mangafire import MangaFireScraper
+        from memanga.scrapers.jjkmanga import JJKMangaScraper
+
+        fire = MangaFireScraper()
+        assert fake_cloudscraper.calls[-1] == {"browser": {
+            "browser": "chrome", "platform": "windows", "mobile": False}}
+        assert fire.session.headers["Accept-Language"] == "en-US,en;q=0.9"
+
+        jjk = JJKMangaScraper()
+        assert fake_cloudscraper.calls[-1] == {}
+        assert jjk.session.headers["Referer"] == "https://jjkmanga.net/"
+
+        dna = MangaDNAScraper()
+        assert dna.scraper is dna.session
+        assert fake_cloudscraper.calls[-1]["browser"]["desktop"] is True
+
+    def test_worker_copy_builds_a_fresh_cloudscraper_session(self, fake_cloudscraper):
+        from memanga.scrapers.mangadna import MangaDNAScraper
+        s = MangaDNAScraper()
+        clone = s.worker_copy()
+        assert len(fake_cloudscraper.calls) == 2
+        assert clone.session is not s.session
+        assert clone.scraper is clone.session

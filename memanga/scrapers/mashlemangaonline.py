@@ -7,7 +7,6 @@ WordPress + wp-content/uploads CDN
 
 import logging
 import re
-import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
@@ -22,7 +21,7 @@ class MashleMangaOnlineScraper(BaseScraper):
     def __init__(self):
         super().__init__()
         self.base_url = "https://mashle-manga.online"
-        self.session = cloudscraper.create_scraper()
+        self._use_cloudscraper()
         self.session.headers.update({
             'User-Agent': BROWSER_USER_AGENT,
             'Referer': self.base_url,
