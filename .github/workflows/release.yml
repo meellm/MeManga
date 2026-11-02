@@ -92,7 +92,7 @@ jobs:
           python-version: "3.12"
 
       - name: Check release tag matches the project version
-        # Issue #381: the notices direct users to tag v<pyproject version>
+        # Issue #381: the notices direct users to tag v<project version>
         # for the source and build files of their download. A tag that
         # differs (a typo, or a version bump that was not tagged) would
         # point them at a different tree, so it fails before any build.

@@ -305,12 +305,21 @@ def dist_component(dist: metadata.Distribution) -> Component:
     return comp
 
 
-def _project_version(project_root: Path) -> str:
-    pyproject = project_root / "pyproject.toml"
-    if pyproject.is_file():
-        m = re.search(r'^version\s*=\s*"([^"]+)"', _read_text(pyproject), re.M)
+def _source_version(project_root: Path) -> str | None:
+    """`__version__` in memanga/__init__.py, the one place the version is
+    set; pyproject.toml reads it from there at build time (issue #215)."""
+    init = Path(project_root) / "memanga" / "__init__.py"
+    if init.is_file():
+        m = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']', _read_text(init), re.M)
         if m:
             return m.group(1)
+    return None
+
+
+def _project_version(project_root: Path) -> str:
+    version = _source_version(project_root)
+    if version:
+        return version
     try:
         return metadata.version("memanga")
     except metadata.PackageNotFoundError:
@@ -319,19 +328,17 @@ def _project_version(project_root: Path) -> str:
 
 def release_tag_problems(tag: str, project_root: Path = ROOT) -> list[str]:
     """Problems with building a release from the git tag `tag` (issue #381).
-    The notices direct users to tag v<pyproject version> for the source and
+    The notices direct users to tag v<project version> for the source and
     build files of their download, so the tag being built must be exactly
     that one; anything else would point them at a different tree."""
-    pyproject = Path(project_root) / "pyproject.toml"
-    m = (re.search(r'^version\s*=\s*"([^"]+)"', _read_text(pyproject), re.M)
-         if pyproject.is_file() else None)
-    if not m:
-        return ["pyproject.toml declares no project version"]
-    expected = f"v{m.group(1)}"
+    version = _source_version(project_root)
+    if not version:
+        return ["memanga/__init__.py declares no __version__"]
+    expected = f"v{version}"
     if tag != expected:
         return [f"release tag {tag!r} does not match the project version in "
-                f"pyproject.toml (expected {expected!r}); the notices would "
-                f"point users to the wrong source"]
+                f"memanga/__init__.py (expected {expected!r}); the notices "
+                f"would point users to the wrong source"]
     return []
 
 
@@ -1141,7 +1148,7 @@ def main(argv: list[str] | None = None) -> int:
     bundle.add_argument("path", type=Path)
 
     tag = sub.add_parser("check-tag", help="fail unless the release tag is "
-                                           "v<version from pyproject.toml>")
+                                           "v<__version__ from memanga/__init__.py>")
     tag.add_argument("tag")
     tag.add_argument("--project-root", type=Path, default=ROOT)
 

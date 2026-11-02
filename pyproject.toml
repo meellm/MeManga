@@ -1,14 +1,47 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+# 77 is the first setuptools that accepts an SPDX `license` string with
+# `license-files` (PEP 639).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "memanga"
-version = "0.4.4"
+# The version is set once, as `__version__` in memanga/__init__.py.
+dynamic = ["version"]
 description = "Automatic manga downloader with Kindle support"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "meellm"}]
 requires-python = ">=3.10"
+keywords = [
+    "manga",
+    "manga-downloader",
+    "comics",
+    "kindle",
+    "e-reader",
+    "epub",
+    "cbz",
+    "pdf",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Utilities",
+]
 dependencies = [
     "rich>=13.0.0",
     "pyyaml>=6.0",
@@ -33,9 +66,20 @@ dev = [
 ]
 build = ["pyinstaller>=6.0", "certifi>=2024.7.0"]
 
+[project.urls]
+Homepage = "https://github.com/meellm/MeManga"
+Documentation = "https://github.com/meellm/MeManga/blob/main/docs/Guide.md"
+Repository = "https://github.com/meellm/MeManga"
+Issues = "https://github.com/meellm/MeManga/issues"
+Changelog = "https://github.com/meellm/MeManga/blob/main/CHANGELOG.md"
+Releases = "https://github.com/meellm/MeManga/releases"
+
 [project.scripts]
 memanga = "memanga.cli:main"
 memanga-gui = "memanga.gui:launch_gui"
+
+[tool.setuptools.dynamic]
+version = {attr = "memanga.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["memanga*"]
