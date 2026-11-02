@@ -35,18 +35,17 @@ RUN python -m pip install --upgrade pip \
     && mkdir -p /home/memanga/.config/memanga /home/memanga/Downloads/MeManga \
     && chown -R memanga:memanga /home/memanga
 
-# Install the package itself (deps already satisfied above).
-# .dockerignore excludes memanga/gui so only the CLI source lands in the image.
-# pyproject.toml declares a memanga-gui console script; remove it so the image
-# exposes only the memanga CLI and does not leave a broken launcher in PATH.
-# The trailing test assertion makes the build fail if the path ever changes.
+# Install the package itself, unmodified. --no-deps keeps the pinned layer
+# above the only source of dependencies; pip check then fails the build if
+# pyproject.toml needs a package that layer does not provide. The image has
+# no Qt runtime, so the memanga-gui launcher and --gui exit with an error
+# (MEMANGA_CLI_ONLY).
 # LICENSE is in the build context because pyproject.toml lists it in
 # license-files, so the installed metadata carries it.
 COPY pyproject.toml README.md LICENSE ./
 COPY memanga ./memanga
 RUN python -m pip install --no-deps . \
-    && rm -f /usr/local/bin/memanga-gui \
-    && test ! -f /usr/local/bin/memanga-gui
+    && python -m pip check
 
 # Third-party notices (issue #380): MeManga's license plus the license
 # texts of every installed Python distribution, the Python runtime and the

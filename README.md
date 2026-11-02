@@ -318,7 +318,8 @@ On macOS / Linux:
 
 The Docker image packages the CLI and Playwright Firefox runtime for
 headless servers, NAS boxes, Raspberry Pi systems, and cron-style
-automation. It does **not** include PySide6 or any other GUI runtime.
+automation. It does **not** include PySide6 or any other GUI runtime;
+`memanga --gui` and `memanga-gui` exit with an error there.
 
 ```bash
 docker build -t memanga:cli .

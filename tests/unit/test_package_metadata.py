@@ -121,6 +121,19 @@ def test_project_urls_point_at_the_repository(pyproject):
         assert (ROOT / path).is_file(), label
 
 
+def test_docker_image_installs_the_package_unmodified():
+    # #314: no installed file is deleted afterwards, the whole package is
+    # in the build context, and pip check proves the pinned layer
+    # satisfies pyproject.toml despite --no-deps.
+    text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    flat = " ".join(text.replace("\\\n", " ").split())
+    assert "rm -f /usr/local/bin" not in text
+    assert "pip install --no-deps . && python -m pip check" in flat
+    ignored = {line.strip().rstrip("/") for line in
+               (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()}
+    assert not ignored & {"memanga", "memanga/gui"}
+
+
 def test_docker_package_install_has_the_license_files(pyproject):
     # The image runs `pip install --no-deps .` on what it copied into the
     # working directory; license-files must be there by then.

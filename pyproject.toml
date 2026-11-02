@@ -78,6 +78,9 @@ Issues = "https://github.com/meellm/MeManga/issues"
 Changelog = "https://github.com/meellm/MeManga/blob/main/CHANGELOG.md"
 Releases = "https://github.com/meellm/MeManga/releases"
 
+# memanga-gui stays a console script, not a gui-script: on Windows a
+# gui-script has no console, so the error printed without the gui extra
+# would not be seen. The release downloads are the windowed app.
 [project.scripts]
 memanga = "memanga.cli:main"
 memanga-gui = "memanga.gui:launch_gui"

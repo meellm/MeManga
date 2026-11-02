@@ -324,7 +324,8 @@ script and the release downloads include the GUI already.
 Docker is the easiest option for headless servers, NAS boxes, Raspberry
 Pi systems, and cron-style automation because the image includes the CLI
 and Playwright Firefox runtime without requiring a local Python install.
-The Docker image does **not** include PySide6 or any other GUI runtime.
+The Docker image does **not** include PySide6 or any other GUI runtime;
+`memanga --gui` and `memanga-gui` exit with an error there.
 
 ### Requirements
 

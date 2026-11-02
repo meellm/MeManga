@@ -525,6 +525,23 @@ def _require_gui_dependencies():
     sys.exit(1)
 
 
+def _require_desktop_build():
+    """Exit when this is the CLI-only Docker image (issue #314).
+
+    The image installs the whole package, so ``memanga-gui`` exists
+    there, but not the Qt runtime; pip install hints would be wrong.
+    """
+    import os
+    if not os.environ.get("MEMANGA_CLI_ONLY"):
+        return
+    sys.stderr.write(
+        "error: the MeManga desktop app is not available in this image "
+        "(CLI-only Docker build)\n"
+        "Use the memanga command instead.\n"
+    )
+    sys.exit(1)
+
+
 def launch_gui(config=None, state=None, explicit_config_dir=None):
     """Launch the MeManga GUI application.
 
@@ -538,6 +555,7 @@ def launch_gui(config=None, state=None, explicit_config_dir=None):
     """
     # Before anything can log, imports included (issue #342).
     _ensure_logging()
+    _require_desktop_build()
     # Before any Qt import: without the gui extra this exits with the
     # install command instead of a ModuleNotFoundError traceback.
     _require_gui_dependencies()
