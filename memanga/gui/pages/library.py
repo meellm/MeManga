@@ -127,6 +127,7 @@ class LibraryPage(BasePage):
 
         self._search_entry = QLineEdit()
         self._search_entry.setPlaceholderText("Filter library…")
+        self._search_entry.setAccessibleName("Filter library")
         self._search_entry.setMaximumWidth(240)
         self._search_entry.textChanged.connect(self._on_search)
         filter_bar.addWidget(self._search_entry)
@@ -158,6 +159,11 @@ class LibraryPage(BasePage):
         filter_bar.addStretch()
 
         self._sort_menu = QComboBox()
+        # Qt on Linux publishes a combo box's current item as its name, so
+        # the purpose also goes in the description, which every platform
+        # publishes.
+        self._sort_menu.setAccessibleName("Sort library")
+        self._sort_menu.setAccessibleDescription("Sort order of the library")
         self._sort_menu.addItems(["Title A-Z", "Last Updated", "Recently Added", "Chapter Count", "Status"])
         sort_display = {"title": "Title A-Z", "last_updated": "Last Updated",
                         "recently_added": "Recently Added", "chapter_count": "Chapter Count",
@@ -176,8 +182,12 @@ class LibraryPage(BasePage):
         view_l.setSpacing(0)
         self._view_buttons: dict[str, QPushButton] = {}
         self._view_mode = self.app.config.get("gui.view_mode", "grid")
-        for mode, glyph in [("grid", "▦"), ("list", "≡")]:
+        for mode, glyph, label in [("grid", "▦", "Grid view"),
+                                   ("list", "≡", "List view")]:
             btn = QPushButton(glyph)
+            # The glyph alone is not a label (issue #394).
+            btn.setToolTip(label)
+            btn.setAccessibleName(label)
             btn.setProperty("variant", "chip")
             btn.setProperty("active", "true" if mode == self._view_mode else "false")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -185,6 +195,7 @@ class LibraryPage(BasePage):
             btn.clicked.connect(lambda _, m=mode: self._set_view_mode(m))
             view_l.addWidget(btn)
             self._view_buttons[mode] = btn
+        self._describe_view_buttons()
         filter_bar.addWidget(view_wrap)
 
         self._count_label = QLabel("")
@@ -544,9 +555,19 @@ class LibraryPage(BasePage):
         for m, btn in self._view_buttons.items():
             btn.setProperty("active", "true" if m == mode else "false")
             btn.style().unpolish(btn); btn.style().polish(btn)
+        self._describe_view_buttons()
         self.app.config.set("gui.view_mode", mode)
         self.app.config.save()
         self._refresh()
+
+    def _describe_view_buttons(self):
+        """Say which view is current; the accent tint is visual only.
+        An empty description would fall back to the tooltip, which only
+        repeats the name."""
+        hints = {"grid": "Show covers in a grid", "list": "Show a compact list"}
+        for m, btn in self._view_buttons.items():
+            btn.setAccessibleDescription(
+                "Current view" if m == self._view_mode else hints[m])
 
     def _on_sort_change(self, value):
         sort_map = {"Title A-Z": "title", "Last Updated": "last_updated",

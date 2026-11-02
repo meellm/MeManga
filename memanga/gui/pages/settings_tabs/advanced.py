@@ -117,6 +117,10 @@ class AdvancedTabMixin:
         self._cron_time = QLineEdit(self.app.config.get("cron.time", "06:00"))
         self._cron_time.setMinimumWidth(90)
         self._cron_time.setMaximumWidth(120)
+        time_lbl.setBuddy(self._cron_time)
+        # Name only: the description carries the disabled reason
+        # (_apply_scheduling_capability).
+        self._cron_time.setAccessibleName("Daily auto-check time")
         self._cron_time.setStyleSheet("font-family: 'Geist Mono', monospace;")
         cron_row.addWidget(self._cron_time)
         cron_row.addStretch()
@@ -182,6 +186,8 @@ class AdvancedTabMixin:
         self._partial_threshold.setValue(int(round(self.app.config.partial_threshold)))
         self._partial_threshold.setMinimumWidth(56)
         self._partial_threshold.setMaximumWidth(72)
+        thresh_lbl.setBuddy(self._partial_threshold)
+        self._partial_threshold.setAccessibleName("Max pages allowed to fail")
         thresh_row.addWidget(self._partial_threshold)
         thresh_row.addStretch(1)
         f.addLayout(thresh_row)
@@ -214,6 +220,9 @@ class AdvancedTabMixin:
         )
         self._post_processing_command.setMinimumHeight(36)
         self._post_processing_command.setMinimumWidth(280)
+        command_lbl.setBuddy(self._post_processing_command)
+        self._post_processing_command.setAccessibleName(
+            "Post-processing command")
         self._post_processing_command.setPlaceholderText(
             "python scripts/after_download.py {output_path}"
         )

@@ -140,6 +140,11 @@ class SearchResultRow(QFrame):
             btn.setSizePolicy(QSizePolicy.Policy.Fixed,
                                QSizePolicy.Policy.Fixed)
             btn.clicked.connect(self._handle_add)
+            # Every row has the same "+ Add"; say which hit it adds.
+            btn.setAccessibleDescription(
+                f"Add {result.get('title', 'Unknown')} from "
+                f"{source or 'unknown source'} to the library"
+            )
             layout.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
             self._add_btn = btn
 

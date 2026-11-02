@@ -38,6 +38,10 @@ class ProgressItem(QFrame):
                 f"background: transparent; border: none; color: {T.FG_MUTED}; font-weight: bold;"
             )
             cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            # "x" is a glyph, not a label (issue #394).
+            cancel_btn.setToolTip("Cancel download")
+            cancel_btn.setAccessibleName("Cancel download")
+            cancel_btn.setAccessibleDescription(f"{title} - Ch. {chapter}")
             cancel_btn.clicked.connect(lambda: on_cancel(task_id))
             top.addWidget(cancel_btn)
 
@@ -48,6 +52,8 @@ class ProgressItem(QFrame):
         self._progress.setValue(0)
         self._progress.setFixedHeight(6)
         self._progress.setTextVisible(False)
+        self._progress.setAccessibleName("Download progress")
+        self._progress.setAccessibleDescription(f"{title} - Ch. {chapter}")
         layout.addWidget(self._progress)
 
     def update_progress(self, current: int, total: int):

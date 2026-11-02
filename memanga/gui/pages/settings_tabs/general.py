@@ -85,6 +85,8 @@ class GeneralTabMixin:
         self._dir_entry = QLineEdit(str(self.app.config.download_dir))
         self._dir_entry.setMinimumHeight(36)
         self._dir_entry.setMinimumWidth(300)
+        dir_lbl.setBuddy(self._dir_entry)
+        self._dir_entry.setAccessibleName("Download Directory")
         dir_row.addWidget(self._dir_entry, 1)
 
         browse_btn = QPushButton("Browse")
@@ -95,28 +97,41 @@ class GeneralTabMixin:
         f.addLayout(dir_row)
 
         # Output format
-        self._section(f, "Output Format")
+        format_heading = self._section(f, "Output Format")
         format_row = QHBoxLayout()
         format_row.setSpacing(12)
         self._format_combo = QComboBox()
         self._format_combo.addItems(["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"])
         self._format_combo.setCurrentText(self.app.config.output_format)
         self._format_combo.setMinimumWidth(160)
+        # Qt on Linux publishes a combo box's current item as its name;
+        # the heading relation and the description carry the purpose
+        # (issue #394).
+        format_heading.setBuddy(self._format_combo)
+        self._format_combo.setAccessibleName("Output format")
         self._format_combo.currentTextChanged.connect(lambda _: self._refresh_filename_preview())
         format_row.addWidget(self._format_combo)
 
         hint = QLabel("pdf/epub = e-reader, Kindle  |  cbz/zip/images = local only")
         hint.setProperty("role", "hint")
         format_row.addWidget(hint, 1)
+        # Spelled out: the visible hint's "=" and "|" read badly aloud.
+        self._format_combo.setAccessibleDescription(
+            "Output format for downloaded chapters. PDF and EPUB suit "
+            "e-readers and Kindle; CBZ, ZIP and images stay local only.")
         f.addLayout(format_row)
 
-        self._section(f, "MangaDex Image Quality")
+        quality_heading = self._section(f, "MangaDex Image Quality")
         self._mangadex_quality = QComboBox()
         self._mangadex_quality.addItem("Original", False)
         self._mangadex_quality.addItem("Data saver (smaller downloads)", True)
         self._mangadex_quality.setCurrentIndex(
             1 if self.app.config.get("mangadex.data_saver", False) else 0)
         self._mangadex_quality.setMaximumWidth(280)
+        quality_heading.setBuddy(self._mangadex_quality)
+        self._mangadex_quality.setAccessibleName("MangaDex image quality")
+        self._mangadex_quality.setAccessibleDescription(
+            "Image quality for MangaDex downloads")
         f.addWidget(self._mangadex_quality)
 
         # Concurrent downloads slider (1..8). JumpSlider so a groove
@@ -138,6 +153,9 @@ class GeneralTabMixin:
         self._concurrent_slider.setMinimumWidth(160)
         current_concurrent = int(self.app.config.get("gui.max_concurrent_downloads", 2))
         self._concurrent_slider.setValue(max(1, min(8, current_concurrent)))
+        # The section heading is not tied to the slider (issue #394).
+        self._concurrent_slider.setAccessibleName("Concurrent downloads")
+        self._concurrent_slider.setAccessibleDescription(slider_hint.text())
         slider_row.addWidget(self._concurrent_slider)
 
         self._concurrent_value_lbl = QLabel(str(self._concurrent_slider.value()))
@@ -164,6 +182,8 @@ class GeneralTabMixin:
         )
         self._naming_entry.setMinimumHeight(36)
         self._naming_entry.setMinimumWidth(280)
+        naming_lbl.setBuddy(self._naming_entry)
+        self._naming_entry.setAccessibleName("File naming template")
         self._naming_entry.textChanged.connect(self._refresh_filename_preview)
         naming_row.addWidget(self._naming_entry, 1)
         f.addLayout(naming_row)

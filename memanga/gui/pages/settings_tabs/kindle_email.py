@@ -44,6 +44,10 @@ class EmailTabMixin:
         self._password_entry.setMinimumWidth(160)
         self._password_entry.setMaximumWidth(220)
         self._password_entry.setEchoMode(QLineEdit.EchoMode.Password)
+        pw_lbl.setBuddy(self._password_entry)
+        self._password_entry.setAccessibleName("App Password")
+        self._password_entry.setAccessibleDescription(
+            "Leave blank to keep the saved password")
         pw_row.addWidget(self._password_entry)
 
         # Wraps instead of widening the tab past a narrow window.

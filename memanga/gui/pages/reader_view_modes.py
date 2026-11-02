@@ -114,6 +114,10 @@ class ReaderViewModeMixin:
                      else T.tokens()["text.t_2"])
             btn.setIcon(_ic(icon_name, color, 16))
             btn.setIconSize(QSize(16, 16))
+            # The tint is visual only; say which layout is active.
+            tip = btn.toolTip()
+            btn.setAccessibleDescription(
+                f"{tip}, current layout" if mode == self._view_mode else tip)
 
     def _render_images(self):
         max_w = self._page_width_budget()

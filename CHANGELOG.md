@@ -343,6 +343,14 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #394 Screen readers announce the desktop app's controls by name. Icon
+  and glyph buttons (grid/list view, reader layout and zoom, download
+  cancel, the sources "⋯" menu), cover cards and list rows, theme cards,
+  source checkboxes, progress bars and the Settings fields used to be
+  announced as a symbol or with no name at all. Sidebar badges say what
+  they count, repeated buttons such as "Read" or "+ Add" say which
+  chapter or title they act on, and the active view, layout and theme are
+  announced. `docs/ACCESSIBILITY.md` has a manual screen-reader checklist.
 - #259 The desktop app's Settings header shows the config file it really
   uses, including one chosen with `--config-dir` or `MEMANGA_CONFIG_DIR`,
   and the path can be selected and copied. It used to name a
