@@ -164,6 +164,11 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #215 The version is set in one place, `__version__` in
+  `memanga/__init__.py`; `pyproject.toml` reads it at build time and the
+  release tag check reads it from there. The package metadata now has an
+  SPDX license expression with the license file, author, keywords,
+  classifiers and project links. Building needs setuptools 77 or newer.
 - #393 "Remove chapters after reading" moves a finished chapter's
   download to the system trash (Recycle Bin on Windows, Trash on macOS and
   Linux) instead of deleting it for good, so a chapter finished by
@@ -209,7 +214,7 @@ All notable changes are recorded here. Format loosely follows
   rebuild from source on macOS with the new `python build_app.py
   --no-install`, which builds from the installed packages instead of
   reinstalling the pinned ones over the modified component). A release
-  fails when its tag is not `v` plus the version in `pyproject.toml`, so
+  fails when its tag is not `v` plus the project version, so
   the tag the notices name is the one the download was built from.
   Builds drop Qt Virtual Keyboard (GPL or
   commercial only) and Python's `readline` module (it links GNU Readline,

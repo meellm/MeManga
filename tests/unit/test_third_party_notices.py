@@ -95,9 +95,11 @@ def project(tmp_path):
     root = tmp_path / "project"
     root.mkdir()
     (root / "LICENSE").write_text(MIT_TEXT, encoding="utf-8")
-    (root / "pyproject.toml").write_text('[project]\nversion = "9.9.9"\n',
+    (root / "pyproject.toml").write_text('[project]\ndynamic = ["version"]\n',
                                          encoding="utf-8")
     (root / "memanga").mkdir()
+    (root / "memanga" / "__init__.py").write_text('__version__ = "9.9.9"\n',
+                                                 encoding="utf-8")
     (root / "memanga" / "cli.py").write_text("", encoding="utf-8")
     return root
 
@@ -1104,7 +1106,7 @@ def test_readme_documents_onedir_downloads_and_lgpl_replacement():
 
 
 # ── issue #381: the notices point at the tree that built the download ───
-# The LGPL section names tag v<pyproject version> as the source and build
+# The LGPL section names tag v<project version> as the source and build
 # files of the download, and tells macOS users how to rebuild with a
 # modified component. The release fails on any other tag, and the rebuild
 # route must not reinstall the pinned component over the modified one.
@@ -1124,10 +1126,20 @@ def test_release_tag_must_match_project_version(project, tag, ok):
 
 
 def test_release_tag_needs_a_project_version(tmp_path):
-    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
-    missing = ["pyproject.toml declares no project version"]
+    (tmp_path / "memanga").mkdir()
+    (tmp_path / "memanga" / "__init__.py").write_text('"""x"""\n', encoding="utf-8")
+    missing = ["memanga/__init__.py declares no __version__"]
     assert notices.release_tag_problems("v1.0.0", tmp_path) == missing
     assert notices.release_tag_problems("v1.0.0", tmp_path / "absent") == missing
+
+
+def test_release_tag_ignores_a_stale_pyproject_version(project):
+    # Issue #215: memanga/__init__.py is the only version source; a static
+    # version left in pyproject.toml must not be what the tag is held to.
+    (project / "pyproject.toml").write_text('[project]\nversion = "1.0.0"\n',
+                                            encoding="utf-8")
+    assert notices.release_tag_problems("v9.9.9", project) == []
+    assert notices._project_version(project) == "9.9.9"
 
 
 def test_repo_version_passes_the_release_tag_check():
