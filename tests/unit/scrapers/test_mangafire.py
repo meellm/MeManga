@@ -688,6 +688,9 @@ class TestVRFBrowserInitAtomicity:
         gen = mf.VRFGenerator()
         with pytest.raises(RuntimeError, match="Executable doesn't exist"):
             gen._ensure_browser_in_thread()
+        # Issue #217: the error says how to install the browser.
+        with pytest.raises(RuntimeError, match="memanga setup"):
+            gen._ensure_browser_in_thread()
         # Playwright start was rolled back; no half-initialised state left.
         assert started.stopped is True
         assert not hasattr(mf._vrf_thread_local, "playwright")

@@ -34,6 +34,7 @@ from . import __version__
 from .config import AppPasswordError, app_password_override, get_app_password
 from .cron import WINDOWS_TASK_NAME, is_managed_line
 from .emailer import EmailAuthError, kindle_format_error, smtp_login
+from .first_run import missing_host_dependencies
 
 SCHEMA_VERSION = 1
 
@@ -667,6 +668,8 @@ def _probe_browsers(launch: bool) -> Dict[str, Dict[str, Any]]:
             except Exception as e:
                 info["launched"] = False
                 info["error"] = _first_line(e)
+                # Playwright puts this reason below a bare first line.
+                info["missing_dependencies"] = missing_host_dependencies(e)
     return results
 
 
@@ -689,12 +692,16 @@ def check_browsers(config=None, state=None, launch: bool = False) -> CheckResult
         install = "python -m playwright install " + " ".join(REQUIRED_BROWSERS)
         return CheckResult("browsers", FAIL,
                            "Missing Playwright browser(s): " + ", ".join(missing)
-                           + f"; run '{install}'", details)
+                           + f"; run 'memanga setup' or '{install}'", details)
     names = ", ".join(REQUIRED_BROWSERS)
     if launch:
         broken = [n for n in REQUIRED_BROWSERS if not browsers[n].get("launched")]
         if broken:
-            return CheckResult("browsers", FAIL, "Browser launch failed: " + ", ".join(broken), details)
+            message = "Browser launch failed: " + ", ".join(broken)
+            if any(browsers[n].get("missing_dependencies") for n in broken):
+                message += ("; system libraries are missing, run 'memanga setup' "
+                            "for the command that installs them")
+            return CheckResult("browsers", FAIL, message, details)
         return CheckResult("browsers", OK, f"Launched {names}", details)
     return CheckResult("browsers", OK, f"Installed: {names}", details)
 

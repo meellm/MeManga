@@ -160,8 +160,13 @@ class TestBashCompletion:
         reply = _complete(script, "")
         assert {"edit", "update"} <= set(reply)
         assert "set" not in reply
-        assert _complete(script, "se") == ["search", "send"]
+        assert _complete(script, "se") == ["search", "send", "setup"]
         assert _complete(script, "update", "Some Title", "--st") == ["--status"]
+
+    def test_setup_offers_both_browser_flags(self, script):
+        # Issue #217: --install-browsers / --no-install-browsers.
+        assert set(_complete(script, "setup", "--")) >= {
+            "--install-browsers", "--no-install-browsers"}
 
     def test_read_unread(self, script):
         reply = _complete(script, "")

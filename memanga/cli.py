@@ -4041,6 +4041,43 @@ def cmd_doctor(args):
     return doctor.exit_code(results, strict=args.strict)
 
 
+def cmd_setup(args):
+    """Prepare a first run (issue #217); safe to repeat.
+
+    Exit code: 0 when every step is done, 1 when one still needs the
+    user (the message says what to run).
+    """
+    from . import first_run
+
+    plain = is_plain_console(console)
+    status_cells = _DOCTOR_LABELS if plain else _DOCTOR_ICONS
+
+    def report(result):
+        console.print(f"{status_cells[result.status]} [cyan]{_esc(result.name)}[/cyan]: "
+                      f"{_esc(result.message)}")
+
+    def confirm(question):
+        return Confirm.ask(_esc(question), default=True)
+
+    def notify(text):
+        console.print(f"[dim]{_esc(text)}[/dim]")
+
+    console.print("[bold]📖 MeManga setup[/bold]")
+    results = first_run.run_setup(
+        config, report=report,
+        install=args.install_browsers, can_prompt=_stdin_is_tty(),
+        confirm=confirm, notify=notify,
+    )
+    if doctor.overall_status(results) == doctor.FAIL:
+        console.print("[red]❌ Setup is not complete.[/red] Fix the items above, "
+                      "then run 'memanga setup' again.")
+        return EXIT_ERROR
+    console.print("[green]✅ Setup complete.[/green] Next: 'memanga add -i' to track "
+                  "a manga, 'memanga check' for new chapters, 'memanga --help' for "
+                  "every command.")
+    return EXIT_OK
+
+
 def cmd_tui(args):
     """Run interactive TUI."""
     if not _stdin_is_tty():
@@ -4328,6 +4365,7 @@ Examples:
   memanga read "Solo Leveling" 1 2      # Mark chapters read (unread undoes)
   memanga path "Solo Leveling"          # Print its download folder
   memanga open "Solo Leveling"          # Open its download folder
+  memanga setup                         # Prepare a first run (browsers too)
   memanga doctor                        # Diagnose setup problems
   memanga cron install                  # Set up daily checks
   memanga config                        # Configure settings
@@ -4799,6 +4837,31 @@ Examples:
                           help="Launch Firefox and Chromium headless instead of only checking they are installed")
     p_doctor.add_argument("--strict", action="store_true", help="Also exit non-zero on warnings")
     p_doctor.set_defaults(func=cmd_doctor)
+
+    # setup (issue #217)
+    p_setup = subparsers.add_parser(
+        "setup",
+        help="Prepare a first run: config, download folder and browsers",
+        description=(
+            "Create the config file and download folder when missing, and\n"
+            "check that the Firefox and Chromium builds the scrapers use are\n"
+            "installed and start. Missing browsers are downloaded only with\n"
+            "--install-browsers or after you agree on a terminal; without a\n"
+            "terminal nothing is downloaded. Missing system libraries are\n"
+            "reported with the command that installs them; setup never runs\n"
+            "sudo or a package manager. Safe to run again at any time.\n\n"
+            "Exits 0 when everything is ready, 1 when something still needs\n"
+            "you."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_setup.add_argument(
+        "--install-browsers", action=argparse.BooleanOptionalAction, default=None,
+        help="Download missing browsers without asking (--install-browsers) or "
+             "never download them (--no-install-browsers). Default: ask on a "
+             "terminal, don't download otherwise",
+    )
+    p_setup.set_defaults(func=cmd_setup)
 
     # tui (default if no command)
     p_tui = subparsers.add_parser("tui", help="Interactive terminal UI")
