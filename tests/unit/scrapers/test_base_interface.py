@@ -613,3 +613,39 @@ class TestPlaywrightScraperPerSubclassExecutor:
         assert not hasattr(pb._thread_local, "context")
         # And `pw.stop()` must have been called to release native resources.
         assert _BoomPW.stopped, "partial init didn't call pw.stop()"
+
+    def test_missing_browser_build_says_run_setup(self, monkeypatch):
+        """Issue #217: Playwright's "Executable doesn't exist" banner is
+        replaced by a message naming `memanga setup`, after the same
+        rollback."""
+        from memanga.first_run import BrowserSetupError
+        from memanga.scrapers import playwright_base as pb
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        pb.cleanup_browsers()
+        missing = RuntimeError(
+            "BrowserType.launch: Executable doesn't exist at /cache/firefox-1/firefox\n"
+            "║ Looks like Playwright was just installed or updated. ║")
+
+        class _MissingPW:
+            stopped = False
+
+            class firefox:
+                @staticmethod
+                def launch(*a, **k):
+                    raise missing
+
+            def stop(self):
+                _MissingPW.stopped = True
+
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: type("_S", (), {
+            "start": staticmethod(lambda: _MissingPW()),
+        })())
+
+        with pytest.raises(BrowserSetupError, match="memanga setup") as info:
+            WeebCentralScraper()._get_browser_in_thread()
+        assert info.value.__cause__ is missing
+        assert "Looks like" not in str(info.value)
+        assert _MissingPW.stopped
+        assert not hasattr(pb._thread_local, "playwright")

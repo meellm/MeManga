@@ -19,6 +19,7 @@ them to your Kindle.
 - [Setup — Windows](#setup--windows)
 - [Setup — macOS](#setup--macos)
 - [Setup — Linux](#setup--linux)
+- [Setup — pip install](#setup--pip-install)
 - [Setup — Docker](#setup--docker)
 - [Your First Manga](#your-first-manga)
 - [Checking for New Chapters](#checking-for-new-chapters)
@@ -259,6 +260,43 @@ Or run directly through the virtual environment:
 
 If `XDG_CONFIG_HOME` is set, the folder is `$XDG_CONFIG_HOME/memanga`
 instead. Chapters download to `~/Downloads/MeManga` by default.
+
+---
+
+## Setup — pip install
+
+Any platform with Python 3.10+ can install the package with pip, best
+into a virtual environment:
+
+```bash
+python -m pip install "git+https://github.com/meellm/MeManga.git"
+memanga setup
+memanga --help
+```
+
+`pip install` only installs the package. `memanga setup` prepares the
+first run when you ask for it, and can be run again at any time:
+
+1. Creates `config.yaml` with the default settings if there is none (an
+   existing file is left as it is) and the download folder, and checks
+   that both are writable.
+2. Checks the Playwright Firefox and Chromium builds. Missing builds are
+   downloaded after you answer yes. `--install-browsers` downloads them
+   without asking; without a terminal nothing is downloaded unless that
+   flag is given, and `--no-install-browsers` never downloads.
+   `PLAYWRIGHT_BROWSERS_PATH` chooses where they go.
+3. Starts each browser headless (no network) to make sure it runs. If
+   system libraries are missing, setup prints the command that installs
+   them, for example on Debian/Ubuntu
+   `sudo python -m playwright install-deps firefox chromium`. It never
+   runs sudo or a package manager itself.
+
+Each step prints a line; the run exits `0` when everything is ready and
+`1` when something still needs you. Use it in provisioning scripts:
+
+```bash
+memanga --config-dir /srv/memanga setup --install-browsers
+```
 
 ---
 
@@ -1481,6 +1519,8 @@ run import - --replace --yes < memanga_export.json
 | `run send --pending --list "Title"` | List them (title or `#N`), sending nothing |
 | `run send --pending --clear` | Forget them; the files stay |
 | `run sources` | List all supported sources |
+| `run setup` | Prepare a first run: config file, download folder, browsers (see [Setup — pip install](#setup--pip-install)) |
+| `run setup --install-browsers` | Same, downloading missing browsers without asking |
 | `run cron install` | Set up daily automatic checks |
 | `run cron install --time 07:30` | Set custom check time |
 | `run cron status` | Check if scheduling is active |
@@ -1809,7 +1849,9 @@ sudo apt-get install python3-venv
 
 ### Playwright browsers fail to launch
 
-Playwright needs system libraries. Install them:
+`memanga setup` checks the browsers, offers to download missing ones and
+prints the command for missing system libraries. To do it by hand,
+install the system libraries Playwright needs:
 
 ```bash
 ./venv/bin/python -m playwright install-deps

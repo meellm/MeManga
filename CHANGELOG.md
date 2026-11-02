@@ -7,6 +7,19 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #217 `memanga setup` prepares a first run after `pip install`, which
+  itself still sets nothing up. It creates `config.yaml` with the default
+  settings when there is none (an existing file is never changed) and
+  the download folder, checks both are writable, and checks that the
+  Playwright Firefox and Chromium builds are installed and start
+  headless. Missing builds are downloaded only after a yes on a terminal
+  or with `--install-browsers`; without a terminal nothing is downloaded,
+  and `--no-install-browsers` never downloads. Missing system libraries
+  are reported with the command that installs them; setup never runs
+  sudo or a package manager. It can be run again at any time and exits
+  1 while something still needs the user. A scraper whose browser build
+  is missing now says to run `memanga setup` instead of showing
+  Playwright's install banner, and `doctor` points there too.
 - #359 A small, supported Python API: `memanga.api.Library` reads the
   tracked manga of a config directory (title, status, sources, last,
   downloaded and failed chapters) as read-only objects, without printing,

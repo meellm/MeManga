@@ -10,6 +10,7 @@ import logging
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, wait
 import threading
+from ..first_run import browser_launch_error
 from .base import BaseScraper
 
 logger = logging.getLogger(__name__)
@@ -308,13 +309,17 @@ class PlaywrightScraper(BaseScraper):
         pw = sync_playwright().start()
         try:
             browser, context = self._launch_browser(pw)
-        except Exception:
+        except Exception as e:
             # Roll back the Playwright start so the next call can retry
             # cleanly instead of inheriting half-broken state.
             try:
                 pw.stop()
             except Exception:
                 pass
+            # Issue #217: a missing browser build says how to fix it.
+            setup_error = browser_launch_error(e)
+            if setup_error is not None:
+                raise setup_error from e
             raise
 
         # Commit all three at once — never leave half-set thread-local.

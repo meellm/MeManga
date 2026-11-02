@@ -606,6 +606,60 @@ class TestBrowsers:
         assert result.status == doctor.FAIL
         assert result.details["browsers"]["chromium"]["error"] == "crashed"
 
+    def test_missing_browser_points_to_setup(self, monkeypatch):
+        probe = dict(firefox=dict(installed=False, executable="/y", launched=None, error=None),
+                     chromium=self._installed())
+        monkeypatch.setattr(doctor, "_probe_browsers", lambda launch: probe)
+        assert "memanga setup" in doctor.check_browsers().message
+
+    def test_probe_records_missing_system_libraries(self, monkeypatch, tmp_path):
+        # Issue #217: the reason sits below Playwright's bare first line,
+        # so the probe must read the whole error, not just `error`.
+        executable = tmp_path / "browser"
+        executable.write_text("")
+        deps = RuntimeError(
+            "BrowserType.launch: \n"
+            "║ Host system is missing dependencies to run browsers. ║")
+
+        class _Type:
+            def __init__(self, error):
+                self.executable_path = str(executable)
+                self._error = error
+
+            def launch(self, **kwargs):
+                raise self._error
+
+        class _PW:
+            firefox = _Type(deps)
+            chromium = _Type(RuntimeError("crashed"))
+
+        class _Manager:
+            def __enter__(self):
+                return _PW()
+
+            def __exit__(self, *exc):
+                return False
+
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: _Manager())
+        probe = doctor._probe_browsers(launch=True)
+        assert probe["firefox"]["launched"] is False
+        # Only the bare first line survives in `error`.
+        assert probe["firefox"]["error"].strip() == "BrowserType.launch:"
+        assert probe["firefox"]["missing_dependencies"] is True
+        assert probe["chromium"]["missing_dependencies"] is False
+
+    def test_missing_system_libraries_named(self, monkeypatch):
+        # Issue #217: Playwright's first line is only "BrowserType.launch:".
+        broken = dict(self._installed(launched=False, error="BrowserType.launch:"),
+                      missing_dependencies=True)
+        probe = dict(firefox=broken, chromium=self._installed(launched=True))
+        monkeypatch.setattr(doctor, "_probe_browsers", lambda launch: probe)
+        result = doctor.check_browsers(launch=True)
+        assert result.status == doctor.FAIL
+        assert "system libraries" in result.message
+        assert "memanga setup" in result.message
+
 
 class TestRunnerAndReport:
     def test_selection_keeps_canonical_order(self, config, state):

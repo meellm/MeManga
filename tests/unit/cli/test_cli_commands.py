@@ -5302,6 +5302,88 @@ class TestDoctorCommand:
         assert run_cli("doctor", "--check", "nope") == 2
 
 
+class TestSetupCommand:
+    """Issue #217: `memanga setup` prepares a first run on request."""
+
+    @staticmethod
+    def _probe(installed):
+        def probe(launch):
+            return {name: dict(installed=name in installed, executable="/x",
+                               launched=(name in installed) if launch else None,
+                               error=None)
+                    for name in ("firefox", "chromium")}
+        return probe
+
+    @pytest.fixture
+    def no_installer(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(first_run_module(), "run_installer",
+                            lambda *a, **k: calls.append(a) or pytest.fail("installer ran"))
+        return calls
+
+    def test_creates_config_and_download_dir(self, run_cli, isolated_home,
+                                             monkeypatch, capsys, no_installer):
+        from memanga import doctor
+        monkeypatch.setattr(doctor, "_probe_browsers", self._probe({"firefox", "chromium"}))
+        root = isolated_home / ".config" / "memanga"
+        assert run_cli("setup") == 0
+        out = capsys.readouterr().out
+        assert (root / "config.yaml").is_file()
+        assert (isolated_home / "Downloads" / "MeManga").is_dir()
+        assert "Setup complete" in out
+        assert "memanga add -i" in out
+
+        # Repeatable: the existing file is kept as it is.
+        before = (root / "config.yaml").read_text(encoding="utf-8")
+        assert run_cli("setup") == 0
+        assert (root / "config.yaml").read_text(encoding="utf-8") == before
+        assert "Using existing" in capsys.readouterr().out
+
+    def test_missing_browsers_without_terminal_exit_1(self, run_cli, monkeypatch,
+                                                      capsys, no_installer):
+        from memanga import doctor
+        monkeypatch.setattr(doctor, "_probe_browsers", self._probe({"firefox"}))
+        assert run_cli("setup") == 1
+        out = capsys.readouterr().out
+        assert "--install-browsers" in out
+        assert "Setup is not complete" in out
+        assert no_installer == []
+
+    def test_install_flag_runs_installer(self, run_cli, monkeypatch, capsys):
+        from memanga import doctor
+        installed = {"firefox"}
+        monkeypatch.setattr(doctor, "_probe_browsers",
+                            lambda launch: self._probe(set(installed))(launch))
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            installed.add("chromium")
+            return types.SimpleNamespace(returncode=0)
+        monkeypatch.setattr(first_run_module(), "run_installer", fake_run)
+        assert run_cli("setup", "--install-browsers") == 0
+        assert calls == [[sys.executable, "-m", "playwright", "install", "chromium"]]
+        assert "Downloaded and started" in capsys.readouterr().out
+
+    def test_no_install_flag(self, run_cli, monkeypatch, capsys, no_installer):
+        from memanga import doctor
+        monkeypatch.setattr(doctor, "_probe_browsers", self._probe(set()))
+        assert run_cli("setup", "--no-install-browsers") == 1
+        assert no_installer == []
+
+    def test_broken_config_refused_and_kept(self, run_cli, isolated_home, capsys):
+        path = isolated_home / ".config" / "memanga" / "config.yaml"
+        path.write_text("manga: [unclosed\n", encoding="utf-8")
+        assert run_cli("setup") == 1
+        assert "memanga doctor" in capsys.readouterr().err
+        assert path.read_text(encoding="utf-8") == "manga: [unclosed\n"
+
+
+def first_run_module():
+    from memanga import first_run
+    return first_run
+
+
 class TestInvalidConfigFile:
     """A broken config.yaml must not crash `import memanga.cli`: doctor
     reports it, every other command refuses to run (issue #250)."""

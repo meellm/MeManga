@@ -25,6 +25,7 @@ from typing import List, Optional, Dict, Sequence, Tuple
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse
 
+from ..first_run import browser_launch_error
 from ..image_limits import ImageTooLargeError, open_image
 from .base import (
     BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT,
@@ -300,13 +301,17 @@ class VRFGenerator:
                 viewport={'width': 1920, 'height': 1080}
             )
             page = context.new_page()
-        except Exception:
+        except Exception as e:
             # Roll back so the next call retries cleanly and surfaces the
             # real error instead of a masking AttributeError.
             try:
                 pw.stop()
             except Exception:
                 pass
+            # Issue #217: a missing browser build says how to fix it.
+            setup_error = browser_launch_error(e)
+            if setup_error is not None:
+                raise setup_error from e
             raise
 
         _vrf_thread_local.playwright = pw

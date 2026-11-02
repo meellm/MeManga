@@ -242,6 +242,42 @@ and download files — you can drive your library from both interchangeably.
 
 ## Install
 
+Install the package with pip (into a virtual environment), then run
+`setup` once:
+
+```bash
+python -m pip install "git+https://github.com/meellm/MeManga.git"
+memanga setup     # config file, download folder, browsers
+memanga --help    # every command
+```
+
+Installing only installs the package; it never downloads browsers or
+writes to your config folder. `memanga setup` does that when you run it,
+and is safe to run again at any time:
+
+- creates `config.yaml` with the default settings when there is none (an
+  existing file is never changed) and the download folder, and checks
+  both are writable;
+- checks that the Playwright Firefox and Chromium builds the scrapers use
+  are installed. Missing builds (several hundred MB) are downloaded after
+  you agree, or without asking with `--install-browsers`. Without a
+  terminal nothing is downloaded unless you pass that flag;
+  `--no-install-browsers` never downloads;
+- starts each browser headless to make sure it runs. When system
+  libraries are missing it prints the command that installs them (on
+  Debian/Ubuntu `sudo python -m playwright install-deps firefox
+  chromium`); it never runs sudo or a package manager itself.
+
+It exits 0 when everything is ready and 1 when something still needs
+you, so it also works in provisioning scripts:
+
+```bash
+memanga --config-dir /srv/memanga setup --install-browsers
+```
+
+From a clone, the bootstrap script creates a venv and installs
+everything, including system packages:
+
 ```bash
 git clone https://github.com/meellm/MeManga.git
 cd MeManga
@@ -339,6 +375,7 @@ For a host cron job, run Compose from the repository directory:
 | `send TARGET CHAPTER... [--dry-run] [--yes]` | Send downloaded chapters to the Kindle (again) from their saved files; several chapters ask first unless `--yes`, `--dry-run` only shows what would be sent |
 | `send --pending [TARGET] [--list \| --clear]` | Send chapters that were saved but never reached the Kindle again; `--list` only lists them, `--clear` forgets the records (the files stay) |
 | `status [--json]` | Show config dir, download dir, manga count, last check time |
+| `setup [--install-browsers \| --no-install-browsers]` | Prepare a first run: create the config file and download folder, check (and with consent download) the Playwright browsers, report missing system libraries. Safe to repeat |
 | `doctor [--json] [--check NAME] [--smtp] [--launch-browsers]` | Diagnose install, paths, browsers, email, keyring, scheduler and source health |
 | `config` | Interactive settings editor |
 | `config show [--json]` / `config get KEY` / `config set KEY VALUE` | Show, read or change settings without prompts; values are checked before saving and the app password stays masked |
