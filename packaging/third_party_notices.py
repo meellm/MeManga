@@ -793,10 +793,9 @@ _REPLACEMENT = {
         "This download is a single executable (inside MeManga.app on macOS), "
         "so the LGPL components cannot be swapped in place. To use a modified "
         "version, build MeManga from its source at the release tag that "
-        "matches this download: install the pinned dependencies with `pip "
-        "install --no-deps -r requirements-lock.txt` and PyInstaller with `pip "
-        "install \"pyinstaller>=6.0,<7.0\"`, install the modified component in "
-        "their place, "
+        "matches this download: install the pinned dependencies, PyInstaller "
+        "included, with `pip install --no-deps -r requirements/build.txt`, "
+        "install the modified component in their place, "
         "then run `python build_app.py --no-install`, which builds from the "
         "packages already installed (without --no-install it reinstalls the "
         "pinned versions over yours), and on macOS then `python "
@@ -838,7 +837,7 @@ def lgpl_section(components, *, layout: str, qt: str = "",
     out += [""] + textwrap.wrap(
         "MeManga's own source code, including the files this download is built "
         "from (packaging/memanga-release.spec, build_app.py and "
-        f"requirements-lock.txt), is at {PROJECT_HOMEPAGE} under the MIT "
+        f"requirements/build.txt), is at {PROJECT_HOMEPAGE} under the MIT "
         f"license; use the release tag {tag}.", width=79, break_on_hyphens=False)
     # Keep commands such as `build_app.py --no-install` whole.
     out += [""] + textwrap.wrap(" ".join(_REPLACEMENT[layout]), width=79,

@@ -628,9 +628,9 @@ class TestImagesToEpub:
 
     def test_ebooklib_not_a_declared_dependency(self):
         root = Path(__file__).resolve().parents[2]
-        for name in ("pyproject.toml", "requirements.txt",
-                     "requirements-docker.txt", "requirements-lock.txt"):
-            assert "ebooklib" not in (root / name).read_text().lower(), name
+        for path in (root / "pyproject.toml",
+                     *sorted((root / "requirements").glob("*.txt"))):
+            assert "ebooklib" not in path.read_text().lower(), path.name
 
 
 class TestImagesToFolder:

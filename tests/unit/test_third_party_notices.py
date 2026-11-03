@@ -397,8 +397,8 @@ def test_qt_pdf_entry_covers_every_component_qt_lists():
     release, each with the license text its source names."""
     (entry,) = notices.load_embedded()
     assert entry.library == "Qt PDF"
-    lock = (REPO_ROOT / "requirements-lock.txt").read_text(encoding="utf-8")
-    pyside = next(l.split("==")[1].strip() for l in lock.splitlines()
+    lock = (REPO_ROOT / "requirements" / "build.txt").read_text(encoding="utf-8")
+    pyside = next(l.split("==")[1].split()[0] for l in lock.splitlines()
                   if l.startswith("pyside6=="))
     # A PySide6 update must refresh the texts from the matching Qt release.
     assert entry.qt == notices.qt_version(pyside)
@@ -852,7 +852,7 @@ def test_lgpl_section_gives_exact_sources_and_project_source(tmp_path, project, 
     flat = " ".join(section.split())
     assert notices.PROJECT_HOMEPAGE in flat
     assert "release tag v9.9.9" in flat
-    assert "requirements-lock.txt" in flat
+    assert "requirements/build.txt" in flat
     assert "_internal/img2pdf.py" in flat and "_internal/PySide6" in flat
     # LGPL-3.0 section 4(b): both texts travel with an LGPL component even
     # when it ships its own license file.
@@ -1057,10 +1057,10 @@ def test_builds_exclude_agpl_pymupdf_and_bundle_qt_pdf():
         # The reader renders whole PDF pages with Qt PDF instead.
         assert '"PySide6.QtPdf"' not in excludes, spec.name
         assert '"PySide6.QtPdf",' in spec.read_text(encoding="utf-8"), spec.name
-    for name in ("pyproject.toml", "requirements.txt",
-                 "requirements-docker.txt", "requirements-lock.txt"):
-        text = (REPO_ROOT / name).read_text(encoding="utf-8").lower()
-        assert "pymupdf" not in text and "fitz" not in text, name
+    for path in (REPO_ROOT / "pyproject.toml",
+                 *sorted((REPO_ROOT / "requirements").glob("*.txt"))):
+        text = path.read_text(encoding="utf-8").lower()
+        assert "pymupdf" not in text and "fitz" not in text, path.name
 
 
 def test_build_app_collects_onedir_and_checks_it():
@@ -1170,8 +1170,8 @@ def test_onefile_rebuild_route_keeps_the_modified_component(tmp_path, project, p
     flat = " ".join(section.split())
     # Pins first, then the modified component, then a build that does not
     # reinstall the pins over it, then the macOS wrapper.
-    steps = ("pip install --no-deps -r requirements-lock.txt",
-             'pip install "pyinstaller>=6.0,<7.0"',
+    steps = ("PyInstaller included",
+             "pip install --no-deps -r requirements/build.txt",
              "install the modified component",
              "run `python build_app.py --no-install`",
              "packaging/macos_app.py build --exe release/MeManga --dest release")

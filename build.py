@@ -56,26 +56,17 @@ DIST_TMP = ROOT / "dist"
 
 
 def install_dependencies() -> bool:
-    """Install runtime deps + PyInstaller into the current env."""
+    """Install runtime deps + PyInstaller into the current env, at the
+    versions pinned in requirements/build.txt (the release build's)."""
     print("=== Installing dependencies ===")
-    req = ROOT / "requirements.txt"
-    if not req.exists():
-        print("  ! requirements.txt missing — skipping")
-    else:
-        r = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", str(req), "-q"],
-        )
-        if r.returncode != 0:
-            print("  ! pip install -r requirements.txt failed")
-            return False
-        print("  ✓ requirements.txt")
+    name = "requirements/build.txt"
     r = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "pyinstaller", "certifi", "-q"],
+        [sys.executable, "-m", "pip", "install", "-r", str(ROOT / name), "-q"],
     )
     if r.returncode != 0:
-        print("  ! pip install pyinstaller/certifi failed")
+        print(f"  ! pip install -r {name} failed")
         return False
-    print("  ✓ pyinstaller + certifi")
+    print(f"  ✓ {name}")
     return True
 
 

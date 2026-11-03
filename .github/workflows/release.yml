@@ -126,10 +126,11 @@ jobs:
         run: brew install qpdf
 
       - name: Install dependencies
+        # The release pins (hashes, PyInstaller included); build_app.py
+        # installs the same file again, which changes nothing here.
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          pip install -r requirements/build.txt
 
       - name: Import Developer ID signing certificate
         # Decode the Developer ID Application .p12 into a throwaway

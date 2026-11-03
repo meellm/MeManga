@@ -177,6 +177,22 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #315 `pyproject.toml` is the only place dependencies are declared. The
+  pinned installs in `requirements/` (`cli.txt`, `gui.txt`, `dev.txt`,
+  `build.txt`) are generated from it by `scripts/lock_dependencies.py`,
+  with hashes, for every supported platform and Python version. Which
+  versions they pin is set there too, as the state of PyPI at recorded
+  times, so the locks can be regenerated exactly, and a check fails pull
+  requests whose files differ from that in any way. They replace
+  `requirements.txt`, `requirements-docker.txt`, `requirements-lock.txt`,
+  `requirements-docker-constraints.txt` and `tests/requirements-test.txt`.
+  The Docker image installs `requirements/cli.txt` with hash checking;
+  the dev and release builds and the release workflow install
+  `requirements/build.txt`, which now also pins PyInstaller; the
+  bootstrap and Linux setup scripts install `requirements/gui.txt`. The
+  pinned versions are unchanged. The `urllib3>=2.8.0` floor, which only
+  the Docker set had, is now a package dependency, and the `dev` extra
+  has all the test tools.
 - #314 The Docker image installs the package unmodified: it keeps the
   `memanga-gui` launcher instead of deleting it after the install, and
   the build fails if the pinned dependencies do not satisfy the package
