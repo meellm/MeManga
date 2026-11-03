@@ -32,12 +32,22 @@ from pyproject.toml alone, never from the files it checks, so a pin moved
 by hand to another version, even one that fits and carries its own valid
 hashes, fails as well. It writes no file. `--check --offline` does only
 the first part, without uv or the network.
+
+  python scripts/lock_dependencies.py --check-installed build
+
+exits 1 unless the running Python holds exactly the rows of
+requirements/build.txt that apply to it, each once, at its pinned version
+and installed from the package index, and nothing else besides pip and
+the project itself. It compares names and versions, not file contents.
+The release workflow runs it after a hash-checked reinstall of the lock
+and before it builds (#316).
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
 import re
@@ -72,6 +82,10 @@ DIGEST_PREFIX = "# input-digest: sha256:"
 # this one; CI installs it.
 UV_VERSION = "0.13.1"
 UV_INSTALL = f'python -m pip install "uv=={UV_VERSION}"'
+# Installed distributions --check-installed allows besides the lock rows:
+# the installer that put them there, the runner Python's own. The project
+# being built is allowed too; it is never a row of its own locks.
+INSTALLER = ("pip",)
 
 
 def load_pyproject(path: Path) -> dict:
@@ -249,6 +263,110 @@ def check_generated(root: Path | None, uv) -> list[str]:
     return problems
 
 
+def lock_rows(text: str) -> list[str]:
+    """The requirement of every pinned row of a lock, marker included,
+    without its hashes and comments."""
+    rows = []
+    for line in text.splitlines():
+        if line[:1] in ("", " ", "#"):
+            continue
+        rows.append(line.rstrip("\\").strip())
+    return rows
+
+
+def installed_problems(name: str, root: Path | None = None,
+                       distributions=None) -> list[str]:
+    """Problems with the running environment against requirements/<name>.txt:
+    a row for this platform and Python that is missing or at another
+    version, rows for this platform that overlap, a distribution that no
+    row pins, one installed more than once, or one installed from a URL or
+    path rather than the package index. Empty when the environment holds
+    exactly the lock."""
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+    from packaging.version import InvalidVersion, Version
+
+    root = root or ROOT
+    rel = f"{LOCK_DIR}/{name}.txt"
+    if not (root / rel).is_file():
+        return [f"{rel} is missing"]
+    problems = []
+    pinned = {}
+    for row in lock_rows((root / rel).read_text(encoding="utf-8")):
+        req = Requirement(row)
+        if req.marker is not None and not req.marker.evaluate({"extra": ""}):
+            continue
+        (spec,) = req.specifier
+        pkg = canonicalize_name(req.name)
+        if pkg in pinned and pinned[pkg] != spec.version:
+            problems.append(f"{rel} pins {pkg} at both {pinned[pkg]} and "
+                            f"{spec.version} here")
+            continue
+        pinned[pkg] = spec.version
+    allowed = {canonicalize_name(n) for n in INSTALLER}
+    allowed.add(canonicalize_name(load_project(root / "pyproject.toml")["name"]))
+
+    def same(version: str, pin: str) -> bool:
+        try:
+            return Version(version) == Version(pin)
+        except InvalidVersion:
+            return version == pin
+
+    found = {}
+    if distributions is None:
+        # Each search path once, so that a copy is counted once.
+        distributions = importlib.metadata.distributions(
+            path=list(dict.fromkeys(sys.path)))
+    for dist in distributions:
+        dist_name = dist.metadata["Name"]
+        if dist_name:
+            found.setdefault(canonicalize_name(dist_name), []).append(dist)
+
+    for pkg, pin in sorted(pinned.items()):
+        if pkg not in found:
+            problems.append(f"{pkg}=={pin} from {rel} is not installed")
+    for pkg, dists in sorted(found.items()):
+        if pkg in allowed:
+            continue
+        versions = sorted(d.version for d in dists)
+        if len(dists) > 1:
+            # Even at one version: either copy may be the one imported.
+            problems.append(f"{pkg} is installed more than once: "
+                            + ", ".join(versions))
+            continue
+        version = versions[0]
+        if pkg not in pinned:
+            problems.append(f"{pkg} {version} is installed but not pinned in {rel}")
+        elif not same(version, pinned[pkg]):
+            problems.append(f"{pkg} is installed at {version}, "
+                            f"{rel} pins {pinned[pkg]}")
+        elif any(d.read_text("direct_url.json") is not None for d in dists):
+            # PEP 610: a URL, VCS or local path install, not the hashed
+            # download from the index the lock describes.
+            problems.append(f"{pkg} {version} was installed from a URL or path, "
+                            "not from the package index")
+    return problems
+
+
+def _run_check_installed(name: str) -> int:
+    problems = installed_problems(name)
+    rel = f"{LOCK_DIR}/{name}.txt"
+    if problems:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        print(f"Install only from the lock, in a new environment: python -m pip "
+              f"install --require-hashes --only-binary :all: --force-reinstall "
+              f"-r {rel}",
+              file=sys.stderr)
+        return 1
+    try:
+        pip = f" and pip {importlib.metadata.version('pip')}"
+    except importlib.metadata.PackageNotFoundError:
+        pip = ""
+    print(f"The environment holds exactly {rel}{pip}")
+    return 0
+
+
 def _usable_uv() -> tuple[list[str] | None, str]:
     uv = _uv()
     version = _uv_version(uv) if uv else None
@@ -317,9 +435,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--offline", action="store_true",
                         help="with --check: only check the inputs, without uv "
                              "or the network")
+    parser.add_argument("--check-installed", metavar="TARGET", choices=TARGETS,
+                        help="check that this Python holds exactly the lock "
+                             "of TARGET, and nothing else besides pip")
     args = parser.parse_args(argv)
     if args.offline and not args.check:
         parser.error("--offline only goes with --check")
+    if args.check_installed and args.check:
+        parser.error("--check-installed does not go with --check")
+    if args.check_installed:
+        return _run_check_installed(args.check_installed)
     if args.check:
         return _run_check(args.offline)
     return generate()

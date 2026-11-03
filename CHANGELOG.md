@@ -177,6 +177,18 @@ All notable changes are recorded here. Format loosely follows
   as aliases of `retry`/`clear`.
 
 ### Changed
+- #316 Release builds install `requirements/build.txt` with
+  `--require-hashes`, wheels only (`--only-binary :all:`) and
+  `--force-reinstall`, so nothing is built from source with unpinned
+  build tools and every package is downloaded and hash-checked even if
+  the runner already had it; the macOS legs no longer install Homebrew's
+  qpdf for that. The release workflow no longer upgrades pip from the
+  index, builds only after the full lock check passes on the tag (every
+  lock generated again from its `pyproject.toml` and compared row for
+  row), and fails before building when the build environment holds a
+  package the lock does not pin, another version of one it does, more
+  than one copy of one, or one installed from a URL or path
+  (`python scripts/lock_dependencies.py --check-installed build`).
 - #315 `pyproject.toml` is the only place dependencies are declared. The
   pinned installs in `requirements/` (`cli.txt`, `gui.txt`, `dev.txt`,
   `build.txt`) are generated from it by `scripts/lock_dependencies.py`,

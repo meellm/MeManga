@@ -84,7 +84,11 @@ def install_dependencies() -> bool:
     pyproject.toml with exact pins and hashes for every direct and
     transitive dependency, PyInstaller included, so that the binary we
     ship from GitHub Actions today and the one you can rebuild from the
-    same tag in six months use IDENTICAL package versions.
+    same tag in six months use IDENTICAL package versions. Every row
+    must carry a hash and only wheels are installed, so no package is
+    built from source with build tools the lock does not pin, and every
+    row is reinstalled, so a copy already installed is replaced by the
+    hash-checked download (#316).
     """
     print("=== Installing dependencies ===")
     name = "requirements/build.txt"
@@ -96,6 +100,7 @@ def install_dependencies() -> bool:
     print(f"  → installing from {name} (pinned for reproducible build)")
     r = subprocess.run(
         [sys.executable, "-m", "pip", "install",
+         "--require-hashes", "--only-binary", ":all:", "--force-reinstall",
          "-r", str(lock), "--no-deps", "-q"],
     )
     if r.returncode != 0:

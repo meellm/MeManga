@@ -160,10 +160,81 @@ def _workflow_runs(name):
             for step in job["steps"]]
 
 
+RELEASE_INSTALL = ("python -m pip install --require-hashes --only-binary :all: "
+                   "--force-reinstall -r requirements/build.txt")
+RELEASE_ENV_CHECK = "python scripts/lock_dependencies.py --check-installed build"
+RELEASE_BUILD = "python build_app.py --no-install"
+
+
+def _release_workflow():
+    return yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text(
+        encoding="utf-8"))
+
+
+def _release_steps(job="build"):
+    return _release_workflow()["jobs"][job]["steps"]
+
+
+def _release_step_running(command):
+    steps = _release_steps()
+    found = [i for i, step in enumerate(steps)
+             if command in step.get("run", "").splitlines()]
+    assert len(found) == 1, f"{command!r} runs {len(found)} times in release.yml"
+    return found[0], steps[found[0]]
+
+
 def test_release_workflow_installs_the_build_lock():
     runs = "\n".join(_workflow_runs("release.yml"))
-    assert "pip install -r requirements/build.txt" in runs
+    assert RELEASE_INSTALL in runs
     assert "pip install pyinstaller" not in runs
+
+
+def test_release_workflow_installs_nothing_unpinned():
+    # #316: every pip install of the build is the hashed, wheel-only
+    # reinstall of the lock; pip itself is not upgraded from the index, and
+    # no system libraries for building a package from source are set up.
+    for step in _release_steps():
+        for line in step.get("run", "").splitlines():
+            if "pip install" in line:
+                assert line.strip() == RELEASE_INSTALL, line
+    for run in _workflow_runs("release.yml"):
+        for line in run.splitlines():
+            if "pip install" in line:
+                assert "--require-hashes --only-binary :all:" in line, line
+            assert "--upgrade pip" not in line
+            assert "brew install" not in line
+
+
+def test_release_builds_only_after_the_full_lock_check(locks):
+    # #316: the tag's locks must be what its pyproject.toml generates, row
+    # for row; the recorded input digest alone does not show that.
+    workflow = _release_workflow()
+    assert workflow["jobs"]["build"]["needs"] == "locks"
+    (step,) = [s for s in _release_steps("locks") if "run" in s]
+    lines = step["run"].splitlines()
+    # uv comes from its hashed wheel, at the release the locks are made with.
+    (pin,) = [line for line in lines if line.startswith("echo ")]
+    assert f'"uv=={locks.UV_VERSION} --hash=sha256:' in pin
+    install = ('python -m pip install --require-hashes --only-binary :all: '
+               '-r "$RUNNER_TEMP/uv.txt"')
+    full_check = "python scripts/lock_dependencies.py --check"
+    assert lines.index(install) < lines.index(full_check)
+    # Fails on the first failed command, on any runner.
+    assert step.get("shell") == "bash"
+    assert "--offline" not in step["run"]
+    assert workflow["jobs"]["locks"]["permissions"] == {"contents": "read"}
+
+
+def test_release_workflow_checks_the_build_environment_before_building():
+    install, _ = _release_step_running(RELEASE_INSTALL)
+    check, step = _release_step_running(RELEASE_ENV_CHECK)
+    build, _ = _release_step_running(RELEASE_BUILD)
+    assert install < check < build
+    assert "if" not in step, "the check must run on every release leg"
+    # Nothing installs into the checked environment before the build.
+    for later in _release_steps()[check + 1:build + 1]:
+        assert "pip install" not in later.get("run", "")
+    assert _release_step_running(RELEASE_BUILD)[1]["run"].strip() == RELEASE_BUILD
 
 
 def test_builds_install_the_build_lock():
@@ -171,6 +242,11 @@ def test_builds_install_the_build_lock():
         text = (ROOT / script).read_text(encoding="utf-8")
         assert '"requirements/build.txt"' in text, script
         assert '"pyinstaller' not in text, script
+
+
+def test_release_build_installs_hashed_wheels_only():
+    text = (ROOT / "build_app.py").read_text(encoding="utf-8")
+    assert '"--require-hashes", "--only-binary", ":all:", "--force-reinstall",' in text
 
 
 def test_source_docs_check_installs_the_cli_lock():
@@ -515,3 +591,145 @@ def test_check_mode_needs_the_pinned_uv(tmp_path, locks, fake_uv, monkeypatch, c
     monkeypatch.setattr(locks, "_uv", lambda: None)
     assert locks.main(["--check"]) == 1
     assert "uv was not found" in capsys.readouterr().err
+
+
+# ─── The build environment against its lock (#316) ──────────────────────
+
+class _Dist:
+    """A stand-in installed distribution."""
+
+    def __init__(self, name, version, direct_url=None):
+        self.metadata = {"Name": name}
+        self.version = version
+        self._direct_url = direct_url
+
+    def read_text(self, filename):
+        return self._direct_url if filename == "direct_url.json" else None
+
+
+ENV_LOCK = (
+    "alpha==1.0 \\\n    --hash=sha256:aa\n"
+    "    # via demo-app (pyproject.toml)\n"
+    "beta-pkg==2.0.0 \\\n    --hash=sha256:bb\n"
+    "nowhere==3.0 ; sys_platform == 'no-such-platform' \\\n    --hash=sha256:cc\n"
+)
+
+
+@pytest.fixture
+def env_root(tmp_path, locks):
+    _write(tmp_path, locks)
+    (tmp_path / "requirements" / "build.txt").write_text(
+        locks.lock_text("build", ENV_LOCK, "abc"), encoding="utf-8")
+    return tmp_path
+
+
+def _locked_env(*extra):
+    return [_Dist("alpha", "1.0"), _Dist("Beta_Pkg", "2.0"), _Dist("pip", "24.0"),
+            *extra]
+
+
+def test_lock_rows_are_the_pinned_requirements(locks):
+    assert locks.lock_rows(ENV_LOCK) == [
+        "alpha==1.0", "beta-pkg==2.0.0",
+        "nowhere==3.0 ; sys_platform == 'no-such-platform'"]
+    real = locks.lock_rows((ROOT / "requirements" / "build.txt").read_text(
+        encoding="utf-8"))
+    assert [Requirement(row).name for row in real] == [r.name for r, _ in _rows("build")]
+
+
+def test_environment_with_exactly_the_lock_passes(locks, env_root):
+    # Names and versions compare normalized; rows for other platforms are
+    # not needed; pip and the project itself, even as an editable
+    # install, are allowed.
+    env = _locked_env(_Dist("demo_app", "0.1", direct_url='{"url": "file:///src"}'))
+    assert locks.installed_problems("build", env_root, env) == []
+
+
+def test_unpinned_package_in_the_environment_fails(locks, env_root):
+    env = _locked_env(_Dist("wheel", "0.45.1"))
+    assert locks.installed_problems("build", env_root, env) == [
+        "wheel 0.45.1 is installed but not pinned in requirements/build.txt"]
+
+
+def test_other_version_of_a_pinned_package_fails(locks, env_root):
+    env = [_Dist("alpha", "1.1"), _Dist("beta-pkg", "2.0.0")]
+    assert locks.installed_problems("build", env_root, env) == [
+        "alpha is installed at 1.1, requirements/build.txt pins 1.0"]
+
+
+def test_missing_row_fails(locks, env_root):
+    env = [_Dist("alpha", "1.0")]
+    assert locks.installed_problems("build", env_root, env) == [
+        "beta-pkg==2.0.0 from requirements/build.txt is not installed"]
+
+
+def test_package_installed_twice_fails(locks, env_root):
+    env = _locked_env(_Dist("alpha", "0.9"))
+    assert locks.installed_problems("build", env_root, env) == [
+        "alpha is installed more than once: 0.9, 1.0"]
+
+
+def test_package_installed_twice_at_the_pinned_version_fails(locks, env_root):
+    env = _locked_env(_Dist("Alpha", "1.0"))
+    assert locks.installed_problems("build", env_root, env) == [
+        "alpha is installed more than once: 1.0, 1.0"]
+
+
+def test_package_installed_from_a_url_fails(locks, env_root):
+    env = [_Dist("alpha", "1.0", direct_url='{"url": "https://example.org/a.whl"}'),
+           _Dist("beta-pkg", "2.0.0")]
+    assert locks.installed_problems("build", env_root, env) == [
+        "alpha 1.0 was installed from a URL or path, not from the package index"]
+
+
+def test_missing_lock_is_reported(locks, env_root):
+    (env_root / "requirements" / "build.txt").unlink()
+    assert locks.installed_problems("build", env_root, []) == [
+        "requirements/build.txt is missing"]
+
+
+def test_overlapping_rows_are_reported(locks, env_root):
+    path = env_root / "requirements" / "build.txt"
+    path.write_text(path.read_text(encoding="utf-8")
+                    + "alpha==1.1 ; sys_platform != 'no-such-platform' \\\n"
+                      "    --hash=sha256:dd\n", encoding="utf-8")
+    assert locks.installed_problems("build", env_root, _locked_env()) == [
+        "requirements/build.txt pins alpha at both 1.0 and 1.1 here"]
+
+
+def test_default_search_counts_each_path_once(locks, env_root, monkeypatch):
+    seen = {}
+
+    def distributions(**kwargs):
+        seen.update(kwargs)
+        return _locked_env()
+
+    monkeypatch.setattr(locks.importlib.metadata, "distributions", distributions)
+    monkeypatch.setattr(locks.sys, "path", ["/a", "/b", "/a"])
+    assert locks.installed_problems("build", env_root) == []
+    assert seen == {"path": ["/a", "/b"]}
+
+
+def test_check_installed_mode_exit_codes(locks, env_root, monkeypatch, capsys):
+    monkeypatch.setattr(locks, "ROOT", env_root)
+    monkeypatch.setattr(locks.importlib.metadata, "distributions",
+                        lambda **_: _locked_env())
+    assert locks.main(["--check-installed", "build"]) == 0
+    assert "holds exactly requirements/build.txt" in capsys.readouterr().out
+    monkeypatch.setattr(locks.importlib.metadata, "distributions",
+                        lambda **_: _locked_env(_Dist("six", "1.17.0")))
+    assert locks.main(["--check-installed", "build"]) == 1
+    err = capsys.readouterr().err
+    assert "six 1.17.0 is installed but not pinned" in err
+    assert ("--require-hashes --only-binary :all: --force-reinstall "
+            "-r requirements/build.txt") in err
+
+
+@pytest.mark.parametrize("argv", [
+    ["--check-installed", "docker"],
+    ["--check", "--check-installed", "build"],
+    ["--offline", "--check-installed", "build"],
+])
+def test_check_installed_takes_a_target_alone(locks, argv):
+    with pytest.raises(SystemExit):
+        locks.main(argv)
