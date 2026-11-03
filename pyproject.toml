@@ -46,6 +46,8 @@ dependencies = [
     "rich>=13.0.0",
     "pyyaml>=6.0",
     "requests>=2.28.0",
+    # Security floor for the urllib3 that requests pulls in.
+    "urllib3>=2.8.0",
     "img2pdf>=0.5.0",
     "Pillow>=10.0.0",
     "beautifulsoup4>=4.12.0",
@@ -57,18 +59,37 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# This file is the only place dependencies are declared. The pinned
+# installs in requirements/ are generated from it; after a change here run
+# `python scripts/lock_dependencies.py` (see CONTRIBUTING.md).
+#
 # The desktop app. The default install is the CLI only, for servers,
 # containers and scheduled checks.
 gui = ["PySide6>=6.5.0"]
 # The GUI tests and the desktop build need the app's Qt runtime.
 dev = [
     "memanga[gui]",
-    "pytest>=7.4.0",
-    "pytest-qt>=4.2.0",
-    "pytest-mock>=3.12.0",
-    "pytest-env>=1.1.0",
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+    "pytest-mock>=3.12",
+    "pytest-env>=1.1",
+    # Parses version specifiers in the dependency-declaration tests.
+    "packaging>=21.0",
+    # Runs unrelated test files in parallel: pytest -n auto
+    "pytest-xdist>=3.5",
+    # Coverage report: pytest --cov=memanga --cov-report=html
+    "pytest-cov>=4.1",
 ]
-build = ["memanga[gui]", "pyinstaller>=6.0", "certifi>=2024.7.0"]
+build = [
+    "memanga[gui]",
+    "pyinstaller>=6.0,<7.0",
+    "certifi>=2024.7.0",
+    # Backs keyring's Windows Credential Manager backend. keyring already
+    # requires it on Windows; it is listed so the frozen app keeps it even
+    # if a keyring release dropped it, which would leave the app on
+    # keyring's Null backend (saved email passwords silently lost).
+    'pywin32-ctypes>=0.2.0; sys_platform == "win32"',
+]
 
 [project.urls]
 Homepage = "https://github.com/meellm/MeManga"
@@ -84,6 +105,37 @@ Releases = "https://github.com/meellm/MeManga/releases"
 [project.scripts]
 memanga = "memanga.cli:main"
 memanga-gui = "memanga.gui:launch_gui"
+
+# Which versions requirements/*.txt pin: each package at its newest
+# release that fits the bounds above, as PyPI was at `resolve-at` (UTC),
+# or at the time listed for it below. Nothing else picks them, so
+# `python scripts/lock_dependencies.py --check` can regenerate the locks
+# and compare. To update a package, move its time (or `resolve-at` for
+# all the others) and regenerate.
+[tool.lock-dependencies]
+resolve-at = "2026-05-25T08:00:00Z"
+
+# Packages read from a later PyPI: the urllib3 security floor, the Linux
+# keyring backend of the Docker image, and the test and build tools with
+# their own dependencies.
+[tool.lock-dependencies.resolve-package-at]
+cffi = "2026-11-02T00:00:00Z"
+coverage = "2026-11-02T00:00:00Z"
+cryptography = "2026-11-02T00:00:00Z"
+importlib-metadata = "2026-11-02T00:00:00Z"
+iniconfig = "2026-11-02T00:00:00Z"
+pluggy = "2026-11-02T00:00:00Z"
+pycparser = "2026-11-02T00:00:00Z"
+pyinstaller = "2026-11-02T00:00:00Z"
+pyinstaller-hooks-contrib = "2026-11-02T00:00:00Z"
+pytest = "2026-11-02T00:00:00Z"
+pytest-env = "2026-11-02T00:00:00Z"
+pytest-mock = "2026-11-02T00:00:00Z"
+python-dotenv = "2026-11-02T00:00:00Z"
+setuptools = "2026-11-02T00:00:00Z"
+tomli = "2026-11-02T00:00:00Z"
+urllib3 = "2026-11-02T00:00:00Z"
+zipp = "2026-11-02T00:00:00Z"
 
 [tool.setuptools.dynamic]
 version = {attr = "memanga.__version__"}

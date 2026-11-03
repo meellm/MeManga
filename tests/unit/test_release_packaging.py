@@ -153,7 +153,7 @@ def test_workflow_verifies_architecture_before_upload():
 
 def test_macos_pdf_system_dependency_is_installed_before_pip_deps():
     """macos-26-intel can fall back to building pikepdf from source, which
-    needs qpdf headers before requirements.txt is installed."""
+    needs qpdf headers before the dependencies are installed."""
     step = _step_named("Install macOS system libraries for PDF dependencies")
     assert step is not None, "macOS qpdf dependency step missing"
     assert step.get("if") == "runner.os == 'macOS'"

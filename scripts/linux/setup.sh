@@ -31,7 +31,7 @@ source venv/bin/activate
 # Install dependencies
 echo "Installing Python dependencies..."
 pip install --upgrade pip -q
-pip install -r requirements.txt -q
+pip install -r requirements/gui.txt -q
 
 # Install Playwright browsers
 echo "Installing Playwright browsers (this may take a while)..."

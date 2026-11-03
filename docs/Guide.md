@@ -314,8 +314,8 @@ memanga-gui            # or: memanga --gui
 
 In the folder of a source checkout, use `python -m pip install -e
 ".[gui]"`. Without the extra, `memanga --gui` and `memanga-gui` exit
-with status `1` and print these commands. Installing `requirements.txt`, the bootstrap
-script and the release downloads include the GUI already.
+with status `1` and print these commands. Installing `requirements/gui.txt`, the
+bootstrap script and the release downloads include the GUI already.
 
 ---
 
@@ -1773,7 +1773,7 @@ Dependencies aren't fully installed. Reinstall:
 
 ```
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements/gui.txt
 ```
 
 ### Scheduled task not running
@@ -1826,7 +1826,7 @@ Reinstall dependencies:
 
 ```bash
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements/gui.txt
 ```
 
 ### Cron job not running
@@ -1901,7 +1901,7 @@ Reinstall dependencies:
 
 ```bash
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements/gui.txt
 ```
 
 ### "Permission denied" on run.sh

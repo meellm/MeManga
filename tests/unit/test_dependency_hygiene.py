@@ -1,85 +1,85 @@
-"""#214: the Docker image installs its CLI dependency set with the release
-lock and a Docker-only constraints file pinning every package, and
-cloudscraper sessions are built in one place."""
+"""#214: the Docker image installs its CLI dependencies from a lock that
+pins every package it pulls in, Linux-only ones included (#315: that lock
+is requirements/cli.txt, generated from pyproject.toml), and cloudscraper
+sessions are built in one place."""
 import ast
 import re
 from importlib import metadata
 from pathlib import Path
 
+import pytest
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+
+tomllib = pytest.importorskip("tomllib")
 
 ROOT = Path(__file__).resolve().parents[2]
 # The Docker image: python:3.12-slim on Linux.
 DOCKER_ENV = {"sys_platform": "linux", "platform_system": "Linux",
               "os_name": "posix", "python_version": "3.12",
-              "python_full_version": "3.12.0"}
-DOCKER_PINS = ("requirements-lock.txt", "requirements-docker-constraints.txt")
-
-
-def _requirements(name):
-    reqs = []
-    for line in (ROOT / name).read_text(encoding="utf-8").splitlines():
-        line = line.split("#", 1)[0].strip()
-        if line:
-            reqs.append(Requirement(line))
-    return reqs
-
-
-def _pins(name):
-    pins = {}
-    for line in (ROOT / name).read_text(encoding="utf-8").splitlines():
-        match = re.match(r"^([A-Za-z0-9._-]+)==(\S+)", line)
-        if match:
-            pins[canonicalize_name(match.group(1))] = match.group(2)
-    return pins
-
-
-def _docker_pins():
-    pins = {}
-    for name in DOCKER_PINS:
-        pins.update(_pins(name))
-    return pins
+              "python_full_version": "3.12.0",
+              "implementation_name": "cpython",
+              "platform_python_implementation": "CPython"}
+DOCKER_LOCK = "requirements/cli.txt"
 
 
 def _applies(req):
     return req.marker is None or req.marker.evaluate({**DOCKER_ENV, "extra": ""})
 
 
-def test_dockerfile_installs_with_both_constraints_files():
+def _dependencies():
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    return [Requirement(r) for r in project["project"]["dependencies"]]
+
+
+def _docker_pins():
+    """The version the image installs of each package in the lock."""
+    pins = {}
+    for line in (ROOT / DOCKER_LOCK).read_text(encoding="utf-8").splitlines():
+        if not line or line[0] in "# ":
+            continue
+        req = Requirement(line.rstrip("\\ "))
+        if _applies(req):
+            (spec,) = req.specifier
+            assert spec.operator == "==", line
+            name = canonicalize_name(req.name)
+            assert name not in pins, f"{req.name} pinned twice for the image"
+            pins[name] = spec.version
+    return pins
+
+
+def test_dockerfile_installs_the_cli_lock_with_hashes():
     text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     flat = " ".join(text.replace("\\\n", " ").split())
-    assert re.search(r"^COPY requirements-docker\.txt requirements-lock\.txt "
-                     r"requirements-docker-constraints\.txt \./$", text, re.M)
-    assert ("pip install -r requirements-docker.txt -c requirements-lock.txt "
-            "-c requirements-docker-constraints.txt") in flat
-    ignored = {line.strip() for line in
+    assert re.search(r"^COPY requirements/cli\.txt \./requirements/$", text, re.M)
+    assert "pip install --require-hashes -r requirements/cli.txt" in flat
+    ignored = {line.strip().rstrip("/") for line in
                (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()}
-    assert not ignored & set(DOCKER_PINS)
+    assert not ignored & {"requirements", DOCKER_LOCK}
 
 
 def test_lock_satisfies_every_docker_requirement():
-    # A floor raised in requirements-docker.txt without a lock refresh
-    # would otherwise only fail during `docker build`.
+    # A floor raised in pyproject.toml without a lock refresh would
+    # otherwise only fail during `docker build`.
     pins = _docker_pins()
-    for req in _requirements("requirements-docker.txt"):
+    for req in _dependencies():
         if not _applies(req):
             continue
         name = canonicalize_name(req.name)
-        assert name in pins, f"{req.name} is not pinned in {DOCKER_PINS}"
+        assert name in pins, f"{req.name} is not pinned in {DOCKER_LOCK}"
         assert req.specifier.contains(pins[name], prereleases=True), (
-            f"the Docker pins give {req.name}=={pins[name]}, "
-            f"requirements-docker.txt needs {req.specifier}")
+            f"{DOCKER_LOCK} gives {req.name}=={pins[name]}, "
+            f"pyproject.toml needs {req.specifier}")
 
 
 def test_every_linux_dependency_of_the_docker_set_is_pinned():
     # Walks the dependency metadata of the installed packages from
-    # requirements-docker.txt, evaluated for the Linux image, so a
-    # package only Linux pulls in (keyring's Secret Service backend)
-    # cannot slip in unpinned. Packages not installed here are still
-    # checked for a pin, just not walked further.
+    # pyproject.toml, evaluated for the Linux image, so a package only
+    # Linux pulls in (keyring's Secret Service backend) cannot slip in
+    # unpinned. Packages not installed here are still checked for a pin,
+    # just not walked further.
     pins = _docker_pins()
-    todo = [r for r in _requirements("requirements-docker.txt") if _applies(r)]
+    todo = [r for r in _dependencies() if _applies(r)]
     seen, unpinned = set(), []
     while todo:
         req = todo.pop()
@@ -100,24 +100,17 @@ def test_every_linux_dependency_of_the_docker_set_is_pinned():
     assert unpinned == []
 
 
-def test_docker_constraints_only_add_exact_pins_the_lock_lacks():
-    lock = _pins("requirements-lock.txt")
-    extra = _pins("requirements-docker-constraints.txt")
-    assert {"jeepney", "secretstorage", "cryptography", "cffi", "pycparser"} <= set(extra)
-    assert not set(extra) & set(lock)
-    rows = [r for r in _requirements("requirements-docker-constraints.txt")]
-    assert len(rows) == len(extra)
-    assert all(str(r.specifier).startswith("==") and r.marker is None for r in rows)
+def test_docker_lock_pins_the_linux_keyring_backend():
+    # The lock covers every platform, so the Linux-only packages keyring
+    # adds there have rows the image uses.
+    pins = _docker_pins()
+    assert {"jeepney", "secretstorage", "cryptography", "cffi", "pycparser"} <= set(pins)
 
 
-def test_docker_requirements_hold_only_linux_cli_packages():
-    names = {canonicalize_name(r.name) for r in _requirements("requirements-docker.txt")}
-    for name in ("pyside6", "pywin32-ctypes", "certifi", "pyinstaller"):
-        assert name not in names, name
-    # Every Docker requirement is also a desktop/release requirement, so
-    # the lock compiled from requirements.txt covers it.
-    desktop = {canonicalize_name(r.name) for r in _requirements("requirements.txt")}
-    assert names - desktop <= {"urllib3"}
+def test_docker_lock_holds_only_cli_packages():
+    pins = _docker_pins()
+    for name in ("pyside6", "shiboken6", "pyinstaller"):
+        assert name not in pins, name
 
 
 def test_only_base_imports_cloudscraper():

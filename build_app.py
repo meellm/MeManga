@@ -80,55 +80,28 @@ ONEDIR = platform.system() != "Darwin"
 def install_dependencies() -> bool:
     """Install deps for the release build.
 
-    Release builds install from `requirements-lock.txt` (exact pins for
-    every transitive dependency) so that the binary we ship from
-    GitHub Actions today and the one you can rebuild from the same
-    tag in six months use IDENTICAL package versions. A `>=` range in
-    `requirements.txt` would let a fresh pip pick up patch-level
-    updates between runs, silently changing what's in the .exe.
-
-    Falls back to `requirements.txt` if the lockfile is missing, with
-    a loud warning — but every release should have a fresh lock.
+    Release builds install from `requirements/build.txt`, generated from
+    pyproject.toml with exact pins and hashes for every direct and
+    transitive dependency, PyInstaller included, so that the binary we
+    ship from GitHub Actions today and the one you can rebuild from the
+    same tag in six months use IDENTICAL package versions.
     """
     print("=== Installing dependencies ===")
-    lock = ROOT / "requirements-lock.txt"
-    req = ROOT / "requirements.txt"
-    if lock.exists():
-        print(f"  → installing from {lock.name} (pinned for reproducible build)")
-        r = subprocess.run(
-            [sys.executable, "-m", "pip", "install",
-             "-r", str(lock), "--no-deps", "-q"],
-        )
-        if r.returncode != 0:
-            print(f"  ! pip install -r {lock.name} failed")
-            return False
-        print(f"  ✓ {lock.name}")
-    elif req.exists():
-        print(f"  ! WARNING: {lock.name} missing — falling back to {req.name}")
-        print(f"  ! For a reproducible release, regenerate with:")
-        print(f"  !   pip-compile --output-file=requirements-lock.txt "
-              f"--strip-extras requirements.txt")
-        r = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", str(req), "-q"],
-        )
-        if r.returncode != 0:
-            print(f"  ! pip install -r {req.name} failed")
-            return False
-        print(f"  ✓ {req.name} (NOT pinned)")
-    else:
-        print("  ! no requirements file found")
+    name = "requirements/build.txt"
+    lock = ROOT / name
+    if not lock.exists():
+        print(f"  ! {name} missing — regenerate it with:")
+        print("  !   python scripts/lock_dependencies.py")
         return False
-
-    # PyInstaller is a build-time tool, not a runtime dep — install
-    # separately. Pinned to a tested major to avoid surprises.
+    print(f"  → installing from {name} (pinned for reproducible build)")
     r = subprocess.run(
         [sys.executable, "-m", "pip", "install",
-         "pyinstaller>=6.0,<7.0", "-q"],
+         "-r", str(lock), "--no-deps", "-q"],
     )
     if r.returncode != 0:
-        print("  ! pip install pyinstaller failed")
+        print(f"  ! pip install -r {name} failed")
         return False
-    print("  ✓ pyinstaller")
+    print(f"  ✓ {name}")
     return True
 
 
@@ -148,7 +121,7 @@ def verify_imports() -> bool:
             print(f"  ✗ {mod}")
             missing.append(mod)
     if missing:
-        print(f"\nMissing: {' '.join(missing)} — run `pip install -r requirements.txt`")
+        print(f"\nMissing: {' '.join(missing)} — run `pip install -r requirements/build.txt`")
         return False
     return True
 
@@ -239,7 +212,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-install", action="store_true",
         help="build from the packages already installed (e.g. a modified "
-             "LGPL component) instead of reinstalling requirements-lock.txt")
+             "LGPL component) instead of reinstalling requirements/build.txt")
     args = parser.parse_args(argv)
     os.chdir(ROOT)
     if args.no_install:

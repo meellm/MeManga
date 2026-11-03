@@ -674,9 +674,9 @@ Both scripts sweep their `build/` + `dist/` scratch dirs after. The dev
 build is a single file at the repo root. The release build is a folder
 with the `MeManga` launcher and its `_internal/` files on Windows and
 Linux (so the bundled LGPL libraries stay replaceable) and a single file
-on macOS, which the release workflow wraps in `MeManga.app`. The release
-build pulls from `requirements-lock.txt` (exact pins for every transitive
-dep).
+on macOS, which the release workflow wraps in `MeManga.app`. Both
+install `requirements/build.txt` (exact pins with hashes for every
+transitive dep, generated from `pyproject.toml`).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for project layout, test
 commands, scraper-add walkthroughs, and the lock-refresh flow.

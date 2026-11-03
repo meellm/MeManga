@@ -69,7 +69,7 @@ def main():
 
     # Install dependencies
     print("Installing Python dependencies...")
-    run(f'"{pip_exe}" install -r requirements.txt -q')
+    run(f'"{pip_exe}" install -r requirements/gui.txt -q')
     print()
 
     # Install Playwright browsers

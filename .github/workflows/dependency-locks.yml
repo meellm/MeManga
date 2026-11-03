@@ -1,0 +1,23 @@
+name: Dependency locks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # requirements/*.txt must be exactly what the current pyproject.toml
+    # gives. The uv release is the one the locks are made with.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install "uv==0.13.1"
+      - run: python scripts/lock_dependencies.py --check

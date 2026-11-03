@@ -33,14 +33,15 @@ def _names(requirements):
     return {canonicalize_name(Requirement(r).name) for r in requirements}
 
 
-def _requirements_txt():
-    reqs = {}
-    for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines():
-        line = line.split("#", 1)[0].strip()
-        if line:
-            req = Requirement(line)
-            reqs[canonicalize_name(req.name)] = req
-    return reqs
+def _locked(name):
+    """canonical name -> pinned version for every row of requirements/<name>.txt."""
+    pins = {}
+    path = ROOT / "requirements" / f"{name}.txt"
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line and line[0] not in "# ":
+            req = Requirement(line.rstrip("\\ "))
+            pins[canonicalize_name(req.name)] = next(iter(req.specifier)).version
+    return pins
 
 
 def _block_qt(monkeypatch):
@@ -59,8 +60,13 @@ def test_default_dependencies_have_no_gui_packages(project):
 def test_gui_extra_has_pyside6_with_the_desktop_floor(project):
     (req,) = [Requirement(r) for r in project["optional-dependencies"]["gui"]]
     assert canonicalize_name(req.name) == "pyside6"
-    # Same floor the desktop build installs from requirements.txt.
-    assert req.specifier == _requirements_txt()["pyside6"].specifier
+    # The source setup and the builds install a PySide6 that meets it.
+    for lock in ("gui", "dev", "build"):
+        assert req.specifier.contains(_locked(lock)["pyside6"]), lock
+
+
+def test_cli_lock_has_no_qt():
+    assert not set(_locked("cli")) & {canonicalize_name(n) for n in QT_PACKAGES}
 
 
 def test_missing_gui_hint_installs_exactly_the_gui_extra(project):

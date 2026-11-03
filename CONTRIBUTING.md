@@ -18,8 +18,8 @@ cd MeManga
 # Create a venv and install everything (deps + dev deps)
 python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-pip install -e ".[dev]"           # the package with the gui extra + test tools
+pip install -r requirements/dev.txt   # pinned: gui extra + test tools
+pip install --no-deps -e .            # the package itself, editable
 python -m playwright install chromium firefox   # browsers for the scrapers
 
 # Or run the one-step setup instead (venv, deps, browsers, config folder):
@@ -43,13 +43,13 @@ dependency. The extras in `pyproject.toml`:
 | Extra | Adds | Use it for |
 |---|---|---|
 | `gui` | PySide6 | Running the desktop app (`memanga --gui`, `memanga-gui`) |
-| `dev` | `gui` plus pytest, pytest-qt, pytest-mock, pytest-env | Running the test suite; the GUI tests need Qt |
-| `build` | `gui` plus PyInstaller and certifi | Desktop builds from the package metadata |
+| `dev` | `gui` plus pytest, pytest-qt, pytest-mock, pytest-env, pytest-xdist, pytest-cov, packaging | Running the test suite; the GUI tests need Qt |
+| `build` | `gui` plus PyInstaller, certifi and (on Windows) pywin32-ctypes | Desktop builds |
 
-`requirements.txt` stays the desktop and release build set and keeps
-PySide6; `requirements-docker.txt` stays the CLI-only set. A new
-dependency that only the GUI imports goes in the `gui` extra and
-`requirements.txt`, never in `dependencies` or `requirements-docker.txt`.
+`pyproject.toml` is the only place dependencies are declared; the
+pinned installs in `requirements/` are generated from it (see
+[Dependency locks](#dependency-locks)). A new dependency that only the
+GUI imports goes in the `gui` extra, never in `dependencies`.
 Code outside `memanga/gui/` must not import Qt at import time;
 `tests/unit/test_optional_gui.py` checks that and the metadata.
 
@@ -191,72 +191,65 @@ Local `python build_app.py` runs on a Mac stay unsigned (ad-hoc) unless
 `MEMANGA_CODESIGN_IDENTITY` is set; hardened-runtime entitlements live in
 `packaging/macos-entitlements.plist`.
 
-### Dependency pinning for release builds
+### Dependency locks
 
-The dev build (`build.py`) installs from `requirements.txt`
-(`>=` ranges) so you get the latest patch-level updates while
-iterating.
+`pyproject.toml` declares every dependency: `dependencies` for the CLI
+and the `gui`, `dev` and `build` extras. Nothing else lists them. The
+files in `requirements/` are generated from it, one per kind of install:
 
-The release build (`build_app.py`) installs from
-**`requirements-lock.txt`** — exact pins for every direct **and
-transitive** dependency. This is what makes the binary on every
-GitHub release reproducible six months later from the same git tag.
+| File | Installs | Used by |
+|---|---|---|
+| `requirements/cli.txt` | `dependencies` | The Docker image, the source docs check |
+| `requirements/gui.txt` | `dependencies` + `gui` | `scripts/bootstrap.py`, `scripts/linux/setup.sh` |
+| `requirements/dev.txt` | `dependencies` + `dev` | Contributors and the test suite |
+| `requirements/build.txt` | `dependencies` + `build` | `build.py`, `build_app.py` and the release workflow |
 
-**When to refresh the lock:**
-- Any time you bump a dependency in `requirements.txt`.
-- Before cutting a release tag.
+Each file pins every direct **and transitive** dependency to an exact
+version, with hashes, for every platform and Python version MeManga
+supports (environment markers select the rows that apply). pip then
+installs the same versions everywhere and refuses a download whose hash
+does not match. This is what makes the binary on every GitHub release
+rebuildable from the same git tag with the same package versions, and
+what keeps the Docker image on the release builds' versions.
 
-**How to refresh:**
+**Which versions:** `[tool.lock-dependencies]` in `pyproject.toml`
+decides that too. Each package is pinned at its newest release that fits
+the declared bounds, as PyPI was at `resolve-at` (UTC), or at the time
+listed for it under `resolve-package-at` (uv's `--exclude-newer` and
+`--exclude-newer-package`). Files uploaded to PyPI after that time are
+ignored as well, so the locks are a function of `pyproject.toml` alone
+and come out the same whenever they are generated.
 
-```bash
-pip install pip-tools
-pip-compile --output-file=requirements-lock.txt --strip-extras requirements.txt
-git add requirements-lock.txt
-git commit -m "chore(deps): refresh requirements-lock.txt"
-```
-
-`pip-compile` walks the full transitive tree once and writes one
-row per package with the resolved version + the chain that pulled
-it in. If a security advisory drops, bump the offending package in
-`requirements.txt` and re-run pip-compile — the lock will
-recompute consistently.
-
-### Docker image dependencies
-
-The Docker image installs **`requirements-docker.txt`**, the CLI-only
-subset of `requirements.txt` (no PySide6, no frozen-build entries such
-as `pywin32-ctypes`), with two pip constraints files:
-
-```bash
-pip install -r requirements-docker.txt \
-    -c requirements-lock.txt -c requirements-docker-constraints.txt
-```
-
-`requirements-lock.txt` gives the packages the image shares with the
-release builds the same exact versions. It is compiled on a non-Linux
-host, so it has no rows for the Linux-only packages keyring adds there
-(`jeepney`, `SecretStorage`, `cryptography`, `cffi`, `pycparser`);
-`requirements-docker-constraints.txt` pins those. Together they pin
-every package installed from `requirements-docker.txt`. Only pip itself,
-upgraded at the start of the build, is not pinned.
-
-When you add or bump a CLI dependency, change both `requirements.txt`
-and `requirements-docker.txt`, then refresh `requirements-lock.txt` as
-above. Then refresh `requirements-docker-constraints.txt`: resolve the
-Docker set against the lock alone in the image base, and copy the
-versions of the packages the lock does not pin:
+**When to refresh:** after any change to the dependencies or to
+`[tool.lock-dependencies]` in `pyproject.toml`. To update a package (for
+example for a security fix), move its time under `resolve-package-at`,
+or move `resolve-at` to update all the others, then regenerate.
+Generating needs [uv](https://docs.astral.sh/uv/) 0.13.1 and the network:
 
 ```bash
-docker run --rm -v "$PWD":/src -w /src python:3.12-slim sh -c \
-    "pip install -q -r requirements-docker.txt -c requirements-lock.txt && pip freeze"
+python -m pip install "uv==0.13.1"
+python scripts/lock_dependencies.py
+git add pyproject.toml requirements/
 ```
 
-A floor in `requirements-docker.txt` that the pins do not satisfy (for
-example a security floor such as `urllib3>=2.8.0`) makes the Docker
-build fail until they are refreshed. `tests/unit/test_dependency_hygiene.py`
-catches that, and any Linux dependency left without a pin, before the
-build does. It walks the installed package metadata, so run it in an
-environment with the Docker dependencies installed.
+Never edit the files by hand.
+
+`python scripts/lock_dependencies.py --check` first checks, without uv
+or the network, that every file in `requirements/` was generated from the
+current `pyproject.toml` and that none is missing or extra. It then
+generates each file again from `pyproject.toml` alone, never from the
+committed files, and compares the two, so any hand edit fails: a pin
+moved to another version, even one that fits the bounds and carries that
+version's valid hashes, a hash, marker or comment changed, a row removed
+or added. It writes no file. The *Dependency locks* workflow runs it on
+every pull request. `--check --offline` does only the first part;
+`tests/unit/test_dependency_locks.py` runs that with the tests.
+
+The dev build (`build.py`) and the release build (`build_app.py`) both
+install `requirements/build.txt`, which includes PyInstaller. The Docker
+image installs `requirements/cli.txt` with `--require-hashes`, then the
+package itself with `--no-deps`; `pip check` fails the build if
+`pyproject.toml` needs anything the lock does not provide.
 
 ## Reporting issues
 

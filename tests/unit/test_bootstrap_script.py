@@ -83,8 +83,8 @@ def test_bootstrap_runs_from_project_root(monkeypatch, capsys):
     bootstrap.main()
 
     assert chdirs == [REPO_ROOT]
-    assert (REPO_ROOT / "requirements.txt").is_file()
-    assert any("install -r requirements.txt" in c for c in commands)
+    assert (REPO_ROOT / "requirements" / "gui.txt").is_file()
+    assert any("install -r requirements/gui.txt" in c for c in commands)
     assert any("-m playwright install chromium firefox" in c for c in commands)
     assert not [c for c in commands if "sudo" in c or "install-deps" in c]
     assert "Setup complete" in capsys.readouterr().out
