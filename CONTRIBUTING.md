@@ -246,7 +246,22 @@ every pull request. `--check --offline` does only the first part;
 `tests/unit/test_dependency_locks.py` runs that with the tests.
 
 The dev build (`build.py`) and the release build (`build_app.py`) both
-install `requirements/build.txt`, which includes PyInstaller. The Docker
+install `requirements/build.txt`, which includes PyInstaller. The release
+build and the release workflow install it with `--require-hashes`,
+`--only-binary :all:` and `--force-reinstall`: wheels only, so no package
+is built from source with build tools the lock does not pin, and every
+row is downloaded and hash-checked even when that version is already
+installed. The release workflow first runs the full
+`python scripts/lock_dependencies.py --check` on the tagged tree in a
+job of its own, with uv installed from its hashed wheel, keeps the
+runner's own pip rather than upgrading it, and before building runs
+`python scripts/lock_dependencies.py --check-installed build`, which
+fails unless the build Python holds exactly the rows of
+`requirements/build.txt` for its platform, once each, at their pinned
+versions and from the package index, and nothing else besides pip. That
+check compares names and versions; the file contents are the ones the
+install just hash-checked. The release then builds with
+`python build_app.py --no-install`, without installing again. The Docker
 image installs `requirements/cli.txt` with `--require-hashes`, then the
 package itself with `--no-deps`; `pip check` fails the build if
 `pyproject.toml` needs anything the lock does not provide.
