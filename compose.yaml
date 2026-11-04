@@ -1,11 +1,25 @@
+x-memanga: &memanga
+  build: .
+  image: memanga:cli
+  volumes:
+    - memanga-config:/home/memanga/.config/memanga
+    - memanga-downloads:/home/memanga/Downloads/MeManga
+
 services:
+  # One-off commands: docker compose run --rm memanga <command>
   memanga:
-    build: .
-    image: memanga:cli
-    volumes:
-      - memanga-config:/home/memanga/.config/memanga
-      - memanga-downloads:/home/memanga/Downloads/MeManga
+    <<: *memanga
     command: ["list"]
+
+  # Scheduled checks: docker compose up -d scheduler
+  scheduler:
+    <<: *memanga
+    command: ["watch", "--every", "6h", "--jitter", "30m"]
+    restart: unless-stopped
+    # Reaps the browser processes a check leaves behind.
+    init: true
+    # Time for a running check to save its state on docker stop.
+    stop_grace_period: 1m
 
 volumes:
   memanga-config:

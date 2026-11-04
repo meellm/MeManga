@@ -175,6 +175,16 @@ All notable changes are recorded here. Format loosely follows
   retry` and `failed clear`, each with an optional TARGET (a title or
   `#N`). Plain `failed` still lists, and `--retry`/`--clear` keep working
   as aliases of `retry`/`clear`.
+- #327 `memanga watch` keeps scheduled checks running without cron, for
+  Docker and NAS setups. It runs `check --auto --quiet` right away and
+  then every `--every` interval (default 6h, at least 15m) plus up to
+  `--jitter` random delay. Checks run one at a time, each as its own
+  process that locks the config directory only while it works; a failed
+  check is reported and the schedule continues. On SIGTERM a running
+  check saves its state before the watcher exits 143. `compose.yaml` has
+  a `scheduler` service for it (`docker compose up -d scheduler`) with
+  `restart: unless-stopped`, `init: true` and a one-minute stop grace
+  period; the `memanga` service for one-off commands is unchanged.
 
 ### Changed
 - #316 Release builds install `requirements/build.txt` with

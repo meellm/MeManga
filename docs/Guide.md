@@ -392,7 +392,61 @@ docker compose run --rm memanga check --auto
 docker compose run --rm memanga config
 ```
 
-For daily checks, add a host cron entry from the repository directory:
+### Scheduling in Docker
+
+There is no cron daemon in the container, and `memanga cron install`
+does not schedule anything there. Use the `scheduler` service from
+`compose.yaml` instead:
+
+```bash
+docker compose up -d scheduler
+docker compose logs -f scheduler
+```
+
+It runs `memanga watch --every 6h --jitter 30m`, which stays in the
+foreground and:
+
+- runs `check --auto --quiet` right away, then every `--every`
+  interval, measured from the start of one check to the start of the
+  next, plus a random delay of up to `--jitter` so many installs do not
+  hit the sources at the same moment;
+- never overlaps checks: one that runs past its slot is followed by the
+  next as soon as it ends;
+- runs each check as its own process, which locks the config volume only
+  while it works (see [One MeManga at a time](#one-memanga-at-a-time)),
+  so `docker compose run --rm memanga add …` and other commands work
+  between checks. A command that changes the library while a check runs
+  exits `1` and changes nothing; retry it afterwards;
+- reports a failed check and keeps the schedule; config changes are
+  picked up by the next check without a restart;
+- on `docker compose stop` (SIGTERM), lets a running check save what it
+  has downloaded, then exits. `stop_grace_period: 1m` gives the check
+  time for that; a check still running after 45 seconds is killed.
+
+`restart: unless-stopped` starts it again after a crash or a reboot of
+the Docker host, until you run `docker compose stop scheduler`.
+`init: true` runs a small init process that cleans up the browser
+processes a check starts.
+
+Durations are a number with `d`, `h`, `m` or `s`, for example `12h`,
+`90m` or `1h30m`; `--every` is at least `15m`. To change the schedule,
+edit the `command` line in `compose.yaml` and run
+`docker compose up -d scheduler` again. The interval does not depend on
+the container's time zone; only the times in the log lines do.
+
+Without Compose:
+
+```bash
+docker run -d --name memanga-scheduler --init --restart unless-stopped \
+  --stop-timeout 60 \
+  -v "$PWD/memanga-data/config:/home/memanga/.config/memanga" \
+  -v "$PWD/memanga-data/downloads:/home/memanga/Downloads/MeManga" \
+  memanga:cli watch --every 6h --jitter 30m
+```
+
+`memanga watch` works outside Docker too, on any command-line install.
+
+Or add a host cron entry from the repository directory:
 
 ```cron
 0 6 * * * cd /path/to/MeManga && docker compose run --rm memanga check --auto --quiet >> memanga-docker.log 2>&1
