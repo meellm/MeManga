@@ -42,8 +42,9 @@ from .config import (CONFIG_DIR_ENV, CONFIG_KEYS, AppPasswordError, Config,
                      get_app_password, parse_config_value,
                      plaintext_password_notice, set_app_password)
 from .cron import (ScheduleStatus, install_schedule, parse_schedule_time,
-                   remove_schedule, schedule_status, source_checkout_root)
-from . import __version__, completion, doctor
+                   remove_schedule, schedule_status, scheduled_checks_supported,
+                   source_checkout_root)
+from . import __version__, completion, doctor, watch
 from .persist import SaveError
 from .process_lock import (LOCK_FILENAME, ConfigDirBusy, ConfigDirLock,
                            ConfigDirLockError)
@@ -2733,6 +2734,75 @@ def _cron_remove():
     console.print(f"[green]✅ {removed}[/green]")
 
 
+def _watch_interval_arg(value):
+    try:
+        seconds = watch.parse_duration(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+    if seconds < watch.MIN_INTERVAL:
+        raise argparse.ArgumentTypeError(
+            f"must be at least {watch.format_duration(watch.MIN_INTERVAL)}")
+    return seconds
+
+
+def _watch_jitter_arg(value):
+    try:
+        return watch.parse_duration(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+
+
+def _clock_text(delay=0) -> str:
+    """Local wall-clock time ``delay`` seconds from now."""
+    return (datetime.fromtimestamp(datetime.now().timestamp() + delay)
+            .strftime("%Y-%m-%d %H:%M"))
+
+
+def _watch_report(event, code=None, elapsed=None, delay=None):
+    if event == "start":
+        console.print(f"[dim]{_clock_text()} Checking for new chapters[/dim]")
+    elif event == "finished":
+        took = watch.format_duration(elapsed)
+        if code == EXIT_OK:
+            console.print(f"[dim]{_clock_text()} Check finished in {took}[/dim]")
+        else:
+            _diagnostic(
+                logging.WARNING,
+                f"[yellow]⚠️  Check exited {code} after {took}; "
+                "the schedule continues[/yellow]",
+                "Check exited %s after %s; the schedule continues", code, took)
+    elif event == "waiting":
+        console.print(f"[dim]Next check at {_clock_text(delay)} "
+                      f"(in {watch.format_duration(delay)})[/dim]")
+
+
+def cmd_watch(args):
+    """Run `check --auto --quiet` now and then on a fixed interval
+    (issue #327), for containers and other hosts without cron.
+
+    Runs before the config directory is locked or loaded: each check is
+    its own process and takes the lock only while it works.
+    """
+    if not scheduled_checks_supported():
+        return _error(
+            "[red]watch needs the command-line version of MeManga; the "
+            "desktop app has no command line.[/red]")
+    # Absolute, so it still holds when the check runs from the source
+    # checkout (issue #232); also passes $MEMANGA_CONFIG_DIR on.
+    argv = watch.build_check_argv(
+        sys.executable, resolve_config_dir(args.config_dir),
+        verbose=args.verbose,
+        log_quiet=args.log_quiet, plain=args.plain, log_file=args.log_file)
+    jitter = (f" plus up to {watch.format_duration(args.jitter)}"
+              if args.jitter else "")
+    console.print(
+        f"[bold]Checking every {watch.format_duration(args.every)}{jitter}. "
+        "Stop with Ctrl-C or docker stop.[/bold]")
+    watch.run_watch(
+        argv, args.every, args.jitter, report=_watch_report,
+        cwd=source_checkout_root(Path(__file__).resolve().parent))
+
+
 SOURCE_HEALTH_STATUSES = ["ok", "warning", "error", "unknown"]
 SOURCE_SEARCH_FILTERS = ["included", "not-searched"]
 _HEALTH_STYLES = {"ok": "green", "warning": "yellow", "error": "red",
@@ -4368,6 +4438,7 @@ Examples:
   memanga setup                         # Prepare a first run (browsers too)
   memanga doctor                        # Diagnose setup problems
   memanga cron install                  # Set up daily checks
+  memanga watch --every 6h              # Check every 6 hours (Docker)
   memanga config                        # Configure settings
   memanga config set KEY VALUE          # Change one setting
   memanga --config-dir DIR status       # Use another config directory
@@ -4686,6 +4757,28 @@ Examples:
     p_cron.add_argument("action", choices=["status", "install", "remove"], help="Action")
     p_cron.add_argument("--time", help="Check time (HH:MM) for install")
     p_cron.set_defaults(func=cmd_cron)
+
+    p_watch = subparsers.add_parser(
+        "watch",
+        help="Keep running and check on an interval (containers)",
+        description=(
+            "Stay in the foreground and run 'check --auto --quiet' now and then\n"
+            "every --every interval, start to start, for Docker and other hosts\n"
+            "without cron. Checks never overlap; a failed check is reported and\n"
+            "the schedule continues. Each check locks the config directory only\n"
+            "while it runs, so other commands work in between. SIGTERM or Ctrl-C\n"
+            "lets a running check save its state, then exits 143 or 130.\n\n"
+            "Durations: a number with d, h, m or s, e.g. 6h, 90m or 1h30m."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_watch.add_argument(
+        "--every", type=_watch_interval_arg, default=6 * 3600, metavar="DURATION",
+        help="Time between check starts (default: 6h, at least 15m)")
+    p_watch.add_argument(
+        "--jitter", type=_watch_jitter_arg, default=0, metavar="DURATION",
+        help="Add a random delay of up to DURATION to each wait (default: 0)")
+    p_watch.set_defaults(func=cmd_watch)
     
     # sources
     p_sources = subparsers.add_parser("sources", help="List supported sources")
@@ -4956,6 +5049,11 @@ def _main():
     # writes to the config directory.
     if args.command == "completion" and not args.gui:
         sys.exit(args.func(args))
+    # Issue #327: the watcher loads and locks nothing; each check it
+    # starts is its own process that does.
+    if args.command == "watch" and not args.gui:
+        with _sigterm_as_shutdown():
+            sys.exit(args.func(args))
     # The GUI selects the same way (issue #249): main() loads Config/State
     # in the selected root and hands them, and an explicit choice, to
     # launch_gui().

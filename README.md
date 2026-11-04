@@ -403,7 +403,23 @@ the command line. Without a keyring it is then kept in plain text in the
 config volume; to keep it out, pass it as a Docker secret instead (see
 [App password as a Docker secret](docs/Guide.md#app-password-as-a-docker-secret)).
 
-For a host cron job, run Compose from the repository directory:
+For scheduled checks without host cron, start the `scheduler` service.
+It runs `memanga watch --every 6h --jitter 30m`: a check right away, then
+one every 6 hours plus up to 30 random minutes, and it restarts with
+Docker unless you stop it:
+
+```bash
+docker compose up -d scheduler
+docker compose logs -f scheduler
+docker compose stop scheduler
+```
+
+Checks never overlap, and other commands (`docker compose run --rm
+memanga add …`) still work between them. Change the interval in
+`compose.yaml`; see
+[Scheduling in Docker](docs/Guide.md#scheduling-in-docker).
+
+Or use a host cron job, running Compose from the repository directory:
 
 ```cron
 0 6 * * * cd /path/to/MeManga && docker compose run --rm memanga check --auto --quiet >> memanga-docker.log 2>&1
@@ -430,6 +446,7 @@ For a host cron job, run Compose from the repository directory:
 | `config path` / `config edit` / `config email [--test \| --send-test]` | Print the config file path, open it in `$VISUAL`/`$EDITOR` and check it, show email settings (`--test` only logs in to SMTP; `--send-test` emails a small test PDF to the Kindle) |
 | `cron install [--time 06:00]` | Schedule a daily `check --auto --quiet` job (`--auto` is an alias of `--download`) |
 | `cron status` / `cron remove` | Inspect / uninstall the cron job |
+| `watch [--every 6h] [--jitter 30m]` | Stay in the foreground and run `check --auto --quiet` now and on an interval, one at a time (for Docker; see [Docker](#docker)) |
 | `sources` | List registered sources and their search status (`--json` for metadata) |
 | `export FILE` / `import FILE` | Back up or restore your library + state as JSON (`-` for stdout/stdin; `import --dry-run` previews, `--replace` asks unless `--yes`) |
 | `tui` | Launch the in-terminal interactive view |
