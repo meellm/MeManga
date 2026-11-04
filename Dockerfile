@@ -14,6 +14,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# tini runs as PID 1 (issue #333) and reaps the browser processes that
+# Playwright leaves behind when a driver or browser exits early; Python
+# as PID 1 never reaps them, so they stayed as zombies until the
+# container stopped. It forwards signals to memanga only, so the CLI's
+# own SIGTERM and Ctrl-C handling is unchanged. -s keeps the reaping
+# when tini is not PID 1 (docker run --init, Compose init: true).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install CLI-only dependencies and the Playwright Firefox + Chromium runtimes
 # first so this expensive layer stays cached when only application source
 # changes. Chromium is needed by MangaPark, whose Cloudflare check blocks
@@ -66,5 +76,5 @@ USER memanga
 
 VOLUME ["/home/memanga/.config/memanga", "/home/memanga/Downloads/MeManga"]
 
-ENTRYPOINT ["memanga"]
+ENTRYPOINT ["/usr/bin/tini", "-s", "--", "memanga"]
 CMD ["--help"]

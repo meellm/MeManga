@@ -412,6 +412,14 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #333 The Docker image runs MeManga under `tini`, so containers no
+  longer collect zombie browser processes. MeManga ran as PID 1, which
+  never reaped the processes left behind when a Playwright driver or
+  browser exited early; they stayed until the container stopped. This
+  now works however the container is started, without `docker run
+  --init` or Compose `init: true`, which the `scheduler` service no
+  longer sets (both still work). `docker stop` and Ctrl-C reach MeManga
+  as before, and exit codes are unchanged.
 - #396 The desktop app can be used from the keyboard. Library cards and
   rows, continue-reading cards and the theme cards could only be clicked;
   `Tab` now reaches them, `Enter` or `Space` opens them, and the `Menu`

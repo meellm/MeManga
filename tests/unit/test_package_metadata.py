@@ -2,6 +2,7 @@
 version is set once, as `memanga.__version__`, which pyproject.toml reads
 at build time."""
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -150,3 +151,21 @@ def test_docker_package_install_has_the_license_files(pyproject):
     for name in pyproject["project"]["license-files"]:
         assert name in copied, name
         assert name not in ignored, name
+
+
+def test_docker_image_runs_memanga_under_an_init():
+    # #333: as PID 1, memanga never reaped the browser processes left
+    # behind when a Playwright driver or browser exited early. tini is PID
+    # 1 however the container is started; -s keeps it reaping when an
+    # outer init (docker run --init) is PID 1 instead. No -g: signals go
+    # to memanga only, whose own handlers stop the browsers.
+    text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    flat = " ".join(text.replace("\\\n", " ").split())
+    assert "apt-get install -y --no-install-recommends tini" in flat
+    directives = {}
+    for line in text.splitlines():
+        parts = line.split(maxsplit=1)
+        if parts and parts[0] in ("ENTRYPOINT", "CMD"):
+            directives[parts[0]] = json.loads(parts[1])
+    assert directives["ENTRYPOINT"] == ["/usr/bin/tini", "-s", "--", "memanga"]
+    assert directives["CMD"] == ["--help"]
