@@ -156,6 +156,11 @@ class AddMangaDialog(ModalDialog):
             f"  background-color: {T.tokens()['accent.primary_2']};"
             f"  border-color: {T.tokens()['accent.primary_2']};"
             f"}}"
+            # Keyboard focus ring (issue #396), as for app primary buttons.
+            f"QPushButton[focusVisible=\"true\"]:focus {{"
+            f"  border: 2px solid {T.tokens()['text.t_1']};"
+            f"  padding: 5px 13px;"
+            f"}}"
         )
         add_btn.clicked.connect(self._add_manga)
         self.foot_layout.addWidget(add_btn)

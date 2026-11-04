@@ -31,6 +31,7 @@ class _ModeItemWidget(QWidget):
     def __init__(self, label: str, desc: str, on_click, parent=None):
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._on_click = on_click
 
         layout = QVBoxLayout(self)
@@ -53,13 +54,31 @@ class _ModeItemWidget(QWidget):
             self._on_click()
         super().mousePressEvent(ev)
 
+    # QMenu paints no highlight behind a widget action. It focuses the
+    # widget when arrow keys move onto it, so the highlight follows
+    # focus as well as the pointer (issue #396).
+
+    def _set_highlight(self, on: bool):
+        self.setStyleSheet(
+            f"background-color: {T.tokens()['surfaces.bg_2']}; border-radius: 4px;"
+            if on else ""
+        )
+
     def enterEvent(self, ev):
-        self.setStyleSheet(f"background-color: {T.tokens()['surfaces.bg_2']}; border-radius: 4px;")
+        self._set_highlight(True)
         super().enterEvent(ev)
 
     def leaveEvent(self, ev):
-        self.setStyleSheet("")
+        self._set_highlight(self.hasFocus())
         super().leaveEvent(ev)
+
+    def focusInEvent(self, ev):
+        self._set_highlight(True)
+        super().focusInEvent(ev)
+
+    def focusOutEvent(self, ev):
+        self._set_highlight(self.underMouse())
+        super().focusOutEvent(ev)
 
 
 class ModeDropdown(QToolButton):
@@ -93,6 +112,10 @@ class ModeDropdown(QToolButton):
             f"QToolButton:hover {{"
             f"  border-color: {T.tokens()['surfaces.border_strong']};"
             f"}}"
+            # Same 1px accent edge as focused inputs (issue #396).
+            f"QToolButton:focus {{"
+            f"  border-color: {T.tokens()['accent.primary']};"
+            f"}}"
             f"QToolButton::menu-indicator {{"
             f"  image: none; width: 0; height: 0;"
             f"  subcontrol-position: right center;"
@@ -115,6 +138,9 @@ class ModeDropdown(QToolButton):
             item = _ModeItemWidget(label, desc, lambda k=key: self._on_pick(k))
             item.setMinimumWidth(260)
             wa.setDefaultWidget(item)
+            # Enter on a highlighted item triggers the action rather
+            # than a mouse press on its widget (issue #396).
+            wa.triggered.connect(lambda _=False, k=key: self._on_pick(k))
             self._menu.addAction(wa)
 
         self._refresh_text()

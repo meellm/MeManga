@@ -293,6 +293,11 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
             f"  background-color: {toks['accent.primary_2']};"
             f"  border-color: {toks['accent.primary_2']};"
             f"}}"
+            # Keyboard focus ring (issue #396), as for app primary buttons.
+            f"QPushButton[focusVisible=\"true\"]:focus {{"
+            f"  border: 2px solid {toks['text.t_1']};"
+            f"  padding: 7px 17px;"
+            f"}}"
         )
         # Re-render the icon at the new on-accent color too.
         self._save_bar_btn.setIcon(_ic("check", toks["accent.on_primary"], 14))

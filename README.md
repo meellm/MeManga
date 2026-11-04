@@ -118,6 +118,9 @@ chapters, and an in-progress bar for the current chapter you're on.
 - Click a card → **Detail** page (chapter list, status, mode, Kindle toggle)
 - Right-click → quick actions (mark as read, change status, remove)
 - Top-right chip row filters by status; the chip count updates live
+- Keyboard: `Tab` moves to a card, `Enter` or `Space` opens it, and the
+  `Menu` key or `Shift+F10` opens its quick actions (see
+  [Keyboard shortcuts](#keyboard-shortcuts))
 
 ## Reader
 
@@ -127,14 +130,22 @@ Click any downloaded chapter on the Detail page to open it in the built-in reade
   <img src="docs/screenshots/reader-view.png" alt="Built-in reader showing a chapter" width="700">
 </p>
 
-| Key / mouse | Action |
-|---|---|
-| `↑ ↓` / scroll wheel | Scroll within page |
-| `← →` / `Page Up Page Down` | Previous / next chapter |
-| `Ctrl/Cmd + scroll` | Zoom in/out |
-| `Ctrl/Cmd + 0` | Reset zoom |
-| Click-drag while zoomed | Pan |
-| `Esc` | Back to Detail |
+| Key / mouse | Continuous scroll | Single page / Two-page spread |
+|---|---|---|
+| `↑ ↓` / scroll wheel | Scroll | Scroll within the page |
+| `← →` | Pan sideways when zoomed in, otherwise previous / next chapter | Previous / next page |
+| `Page Up` / `Page Down`, `Space` | Scroll one screen up / down (`Space` scrolls down) | Previous / next page (`Space` turns forward) |
+| `Home` / `End` | Start / end of the chapter | First / last page |
+| `P` / `N` | Previous / next chapter | Previous / next chapter |
+| `+` (or `=`) / `−`, `Ctrl/Cmd + scroll`, pinch | Zoom in / out | Zoom in / out |
+| `Ctrl/Cmd + 0` | Reset zoom to 100% | Reset zoom to 100% |
+| `F` | Toggle fit to width | Toggle fit to width |
+| Click-drag while zoomed | Pan | Pan |
+| `Esc` | Back to Detail | Back to Detail |
+
+Reaching the end of the chapter marks it read, whichever way you get there.
+`Tab` moves to the reader's buttons; clicking a button or the page keeps
+these keys working.
 
 PDF chapters MeManga wrote show each page's image exactly as stored, at its
 original resolution. Any other PDF page, such as one with text, drawings, links
@@ -230,6 +241,26 @@ Hit **Re-check health** to ping every enabled source and see their status.
    off for the manga you don't want sent.
 
 Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs too large for one email (over 18 MB with the default 25 MB email size limit, `email.max_email_mb`) are split automatically and the parts are sent in one mail session; EPUB files can't be split so they fail-loud with a size warning. See the [Guide](docs/Guide.md#email-size-limit) to match the limit to your mail provider.
+
+## Keyboard shortcuts
+
+`Tab` and `Shift+Tab` move between controls, including the Library cards
+and rows and the theme cards in Settings. The control with keyboard focus
+gets a ring (a click doesn't leave one on a button). `Enter` or `Space`
+activates buttons, cards and rows; arrow keys and `Enter` pick an option in
+a drop-down or menu; `Esc` closes dialogs. `Page Up` and `Page Down`
+scroll the page. When a page opens from the keyboard, focus moves to its
+first control, and after a card's quick action it returns to the card.
+
+| Key | Action |
+|---|---|
+| `Ctrl/Cmd + K` | Go to Search and put the cursor in the search field |
+| `Ctrl/Cmd + F` | Filter field on Library and Sources (search field on Search) |
+| `Ctrl/Cmd + ,` | Settings |
+| `Alt + ←` (`Cmd + [` on macOS) | Detail page: back to Library |
+| `Menu` / `Shift + F10` | Library card or row: quick actions |
+
+The reader's keys are listed under [Reader](#reader).
 
 ---
 

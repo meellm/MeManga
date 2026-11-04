@@ -7,8 +7,8 @@ controls.
 
 Screen readers: Orca (Linux), NVDA or Narrator (Windows), VoiceOver (macOS).
 Use the screen reader's object/review navigation to move through each page;
-keyboard reachability and color contrast have their own checks and are not
-part of this list.
+keyboard reachability has its own checklist below, and color contrast is
+not part of either list.
 
 Start with a library of at least two manga, one with new chapters, and one
 downloaded chapter.
@@ -71,3 +71,42 @@ downloaded chapter.
       not their placeholder or an empty name.
 - [ ] The Output Format and MangaDex Image Quality drop-downs say what they
       set, not only their current choice ("pdf", "Original").
+
+# Keyboard checklist
+
+A manual pass without touching the mouse, in both the dark and the light
+theme. Start the same way as above. Shortcuts are listed in the README
+under "Keyboard shortcuts" and "Reader".
+
+## Focus ring
+
+- [ ] `Tab` and `Shift+Tab` show a clearly visible ring on every stop:
+      sidebar items, buttons (including primary ones), tabs, chips, text
+      fields, drop-downs, check boxes, Library cards and rows,
+      continue-reading cards and theme cards.
+- [ ] Clicking a button with the mouse does not leave a ring on it.
+- [ ] Labels don't shift by a pixel when the ring appears.
+- [ ] No Tab stop is invisible: every press of `Tab` moves the ring to a
+      control you can see, including on long pages; `Page Up` / `Page Down`
+      still scroll them.
+
+## Pages
+
+- [ ] Library: `Tab` reaches the filter, sort, view toggles and each card or
+      row; `Enter` or `Space` opens Detail with focus on its first control;
+      the `Menu` key or `Shift+F10` opens the quick actions menu, which arrow
+      keys and `Enter` operate.
+- [ ] Detail: every chapter button can be reached; `Alt+←` (`Cmd+[` on
+      macOS) returns to Library; the mode drop-down opens with `Space`, and
+      arrow keys highlight Auto / Manual and `Enter` picks one.
+- [ ] Reader: every key in the README table works in all three layouts, also
+      after clicking a toolbar button or the page; `Ctrl/Cmd+0` resets zoom.
+- [ ] Search, Sources, Downloads, Notifications: every control can be
+      reached and used; `Ctrl/Cmd+F` puts the cursor in the filter or search
+      field.
+- [ ] Settings (`Ctrl/Cmd+,`): every tab, field and the Save button can be
+      reached; the theme cards switch theme with `Enter` or `Space`.
+- [ ] Dialogs (Add manga, Download from, Remove, error details): focus
+      starts inside the dialog, `Tab` goes × → fields → Cancel → primary
+      button and stays in the dialog, the ring on Cancel is not cut off, and
+      `Esc` closes it.

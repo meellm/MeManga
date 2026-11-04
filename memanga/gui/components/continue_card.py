@@ -13,6 +13,7 @@ from PySide6.QtGui import QMouseEvent, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
 
 from .. import theme as T
+from .keyboard import is_activation
 
 
 class ContinueCard(QFrame):
@@ -25,6 +26,8 @@ class ContinueCard(QFrame):
         self.setFixedHeight(96)
         self.setMinimumWidth(240)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Reachable with Tab, opened with Enter/Space (issue #396).
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._manga = manga
         self._on_click = on_click
         self._hover_offset = 0
@@ -129,3 +132,9 @@ class ContinueCard(QFrame):
     def mousePressEvent(self, ev: QMouseEvent):
         if ev.button() == Qt.MouseButton.LeftButton and self._on_click:
             self._on_click(self._manga)
+
+    def keyPressEvent(self, ev):
+        if is_activation(ev) and self._on_click:
+            self._on_click(self._manga)
+        else:
+            super().keyPressEvent(ev)

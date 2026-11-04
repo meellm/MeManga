@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 from .. import theme as T
 from ..theme.tokens import THEMES
+from .keyboard import is_activation
 
 
 class _MiniPreview(QWidget):
@@ -115,6 +116,8 @@ class _ThemeCard(QFrame):
         self._theme_name = theme_name
         self.setProperty("role", "theme_card")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Reachable with Tab, picked with Enter/Space (issue #396).
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -169,6 +172,12 @@ class _ThemeCard(QFrame):
         if ev.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self._theme_name)
         super().mousePressEvent(ev)
+
+    def keyPressEvent(self, ev):
+        if is_activation(ev):
+            self.clicked.emit(self._theme_name)
+        else:
+            super().keyPressEvent(ev)
 
 
 class ThemePicker(QWidget):

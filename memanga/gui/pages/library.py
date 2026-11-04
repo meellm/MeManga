@@ -7,21 +7,29 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QComboBox, QScrollArea, QWidget, QGridLayout, QFrame, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QKeySequence
 from .base import BasePage
 from ...perf import timed
 from .. import theme as T
 from ..components.manga_card import MangaCard
 from ..components.manga_row import MangaRow
 from ..components.context_menu import ContextMenu
+from ..focus import focus_into
 from ..components.toast import Toast
 from ..components.remove_manga_modal import (RemoveMangaModal, remove_manga,
                                               removed_message)
 
 
 class LibraryPage(BasePage):
+    # Queued like the page handoff in MeMangaApp.show_page (issue #396):
+    # the rebuilt cards are shown by events posted before it.
+    _refocus_due = Signal(str)
+
     def __init__(self, parent, app):
         super().__init__(parent, app)
+        self._refocus_due.connect(self._refocus_card,
+                                  Qt.ConnectionType.QueuedConnection)
         self._view_mode = "grid"
         self._filter_status = "all"
         self._search_query = ""
@@ -131,6 +139,9 @@ class LibraryPage(BasePage):
         self._search_entry.setMaximumWidth(240)
         self._search_entry.textChanged.connect(self._on_search)
         filter_bar.addWidget(self._search_entry)
+        # Ctrl/Cmd+F → filter field (issue #396).
+        self.add_shortcut(QKeySequence.StandardKey.Find,
+                          lambda: self.focus_field(self._search_entry))
 
         # Status chip-row instead of a dropdown — matches HTML.
         self._chip_buttons: dict[str, QPushButton] = {}
@@ -348,10 +359,13 @@ class LibraryPage(BasePage):
         # Continue Reading rail first
         self._refresh_continue_rail()
 
-        # Clear grid
+        # Clear grid. Hidden first: deleteLater leaves the old cards on
+        # screen and focusable until control returns to the event loop
+        # (issue #396).
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         self._cards.clear()
 
@@ -480,10 +494,11 @@ class LibraryPage(BasePage):
         """Repopulate the Continue Reading rail with up to 4 most-recently-read
         manga that have an unfinished chapter."""
         from ..components.continue_card import ContinueCard
-        # Drain old cards
+        # Drain old cards (hidden first, as in _refresh)
         while self._continue_grid.count():
             item = self._continue_grid.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
 
         candidates = []
@@ -582,6 +597,11 @@ class LibraryPage(BasePage):
         self.app.show_page("detail", manga=manga)
 
     def _on_right_click(self, manga, x, y):
+        # Issue #396: opened from the keyboard, the card has focus. A
+        # status change rebuilds the cards, so focus goes back to the new
+        # card for the same manga afterwards (or into the page if it is
+        # gone) instead of being lost with the old one.
+        from_keyboard = any(card.hasFocus() for _m, card in self._cards)
         items = [
             ("Check Updates", lambda: self._ctx_check(manga)),
             ("Download All", lambda: self._ctx_download_all(manga)),
@@ -593,6 +613,21 @@ class LibraryPage(BasePage):
             ("Remove", lambda: self._ctx_remove(manga)),
         ]
         ContextMenu(self, x, y, items)
+        if from_keyboard:
+            # Rebuilt cards are shown only by events the rebuild posted;
+            # a queued call runs after them.
+            self._refocus_due.emit(manga.get("title") or "")
+
+    @Slot(str)
+    def _refocus_card(self, title):
+        if not self.isVisible():
+            return  # the action left the page (Check Updates, Download All)
+        card = next((c for m, c in self._cards if m.get("title") == title),
+                    None)
+        if card is not None and card.isVisible():
+            card.setFocus(Qt.FocusReason.OtherFocusReason)
+        else:
+            focus_into(self)  # the manga was removed or filtered out
 
     def _ctx_check(self, manga):
         self.app.worker.check_updates(

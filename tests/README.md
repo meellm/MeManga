@@ -35,6 +35,7 @@ pytest --cov=memanga --cov-report=html   # HTML coverage report
 | `unit/gui/test_workers.py` | BackgroundWorker pool, pause/resume, ping_sources, cancel_download. |
 | `unit/gui/test_events.py` | EventBus pub/sub, polling, thread safety. |
 | `unit/gui/test_cache.py` | CoverCache disk/memory LRU, placeholders. |
+| `unit/gui/test_keyboard_navigation.py` | Keyboard activation of cards and drop-downs, keyboard-only focus rings, focus following page changes and quick actions, no scroll-area Tab stops, dialog Tab order, page shortcuts, reader keys. |
 | `unit/cli/` | `argparse` wiring, each subcommand's handler. |
 | `integration/` | End-to-end flows that span multiple components. |
 
@@ -81,6 +82,9 @@ pytest --cov=memanga --cov-report=html   # HTML coverage report
 - macOS-specific frame chrome (`launch_gui` ensure-browsers flow)
 - How a real screen reader speaks the GUI (accessible names are unit-tested;
   see `docs/ACCESSIBILITY.md` for the manual pass)
+- How focus rings look and the full Tab order of each page (the rules and
+  focus handling are unit-tested; see the keyboard checklist in
+  `docs/ACCESSIBILITY.md`)
 
 ## Adding a test
 

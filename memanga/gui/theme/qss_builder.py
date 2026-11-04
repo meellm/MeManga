@@ -143,6 +143,19 @@ QPushButton:disabled {{
     border-color: {border};
 }}
 
+/* Keyboard focus ring (issue #396). Qt has no :focus-visible, so the
+   app sets focusVisible="true" on a button only when it took focus
+   without a mouse press; a clicked button keeps its normal look. The
+   ring is 2px and the padding gives back the extra pixel, so the label
+   doesn't move. Variants below that change padding restate it.
+   `outline: none` drops the style's own dotted box inside the label,
+   which the ring replaces. */
+QPushButton[focusVisible="true"]:focus {{
+    border: 2px solid {a_primary};
+    padding: 5px 13px;
+    outline: none;
+}}
+
 QPushButton[variant="primary"], QPushButton[class="accent"] {{
     background-color: {a_primary};
     color: {a_on};
@@ -152,6 +165,11 @@ QPushButton[variant="primary"], QPushButton[class="accent"] {{
 QPushButton[variant="primary"]:hover, QPushButton[class="accent"]:hover {{
     background-color: {a_primary_2};
     border-color: {a_primary_2};
+}}
+/* An accent ring would vanish on the accent fill. */
+QPushButton[variant="primary"][focusVisible="true"]:focus,
+QPushButton[class="accent"][focusVisible="true"]:focus {{
+    border-color: {t_1};
 }}
 
 QPushButton[variant="ghost"], QPushButton[class="flat"] {{
@@ -178,20 +196,29 @@ QPushButton[size="sm"] {{
     font-size: {sz_hint}pt;
     border-radius: {rxs}px;
 }}
+QPushButton[size="sm"][focusVisible="true"]:focus {{
+    padding: 3px 9px;
+}}
 
 /* Nav items (sidebar) — symmetric padding pulls the text upward in
    the 40-px button so descenders ('g' in "Settings", 'y' in
    "Library") get the full bottom margin. The button height already
-   accounts for the extra room. */
+   accounts for the extra room. The transparent 2px border is the
+   focus ring's room (issue #396); padding is 2px less to match. */
 QPushButton[variant="nav"], QPushButton[class="nav"] {{
     background: transparent;
-    border: none;
+    border: 2px solid transparent;
     border-radius: {rsm}px;
     color: {t_2};
     text-align: left;
-    padding: 8px 12px 13px 12px;
+    padding: 6px 10px 11px 10px;
     font-size: {sz_body}pt;
     font-weight: 500;
+}}
+QPushButton[variant="nav"][focusVisible="true"]:focus,
+QPushButton[class="nav"][focusVisible="true"]:focus {{
+    border-color: {a_primary};
+    padding: 6px 10px 11px 10px;
 }}
 QPushButton[variant="nav"]:hover, QPushButton[class="nav"]:hover {{
     background-color: {bg_2};
@@ -205,20 +232,22 @@ QPushButton[class="nav"][active="true"] {{
 /* Nav button with a count badge needs extra right padding so the text
    doesn't slide under the badge. */
 QPushButton[variant="nav"][hasBadge="true"],
-QPushButton[class="nav"][hasBadge="true"] {{
-    padding-right: 44px;
+QPushButton[class="nav"][hasBadge="true"],
+QPushButton[variant="nav"][hasBadge="true"][focusVisible="true"]:focus,
+QPushButton[class="nav"][hasBadge="true"][focusVisible="true"]:focus {{
+    padding-right: 42px;
 }}
 
-/* Tabs */
+/* Tabs — the underline is the bottom edge of a transparent 2px
+   border, which also gives the focus ring its room (issue #396). */
 QPushButton[variant="tab"], QPushButton[class="tab"] {{
     background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
+    border: 2px solid transparent;
     border-radius: 0;
     color: {t_2};
     /* Extra bottom padding so the descender on 'y' in History/Library
        isn't clipped above the underline border. */
-    padding: 10px 16px 12px 16px;
+    padding: 8px 14px 12px 14px;
     font-size: {sz_body}pt;
     font-weight: 500;
 }}
@@ -231,16 +260,26 @@ QPushButton[class="tab"][active="true"] {{
     border-bottom-color: {a_primary};
     font-weight: 600;
 }}
+QPushButton[variant="tab"][focusVisible="true"]:focus,
+QPushButton[class="tab"][focusVisible="true"]:focus {{
+    border-color: {a_primary};
+    padding: 8px 14px 12px 14px;
+}}
 
-/* Chip-style (segmented filter buttons) */
+/* Chip-style (segmented filter buttons). The transparent 2px border is
+   the focus ring's room (issue #396). */
 QPushButton[variant="chip"] {{
     background: transparent;
-    border: none;
+    border: 2px solid transparent;
     border-radius: {rxs}px;
     color: {t_2};
-    padding: 5px 12px;
+    padding: 3px 10px;
     font-size: {sz_hint + 0.5}pt;
     font-weight: 500;
+}}
+QPushButton[variant="chip"][focusVisible="true"]:focus {{
+    border-color: {a_primary};
+    padding: 3px 10px;
 }}
 QPushButton[variant="chip"]:hover {{
     color: {t_1};
@@ -263,6 +302,9 @@ QPushButton[variant="icon"] {{
 QPushButton[variant="icon"]:hover {{
     background-color: {bg_3};
     color: {t_1};
+}}
+QPushButton[variant="icon"][focusVisible="true"]:focus {{
+    padding: 0;
 }}
 
 /* ════════════════════════════════════════════════════════════════
@@ -343,6 +385,17 @@ QRadioButton::indicator {{ border-radius: 8px; }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
     background-color: {a_primary};
     border-color: {a_primary};
+}}
+/* Keyboard focus (issue #396): a 2px ring in text colour, which shows
+   on the accent fill of a checked box too. The box shrinks by the extra
+   border so the label doesn't move. */
+QCheckBox[focusVisible="true"]::indicator:focus,
+QRadioButton[focusVisible="true"]::indicator:focus {{
+    border: 2px solid {t_1};
+    width: 14px; height: 14px;
+}}
+QCheckBox[focusVisible="true"]:focus, QRadioButton[focusVisible="true"]:focus {{
+    outline: none;
 }}
 
 /* ════════════════════════════════════════════════════════════════
@@ -427,10 +480,22 @@ QFrame[role="card"], QFrame[class="card"] {{
     border: 1px solid {border};
     border-radius: {rmd}px;
 }}
+/* Cards that open something (list rows, continue-reading cards) take
+   keyboard focus (issue #396). The border stays 1px so the content
+   doesn't move; the tint makes the change easy to spot. */
+QFrame[role="card"]:focus, QFrame[class="card"]:focus {{
+    border-color: {a_primary};
+    background-color: {a_soft10};
+}}
 QFrame[role="card_2"] {{
     background-color: {bg_2};
     border: 1px solid {border};
     border-radius: {rmd}px;
+}}
+/* A borderless field inside the box has focus (Search, issue #396):
+   the same accent edge as a focused text field. */
+QFrame[role="card_2"][focusWithin="true"] {{
+    border-color: {a_primary};
 }}
 
 /* Stat card variant */
@@ -463,6 +528,11 @@ QFrame[role="theme_card"] {{
 QFrame[role="theme_card"][selected="true"] {{
     border-color: {a_primary};
     background-color: {a_soft10};
+}}
+/* Keyboard focus (issue #396) in text colour, so it reads apart from
+   the accent border of the selected card. */
+QFrame[role="theme_card"]:focus {{
+    border-color: {t_1};
 }}
 
 /* Chapter / download / history row */
@@ -522,7 +592,9 @@ QMenu::item {{
     color: {t_1};
     border-radius: {rxs}px;
 }}
-QMenu::item:selected {{ background: {bg_2}; }}
+/* Solid accent highlight, like a native menu, so the item the arrow
+   keys are on is easy to see (issue #396). */
+QMenu::item:selected {{ background: {a_primary}; color: {a_on}; }}
 QMenu::separator {{ height: 1px; background: {border}; margin: 4px 8px; }}
 
 QToolButton {{
@@ -536,6 +608,7 @@ QToolButton:hover {{
     background-color: {bg_2};
     color: {t_1};
 }}
+QToolButton:focus {{ border-color: {a_primary}; }}
 
 /* Close button (Windows/Linux frameless) gets red hover */
 QPushButton#title_close_btn:hover {{

@@ -21,7 +21,11 @@ class ReaderInputMixin:
             if self._manga:
                 self.app.show_page("detail", manga=self._manga)
             return
-        if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+        if (key == Qt.Key.Key_0
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            # Ctrl/Cmd+0 → back to 100% (issue #396).
+            self._reset_zoom()
+        elif key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
             self._zoom_in()
         elif key == Qt.Key.Key_Minus:
             self._zoom_out()
@@ -41,6 +45,15 @@ class ReaderInputMixin:
             self._go_to_page(0)
         elif self._view_mode in self.PAGED_MODES and key == Qt.Key.Key_End:
             self._go_to_page(len(self._images) - 1)
+        # Continuous mode: the usual document keys (issue #396).
+        elif key in (Qt.Key.Key_PageDown, Qt.Key.Key_Space):
+            self._scroll_screen(+1)
+        elif key == Qt.Key.Key_PageUp:
+            self._scroll_screen(-1)
+        elif key == Qt.Key.Key_Home:
+            self._scroll_to_edge(end=False)
+        elif key == Qt.Key.Key_End:
+            self._scroll_to_edge(end=True)
         elif key == Qt.Key.Key_Down:
             self._scroll_vertical(+1)
         elif key == Qt.Key.Key_Up:
@@ -63,6 +76,20 @@ class ReaderInputMixin:
             return
         bar = self._scroll.verticalScrollBar()
         bar.setValue(bar.value() + direction * max(40, bar.pageStep() // 2))
+
+    def _scroll_screen(self, direction: int):
+        """Page Up/Down and Space in continuous mode: one viewport."""
+        if self._scroll is None:
+            return
+        bar = self._scroll.verticalScrollBar()
+        bar.setValue(bar.value() + direction * bar.pageStep())
+
+    def _scroll_to_edge(self, end: bool):
+        """Home/End in continuous mode: top or bottom of the chapter."""
+        if self._scroll is None:
+            return
+        bar = self._scroll.verticalScrollBar()
+        bar.setValue(bar.maximum() if end else bar.minimum())
 
     def _arrow_horizontal(self, direction: int):
         """Left/Right in continuous mode: pan when zoomed content
@@ -87,6 +114,11 @@ class ReaderInputMixin:
     def _zoom_out(self):
         if self._zoom_level > self.ZOOM_MIN:
             self._zoom_level -= self.ZOOM_STEP
+            self._rebuild_images()
+
+    def _reset_zoom(self):
+        if self._zoom_level != 1.0:
+            self._zoom_level = 1.0
             self._rebuild_images()
 
     # ── Ctrl+wheel zoom (issue #16) ──────────────────────────────────────
