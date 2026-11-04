@@ -25,6 +25,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QWidget
 
 from .. import theme as T
+from .keyboard import is_activation, is_context_menu, menu_anchor
 
 
 CARD_W = 170
@@ -118,11 +119,19 @@ class _CoverArea(QWidget):
             if 0 < progress < 100:
                 self._paint_progress_bar(p, progress)
 
-            # 6. Border on top so it isn't hidden by overlays
+            # 6. Border on top so it isn't hidden by overlays. A card
+            # with keyboard focus gets a 2px accent ring instead
+            # (issue #396).
             p.setClipping(False)
-            p.setPen(QPen(QColor(T.tokens()["surfaces.border"]), 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawPath(path)
+            parent = self.parentWidget()
+            if parent is not None and parent.hasFocus():
+                p.setPen(QPen(QColor(T.tokens()["accent.primary"]), 2))
+                p.drawPath(self._rounded_path(rect.adjusted(1, 1, -1, -1),
+                                              radius - 1))
+            else:
+                p.setPen(QPen(QColor(T.tokens()["surfaces.border"]), 1))
+                p.drawPath(path)
         finally:
             # Always end() — otherwise an exception leaves the QPainter
             # active and Qt floods the log with QBackingStore::endPaint
@@ -302,6 +311,9 @@ class MangaCard(QFrame):
         super().__init__(parent)
         self.setFixedSize(CARD_W, CARD_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Tab reaches the card; a click still opens it without moving
+        # focus, so the ring shows for keyboard use only (issue #396).
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._manga = manga
         self._on_click = on_click
         self._on_right_click = on_right_click
@@ -432,6 +444,25 @@ class MangaCard(QFrame):
         elif event.button() == Qt.MouseButton.RightButton and self._on_right_click:
             pos = event.globalPosition().toPoint()
             self._on_right_click(self._manga, pos.x(), pos.y())
+
+    # ── Keyboard (issue #396) ──
+
+    def keyPressEvent(self, event):
+        if is_activation(event) and self._on_click:
+            self._on_click(self._manga)
+        elif is_context_menu(event) and self._on_right_click:
+            pos = menu_anchor(self)
+            self._on_right_click(self._manga, pos.x(), pos.y())
+        else:
+            super().keyPressEvent(event)
+
+    def focusInEvent(self, ev):
+        super().focusInEvent(ev)
+        self._cover_area.update()
+
+    def focusOutEvent(self, ev):
+        super().focusOutEvent(ev)
+        self._cover_area.update()
 
     # ── Helpers ──
 

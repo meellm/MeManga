@@ -61,6 +61,10 @@ class StatusDropdown(QToolButton):
             f"QToolButton:hover {{"
             f"  border-color: {T.tokens()['surfaces.border_strong']};"
             f"}}"
+            # Same 1px accent edge as focused inputs (issue #396).
+            f"QToolButton:focus {{"
+            f"  border-color: {T.tokens()['accent.primary']};"
+            f"}}"
             f"QToolButton::menu-indicator {{"
             f"  image: none; width: 0; height: 0;"
             f"  subcontrol-position: right center;"
@@ -80,8 +84,11 @@ class StatusDropdown(QToolButton):
             f"  color: {T.tokens()['text.t_1']};"
             f"  border-radius: 4px;"
             f"}}"
+            # Solid accent highlight, easy to follow with the arrow keys
+            # (issue #396).
             f"QMenu::item:selected {{"
-            f"  background-color: {T.tokens()['surfaces.bg_2']};"
+            f"  background-color: {T.tokens()['accent.primary']};"
+            f"  color: {T.tokens()['accent.on_primary']};"
             f"}}"
         )
         self.setMenu(self._menu)

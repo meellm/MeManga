@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QCheckBox, QLineEdit,
 )
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QKeySequence
 from .base import BasePage
 from .. import theme as T
 
@@ -267,6 +268,9 @@ class SourcesPage(BasePage):
         self._filter_entry.setMaximumWidth(300)
         self._filter_entry.textChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self._filter_entry)
+        # Ctrl/Cmd+F → filter field (issue #396).
+        self.add_shortcut(QKeySequence.StandardKey.Find,
+                          lambda: self.focus_field(self._filter_entry))
 
         # Language chip-row (All / EN / JP / ES / Other). Selecting one
         # filters the supported list to sources tagged with that lang.
@@ -429,6 +433,9 @@ class SourcesPage(BasePage):
                 f" padding: 0; border-radius: 4px; }}"
                 f"QPushButton:hover {{ background-color: {T.tokens()['surfaces.bg_2']};"
                 f" color: {T.tokens()['text.t_1']}; }}"
+                # Keyboard focus ring (issue #396).
+                f"QPushButton[focusVisible=\"true\"]:focus {{"
+                f" border: 2px solid {T.tokens()['accent.primary']}; }}"
             )
             more_btn.clicked.connect(lambda _, d=domain: self._show_active_more(d))
             head.addWidget(more_btn)

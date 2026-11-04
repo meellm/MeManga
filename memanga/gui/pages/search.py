@@ -7,11 +7,13 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QKeySequence
 from .base import BasePage
 from .. import theme as T
 from ..components.error_details import ErrorDetailsDialog
 from ..components.search_result import SearchResultRow
 from ..components.toast import Toast
+from ..focus import ring_container_on_focus
 from ...output import redact_diagnostic
 
 # Issue #342: why sources failed is kept for the current search only.
@@ -142,6 +144,12 @@ class SearchPage(BasePage):
         self._search_entry.setStyleSheet("border: none; background: transparent; font-size: 13pt;")
         self._search_entry.returnPressed.connect(self._do_search)
         bar.addWidget(self._search_entry, 1)
+        # The field itself is borderless; the bar around it shows focus
+        # like any other text field (issue #396).
+        ring_container_on_focus(self._search_entry, bar_wrap)
+        # Ctrl/Cmd+F → search field here too (issue #396).
+        self.add_shortcut(QKeySequence.StandardKey.Find,
+                          lambda: self.focus_field(self._search_entry))
 
         self._search_btn = QPushButton("Search")
         self._search_btn.setProperty("variant", "primary")

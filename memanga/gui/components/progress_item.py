@@ -35,7 +35,12 @@ class ProgressItem(QFrame):
             cancel_btn = QPushButton("x")
             cancel_btn.setFixedSize(22, 22)
             cancel_btn.setStyleSheet(
-                f"background: transparent; border: none; color: {T.FG_MUTED}; font-weight: bold;"
+                f"QPushButton {{ background: transparent; border: none;"
+                f" color: {T.FG_MUTED}; font-weight: bold; }}"
+                # Keyboard focus ring (issue #396).
+                f"QPushButton[focusVisible=\"true\"]:focus {{"
+                f" border: 2px solid {T.tokens()['accent.primary']};"
+                f" border-radius: 4px; }}"
             )
             cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             # "x" is a glyph, not a label (issue #394).

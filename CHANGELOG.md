@@ -402,6 +402,24 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #396 The desktop app can be used from the keyboard. Library cards and
+  rows, continue-reading cards and the theme cards could only be clicked;
+  `Tab` now reaches them, `Enter` or `Space` opens them, and the `Menu`
+  key or `Shift+F10` opens a card's quick actions. The Auto / Manual and
+  layout drop-downs can be picked with the arrow keys and `Enter`. Buttons,
+  tabs, chips, sidebar items, check boxes, drop-downs and cards show a
+  focus ring when focused from the keyboard, not after a click; so does the
+  Search field. Page scroll areas are no longer invisible `Tab` stops
+  (`Page Up` / `Page Down` still scroll), dialogs `Tab` in reading order,
+  and menu highlights are easier to see. Opening a page from the keyboard
+  moves focus to its first control instead of leaving it in the sidebar,
+  and focus returns to a card after its quick action. In the reader, clicking a toolbar button or the page no longer
+  takes the reader keys away; `Ctrl/Cmd+0` resets the zoom as documented,
+  and `Page Up`, `Page Down`, `Space`, `Home` and `End` scroll in
+  continuous mode. New shortcuts: `Ctrl/Cmd+F` for the filter field,
+  `Ctrl/Cmd+,` for Settings and `Alt+←` (`Cmd+[` on macOS) from Detail back
+  to Library. The README's reader key table was wrong in places and now
+  lists every key for each layout.
 - #394 Screen readers announce the desktop app's controls by name. Icon
   and glyph buttons (grid/list view, reader layout and zoom, download
   cancel, the sources "⋯" menu), cover cards and list rows, theme cards,

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
 from PySide6.QtGui import QPixmap, QMouseEvent
 from PySide6.QtCore import Qt
 from .. import theme as T
+from .keyboard import is_activation, is_context_menu, menu_anchor
 
 
 class MangaRow(QFrame):
@@ -18,6 +19,8 @@ class MangaRow(QFrame):
         self.setProperty("class", "card")
         self.setFixedHeight(56)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Reachable with Tab, opened with Enter/Space (issue #396).
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._manga = manga
         self._on_click = on_click
         self._on_right_click = on_right_click
@@ -96,3 +99,12 @@ class MangaRow(QFrame):
         elif event.button() == Qt.MouseButton.RightButton and self._on_right_click:
             pos = event.globalPosition().toPoint()
             self._on_right_click(self._manga, pos.x(), pos.y())
+
+    def keyPressEvent(self, event):
+        if is_activation(event) and self._on_click:
+            self._on_click(self._manga)
+        elif is_context_menu(event) and self._on_right_click:
+            pos = menu_anchor(self)
+            self._on_right_click(self._manga, pos.x(), pos.y())
+        else:
+            super().keyPressEvent(event)

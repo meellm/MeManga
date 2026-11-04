@@ -5,8 +5,10 @@ MeManga GUI Application - PySide6 MainWindow with sidebar + QStackedWidget.
 import logging
 from datetime import datetime
 
-from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QStackedWidget,
+)
+from PySide6.QtCore import QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QShortcut, QKeySequence
 
 from .. import __version__
@@ -21,6 +23,7 @@ from . import theme as T
 from .components.sidebar import Sidebar
 from .components.offline_banner import OfflineBanner
 from .components.error_details import notify_error
+from .focus import disable_scroll_area_focus, focus_into, install_focus_marker
 from .pages.base import BasePage
 
 logger = logging.getLogger(__name__)
@@ -28,6 +31,10 @@ logger = logging.getLogger(__name__)
 
 class MeMangaApp(QMainWindow):
     """Main application window."""
+
+    # Carries a page's keyboard focus handoff through Qt's posted-event
+    # queue (issue #396); connected queued in __init__, see show_page.
+    _focus_handoff_due = Signal(object)
 
     def __init__(self, config=None, app_state=None, explicit_config_dir=None):
         super().__init__()
@@ -148,6 +155,11 @@ class MeMangaApp(QMainWindow):
         # Pages registry
         self._pages: dict[str, BasePage] = {}
         self._current_page: str = ""
+        # Page whose keyboard focus handoff is still waiting for the
+        # event loop (issue #396); see show_page.
+        self._focus_handoff = None
+        self._focus_handoff_due.connect(
+            self._finish_focus_handoff, Qt.ConnectionType.QueuedConnection)
         self._register_pages()
 
         # Library is home
@@ -185,6 +197,17 @@ class MeMangaApp(QMainWindow):
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
         self._search_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._search_shortcut.activated.connect(self._focus_search)
+        # Ctrl/Cmd+, → Settings, the usual preferences shortcut
+        # (issue #396).
+        self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
+        self._settings_shortcut.activated.connect(self._open_settings)
+
+        # Focus rings show for keyboard focus only (issue #396).
+        install_focus_marker(QApplication.instance())
+
+    def _open_settings(self):
+        self.show_page("settings")
+        focus_into(self._pages["settings"])
 
     def _focus_search(self):
         """Jump to the Search page and put focus in its input."""
@@ -218,10 +241,30 @@ class MeMangaApp(QMainWindow):
             page = cls(self._stack, app=self)
             self._stack.addWidget(page)
             self._pages[name] = page
+            # No invisible Tab stops on page scroll areas (issue #396).
+            disable_scroll_area_focus(page)
 
     def show_page(self, name: str, **kwargs):
         if name == self._current_page and not kwargs:
             return
+
+        # Issue #396: when focus is on the page being left (a card opened
+        # with Enter, a Back button), it follows into the new page, onto
+        # its first control. Focus is dropped first: otherwise the page
+        # stack hands it to a widget of the new page that on_show is about
+        # to replace, and it is lost when that widget is deleted. The
+        # handoff runs from the event loop (_finish_focus_handoff). A
+        # second page change before then (keys typed quickly, Enter then
+        # Alt+Left) finds no focus anywhere; the pending handoff moves on
+        # to the newer page instead of being lost.
+        old = self._pages.get(self._current_page)
+        focused = QApplication.focusWidget()
+        follow_focus = old is not None and focused is not None and (
+            focused is old or old.isAncestorOf(focused))
+        if follow_focus:
+            focused.clearFocus()
+        elif self._focus_handoff is not None and focused is None:
+            follow_focus = True
 
         if self._current_page and self._current_page in self._pages:
             self._pages[self._current_page].on_hide()
@@ -232,6 +275,24 @@ class MeMangaApp(QMainWindow):
             page.on_show(**kwargs)
             self._current_page = name
             self._sidebar.set_active(name)
+            if follow_focus:
+                # Queued, not a timer: on_show's rebuilt widgets are shown
+                # and laid out by events it has just posted, and posted
+                # events run in order, so the handoff sees them. A 0 ms
+                # timer's place relative to those depends on the event
+                # dispatcher (live, it could run first and miss the new
+                # "‹ Library").
+                self._focus_handoff = page
+                self._focus_handoff_due.emit(page)
+
+    @Slot(object)
+    def _finish_focus_handoff(self, page):
+        """Focus the first control of ``page`` once its rebuilt widgets
+        are shown, unless a later page change took over the handoff."""
+        if self._focus_handoff is not page:
+            return
+        self._focus_handoff = None
+        focus_into(page)
 
     def reload_data(self):
         # Same directory, never the default again (issue #249).

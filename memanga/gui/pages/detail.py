@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QComboBox, QCheckBox, QLineEdit,
 )
 from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QKeySequence
 from ...chapters import format_chapter_value
 from .base import BasePage
 from .. import theme as T
@@ -57,6 +58,11 @@ class DetailPage(BasePage):
         self._layout.setSpacing(0)
         self._scroll.setWidget(self._scroll_content)
 
+        # Alt+Left (Cmd+[ on macOS) → back to Library, like the
+        # "‹ Library" button (issue #396).
+        self.add_shortcut(QKeySequence.StandardKey.Back,
+                          lambda: self.app.show_page("library"))
+
         # Refresh the chapter list when a single download completes for the
         # currently displayed manga (manual-mode per-chapter Download flow).
         self.app.events.subscribe("download_complete", self._on_any_download_complete)
@@ -93,10 +99,14 @@ class DetailPage(BasePage):
         return primary, primary_url, backup, backup_url
 
     def _clear_layout(self):
+        # Widgets are hidden before deleteLater: until control returns to
+        # the event loop they would otherwise stay on screen and
+        # focusable, overlapping their replacements (issue #396).
         while self._layout.count():
             item = self._layout.takeAt(0)
             w = item.widget()
             if w:
+                w.hide()
                 w.deleteLater()
             elif item.layout():
                 self._clear_child_layout(item.layout())
@@ -106,6 +116,7 @@ class DetailPage(BasePage):
             item = layout.takeAt(0)
             w = item.widget()
             if w:
+                w.hide()
                 w.deleteLater()
             elif item.layout():
                 self._clear_child_layout(item.layout())

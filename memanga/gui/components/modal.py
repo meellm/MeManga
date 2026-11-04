@@ -83,7 +83,7 @@ class ModalDialog(QDialog):
         head_l.addWidget(title_lbl)
         head_l.addStretch(1)
 
-        close_btn = QPushButton()
+        close_btn = self._close_btn = QPushButton()
         close_btn.setProperty("variant", "ghost")
         close_btn.setIcon(icon("x_close", T.tokens()["text.t_2"], 14))
         close_btn.setFixedSize(28, 28)
@@ -110,11 +110,23 @@ class ModalDialog(QDialog):
         # ── Foot ── (built BEFORE build_body() so subclasses can push
         # their primary action button into foot_layout / reference cancel_btn)
         foot = QWidget()
+        # `*` keeps the look this sheet always had: the rules also reach
+        # the buttons in the foot. The focus rule restores the keyboard
+        # ring there; without it the 1px top border and 12px corners from
+        # `*` cut the ring off at the top and bottom (issue #396).
         foot.setStyleSheet(
-            f"background-color: {T.tokens()['surfaces.bg_0']};"
-            f"border-top: 1px solid {T.tokens()['surfaces.border']};"
-            f"border-bottom-left-radius: 12px;"
-            f"border-bottom-right-radius: 12px;"
+            f"* {{"
+            f"  background-color: {T.tokens()['surfaces.bg_0']};"
+            f"  border-top: 1px solid {T.tokens()['surfaces.border']};"
+            f"  border-bottom-left-radius: 12px;"
+            f"  border-bottom-right-radius: 12px;"
+            f"}}"
+            f"QPushButton[focusVisible=\"true\"]:focus {{"
+            f"  border: 2px solid {T.tokens()['accent.primary']};"
+            f"  border-radius: 6px;"
+            f"  padding: 5px 13px;"
+            f"  outline: none;"
+            f"}}"
         )
         self.foot_layout = QHBoxLayout(foot)
         self.foot_layout.setContentsMargins(16, 16, 22, 16)
@@ -130,6 +142,30 @@ class ModalDialog(QDialog):
         # Hook for subclasses to add fields. Cancel_btn + foot_layout are
         # available now.
         self.build_body()
+        self._order_tabs()
+
+    def _order_tabs(self):
+        """Tab in reading order (issue #396): the close button at the top,
+        then the fields, then the foot buttons left to right. Qt's default
+        is creation order, which put Cancel (made before the fields) last
+        and the close button between the primary button and Cancel."""
+        def tabbable(w):
+            return (w.focusProxy() is None
+                    and w.focusPolicy().value & Qt.FocusPolicy.TabFocus.value)
+
+        body, w = [], self.nextInFocusChain()
+        for _ in range(10000):  # bounded walk of the focus ring
+            if w is None or w is self:
+                break
+            if self._body_w.isAncestorOf(w) and tabbable(w):
+                body.append(w)
+            w = w.nextInFocusChain()
+        foot = [self.foot_layout.itemAt(i).widget()
+                for i in range(self.foot_layout.count())]
+        foot = [w for w in foot if w is not None and tabbable(w)]
+        order = [self._close_btn, *body, *foot]
+        for first, second in zip(order, order[1:]):
+            QWidget.setTabOrder(first, second)
 
     def build_body(self):
         """Subclass hook — populate self.body_layout with fields."""

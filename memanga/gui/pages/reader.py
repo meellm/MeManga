@@ -854,9 +854,14 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         top_layout.setContentsMargins(24, 12, 24, 12)
         top_layout.setSpacing(10)
 
+        # Issue #396: the reader buttons take focus from Tab only. A
+        # click leaves focus on the page, so Space, arrows and the
+        # other reader keys keep working instead of going to the button
+        # just clicked.
         back_btn = QPushButton("‹ Back")
         back_btn.setProperty("variant", "ghost")
         back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         back_btn.clicked.connect(lambda: self.app.show_page("detail", manga=self._manga))
         top_layout.addWidget(back_btn)
 
@@ -878,6 +883,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         if prev_ch is not None:
             prev_btn = QPushButton("‹ Prev")
             prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            prev_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             prev_btn.clicked.connect(lambda checked=False, c=prev_ch: self._navigate_chapter(c))
             top_layout.addWidget(prev_btn)
 
@@ -887,6 +893,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         # It resolves its target on click, so no chapter is captured.
         self._next_btn = QPushButton("Next ›")
         self._next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._next_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._next_btn.clicked.connect(
             lambda checked=False: self._go_next_chapter())
         self._next_btn.setVisible(next_ch is not None)
@@ -906,6 +913,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
             btn = QPushButton()
             btn.setFixedSize(36, 28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             btn.setToolTip(tip)
             # Icon-only: the tooltip alone ends up as the description,
             # leaving no name (issue #394).
@@ -921,6 +929,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         zoom_minus.setAccessibleName("Zoom out")
         zoom_minus.setFixedSize(28, 28)
         zoom_minus.setCursor(Qt.CursorShape.PointingHandCursor)
+        zoom_minus.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         zoom_minus.clicked.connect(self._zoom_out)
         top_layout.addWidget(zoom_minus)
 
@@ -936,6 +945,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         zoom_plus.setAccessibleName("Zoom in")
         zoom_plus.setFixedSize(28, 28)
         zoom_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+        zoom_plus.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         zoom_plus.clicked.connect(self._zoom_in)
         top_layout.addWidget(zoom_plus)
 
@@ -1010,6 +1020,11 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         # ── Scrollable image area (reader_body) ──
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
+        # Issue #396: the page keeps keyboard focus and does all the
+        # scrolling and page turning itself. A focused scroll area
+        # (after a click on the page) would take the arrow keys and
+        # scroll instead of turning pages.
+        self._scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # Issue #21: allow horizontal scrollbar when zoomed images
         # overflow the viewport. AsNeeded keeps it hidden at fit-width.
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -1063,6 +1078,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
             next_chapter_btn.setFixedHeight(40)
             next_chapter_btn.setFixedWidth(250)
             next_chapter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            next_chapter_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             next_chapter_btn.clicked.connect(
                 lambda checked=False: self._go_next_chapter()
             )
