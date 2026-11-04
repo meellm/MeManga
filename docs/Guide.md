@@ -357,6 +357,12 @@ and `latest` tags; pin to a specific `X.Y.Z` tag for reproducible runs.
 Use a local `docker build` when testing unreleased code from the
 repository.
 
+The image starts MeManga under a small init process (`tini`), which
+cleans up the browser processes a command leaves behind and passes
+`docker stop` and Ctrl-C on to MeManga. This works however the container
+is started, so `docker run --init` and Compose `init: true` are not
+needed; they do no harm either.
+
 ### Persist config, state, and downloads
 
 MeManga stores config and state under
@@ -425,8 +431,6 @@ foreground and:
 
 `restart: unless-stopped` starts it again after a crash or a reboot of
 the Docker host, until you run `docker compose stop scheduler`.
-`init: true` runs a small init process that cleans up the browser
-processes a check starts.
 
 Durations are a number with `d`, `h`, `m` or `s`, for example `12h`,
 `90m` or `1h30m`; `--every` is at least `15m`. To change the schedule,
@@ -437,7 +441,7 @@ the container's time zone; only the times in the log lines do.
 Without Compose:
 
 ```bash
-docker run -d --name memanga-scheduler --init --restart unless-stopped \
+docker run -d --name memanga-scheduler --restart unless-stopped \
   --stop-timeout 60 \
   -v "$PWD/memanga-data/config:/home/memanga/.config/memanga" \
   -v "$PWD/memanga-data/downloads:/home/memanga/Downloads/MeManga" \
