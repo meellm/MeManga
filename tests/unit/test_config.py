@@ -441,6 +441,8 @@ class TestConfigKeys:
         ("gui.network_check_hosts", ["example.test:0"]),
         ("gui.network_check_hosts", ["2001:db8::1:443"]),
         ("gui.network_check_hosts", [443]),
+        # Issue #405
+        ("gui.search_chapter_counts", "no"),
     ])
     def test_value_problem(self, key, value):
         from memanga.config import config_value_problem
@@ -456,6 +458,7 @@ class TestConfigKeys:
     @pytest.mark.parametrize("key,text,expected", [
         ("gui.network_check", "false", False),
         ("gui.mangadex_cover_fallback", "off", False),
+        ("gui.search_chapter_counts", "off", False),
     ])
     def test_network_privacy_switches_parse(self, key, text, expected):
         from memanga.config import parse_config_value
@@ -467,6 +470,7 @@ class TestConfigKeys:
         assert cfg.get("gui.network_check") is True
         assert cfg.get("gui.network_check_hosts") == []
         assert cfg.get("gui.mangadex_cover_fallback") is True
+        assert cfg.get("gui.search_chapter_counts") is True
 
     @pytest.mark.parametrize("data,expected", [
         ({}, []),

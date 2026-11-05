@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Re-imported under the historical names so existing callers (and
 # tests) keep working.
 from ..search import (  # noqa: E402
+    CHAPTER_COUNT_WORKERS,
     result_matches_query as _result_matches_query,
     source_rank,
     sort_sources_by_popularity,
@@ -97,10 +98,11 @@ class BackgroundWorker:
         self._search_lock = threading.Lock()
         # Dedicated pool for chapter-count probes — separate from
         # the 3-slot shared pool so a busy download queue doesn't
-        # block chips from appearing, and they don't serialise
-        # excessively behind each other either.
+        # block chips from appearing. Same bound as the CLI's
+        # `memanga search` (issue #405).
         self._count_pool = ThreadPoolExecutor(
-            max_workers=6, thread_name_prefix="chapter-count",
+            max_workers=CHAPTER_COUNT_WORKERS,
+            thread_name_prefix="chapter-count",
         )
         # Optional NetworkMonitor — wired up by MeMangaApp after both
         # the worker and the monitor exist. When set, network-bound
@@ -812,7 +814,7 @@ class BackgroundWorker:
         ``{source, url, count}`` once known (count = -1 if every retry
         attempt failed; the row drops the chip).
 
-        - Runs on a dedicated 6-slot pool (`_count_pool`) so it doesn't
+        - Runs on a dedicated pool (`_count_pool`) so it doesn't
           compete with downloads for the shared 3-slot worker pool.
         - **Not** tied to the search seq. The UI matches incoming
           events to result rows by URL, so a late-arriving chip for

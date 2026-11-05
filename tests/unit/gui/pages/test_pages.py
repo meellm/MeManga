@@ -314,6 +314,33 @@ class TestSearchPage:
         assert kept < search_mod.SEARCH_ERRORS_MAX_CHARS + 100 * sources
         assert page._failures_cut == 2
 
+    # Issue #405: chapter-count chips can be turned off.
+
+    def _result(self, url="https://a.test/m"):
+        return {"title": "Blue Lock", "url": url, "source": "a.test",
+                "seq": -1}
+
+    def test_result_probes_chapter_count_by_default(
+            self, app_window, qapp, monkeypatch):
+        calls = []
+        monkeypatch.setattr(app_window.worker, "count_chapters",
+                            lambda source, url: calls.append((source, url)))
+        page = app_window._pages["search"]
+        page._on_result(self._result())
+        assert calls == [("a.test", "https://a.test/m")]
+
+    def test_result_skips_chapter_count_when_off(
+            self, app_window, qapp, monkeypatch):
+        calls = []
+        monkeypatch.setattr(app_window.worker, "count_chapters",
+                            lambda source, url: calls.append((source, url)))
+        app_window.config.set("gui.search_chapter_counts", False)
+        page = app_window._pages["search"]
+        page._on_result(self._result())
+        assert calls == []
+        (row,) = page._result_widgets
+        assert row._count_chip.isHidden()
+
     def test_empty_query_does_nothing(self, app_window, qapp):
         page = app_window._pages["search"]
         page._search_entry.setText("")
@@ -489,21 +516,37 @@ class TestSettingsPage:
         page = app_window._pages["settings"]
         assert page._network_check.isChecked()
         assert page._mangadex_cover_check.isChecked()
+        assert page._search_chapter_counts_check.isChecked()
 
     def test_network_privacy_save_and_reload(self, app_window, qapp):
         page = app_window._pages["settings"]
         page._network_check.setChecked(False)
         page._mangadex_cover_check.setChecked(False)
+        page._search_chapter_counts_check.setChecked(False)
         page._save()
         cfg = app_window.config
         assert cfg.get("gui.network_check") is False
         assert cfg.get("gui.mangadex_cover_fallback") is False
+        assert cfg.get("gui.search_chapter_counts") is False
 
         page._network_check.setChecked(True)
         page._mangadex_cover_check.setChecked(True)
+        page._search_chapter_counts_check.setChecked(True)
         page._load_config_into_widgets()
         assert not page._network_check.isChecked()
         assert not page._mangadex_cover_check.isChecked()
+        assert not page._search_chapter_counts_check.isChecked()
+
+    def test_reset_turns_search_chapter_counts_back_on(
+            self, app_window, qapp, toasts):
+        # Issue #405
+        page = app_window._pages["settings"]
+        app_window.config.set("gui.search_chapter_counts", False)
+        page._load_config_into_widgets()
+        assert not page._search_chapter_counts_check.isChecked()
+        page._reset_to_defaults()
+        assert app_window.config.get("gui.search_chapter_counts") is True
+        assert page._search_chapter_counts_check.isChecked()
 
     def test_turning_network_check_off_clears_offline(self, app_window, qapp):
         network = app_window.network
@@ -1178,6 +1221,7 @@ class TestSettingsPage:
             titles["Network & Privacy"]
             < positions[page._network_check]
             < positions[page._mangadex_cover_check]
+            < positions[page._search_chapter_counts_check]
             < titles["Scheduled Checks"]
         )
 

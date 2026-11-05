@@ -172,9 +172,21 @@ widely; other sources are often slower or have fewer chapters.
   <img src="docs/screenshots/search-results.png" alt='Search results for "Blue Lock" with chapter-count chips' width="900">
 </p>
 
-Each result row shows the source domain, a `47 ch` chip with the number
-of chapters that source has, and a `+ Add` button that adds it to your
-library. Use the chapter count to choose a source.
+Each result row shows the source domain, a `+ Add` button that adds it
+to your library and, unless chapter counts are turned off, a `47 ch`
+chip with the number of chapters that source has. Use the chapter count
+to choose a source.
+
+To get that number, the app loads each result's chapter list from its
+source, for up to 4 results at a time. One chapter list can take
+several requests: long lists come in pages (MangaDex sends 100 chapters
+per request), some sources load theirs in a browser, and a request that
+fails on a busy or flaky connection may be sent again. In the app, a
+result that fails or shows no chapters is also loaded up to 3 more times
+over about 30 seconds; `memanga search` loads it once. On a slow or
+metered connection, turn off **Show chapter counts in search results**
+in **Settings → Advanced → Network & Privacy**. That switch only affects
+the desktop app; for the CLI, use `memanga search --no-chips`.
 
 ## Downloads
 
@@ -844,12 +856,17 @@ The desktop app contacts:
   longer loads, the app searches MangaDex by title. This never happens
   while MangaDex is turned off in **Sources**, and you can turn it off
   in **Settings → Advanced → Network & Privacy**.
+- **The sources in your search results, for chapter counts:** each
+  result's chapter list, which can take several requests. Turn it off in
+  **Settings → Advanced → Network & Privacy** ([Search](#search) has the
+  details).
 - **Your mail server**, only if you set up Kindle / email delivery.
 - **Playwright's download server**, once, for the browser driver on
   first launch.
 
-The same switches exist as `gui.network_check` and
-`gui.mangadex_cover_fallback` for `memanga config set`.
+The same switches exist as `gui.network_check`,
+`gui.mangadex_cover_fallback` and `gui.search_chapter_counts` for
+`memanga config set`.
 
 **Why does the first launch take a while?**
 It downloads Playwright's Firefox build (about 80 MB), which sources

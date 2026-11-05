@@ -496,6 +496,9 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         if hasattr(self, "_mangadex_cover_check"):
             cfg.set("gui.mangadex_cover_fallback",
                     self._mangadex_cover_check.isChecked())
+        if hasattr(self, "_search_chapter_counts_check"):
+            cfg.set("gui.search_chapter_counts",
+                    self._search_chapter_counts_check.isChecked())
 
         cfg.save()
         kindle_notice = _kindle_format_toast_text(cfg)
@@ -594,6 +597,9 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         if hasattr(self, "_mangadex_cover_check"):
             self._mangadex_cover_check.setChecked(
                 bool(cfg.get("gui.mangadex_cover_fallback", True)))
+        if hasattr(self, "_search_chapter_counts_check"):
+            self._search_chapter_counts_check.setChecked(
+                bool(cfg.get("gui.search_chapter_counts", True)))
         if hasattr(self, "_network_hint"):
             self._network_hint.setText(self._network_hint_text())
 
