@@ -377,7 +377,7 @@ def rotate_log_file(path, backups: int = LOG_FILE_BACKUPS) -> bool:
 # as a "♥" or "★" in a manga title, are user data and stay.
 APP_DECORATION = (
     "✅⚠❌➕➖✏⏱⏰⬇⚙"
-    "🩺📊📖🗑🔍📧📥🔗📚🚪📬📤📂📁🌐"
+    "🩺📊📖🗑🔍📧📥🔗📚🚪📬📤📂📁🌐📋"
 )
 _DECORATION = re.compile(
     "(?:[" + APP_DECORATION + "─-╿][︎️‍]*)+[ \t]*"

@@ -535,7 +535,7 @@ def cmd_list(args):
         return
 
     if not config.get("manga", []):
-        console.print("[dim]No manga tracked yet. Use [cyan]memanga add[/cyan] to add some![/dim]")
+        console.print("[dim]No manga tracked yet. Use [cyan]memanga add[/cyan] to add one.[/dim]")
         return
 
     entries = _list_entries(statuses, sort, reverse)
@@ -706,7 +706,7 @@ def cmd_add(args):
     # Check for exact duplicate
     for m in manga_list:
         if m["title"].lower() == title.lower():
-            err_console.print(f"[yellow]⚠️  '{_esc(title)}' already exists![/yellow]")
+            err_console.print(f"[yellow]'{_esc(title)}' already exists.[/yellow]")
             return EXIT_ERROR
 
     # Issue #246: titles that differ only in characters a file name drops
@@ -1519,7 +1519,7 @@ class _ConsoleChapterReporter(ChapterReporter):
         console.print(f"     [dim]📧 Part {part}/{total} accepted by the mail server[/dim]")
 
     def email_sent(self, path):
-        console.print("     [green]📬 Sent to Kindle![/green]")
+        console.print("     [green]Sent to Kindle.[/green]")
 
     def deleted_after_send(self, path):
         console.print("     [dim]🗑️  Deleted local copy[/dim]")
@@ -1713,7 +1713,7 @@ def cmd_check(args):
     manga_list = config.get("manga", [])
     
     if not manga_list and not args.title:
-        console.print("[yellow]No manga tracked. Use 'memanga add' first![/yellow]")
+        console.print("[yellow]No manga tracked. Add one with 'memanga add'.[/yellow]")
         return
     
     # Filter to specific manga if provided
@@ -1872,7 +1872,7 @@ def cmd_check(args):
                 total_manual += len(new_chapters)
                 continue
 
-            console.print(f"  [green]└─ {len(new_chapters)} new chapter(s)![/green]")
+            console.print(f"  [green]└─ {len(new_chapters)} new chapter(s)[/green]")
             total_new += len(new_chapters)
             
             for ch in new_chapters:
@@ -2615,7 +2615,7 @@ def cmd_config(args):
         config.set("partial_chapters.enabled", False)
 
     config.save()
-    console.print("\n[green]✅ Configuration saved![/green]")
+    console.print("\n[green]Configuration saved.[/green]")
 
 
 def cmd_cron(args):
@@ -2719,9 +2719,9 @@ def _cron_install(args):
     config.set("cron.time", time_str)
     config.save()
     if result.windows:
-        console.print(f"[green]✅ Scheduled task installed! Will check daily at {time_str}[/green]")
+        console.print(f"[green]Scheduled task installed. Checks run daily at {time_str}.[/green]")
         return
-    console.print(f"[green]✅ Cron job installed! Will check daily at {time_str}[/green]")
+    console.print(f"[green]Cron job installed. Checks run daily at {time_str}.[/green]")
     for line in result.entries:
         console.print(f"[dim]{_esc(line)}[/dim]")
     _print_unmanaged_cron_lines(result.unmanaged)
@@ -4203,7 +4203,7 @@ def cmd_tui(args):
         choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "e", "i", "q"], default="4")
         
         if choice == "q":
-            console.print("[dim]Goodbye! 📖[/dim]")
+            console.print("[dim]Goodbye.[/dim]")
             break
         
         console.print()
@@ -4462,7 +4462,7 @@ Examples:
     # `memanga` script and `python -m memanga` (issue #248).
     parser = argparse.ArgumentParser(
         prog="memanga",
-        description="📖 MeManga - Automatic manga downloader",
+        description="MeManga - Automatic manga downloader",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_epilog,
     )
@@ -4700,7 +4700,7 @@ Examples:
     # Partial-chapter tolerance (issue #86) — config is the source of truth;
     # these override it for a single run.
     partial_grp = p_check.add_mutually_exclusive_group()
-    partial_grp.add_argument("--allow-partial", action="store_true", help="Keep a chapter with a few missing pages instead of discarding it (issue #86)")
+    partial_grp.add_argument("--allow-partial", action="store_true", help="Keep a chapter with a few missing pages instead of discarding it")
     partial_grp.add_argument("--no-partial", action="store_true", help="Force-discard any chapter with missing pages, even if partial tolerance is enabled in config")
     p_check.add_argument("--partial-threshold", type=_partial_threshold_arg, metavar="PCT", help="Max %% of pages allowed to fail before a partial is refused, 0-100 (default: config value)")
     p_check.set_defaults(func=cmd_check)

@@ -289,7 +289,7 @@ class VRFGenerator:
 
         # An automatic replacement is routine upkeep and stays quiet.
         if not replacing:
-            logger.info("Starting the browser used to mint API tokens...")
+            logger.info("Starting the browser for mangafire.to...")
         pw = sync_playwright().start()
         try:
             # Every startup step is cut to the mint's remaining budget so

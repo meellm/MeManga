@@ -10,6 +10,7 @@ import io
 import json
 import os
 import pytest
+import re
 import shlex
 import sys
 import types
@@ -81,6 +82,23 @@ class TestTopLevel:
     def test_unknown_subcommand_errors(self, run_cli):
         rc = run_cli("not-a-real-command")
         assert rc != 0
+
+    def test_help_has_no_issue_numbers(self):
+        """Help text is for users; tracker numbers stay in comments (#376)."""
+        import argparse
+        from memanga import cli
+
+        def texts(parser):
+            yield parser.description or ""
+            yield parser.epilog or ""
+            for action in parser._actions:
+                yield action.help or ""
+                if isinstance(action, argparse._SubParsersAction):
+                    for sub in action.choices.values():
+                        yield from texts(sub)
+
+        for text in texts(cli.build_parser()):
+            assert not re.search(r"issue #\d", text, re.IGNORECASE), text
 
 
 class TestCliIdentity:

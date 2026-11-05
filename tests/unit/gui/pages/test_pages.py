@@ -722,7 +722,7 @@ class TestSettingsPage:
         self._fill_smtp_test(page, "typed-pw")
         page._test_email()
         assert smtp_logins == [("sender@example.invalid", "typed-pw")]
-        assert page._test_label.text() == "Success!"
+        assert page._test_label.text() == "Signed in"
 
     def test_check_login_on_port_465_uses_implicit_tls(
             self, app_window, qapp, smtp_logins, monkeypatch):
@@ -740,7 +740,7 @@ class TestSettingsPage:
         assert factory.call_args.args == ("smtp.example.invalid", 465)
         factory.return_value.login.assert_called_once_with(
             "sender@example.invalid", "typed-pw")
-        assert page._test_label.text() == "Success!"
+        assert page._test_label.text() == "Signed in"
 
     @pytest.fixture
     def smtp_sends(self, smtp_logins, monkeypatch):
@@ -921,7 +921,7 @@ class TestSettingsPage:
         self._fill_smtp_test(page, "typed-pw")
         page._test_email()
         assert smtp_logins == [("sender@example.invalid", "file-pw")]
-        assert page._test_label.text() == "Success!"
+        assert page._test_label.text() == "Signed in"
         assert "MEMANGA_SMTP_PASSWORD_FILE" in page._test_label.toolTip()
         assert "file-pw" not in page._test_label.toolTip()
 
@@ -1218,7 +1218,7 @@ class TestSettingsPage:
     @pytest.mark.parametrize(
         ("login_error", "expected"),
         [
-            (None, "Success!"),
+            (None, "Signed in"),
             ("auth", "Auth failed"),
             (RuntimeError("network down"), "Failed: network down"),
         ],
