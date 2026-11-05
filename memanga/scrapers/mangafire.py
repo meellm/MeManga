@@ -449,17 +449,20 @@ class VRFGenerator:
 
     def close(self):
         """Clean up browser resources."""
-        try:
-            self._run_serialized(self._close_in_thread, timeout=10)
-        except Exception:
-            pass
+        # A worker that never ran a task has no browser to close.
+        if self._worker.started:
+            try:
+                self._run_serialized(self._close_in_thread, timeout=10)
+            except Exception:
+                pass
 
         # Clear cache to free memory
         self._token_cache.clear()
 
     def restart(self):
         """Restart browser (close and clear state so next call re-opens)."""
-        logger.info("Restarting browser to free memory...")
+        if self._worker.started:
+            logger.info("Restarting browser to free memory...")
         self.close()
 
 

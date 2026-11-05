@@ -139,6 +139,13 @@ class BrowserWorker:
         self._lock = threading.Lock()
         # (future, operation, monotonic time it was abandoned) or None.
         self._abandoned = None
+        self._started = False
+
+    @property
+    def started(self) -> bool:
+        """True once the worker was given a task. One that never was has
+        no thread and no browser, so cleanup leaves it alone."""
+        return self._started
 
     def call(self, source: str, timeout: float, fn, /, *args, **kwargs):
         """Run ``fn(*args, **kwargs)`` on the worker and return its result.
@@ -155,6 +162,7 @@ class BrowserWorker:
             self._wait_for_abandoned(source, operation, timeout, deadline)
             task = {"source": source, "operation": operation,
                     "timeout": timeout, "deadline": deadline}
+            self._started = True
             future = self._executor.submit(self._run_task, task, fn,
                                            args, kwargs)
             # Decide "did it finish in time" with wait(), never by catching
@@ -442,7 +450,8 @@ class PlaywrightScraper(BaseScraper):
         miss the real per-subclass browsers. Walk the subclass tree
         and run cleanup_browsers in each dedicated thread. A worker
         still busy with a timed-out task is skipped after the cleanup
-        budget rather than having its browser closed under it.
+        budget rather than having its browser closed under it, and one
+        that never ran a task is skipped without starting its thread.
         """
         seen: set = set()
         def _walk(c):
@@ -450,7 +459,7 @@ class PlaywrightScraper(BaseScraper):
                 if sub in seen:
                     continue
                 seen.add(sub)
-                if "_worker" in sub.__dict__:
+                if "_worker" in sub.__dict__ and sub._worker.started:
                     try:
                         sub._run_serialized(cleanup_browsers,
                                             timeout=cls._CLEANUP_TIMEOUT_S)

@@ -412,6 +412,12 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #235 Browsers opened during a run are now closed when MeManga exits.
+  The exit cleanup ran only after Python had stopped the threads that own
+  the browsers, so every close failed silently and the browsers were left
+  to end with the process. Exit cleanup also no longer starts a thread
+  for a scraper that never opened a browser, and restarting a MangaFire
+  token browser that was never started no longer logs a restart.
 - #333 The Docker image runs MeManga under `tini`, so containers no
   longer collect zombie browser processes. MeManga ran as PID 1, which
   never reaped the processes left behind when a Playwright driver or

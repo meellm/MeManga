@@ -1,11 +1,15 @@
 """Browser lifecycle for scrapers that drive a real browser.
 
-Importing this module registers :func:`_cleanup_at_exit` with ``atexit`` so
+Importing this module registers :func:`_cleanup_at_exit` to run at exit so
 browser processes opened during a run are closed when the program exits.
 """
 
 import atexit
+# Imported first so its thread join is registered before our cleanup and,
+# since these exit hooks run in reverse order, runs after it.
+import concurrent.futures.thread  # noqa: F401
 import sys
+import threading
 
 
 def restart_browsers():
@@ -49,4 +53,9 @@ def _cleanup_at_exit():
             pass
 
 
-atexit.register(_cleanup_at_exit)
+# Issue #235: each browser is closed on its own worker thread, and the
+# interpreter stops those threads before atexit callbacks run, so an
+# atexit hook could close nothing. Run before the threads are joined
+# instead, the way concurrent.futures does; plain atexit is only a
+# fallback for an interpreter without that hook.
+getattr(threading, "_register_atexit", atexit.register)(_cleanup_at_exit)

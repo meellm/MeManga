@@ -792,6 +792,26 @@ class TestVRFWorker:
         gate.set()
         assert mf.VRFGenerator._run_serialized(lambda: "tok", timeout=10) == "tok"
 
+    def test_close_without_a_started_browser_does_nothing(self, worker,
+                                                          monkeypatch):
+        """Issue #235: closing or restarting a generator that never
+        minted must not start the worker thread or log a restart."""
+        from memanga.scrapers import mangafire as mf
+
+        w, _ = worker
+        closed = []
+        monkeypatch.setattr(mf.VRFGenerator, "_close_in_thread",
+                            lambda self: closed.append("vrf"))
+        logged = []
+        monkeypatch.setattr(mf.logger, "info",
+                            lambda *a, **k: logged.append(a))
+
+        mf.VRFGenerator().restart()
+
+        assert closed == []
+        assert logged == []
+        assert not w.started
+
     def test_token_startup_steps_fit_the_mint_budget(self, worker,
                                                      monkeypatch):
         """Launch, page load and generator wait each used to allow up to

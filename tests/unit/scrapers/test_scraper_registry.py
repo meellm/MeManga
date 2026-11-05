@@ -116,9 +116,9 @@ class TestLazyRegistry:
 
     @pytest.mark.parametrize("flag", ["--version", "--help"])
     def test_cli_exit_loads_no_scraper_module(self, flag, isolated_home):
-        # atexit runs handlers last in, first out: registering the probe
-        # before memanga.cli registers its browser cleanup makes the probe
-        # see sys.modules after that cleanup has run.
+        # The browser cleanup runs before any atexit handler (it is a
+        # threading exit hook, #235), so the probe sees sys.modules after
+        # that cleanup has run.
         code = (
             "import atexit, runpy, sys\n"
             "def probe():\n"

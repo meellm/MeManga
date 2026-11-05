@@ -301,6 +301,33 @@ class TestTaskDeadline:
 
 
 class TestCleanup:
+    def test_unused_worker_is_not_started_by_cleanup(self, monkeypatch):
+        """Issue #235: a scraper that never ran a task has no browser,
+        so cleanup must not start a thread just to close nothing."""
+        from memanga.scrapers import playwright_base as pb
+
+        class _Family(PlaywrightScraper):
+            name = "family-test"
+
+        class _Idle(_Family):
+            name = "idle-test"
+
+        cleaned = []
+        monkeypatch.setattr(pb, "cleanup_browsers",
+                            lambda: cleaned.append("idle"))
+
+        _Family.cleanup()
+
+        assert cleaned == []
+        assert not _Idle._worker.started
+        _Idle._worker.shutdown(wait=True)
+        _Family._worker.shutdown(wait=True)
+
+    def test_worker_counts_as_started_once_given_a_task(self, worker):
+        assert not worker.started
+        worker.call("src", LONG, lambda: None)
+        assert worker.started
+
     def test_busy_worker_is_skipped_then_cleaned_on_its_own_thread(
             self, gates, monkeypatch):
         """cleanup() must not close a browser under a task that is still
