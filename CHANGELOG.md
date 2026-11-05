@@ -187,6 +187,14 @@ All notable changes are recorded here. Format loosely follows
   period; the `memanga` service for one-off commands is unchanged.
 
 ### Changed
+- #376 More neutral wording in help, command output and docs. Help text
+  no longer cites issue numbers, source notes in `memanga sources` and
+  the source lists describe the site instead of making size or speed
+  claims or describing how the scraper works, and messages such as
+  "Configuration saved." end without exclamation marks. The desktop
+  app's Check Login now reports "Signed in". Options, exit codes and
+  JSON keys are unchanged; only the text of `note` changes for some
+  sources.
 - #316 Release builds install `requirements/build.txt` with
   `--require-hashes`, wheels only (`--only-binary :all:`) and
   `--force-reinstall`, so nothing is built from source with unpinned

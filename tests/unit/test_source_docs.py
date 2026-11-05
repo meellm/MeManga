@@ -16,7 +16,7 @@ def _source_row(domain):
 def test_rendered_source_metadata_and_search_status():
     included = _source_row("mangadex.org")
     assert included[2:7] == ["api", "en", "No", "Included in search",
-                             "Largest fan-translation library"]
+                             "Fan-translation library"]
 
     skipped = _source_row("bato.to")
     assert skipped[5] == "Not searched (unreliable)"

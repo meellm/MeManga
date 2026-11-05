@@ -1,6 +1,6 @@
 # MeManga
 
-**Automatic manga downloader with a desktop app and a power-user CLI.**
+**Automatic manga downloader with a desktop app and a command-line interface.**
 
 Track manga across 224 scrapers / 319 domains, read downloaded chapters
 in the built-in reader, and optionally email them to your Kindle.
@@ -24,20 +24,20 @@ Works offline once chapters are downloaded.
 
 - **Portable desktop app** — extract and run `MeManga.exe` / `MeManga` / `MeManga.app`
 - **Library tracking** — your read/unread state survives reboots
-- **Multi-source search** — 15 popular aggregators pre-checked, ranked by reliability
+- **Multi-source search** — 15 aggregators selected by default, searched in a fixed order
 - **Built-in reader** — zoom, fit-to-page, keyboard nav, no external viewer needed
 - **PDF / EPUB / CBZ / ZIP / JPG / PNG / WEBP** output
 - **E-Reader delivery** — auto-send chapters by email after download
 - **Backup sources** — fall back to a second source if the primary stops updating
-- **Offline-aware** — gracefully disables network actions, auto-resumes when wifi returns
-- **Power-user CLI** — same engine, scriptable, cron-friendly, works on headless servers
+- **Offline-aware** — disables network actions while offline and enables them again when the connection returns
+- **Command-line interface** — same engine, scriptable, suited to cron jobs and headless servers
 - **No telemetry, no accounts, no cloud** — everything stays on your machine
 
 ---
 
 ## Download
 
-The fastest path is the release download for your platform.
+Release downloads are available for each platform.
 
 | OS | File |
 |---|---|
@@ -50,11 +50,13 @@ On Windows the download is a `.zip` — extract it and run `MeManga.exe` from th
 `MeManga-windows-x64` folder (keep the `_internal` folder next to it).
 On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double-click.
 
-> **First launch downloads Firefox** (~80 MB download, one-time.)
-> Playwright uses it under the hood to scrape JS-heavy sources like MangaFire and WeebCentral.
+> **First launch downloads Firefox** (about 80 MB, once).
+> Playwright uses it for sources that need a browser, such as MangaFire and WeebCentral.
 >
-> **Windows SmartScreen** may warn the first time. This is a false positive — the app is safe. Click "More info → Run anyway" to proceed.
-> The Windows build is not yet code-signed.
+> **Windows SmartScreen** may show a warning the first time, because the Windows
+> build is not yet code-signed. Download MeManga only from the
+> [releases page](https://github.com/meellm/MeManga/releases), then choose
+> **More info → Run anyway** to start it.
 >
 > **macOS Gatekeeper** — the Mac app is not code-signed or notarized by Apple (that needs
 > a paid Apple Developer account), so macOS may refuse to open it after download.
@@ -86,7 +88,7 @@ Windows and Linux the app is a folder rather than a single compressed file, so
 these components stay separate files under `_internal` that you can replace; on
 macOS you rebuild the app from source with the modified component.
 
-You can also build from the source following [Build from source](#-build-from-source) below.
+You can also build from source; see [Build from source](#build-from-source) below.
 
 ---
 
@@ -160,21 +162,19 @@ PyMuPDF is not used, even when it is installed.
 
 ## Search
 
-Search hits **only the 15 most popular working aggregators by default** —
-MangaDex, MangaPill, MangaPark, MangaFire, MangaBuddy, WeebCentral,
-MangaKatana, Asura Scans, Comix, Comick, MangaHub, MangaHere, MangaPanda,
-MangaHere.onl, MangaTaro. You can always flip more on in the
-**Sources** tab if you want a wider net (the long-tail aggregators are
-usually slower or have stale catalogs).
+By default, search covers 15 aggregators: MangaDex, MangaPill,
+MangaPark, MangaFire, MangaBuddy, WeebCentral, MangaKatana, Asura Scans,
+Comix, Comick, MangaHub, MangaHere, MangaPanda, MangaHere.onl and
+MangaTaro. Turn on more sources on the **Sources** page to search more
+widely; other sources are often slower or have fewer chapters.
 
 <p align="center">
   <img src="docs/screenshots/search-results.png" alt='Search results for "Blue Lock" with chapter-count chips' width="900">
 </p>
 
-Each result row shows the source domain, a `47 ch` chip telling you
-how many chapters that source has, and a `+ Add` button that drops it
-straight into your library. You should decide which source to use considering
-the chapter number printed there.
+Each result row shows the source domain, a `47 ch` chip with the number
+of chapters that source has, and a `+ Add` button that adds it to your
+library. Use the chapter count to choose a source.
 
 ## Downloads
 
@@ -193,16 +193,16 @@ back up.
 
 ## Sources
 
-The Sources page shows every supported domain with its current health
+The Sources page shows every supported domain with its last saved health
 status (latency, last successful check, last error). Toggle individual
-sources on/off; your selection persists across restarts. Websites might
-be dead and still show up in there though. Just a little **warning**.
+sources on or off; your selection persists across restarts. A listed
+source may no longer be reachable.
 
 <p align="center">
   <img src="docs/screenshots/sources-page.png" alt="Sources page with toggle list and health badges" width="900">
 </p>
 
-Hit **Re-check health** to ping every enabled source and see their status.
+Select **Re-check health** to check every enabled source and update its status.
 
 ## Settings
 
@@ -240,7 +240,7 @@ Hit **Re-check health** to ping every enabled source and see their status.
    on the Detail page of each manga to send. With **Every manga**, turn it
    off for the manga you don't want sent.
 
-Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs too large for one email (over 18 MB with the default 25 MB email size limit, `email.max_email_mb`) are split automatically and the parts are sent in one mail session; EPUB files can't be split so they fail-loud with a size warning. See the [Guide](docs/Guide.md#email-size-limit) to match the limit to your mail provider.
+Only PDF and EPUB are sent to Kindle; CBZ, ZIP and image folders are saved but not sent. PDFs too large for one email (over 18 MB with the default 25 MB email size limit, `email.max_email_mb`) are split automatically and the parts are sent in one mail session; EPUB files can't be split, so sending one that is too large fails with a size warning. See the [Guide](docs/Guide.md#email-size-limit) to match the limit to your mail provider.
 
 ## Keyboard shortcuts
 
@@ -528,7 +528,7 @@ python -m memanga failed retry "Blue Lock"   # one manga only
 ```
 
 `failed` is the safety net for the "downloaded but incomplete" class of
-errors - the modern downloader refuses to mark a chapter complete if
+errors: the downloader does not mark a chapter complete if
 any page failed, and tracks the failure so you can batch-retry later.
 `failed retry` downloads each chapter the same way `check --download`
 does (backup source, partial-chapter rules, email delivery).
@@ -683,18 +683,18 @@ Their availability can change; check the Sources page for current health.
 
 | Source | Notes |
 |---|---|
-| mangadex.org | Largest fan-translation library |
-| mangapill.com | Fast, no Cloudflare |
-| mangapark1.com | Large library (Chromium, Cloudflare) |
-| mangafire.to | VRF-signed API + image descrambling |
-| mangabuddy.com | Popular aggregator |
-| weebcentral.com | 1000+ series |
+| mangadex.org | Fan-translation library |
+| mangapill.com | General library |
+| mangapark1.com | General library |
+| mangafire.to | General library |
+| mangabuddy.com | General library |
+| weebcentral.com | General library |
 | mangakatana.com | General library |
 | asurascans.com | Manhwa specialist |
-| comix.to | React SPA aggregator |
-| comick.io | Clean API |
-| mangahub.io | Huge library |
-| mangahere.cc | Large library |
+| comix.to | General library |
+| comick.io | General library |
+| mangahub.io | MangaHub network |
+| mangahere.cc | General library |
 | mangapanda.onl | MangaHub network |
 | mangahere.onl | Alternate mirror |
 | mangataro.org | ComicK replacement |
@@ -704,7 +704,7 @@ For every registered domain, see the [supported sources](docs/SUPPORTED_SOURCES.
 
 ---
 
-## 🛠️ Build from source
+## Build from source
 
 ```bash
 git clone https://github.com/meellm/MeManga.git
@@ -809,15 +809,15 @@ app password, and `memanga doctor` reports why.
 ## FAQ
 
 **Will my downloads work without internet?**
-Yes. Once a chapter is on disk it opens in the reader instantly. The
-app gracefully disables network actions (Search, Check, Download)
-when it detects you're offline and re-enables them when the wifi
-returns.
+Yes. Once a chapter is on disk it opens in the reader without a
+connection. The app disables network actions (Search, Check, Download)
+when it detects you're offline and enables them again when the
+connection returns.
 
-**Does it phone home / send analytics?**
-No. No telemetry, no accounts, no crash reports auto-sent. Crash dumps
-go to `crash.log` locally - if you want to share one in a bug report,
-you can (please do so).
+**Does it send analytics?**
+No. No telemetry, no accounts, and crash reports are never sent
+automatically. Crash details go to `crash.log` locally; you can attach
+that file to a bug report.
 
 The desktop app contacts:
 
@@ -852,28 +852,29 @@ The same switches exist as `gui.network_check` and
 `gui.mangadex_cover_fallback` for `memanga config set`.
 
 **Why does the first launch take a while?**
-It's downloading Playwright's Firefox driver (~80 MB) so it can
-scrape JS-heavy sites. One-time, behind a progress dialog. After
-that, startup is ~5 seconds.
+It downloads Playwright's Firefox build (about 80 MB), which sources
+that need a browser use. This happens once, behind a progress dialog.
 
 **A source I use stopped working — what now?**
 - Check **Sources → Re-check health** for status. If it's red, the
-  site is genuinely down or changed its HTML. File an issue with the
-  **Scraper broken** template so we can investigate together.
-- Use the [search-result chapter chip](#-search) to spot dead sources
-  at a glance — they'll show no `N ch` chip.
+  site may be down or may have changed its pages. File an issue with
+  the **Scraper broken** template.
+- Use the [search-result chapter chip](#search) to spot sources that
+  return nothing: they show no `N ch` chip.
 - Switch your manga to a backup source (Detail page → Edit) until
   the scraper is fixed.
 
 **Can I use this on headless devices?**
-The CLI runs anywhere Python 3.10+ runs. You'd typically use 
-cron + the CLI's `--auto` flag and `xvfb-run` for Playwright sources.
+Yes. The CLI runs anywhere Python 3.10+ runs, and its browsers start
+headless, so no display is needed. Use `memanga cron install` or
+`memanga watch` for scheduled checks (see
+[Schedule daily checks](#schedule-daily-checks) and [Docker](#docker)).
 
 ---
 
 ## Contributing
 
-PRs welcome — bug fixes, new scrapers, GUI polish, all of it.
+Pull requests are welcome, including bug fixes, new scrapers and interface improvements.
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, test
 commands, and PR checklist. There are issue templates for
 [bugs](.github/ISSUE_TEMPLATE/bug_report.md),

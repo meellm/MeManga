@@ -6,25 +6,25 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 
 | Source | Aliases | Engine | Language | NSFW | Search status | Notes |
 |---|---|---|---|---|---|---|
-| mangadex.org | api.mangadex.org (Included in search) | api | en | No | Included in search | Largest fan-translation library |
-| mangapill.com | — | http | — | No | Included in search | Fast, no Cloudflare |
-| mangapark1.com | — | browser | — | No | Included in search | Large library (Chromium, Cloudflare) |
-| mangafire.to | — | browser | — | No | Included in search | VRF-signed API + image descrambling |
-| mangabuddy.com | — | browser | — | No | Included in search | Popular aggregator |
-| weebcentral.com | — | browser | — | No | Included in search | 1000+ series |
+| mangadex.org | api.mangadex.org (Included in search) | api | en | No | Included in search | Fan-translation library |
+| mangapill.com | — | http | — | No | Included in search | General library |
+| mangapark1.com | — | browser | — | No | Included in search | General library |
+| mangafire.to | — | browser | — | No | Included in search | General library |
+| mangabuddy.com | — | browser | — | No | Included in search | General library |
+| weebcentral.com | — | browser | — | No | Included in search | General library |
 | mangakatana.com | — | browser | — | No | Included in search | General library |
 | asurascans.com | asuracomic.net (Not searched (alias)), asuratoon.com (Not searched (alias)) | api | — | No | Included in search | Manhwa specialist |
-| comix.to | — | browser | — | No | Included in search | React SPA aggregator |
-| comick.io | comick.dev (Included in search) | api | — | No | Included in search | Clean API |
-| mangahub.io | — | http | — | No | Included in search | Huge library |
-| mangahere.cc | — | http | — | No | Included in search | Large library |
+| comix.to | — | browser | — | No | Included in search | General library |
+| comick.io | comick.dev (Included in search) | api | — | No | Included in search | General library |
+| mangahub.io | — | http | — | No | Included in search | MangaHub network |
+| mangahere.cc | — | http | — | No | Included in search | General library |
 | mangapanda.onl | — | http | — | No | Included in search | MangaHub network |
 | mangahere.onl | — | browser | — | No | Included in search | Alternate mirror |
 | mangataro.org | — | http | — | No | Included in search | ComicK replacement |
 | luminousscans.com | — | http | — | No | Included in search | Manhwa translations |
 | tcbonepiecechapters.com | tcbscans.com (Included in search), tcbscans.me (Included in search) | http | en | No | Included in search | Jump manga (One Piece, JJK) |
 | fanfox.net | mangafox.me (Included in search) | browser | — | No | Included in search | — |
-| 1manga.co | — | http | — | No | Included in search | Large library (MangaHub CDN) |
+| 1manga.co | — | http | — | No | Included in search | MangaHub network |
 | coffeemanga.io | — | http | — | No | Included in search | — |
 | manhuaplus.org | — | http | — | No | Included in search | Manhua focused |
 | mangaeffect.com | — | http | — | No | Included in search | — |
@@ -41,7 +41,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | bakidou.com | — | http | — | No | Not searched (template) | Baki (All Series) |
 | bakirahen.com | — | http | — | No | Included in search | Baki Rahen |
 | bananafishmanga.com | — | http | — | No | Not searched (template) | Banana Fish |
-| bato.to | batoto.to (Not searched (unreliable)) | http | — | No | Not searched (unreliable) | Community-driven |
+| bato.to | batoto.to (Not searched (unreliable)) | http | — | No | Not searched (unreliable) | Community uploads |
 | beastarsmanga.com | — | http | — | No | Included in search | Beastars |
 | beckmanga.com | — | http | — | No | Not searched (template) | Beck: Mongolian Chop Squad |
 | berserk-manga.com | w3.berserk-manga.com (Not searched (template)), w4.berserk-manga.com (Not searched (template)) | http | — | No | Not searched (template) | Berserk |
@@ -113,7 +113,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | jojolionmanga.com | — | http | — | No | Included in search | JoJo Part 8: JoJolion |
 | jujutsukaisenmodulo.org | — | http | — | No | Not searched (template) | Jujutsu Kaisen Modulo |
 | jujutsumodulo.com | — | http | — | No | Not searched (template) | Jujutsu Kaisen Modulo |
-| kagane.org | kagane.to (Not searched (challenge)) | browser | — | No | Not searched (challenge) | Token-protected pages |
+| kagane.org | kagane.to (Not searched (challenge)) | browser | — | No | Not searched (challenge) | General library |
 | kagurabachi-manga.com | — | http | — | No | Not searched (template) | Kagurabachi |
 | kagurabachiread.com | — | http | — | No | Not searched (template) | Kagurabachi |
 | kaijimanga.com | w9.kaijimanga.com (Not searched (template)) | http | — | No | Not searched (template) | Kaiji |
@@ -140,7 +140,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | manganato.com | chapmanganato.to (Not searched (unreachable)), readmanganato.com (Not searched (unreachable)) | http | — | No | Not searched (unreachable) | — |
 | manganato.gg | — | browser | — | No | Not searched (challenge) | — |
 | mangaread.org | — | http | — | No | Not searched (template) | — |
-| mangareader.to | — | http | — | No | Not searched (unreachable) | Clean UI |
+| mangareader.to | — | http | — | No | Not searched (unreachable) | General library |
 | mangasee123.com | — | http | — | No | Not searched (shutdown) | — |
 | mangasehri.com | — | http | — | No | Not searched (template) | — |
 | mangatown.com | — | http | — | No | Not searched (unreliable) | — |

@@ -926,7 +926,7 @@ class TestVRFWorker:
             assert not pages[2].closed and not launched[1].closed
             info = [r.getMessage() for r in caplog.records
                     if r.name == mf.logger.name and r.levelno >= logging.INFO]
-            assert info == ["Starting the browser used to mint API tokens..."]
+            assert info == ["Starting the browser for mangafire.to..."]
             assert any("Restarting the token browser after 2 mints"
                        in r.getMessage() for r in caplog.records
                        if r.levelno == logging.DEBUG)

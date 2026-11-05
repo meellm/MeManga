@@ -682,7 +682,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
             from ...emailer import smtp_login
             smtp_login(sender, smtp_server, int(smtp_port), pw,
                        timeout=timeout, smtp_tls=smtp_tls)
-        self._run_email_test(_login, "Success!")
+        self._run_email_test(_login, "Signed in")
 
     def _send_test_email(self):
         """Send Test PDF (issue #365): email a tiny PDF to the typed

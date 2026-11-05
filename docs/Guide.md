@@ -1105,7 +1105,7 @@ Sender email: youremail@gmail.com
 App password: abcdefghijklmnop
 Send which manga: 1 (selected) or 2 (all)
 
-✅ Configuration saved!
+Configuration saved.
 ```
 
 #### Choose which manga are sent
@@ -1383,7 +1383,7 @@ You'll be asked what time to run (default: 06:00):
 
 ```
 Check time (HH:MM): 07:30
-✅ Scheduled task installed! Will check daily at 07:30
+Scheduled task installed. Checks run daily at 07:30.
 ```
 
 Check if it's active:
