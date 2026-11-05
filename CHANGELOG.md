@@ -420,6 +420,13 @@ All notable changes are recorded here. Format loosely follows
   --init` or Compose `init: true`, which the `scheduler` service no
   longer sets (both still work). `docker stop` and Ctrl-C reach MeManga
   as before, and exit codes are unchanged.
+- #335 `memanga cron install` refuses to run inside a Docker or Podman
+  container, where no cron daemon would ever run the check. It exits 1,
+  runs no `crontab` command, leaves `config.yaml` unchanged, and points
+  to `memanga watch` (the Compose `scheduler` service) and the Docker
+  scheduling guide. Before, it failed with a bare "could not read the
+  current crontab" error, or, in an image with `crontab`, wrote an entry
+  that never ran. `cron status` and `cron remove` work as before.
 - #396 The desktop app can be used from the keyboard. Library cards and
   rows, continue-reading cards and the theme cards could only be clicked;
   `Tab` now reaches them, `Enter` or `Space` opens them, and the `Menu`

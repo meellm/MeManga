@@ -27,6 +27,7 @@ from memanga.cron import (
     remove_managed_lines,
     remove_schedule,
     replace_managed_line,
+    running_in_container,
     schedule_status,
     scheduled_checks_supported,
     source_checkout_root,
@@ -139,6 +140,39 @@ class TestScheduledChecksSupported:
     def test_frozen_build(self, monkeypatch):
         monkeypatch.setattr(sys, "frozen", True, raising=False)
         assert scheduled_checks_supported() is False
+
+
+# Taken at import, before the autouse fixture moves it for each test.
+_REAL_CONTAINER_ROOT = cron_mod.CONTAINER_ROOT
+
+
+class TestRunningInContainer:
+    """#335: Docker and Podman mark every container with a file. The real
+    marker names are created under a temporary root."""
+
+    @pytest.mark.parametrize("present", [
+        (".dockerenv",), ("run/.containerenv",),
+        (".dockerenv", "run/.containerenv")])
+    def test_any_marker(self, monkeypatch, tmp_path, present):
+        (tmp_path / "run").mkdir()
+        for marker in present:
+            (tmp_path / marker).write_text("")
+        monkeypatch.setattr(cron_mod, "CONTAINER_ROOT", str(tmp_path))
+        assert running_in_container() is True
+
+    def test_no_marker(self, monkeypatch, tmp_path):
+        # A marker name somewhere other than its place does not count.
+        (tmp_path / "run").mkdir()
+        (tmp_path / "run" / ".dockerenv").write_text("")
+        (tmp_path / ".containerenv").write_text("")
+        monkeypatch.setattr(cron_mod, "CONTAINER_ROOT", str(tmp_path))
+        assert running_in_container() is False
+
+    def test_markers_are_docker_and_podman_files(self):
+        assert _REAL_CONTAINER_ROOT == "/"
+        assert tuple(os.path.join(_REAL_CONTAINER_ROOT, marker)
+                     for marker in cron_mod.CONTAINER_MARKERS) == (
+            "/.dockerenv", "/run/.containerenv")
 
 
 class TestSourceCheckoutCronLine:
@@ -581,6 +615,21 @@ class TestCronService:
         assert schedule_status().status is ScheduleStatus.INSTALLED
         assert runner.calls
 
+    def test_install_in_container_touches_nothing(self, monkeypatch,
+                                                  tmp_path):
+        """#335: no cron daemon would run the entry; say so instead."""
+        marker = tmp_path / ".dockerenv"
+        marker.write_text("")
+        monkeypatch.setattr(cron_mod, "CONTAINER_ROOT", str(tmp_path))
+        runner = FakeScheduler(CRONTAB)
+        result = _install(runner)
+
+        assert result.status is ScheduleStatus.UNSUPPORTED and not result.ok
+        assert not result.windows
+        assert result.detail == cron_mod.CONTAINER_SCHEDULING_TEXT
+        assert "memanga watch" in result.detail
+        assert runner.calls == []
+
 
 @pytest.mark.usefixtures("on_windows")
 class TestTaskSchedulerService:
@@ -598,6 +647,16 @@ class TestTaskSchedulerService:
             ["schtasks", "/create", "/tn", WINDOWS_TASK_NAME, "/tr", command,
              "/sc", "daily", "/st", "06:05", "/f"],
         ]
+
+    def test_container_markers_do_not_apply(self, monkeypatch, tmp_path):
+        """#335 guards only cron; Task Scheduler runs its own service."""
+        marker = tmp_path / ".dockerenv"
+        marker.write_text("")
+        monkeypatch.setattr(cron_mod, "CONTAINER_ROOT", str(tmp_path))
+        result = install_schedule(6, 5, runtime_dir="C:/cfg",
+                                  python_path=r"C:\Py\python.exe",
+                                  runner=FakeScheduler())
+        assert result.status is ScheduleStatus.INSTALLED
 
     def test_install_failure_keeps_existing_task(self):
         """A failed reinstall must not have deleted the task it replaces:

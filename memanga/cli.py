@@ -41,8 +41,9 @@ from .config import (CONFIG_DIR_ENV, CONFIG_KEYS, AppPasswordError, Config,
                      default_root_moved, explicit_config_dir,
                      get_app_password, parse_config_value,
                      plaintext_password_notice, set_app_password)
-from .cron import (ScheduleStatus, install_schedule, parse_schedule_time,
-                   remove_schedule, schedule_status, scheduled_checks_supported,
+from .cron import (CONTAINER_SCHEDULING_TEXT, ScheduleStatus, install_schedule,
+                   parse_schedule_time, remove_schedule, running_in_container,
+                   schedule_status, scheduled_checks_supported,
                    source_checkout_root)
 from . import __version__, completion, doctor, watch
 from .persist import SaveError
@@ -2675,7 +2676,15 @@ def _cron_status():
     _print_unmanaged_cron_lines(result.unmanaged)
 
 
+def _container_cron_error():
+    # Issue #335: no cron daemon runs in a container; point to `watch`.
+    return _error(f"[red]{_esc(CONTAINER_SCHEDULING_TEXT)}[/red]")
+
+
 def _cron_install(args):
+    # Before asking for a time: no answer would make it work here.
+    if running_in_container():
+        return _container_cron_error()
     time_str = args.time or config.get("cron.time", "06:00")
 
     if not args.time:
@@ -2697,6 +2706,8 @@ def _cron_install(args):
         config_dir=_context.config_dir,
         source_root=source_checkout_root(Path(__file__).resolve().parent))
 
+    if result.status is ScheduleStatus.UNSUPPORTED:
+        return _container_cron_error()
     if result.status is ScheduleStatus.UNREADABLE:
         return _unreadable_error(result)
     if not result.ok:
