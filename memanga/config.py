@@ -332,6 +332,9 @@ class Config:
                 # Look up missing or broken covers on MangaDex. Also skipped
                 # whenever mangadex.org is turned off in Sources.
                 "mangadex_cover_fallback": True,
+                # Chapter-count chips on Search (issue #405): one
+                # chapter-list fetch per result, retried when it fails.
+                "search_chapter_counts": True,
             },
             # Built-in reader behaviour (issue #104). Kept separate from
             # delivery.delete_after_send, which is tied to email delivery —
@@ -672,6 +675,7 @@ CONFIG_KEYS = {
     "gui.network_check_hosts": {
         "kind": "list", "items": "host_port", "read_only": "memanga config edit"},
     "gui.mangadex_cover_fallback": {"kind": "bool"},
+    "gui.search_chapter_counts": {"kind": "bool"},
     "reader.remove_after_read": {"kind": "bool"},
     "mangadex.data_saver": {"kind": "bool"},
     "mangadex.removed_group_ids": {

@@ -95,6 +95,24 @@ class AdvancedTabMixin:
         )
         f.addWidget(self._mangadex_cover_check)
 
+        chapter_count_hint = QLabel(
+            "Load each search result's chapter list from its source to show "
+            "how many chapters it has. Each result takes at least one extra "
+            "request, more for long lists, and failed ones are tried again; "
+            "turn off on slow or metered connections."
+        )
+        chapter_count_hint.setProperty("role", "hint")
+        chapter_count_hint.setWordWrap(True)
+        f.addWidget(chapter_count_hint)
+
+        self._search_chapter_counts_check = QCheckBox(
+            "Show chapter counts in search results"
+        )
+        self._search_chapter_counts_check.setChecked(
+            bool(self.app.config.get("gui.search_chapter_counts", True))
+        )
+        f.addWidget(self._search_chapter_counts_check)
+
         f.addSpacing(T.PAD_XL)
 
         # Scheduled checks

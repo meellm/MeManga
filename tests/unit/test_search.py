@@ -177,6 +177,31 @@ class TestChapterCounts:
         assert results[0].chapter_count == 7
         assert results[1].chapter_count is None
 
+    def test_probe_runs_at_most_four_at_once(self, monkeypatch):
+        # Issue #405: kept low so slow connections aren't flooded.
+        import threading
+        import time
+        from memanga import search as search_mod
+        lock = threading.Lock()
+        state = {"now": 0, "peak": 0}
+
+        def fake_fetch(source, url):
+            with lock:
+                state["now"] += 1
+                state["peak"] = max(state["peak"], state["now"])
+            time.sleep(0.05)
+            with lock:
+                state["now"] -= 1
+            return 1
+
+        monkeypatch.setattr(search_mod, "fetch_chapter_count", fake_fetch)
+        results = [SearchResult(title=str(i), url=f"https://x.test/{i}",
+                                source="x.test") for i in range(12)]
+        probe_chapter_counts(results)
+        assert search_mod.CHAPTER_COUNT_WORKERS == 4
+        assert 1 <= state["peak"] <= 4
+        assert all(r.chapter_count == 1 for r in results)
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # source selection

@@ -276,6 +276,12 @@ def sweep(
     return results, failures
 
 
+# Chapter-count probes running at once, shared by the CLI and the GUI.
+# Requests to one site are already paced across threads; this bounds
+# the total, kept low so slow or flaky connections aren't flooded.
+CHAPTER_COUNT_WORKERS = 4
+
+
 def fetch_chapter_count(source: str, url: str) -> Optional[int]:
     """Chapter count for one result, or None when the probe fails.
     One attempt only — callers wanting retries (the GUI chip probe)
@@ -289,9 +295,13 @@ def fetch_chapter_count(source: str, url: str) -> Optional[int]:
 
 
 def probe_chapter_counts(results: List[SearchResult],
-                         max_workers: int = 6) -> None:
+                         max_workers: int = CHAPTER_COUNT_WORKERS) -> None:
     """Fill in `chapter_count` on each result in place, in parallel.
-    Failed probes leave the field None."""
+    Failed probes leave the field None.
+
+    Each result costs one full chapter-list fetch from its source:
+    several requests for long, paged lists, a browser page load for
+    browser-driven sources, plus any retries of failed requests."""
     if not results:
         return
     with ThreadPoolExecutor(max_workers=max_workers,
