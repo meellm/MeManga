@@ -6,6 +6,7 @@ both surfaces call (issue #297).
 """
 
 import csv
+import os
 import platform
 import shlex
 import subprocess
@@ -33,6 +34,23 @@ SCHEDULER_TIMEOUT = 30
 # encoding (``text=True`` decodes it). All become results, never crashes.
 _SCHEDULER_ERRORS = (OSError, subprocess.SubprocessError, UnicodeError)
 
+# Files that Docker (/.dockerenv) and Podman (/run/.containerenv) create
+# in every container; systemd-detect-virt checks the same ones. They are
+# looked up under CONTAINER_ROOT, the filesystem root.
+CONTAINER_MARKERS = (".dockerenv", "run/.containerenv")
+CONTAINER_ROOT = "/"
+
+# Why `cron install` refuses to run in a container (issue #335), and what
+# schedules checks there instead (issue #327).
+CONTAINER_SCHEDULING_TEXT = (
+    "cron install does not work inside a container: there is no cron "
+    "daemon to run the check, and nothing was changed. Run 'memanga watch' "
+    "as a long-running container instead (the 'scheduler' service in "
+    "compose.yaml), or add a cron entry on the host. See "
+    "https://github.com/meellm/MeManga/blob/main/docs/Guide.md"
+    "#scheduling-in-docker"
+)
+
 
 def quote_cron_path(path) -> str:
     """Quote a filesystem path for use inside a crontab command.
@@ -54,6 +72,16 @@ def scheduled_checks_supported() -> bool:
     with their interpreter and are supported.
     """
     return not getattr(sys, "frozen", False)
+
+
+def running_in_container() -> bool:
+    """Whether this process runs in a Docker or Podman container.
+
+    Containers have no cron daemon, so a crontab entry written there never
+    runs (issue #335); ``memanga watch`` schedules checks instead.
+    """
+    return any(os.path.exists(os.path.join(CONTAINER_ROOT, marker))
+               for marker in CONTAINER_MARKERS)
 
 
 def source_checkout_root(package_dir=None):
@@ -224,6 +252,7 @@ class ScheduleStatus(Enum):
     NOT_FOUND = "not_found"    # status/remove: no MeManga-owned job
     UNREADABLE = "unreadable"  # scheduler could not be read; nothing changed
     FAILED = "failed"          # scheduler could not be written
+    UNSUPPORTED = "unsupported"  # install in a container; nothing changed
 
 
 @dataclass(frozen=True)
@@ -245,7 +274,8 @@ class ScheduleResult:
     @property
     def ok(self) -> bool:
         return self.status not in (ScheduleStatus.UNREADABLE,
-                                   ScheduleStatus.FAILED)
+                                   ScheduleStatus.FAILED,
+                                   ScheduleStatus.UNSUPPORTED)
 
 
 def _uses_task_scheduler() -> bool:
@@ -309,7 +339,8 @@ def install_schedule(hour, minute, *, runtime_dir, config_dir=None,
     failed read (issue #231); Windows recreates :data:`WINDOWS_TASK_NAME`.
     ``runtime_dir``, ``config_dir`` and ``source_root`` are passed to
     :func:`build_cron_line` / :func:`build_task_command`; ``python_path``
-    defaults to the running interpreter (issue #232).
+    defaults to the running interpreter (issue #232). In a container
+    nothing is written and the result is ``UNSUPPORTED`` (issue #335).
     """
     hour, minute = int(hour), int(minute)
     if python_path is None:
@@ -317,6 +348,9 @@ def install_schedule(hour, minute, *, runtime_dir, config_dir=None,
     if _uses_task_scheduler():
         return _install_task(hour, minute, python_path, config_dir,
                              source_root, runner)
+    if running_in_container():
+        return ScheduleResult(ScheduleStatus.UNSUPPORTED, False,
+                              detail=CONTAINER_SCHEDULING_TEXT)
 
     cron_line = build_cron_line(minute, hour, runtime_dir, python_path,
                                 config_dir=config_dir, source_root=source_root)

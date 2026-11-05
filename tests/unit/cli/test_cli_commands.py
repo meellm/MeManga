@@ -3388,6 +3388,57 @@ class TestCronOwnership:
         assert "Invalid time format" in capsys.readouterr().err
 
 
+class TestCronInContainer:
+    """#335: no cron daemon runs in a container, so `cron install` refuses
+    and points to `memanga watch` (#327)."""
+
+    @pytest.fixture(autouse=True)
+    def _in_container(self, monkeypatch, tmp_path):
+        from memanga import cli, cron
+        marker = tmp_path / ".dockerenv"
+        marker.write_text("")
+        monkeypatch.setattr(cron, "CONTAINER_ROOT", str(tmp_path))
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Linux")
+        self.calls = []
+
+        def _run(argv, *a, **k):
+            self.calls.append(argv)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+
+    @staticmethod
+    def _assert_refused(capsys):
+        err = " ".join(capsys.readouterr().err.split())
+        assert "does not work inside a container" in err
+        assert "memanga watch" in err
+        assert "Guide.md#scheduling-in-docker" in err
+
+    def test_install_refuses_without_touching_crontab(self, run_cli, config,
+                                                      capsys):
+        assert run_cli("cron", "install", "--time", "06:00") == 1
+
+        assert self.calls == []
+        assert not config.get("cron.enabled")
+        self._assert_refused(capsys)
+
+    def test_refusal_comes_before_the_time_prompt(self, run_cli, monkeypatch,
+                                                  config, capsys):
+        """Without --time and without a terminal the container is still
+        the reason given, not the missing time."""
+        monkeypatch.setattr("memanga.cli._stdin_is_tty", lambda: False)
+        assert run_cli("cron", "install") == 1
+
+        assert self.calls == []
+        self._assert_refused(capsys)
+
+    def test_status_and_remove_still_read_crontab(self, run_cli):
+        """An entry from an earlier version can still be found and removed."""
+        run_cli("cron", "status")
+        run_cli("cron", "remove")
+        assert self.calls == [["crontab", "-l"], ["crontab", "-l"]]
+
+
 class TestCronWindows:
     """#297: Task Scheduler results come from the shared service."""
 

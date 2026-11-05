@@ -94,6 +94,22 @@ def _reset_output_setup():
     cli.console, cli.err_console = saved
 
 
+@pytest.fixture(scope="session")
+def _empty_root(tmp_path_factory) -> Path:
+    return tmp_path_factory.mktemp("empty-root")
+
+
+@pytest.fixture(autouse=True)
+def _not_in_container(monkeypatch, _empty_root):
+    """Run every test as if outside a container, so a suite run in Docker
+    or Podman still covers `cron install` (issue #335). Only the root the
+    real container markers are looked up under moves, to an empty
+    directory; tests that need a container create a marker under their
+    own root."""
+    from memanga import cron
+    monkeypatch.setattr(cron, "CONTAINER_ROOT", str(_empty_root))
+
+
 @pytest.fixture(autouse=True)
 def _reset_scraper_cache():
     """get_scraper() reuses instances and request spacing is shared per

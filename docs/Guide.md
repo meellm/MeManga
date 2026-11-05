@@ -400,9 +400,9 @@ docker compose run --rm memanga config
 
 ### Scheduling in Docker
 
-There is no cron daemon in the container, and `memanga cron install`
-does not schedule anything there. Use the `scheduler` service from
-`compose.yaml` instead:
+There is no cron daemon in the container, so `memanga cron install`
+refuses to run there (it exits `1` and changes nothing). Use the
+`scheduler` service from `compose.yaml` instead:
 
 ```bash
 docker compose up -d scheduler
@@ -1440,6 +1440,8 @@ Same commands as macOS:
 ```
 
 On headless servers (no display), make sure `xvfb` is installed — the setup script handles this on Debian/Ubuntu.
+
+Inside a Docker or Podman container, `cron install` refuses to run; see [Scheduling in Docker](#scheduling-in-docker).
 
 ### One MeManga at a time
 
