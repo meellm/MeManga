@@ -149,14 +149,14 @@ class TestDependencyDirection:
 class TestBrowserCleanup:
     def test_import_registers_exit_cleanup_once(self):
         code = (
-            "import atexit\n"
+            "import threading\n"
             "seen = []\n"
-            "_register = atexit.register\n"
+            "_register = threading._register_atexit\n"
             "def _record(func, *args, **kwargs):\n"
             "    seen.append((getattr(func, '__module__', ''),\n"
             "                 getattr(func, '__qualname__', '')))\n"
             "    return _register(func, *args, **kwargs)\n"
-            "atexit.register = _record\n"
+            "threading._register_atexit = _record\n"
             "import memanga.downloader\n"
             "import memanga.downloader.browsers\n"
             "import importlib; importlib.import_module('memanga.downloader')\n"
@@ -167,6 +167,39 @@ class TestBrowserCleanup:
                                 capture_output=True, text=True, timeout=120)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip().splitlines()[-1] == "1"
+
+    def test_exit_closes_started_browsers_on_their_own_threads(self):
+        """Issue #235: the interpreter stops worker threads before atexit
+        callbacks, so the exit cleanup has to run earlier for a close to
+        reach a browser's thread. Real workers and a real interpreter
+        exit; the close functions only report where they ran."""
+        code = (
+            "import sys, threading\n"
+            "import memanga.downloader\n"
+            "from memanga.scrapers import mangafire as mf\n"
+            "from memanga.scrapers import playwright_base as pb\n"
+            "def _report(what):\n"
+            "    sys.stderr.write(what + ' closed on '\n"
+            "                     + threading.current_thread().name + '\\n')\n"
+            "pb.cleanup_browsers = lambda: _report('browser')\n"
+            "mf.VRFGenerator._close_in_thread = lambda self: _report('vrf')\n"
+            "class _Used(pb.PlaywrightScraper):\n"
+            "    name = 'used'\n"
+            "class _Unused(pb.PlaywrightScraper):\n"
+            "    name = 'unused'\n"
+            "_Used._run_serialized(lambda: None, timeout=10)\n"
+            "mf.get_vrf_generator()\n"
+            "mf.VRFGenerator._run_serialized(lambda: None, timeout=10)\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT,
+                                capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == ""
+        closed = sorted(result.stderr.splitlines())
+        assert len(closed) == 2, result.stderr
+        assert closed[0].startswith("browser closed on pw-_Used")
+        assert closed[1].startswith("vrf closed on mangafire-vrf")
+        assert "_Unused" not in result.stderr
 
     def test_exit_cleanup_reaches_scraper_hooks_silently(self, monkeypatch,
                                                          capsys):
