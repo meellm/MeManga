@@ -420,6 +420,12 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Fixed
+- #233 An unsupported source is reported in one short line that points
+  to `memanga sources`, instead of listing every supported domain
+  (`check`, downloads and the logs). A scraper that fails with a parse
+  error while listing chapters is now reported as a failed fetch, not as
+  an unsupported source. `get_scraper()` raises the new
+  `UnsupportedSourceError`, which is still a `ValueError`.
 - #235 Browsers opened during a run are now closed when MeManga exits.
   The exit cleanup ran only after Python had stopped the threads that own
   the browsers, so every close failed silently and the browsers were left

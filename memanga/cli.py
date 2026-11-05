@@ -52,7 +52,7 @@ from .process_lock import (LOCK_FILENAME, ConfigDirBusy, ConfigDirLock,
 from .chapters import ChapterWithSource, chapter_order_key, chapter_sort_key, chapter_value
 from .state import State
 from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
-from .scrapers import get_scraper
+from .scrapers import UnsupportedSourceError, get_scraper
 from .scrapers.catalog import source_catalog
 from .search import compute_search_sources, probe_chapter_counts, sweep
 from .email_settings import (EmailSettings, kindle_scope, manga_sends_to_kindle,
@@ -2984,7 +2984,7 @@ def cmd_search(args):
             source = source[4:]
         try:
             get_scraper(source)
-        except ValueError:
+        except UnsupportedSourceError:
             err_console.print(f"[red]Unknown source:[/red] {_esc(source)}")
             err_console.print("[dim]Use 'memanga sources' to see supported sources.[/dim]")
             return EXIT_ERROR

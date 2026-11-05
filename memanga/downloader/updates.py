@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..chapters import Chapter, ChapterWithSource, chapter_value
-from ..scrapers import get_scraper
+from ..scrapers import UnsupportedSourceError, get_scraper
 from ..state import State
 from .errors import DownloaderError
 from .sources import _configure_mangadex, _get_sources_from_manga
@@ -153,8 +153,9 @@ def check_for_updates(
             _configure_mangadex(scraper, state)
             all_chapters = scraper.get_chapters(url)
             sources_checked += 1
-        except ValueError as e:
-            # Unsupported source - skip but warn
+        except UnsupportedSourceError as e:
+            # Only the lookup means an unsupported source; a scraper's own
+            # ValueError (bad JSON, a malformed URL) is a fetch failure.
             source_errors.append(f"{source}: {e}")
             logger.warning("Unsupported source '%s': %s", source, e)
             continue

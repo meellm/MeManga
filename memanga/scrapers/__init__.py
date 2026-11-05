@@ -648,6 +648,22 @@ sys.meta_path.append(_MovedModuleFinder())
 _instances = threading.local()
 
 
+class UnsupportedSourceError(LookupError, ValueError):
+    """No scraper is registered for a source domain.
+
+    The message stays short and points at `memanga sources` instead of
+    listing every domain. Still a ``ValueError`` for callers that caught
+    the plain error ``get_scraper()`` raised before.
+    """
+
+    def __init__(self, source: str):
+        self.source = source
+        super().__init__(
+            f"No scraper available for: {source}. "
+            "Run 'memanga sources' to list supported sources."
+        )
+
+
 def _resolve_class(source: str) -> Optional[Type[BaseScraper]]:
     """Scraper class for ``source``: an exact domain, else its closest
     registered parent domain (``ww3.mangafreak.me`` -> ``mangafreak.me``).
@@ -670,7 +686,8 @@ def get_scraper(source: str) -> BaseScraper:
     """Get the scraper instance for a source domain.
 
     Repeated calls from one thread return the same instance for every
-    domain of a scraper class; other threads get their own.
+    domain of a scraper class; other threads get their own. Raises
+    ``UnsupportedSourceError`` when no scraper handles the domain.
     """
     source = source.lower()
     if source.startswith("www."):
@@ -678,8 +695,7 @@ def get_scraper(source: str) -> BaseScraper:
 
     cls = _resolve_class(source)
     if cls is None:
-        supported = list_supported_sources()
-        raise ValueError(f"No scraper available for: {source}\nSupported: {', '.join(supported)}")
+        raise UnsupportedSourceError(source)
 
     local = _instances  # read once: clear_scraper_cache() may swap it
     instances = getattr(local, "by_class", None)

@@ -11,7 +11,7 @@ from typing import Any, Dict, Literal, Optional
 
 from ..chapters import Chapter, ChapterWithSource
 from ..image_limits import ImageTooLargeError
-from ..scrapers import get_scraper
+from ..scrapers import UnsupportedSourceError, get_scraper
 from ..scrapers.base import BaseScraper, is_image_file
 from ..state import State
 from .errors import DownloaderError
@@ -110,9 +110,9 @@ def download_chapter(
     # Get scraper
     try:
         scraper = get_scraper(source)
-        _configure_mangadex(scraper, state)
-    except ValueError as e:
-        raise DownloaderError(f"Unsupported source: {e}")
+    except UnsupportedSourceError as e:
+        raise DownloaderError(f"Unsupported source: {e}") from e
+    _configure_mangadex(scraper, state)
 
     # Bail before kicking off any expensive work if already cancelled.
     _check_cancel()
