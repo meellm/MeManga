@@ -224,6 +224,83 @@ class TestFallbackDelayMechanic:
         assert state.get_pending_backup("X", "10") is not None
 
 
+class TestSourceFailureCategories:
+    """Issue #233: only a failed scraper lookup is an unsupported source;
+    a scraper's own ValueError keeps its real failure category."""
+
+    def test_unsupported_source_is_short_and_labelled(self, state, caplog):
+        import logging
+        from memanga.downloader import DownloaderError, check_for_updates
+
+        manga = {"title": "X", "sources": [
+            {"source": "unsupported-example.invalid",
+             "url": "https://unsupported-example.invalid/x"},
+        ]}
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(DownloaderError) as exc:
+                check_for_updates(manga, state)
+
+        message = str(exc.value)
+        assert message == (
+            "All sources failed for 'X': unsupported-example.invalid: "
+            "No scraper available for: unsupported-example.invalid. "
+            "Run 'memanga sources' to list supported sources.")
+        assert "Unsupported source 'unsupported-example.invalid'" in caplog.text
+        assert "mangadex.org" not in caplog.text  # no supported-domain dump
+
+    def test_scraper_value_error_is_a_fetch_failure(self, state, monkeypatch,
+                                                    caplog):
+        import json
+        import logging
+        from memanga.downloader import DownloaderError, check_for_updates
+        import memanga.downloader as dl
+
+        class _BrokenScraper:
+            def get_chapters(self, url):
+                # json.JSONDecodeError is a ValueError subclass.
+                return json.loads("<html>not json</html>")
+
+        monkeypatch.setattr(dl.updates, "get_scraper",
+                            lambda d: _BrokenScraper())
+        manga = {"title": "X", "sources": [
+            {"source": "primary.test", "url": "https://primary.test/x"},
+        ]}
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(DownloaderError) as exc:
+                check_for_updates(manga, state)
+
+        assert str(exc.value).startswith(
+            "All sources failed for 'X': primary.test: Expecting value")
+        assert "Failed to fetch from primary.test" in caplog.text
+        assert "Unsupported source" not in caplog.text
+
+    def test_unsupported_primary_still_checks_backup(self, state, monkeypatch):
+        from memanga.downloader import check_for_updates
+        from memanga.scrapers import UnsupportedSourceError
+        from memanga.scrapers.base import Chapter
+        import memanga.downloader as dl
+
+        class _BackupScraper:
+            def get_chapters(self, url):
+                return [Chapter("10", "", "https://backup.test/c/10")]
+
+        def _get(domain):
+            if domain == "backup.test":
+                return _BackupScraper()
+            raise UnsupportedSourceError(domain)
+
+        monkeypatch.setattr(dl.updates, "get_scraper", _get)
+        manga = {"title": "X", "fallback_delay_days": 2, "sources": [
+            {"source": "gone.test", "url": "https://gone.test/x"},
+            {"source": "backup.test", "url": "https://backup.test/x"},
+        ]}
+
+        new, _ = check_for_updates(manga, state, return_all=True)
+
+        assert new == []
+        assert state.get_pending_backup("X", "10") is not None
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Format conversion functions — each one is a pure file-output helper
 # ─────────────────────────────────────────────────────────────────────────
@@ -733,25 +810,49 @@ class TestImageToJpegBytes:
 
 
 class TestDownloadChapterErrors:
-    def test_unknown_source_raises_downloader_error(self, tmp_path, fake_state,
-                                                      monkeypatch):
+    def test_unknown_source_raises_downloader_error(self, tmp_path, fake_state):
         """When no scraper covers the source, the orchestrator should
         raise DownloaderError instead of silently writing nothing."""
         from memanga.downloader import download_chapter, DownloaderError
-        import memanga.downloader as dl
-        # get_scraper raises ValueError for unknown sources — that's
-        # the contract `download_chapter` wraps into `DownloaderError`.
-        monkeypatch.setattr(dl.chapter, "get_scraper",
-                            lambda d: (_ for _ in ()).throw(
-                                ValueError(f"unknown: {d}")))
+        from memanga.scrapers import UnsupportedSourceError
+        # get_scraper raises UnsupportedSourceError for unknown sources —
+        # that's the contract `download_chapter` wraps into `DownloaderError`.
         manga = {"title": "X", "url": "https://unknown.test/x",
                  "source": "unknown.test"}
         chapter = types.SimpleNamespace(
             number="1", title="", url="https://unknown.test/c/1",
             source="unknown.test", source_url="https://unknown.test/c/1",
             is_backup=False)
-        with pytest.raises(DownloaderError):
+        with pytest.raises(DownloaderError) as exc:
             download_chapter(manga, chapter, tmp_path, "pdf", fake_state)
+        message = str(exc.value)
+        assert message.startswith("Unsupported source: No scraper available "
+                                  "for: unknown.test.")
+        assert "memanga sources" in message
+        assert "mangadex.org" not in message  # no supported-domain dump
+        assert isinstance(exc.value.__cause__, UnsupportedSourceError)
+
+    def test_setup_value_error_is_not_unsupported_source(
+            self, tmp_path, fake_state, monkeypatch):
+        """Issue #233: a ValueError after a successful lookup keeps its own
+        cause instead of being relabelled as an unsupported source."""
+        from memanga.downloader import download_chapter
+        import memanga.downloader as dl
+
+        def _bad_setup(scraper, state):
+            raise ValueError("bad mangadex setting")
+
+        monkeypatch.setattr(dl.chapter, "get_scraper", lambda d: object())
+        monkeypatch.setattr(dl.chapter, "_configure_mangadex", _bad_setup)
+        manga = {"title": "X", "url": "https://known.test/x",
+                 "source": "known.test"}
+        chapter = types.SimpleNamespace(
+            number="1", title="", url="https://known.test/c/1",
+            source="known.test", source_url="https://known.test/c/1",
+            is_backup=False)
+        with pytest.raises(ValueError, match="bad mangadex setting") as exc:
+            download_chapter(manga, chapter, tmp_path, "pdf", fake_state)
+        assert "Unsupported source" not in str(exc.value)
 
 
 # ─────────────────────────────────────────────────────────────────────────

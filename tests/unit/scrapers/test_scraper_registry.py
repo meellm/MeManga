@@ -151,11 +151,12 @@ class TestLazyRegistry:
 
     def test_unknown_source_loads_no_scraper_module(self):
         code = (
-            "from memanga.scrapers import get_scraper\n"
+            "from memanga.scrapers import UnsupportedSourceError, get_scraper\n"
             "try:\n"
             "    get_scraper('nope.invalid')\n"
-            "except ValueError as e:\n"
-            "    assert 'mangadex.org' in str(e)\n"
+            "except UnsupportedSourceError as e:\n"
+            "    assert 'No scraper available for: nope.invalid.' in str(e)\n"
+            "    assert 'mangadex.org' not in str(e)\n"
             "else:\n"
             "    raise SystemExit('no error')\n"
         )
@@ -540,9 +541,32 @@ class TestDomainLookup:
         with pytest.raises(ValueError, match="No scraper available"):
             get_scraper(host)
 
-    def test_unknown_host_error_lists_supported_sources(self, fake_registry):
+    def test_unknown_host_error_is_short_and_points_at_sources(
+            self, fake_registry):
+        # Issue #233: the error names the host and the `sources` command
+        # instead of listing every supported domain.
+        from memanga.scrapers import UnsupportedSourceError, get_scraper
+        with pytest.raises(UnsupportedSourceError) as err:
+            get_scraper("WWW.Nope.Invalid")
+        message = str(err.value)
+        assert err.value.source == "nope.invalid"
+        assert message == ("No scraper available for: nope.invalid. "
+                           "Run 'memanga sources' to list supported sources.")
+        assert "site.example" not in message
+
+    def test_unknown_host_error_stays_catchable_as_before(self,
+                                                         fake_registry):
         from memanga.scrapers import get_scraper
-        with pytest.raises(ValueError) as err:
-            get_scraper("nope.invalid")
-        assert "nope.invalid" in str(err.value)
-        assert "site.example" in str(err.value)
+        for base in (ValueError, LookupError):
+            with pytest.raises(base):
+                get_scraper("nope.invalid")
+
+    def test_real_registry_error_has_no_domain_dump(self):
+        from memanga.scrapers import (UnsupportedSourceError, get_scraper,
+                                      list_supported_sources)
+        with pytest.raises(UnsupportedSourceError) as err:
+            get_scraper("unsupported-example.invalid")
+        message = str(err.value)
+        assert len(message) < 200
+        assert "mangadex.org" not in message
+        assert len(list_supported_sources()) > 10

@@ -954,6 +954,25 @@ class TestCheckCommand:
         # Either returns 0 (success) or a small int — should not crash.
         assert rc in (0, 1)
 
+    def test_unsupported_source_error_is_short(self, run_cli, config, capsys):
+        # Issue #233: one short error pointing at `memanga sources`, not
+        # every supported domain.
+        config.set("manga", [{
+            "title": "Lost", "source": "unsupported-example.invalid",
+            "url": "https://unsupported-example.invalid/m",
+            "status": "reading",
+        }])
+        config.save()
+        capsys.readouterr()
+
+        assert run_cli("check", "--dry-run") == 1
+        err = capsys.readouterr().err
+        assert ("No scraper available for: unsupported-example.invalid. "
+                "Run 'memanga sources' to list supported sources.") in err
+        assert "Supported:" not in err
+        assert "mangadex.org" not in err
+        assert len(err) < 2000
+
     def _kindle_check(self, run_cli, config, monkeypatch, tmp_path, capsys,
                       output_format, *argv):
         """`check --download` in email mode with two new chapters; returns
@@ -2988,7 +3007,20 @@ class TestSearchCommand:
         rc = run_cli("search", "Blue Lock",
                      "--source", "not-a-real-source.example")
         assert rc == 1
-        assert "Unknown source" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "Unknown source" in err
+        assert "memanga sources" in err
+        assert "mangadex.org" not in err  # no supported-domain dump
+
+    def test_scraper_value_error_is_not_unknown_source(self, run_cli,
+                                                       monkeypatch, capsys):
+        # Issue #233: only a failed lookup means an unknown source.
+        def _broken(domain):
+            raise ValueError("bad scraper setup")
+        monkeypatch.setattr("memanga.cli.get_scraper", _broken)
+        with pytest.raises(ValueError, match="bad scraper setup"):
+            run_cli("search", "Blue Lock", "--source", "fake.test")
+        assert "Unknown source" not in capsys.readouterr().err
 
     def test_irrelevant_results_filtered(self, run_cli, fake_search_scraper,
                                          capsys):
