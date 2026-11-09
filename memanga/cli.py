@@ -4816,7 +4816,8 @@ Examples:
     p_search.add_argument("--limit", type=int, metavar="N", help="Cap results per source")
     p_search.add_argument("--add", type=int, metavar="N", help="Add result #N without prompting")
     p_search.add_argument("--status", choices=VALID_STATUSES, help="Status for the added manga (with --add or the prompt)")
-    p_search.add_argument("--no-chips", action="store_true", help="Skip chapter-count probes (faster)")
+    p_search.add_argument("--no-chips", action="store_true",
+                          help="Skip chapter counts: no chapter-list fetch per result, which can take several requests each (faster, less traffic)")
     p_search.set_defaults(func=cmd_search)
 
     # export

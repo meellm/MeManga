@@ -296,6 +296,10 @@ class SearchPage(BasePage):
         # the "—" once the scraper finishes get_chapters(). The worker
         # tags the probe's publish with the current seq so a slow
         # MangaFire chip from the previous query can't land here.
+        # Turned off in Settings → Network & Privacy (issue #405), the
+        # row keeps its hidden chip and no chapter list is fetched.
+        if not self.app.config.get("gui.search_chapter_counts", True):
+            return
         try:
             self.app.worker.count_chapters(data.get("source", ""),
                                              data.get("url", ""))

@@ -187,6 +187,15 @@ All notable changes are recorded here. Format loosely follows
   period; the `memanga` service for one-off commands is unchanged.
 
 ### Changed
+- #405 Chapter counts in search results can be turned off: **Show
+  chapter counts in search results** in **Settings → Advanced → Network
+  & Privacy** (`gui.search_chapter_counts` for `memanga config set`,
+  on by default; desktop app only). Each count loads the result's
+  chapter list from its source, which can take several requests (long
+  lists come in pages, and failed requests may be retried); the README
+  now says so, and the `memanga search --no-chips` help mentions it. The
+  app and `memanga search` now fetch at most 4 counts at a time instead
+  of 6, which is easier on slow connections.
 - #376 More neutral wording in help, command output and docs. Help text
   no longer cites issue numbers, source notes in `memanga sources` and
   the source lists describe the site instead of making size or speed

@@ -529,6 +529,11 @@ class TestCountChapters:
     glance.
     """
 
+    def test_pool_matches_cli_bound(self, worker):
+        # Issue #405: the app and `memanga search` share one bound.
+        from memanga.search import CHAPTER_COUNT_WORKERS
+        assert worker._count_pool._max_workers == CHAPTER_COUNT_WORKERS
+
     def test_publishes_event_with_count(self, event_bus, monkeypatch):
         from memanga.gui.workers import BackgroundWorker
         w = BackgroundWorker(event_bus)
