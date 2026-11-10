@@ -5,10 +5,42 @@ on:
     tags:
       - "v*"
 
+# Only the release job writes to the repository: it creates the release.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  notes:
+    # Issue #285: a tag whose version has no CHANGELOG.md section fails
+    # here, in seconds, before the tests, the audit and the release builds
+    # start. The release job writes the same section as the release text.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check the release notes in CHANGELOG.md
+        run: python3 scripts/release_notes.py "${{ github.ref_name }}" > /dev/null
+
+  tests:
+    # Issue #317: the routine CI of the tag's tree, the full suite on Linux
+    # and the core tests on the other Python versions, Windows and macOS.
+    # It runs while the release legs build; nothing is published unless it
+    # passes.
+    needs: notes
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  audit:
+    # Issue #385: no release with a known vulnerability in its locks.
+    needs: notes
+    uses: ./.github/workflows/dependency-audit.yml
+    permissions:
+      contents: read
+
   locks:
     # Issue #316: the release builds only when every lock of this tag is
     # exactly what its pyproject.toml generates, rows, markers and hashes
@@ -17,6 +49,7 @@ jobs:
     # installed from its hashed wheel (the manylinux x86_64 one for
     # ubuntu-latest; it changes with UV_VERSION in
     # scripts/lock_dependencies.py) and stays out of the build environment.
+    needs: notes
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -564,9 +597,20 @@ jobs:
         run: security delete-keychain "$RUNNER_TEMP/memanga-signing.keychain-db" || true
 
   release:
-    needs: build
+    needs: [build, tests, audit]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Release notes from CHANGELOG.md
+        # Issue #285: the release body is the tag's CHANGELOG.md section;
+        # GitHub's list of merged pull requests follows it. A tag without a
+        # section fails here, before anything is published.
+        run: python3 scripts/release_notes.py "${{ github.ref_name }}" --output "$RUNNER_TEMP/release-notes.md"
+
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
@@ -581,5 +625,6 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          body_path: ${{ runner.temp }}/release-notes.md
           generate_release_notes: true
           files: release/*

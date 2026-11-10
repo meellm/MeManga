@@ -7,6 +7,31 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #255 Pushes and pull requests to `main` run CI: a lint for syntax
+  errors and undefined names, a check that the sdist and wheel build,
+  pass `twine check` and start, the whole test suite on Linux with
+  Python 3.12 in four parallel parts, and the non-GUI unit tests on
+  Python 3.10 and 3.13 and on Windows; macOS runs them on pushes to
+  `main` and releases. The live scraper probes run weekly and upload
+  `health.json`.
+- Part of #317: a tag's GitHub Release, with the desktop downloads, is
+  created only when that CI and the dependency check below pass on the
+  tag; the release builds run alongside them. The Docker image is not
+  gated yet: its own workflow still builds and publishes it for every
+  tag, whatever the tests show, until this is coordinated with the
+  Docker workflow changes in #477.
+- Part of #285: the GitHub Release text is the version's section of
+  this changelog, followed by GitHub's list of merged pull requests. A
+  tag whose version has no section here fails within seconds, before
+  the tests and release builds start. Publishing to PyPI and syncing the
+  `cli` branch are not automated yet.
+- Part of #385: the pinned dependencies in `requirements/` are checked
+  against known vulnerabilities when they change, weekly and before
+  every GitHub Release; a known vulnerability fails the check unless it
+  is listed with a reason in `.github/osv-scanner.toml`. This covers the
+  Python packages of the Docker image too, not its operating system
+  packages, which are not scanned yet. Dependabot proposes updates of the
+  GitHub Actions the workflows use.
 - #217 `memanga setup` prepares a first run after `pip install`, which
   itself still sets nothing up. It creates `config.yaml` with the default
   settings when there is none (an existing file is never changed) and

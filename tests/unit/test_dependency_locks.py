@@ -156,8 +156,9 @@ def test_every_package_with_its_own_time_is_locked(locks):
 def _workflow_runs(name):
     data = yaml.safe_load((ROOT / ".github" / "workflows" / name).read_text(
         encoding="utf-8"))
+    # A job that calls another workflow has no steps of its own.
     return [step.get("run", "") for job in data["jobs"].values()
-            for step in job["steps"]]
+            for step in job.get("steps", [])]
 
 
 RELEASE_INSTALL = ("python -m pip install --require-hashes --only-binary :all: "

@@ -1,0 +1,14 @@
+# Update pull requests for the GitHub Actions the workflows use (issue
+# #385). Python packages are not listed: requirements/*.txt are generated
+# by scripts/lock_dependencies.py from pyproject.toml, which Dependabot
+# cannot do; the dependency audit reports advisories against them.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

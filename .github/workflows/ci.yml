@@ -1,0 +1,200 @@
+name: CI
+
+# Routine checks for pushes and pull requests to main (issue #255). The
+# release workflow calls this workflow too, so a tag is only published
+# when the same checks pass on its tree (issue #317).
+#
+# The full default suite (everything but the `live`/`health` probes) runs
+# once, on the release platform (Linux, Python 3.12), split into four
+# path shards that each run in parallel with pytest-xdist. The other
+# Python versions and operating systems run the non-GUI unit tests, which
+# is where version and platform differences show up, instead of the whole
+# suite on every cell. macOS runners are the most expensive and the
+# scarcest, so macOS runs on pushes to main, manual runs and releases,
+# not on every pull request update.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# bash -e on every runner, so a failed command fails its step on Windows
+# too.
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    # Only the rules that mean the code cannot run: syntax errors, invalid
+    # comparisons and statements, undefined names. Ruff comes from its
+    # hashed wheel (the manylinux x86_64 one for ubuntu-latest).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Ruff
+        run: |
+          echo "ruff==0.17.4 --hash=sha256:2cd025509b2e15721b426fc70fd946d71f43b3db3b08e946dfec2d696d911690" > "$RUNNER_TEMP/ruff.txt"
+          python -m pip install --require-hashes --only-binary :all: -r "$RUNNER_TEMP/ruff.txt"
+          ruff check --select E9,F63,F7,F82 --target-version py310 --output-format github .
+
+  package:
+    # The sdist and wheel build and pass twine's metadata check, and the
+    # wheel installs over the pinned CLI dependencies and starts.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        # The console scripts, not `python -m build`: from the checkout
+        # `python -m` finds the repository's own build.py (the desktop dev
+        # build) before the build package.
+        run: |
+          python -m pip install "build==1.6.1" "twine==7.0.0"
+          pyproject-build --outdir dist .
+          shopt -s nullglob
+          sdists=(dist/memanga-*.tar.gz)
+          wheels=(dist/memanga-*-py3-none-any.whl)
+          if [ "${#sdists[@]}" -ne 1 ] || [ "${#wheels[@]}" -ne 1 ]; then
+            echo "::error::Expected one memanga sdist and one wheel in dist/"
+            ls -la dist || true
+            exit 1
+          fi
+          twine check --strict dist/*
+      - name: Install the wheel into a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-env"
+          env_python="$RUNNER_TEMP/wheel-env/bin/python"
+          "$env_python" -m pip install --require-hashes -r requirements/cli.txt
+          "$env_python" -m pip install --no-deps dist/memanga-*-py3-none-any.whl
+          "$env_python" -m pip check
+          "$RUNNER_TEMP/wheel-env/bin/memanga" --help
+
+  tests:
+    # Every test file runs in exactly one shard (checked by
+    # tests/unit/test_ci_workflows.py). The GUI and integration tests
+    # spend most of their time building the main window for each test, so
+    # those shards hand out single tests (worksteal) instead of whole
+    # files: with whole files, the largest file alone sets the shard's
+    # time. The fast unit and mocked scraper tests keep one file per
+    # worker.
+    name: tests (${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: core
+            dist: loadfile
+            paths: tests/unit --ignore=tests/unit/gui tests/scrapers
+          - shard: gui-pages
+            dist: worksteal
+            paths: tests/unit/gui/pages
+          - shard: gui
+            dist: worksteal
+            paths: tests/unit/gui --ignore=tests/unit/gui/pages
+          - shard: integration
+            dist: worksteal
+            paths: tests/integration
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+      - name: Install Linux system libraries for Qt
+        # The libraries Qt needs on the bare runner, as in the release
+        # workflow; the tests use Qt's offscreen platform.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-util1 \
+            libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0 \
+            libegl1 libgl1 libfontconfig1 libdbus-1-3
+      - name: Install dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements/dev.txt
+          python -m pip install --no-deps -e .
+      - name: Run tests
+        run: python -m pytest -n auto --dist ${{ matrix.dist }} ${{ matrix.paths }}
+
+  compat:
+    # The non-GUI unit tests on the oldest and newest supported Python
+    # and on Windows.
+    name: core tests (${{ matrix.os }}, ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+      - name: Install Linux system libraries for Qt
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+            libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-shape0 libxcb-sync1 libxcb-util1 \
+            libxcb-xfixes0 libxcb-xkb1 libxkbcommon-x11-0 \
+            libegl1 libgl1 libfontconfig1 libdbus-1-3
+      - name: Install dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements/dev.txt
+          python -m pip install --no-deps -e .
+      - name: Run tests
+        run: python -m pytest -n auto --dist loadfile tests/unit --ignore=tests/unit/gui
+
+  compat-macos:
+    # The same tests on macOS (Apple Silicon), skipped for pull requests.
+    name: core tests (macos-latest, 3.12)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements/dev.txt
+          python -m pip install --no-deps -e .
+      - name: Run tests
+        run: python -m pytest -n auto --dist loadfile tests/unit --ignore=tests/unit/gui

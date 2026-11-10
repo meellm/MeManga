@@ -1,0 +1,60 @@
+name: Dependency audit
+
+# Known vulnerabilities in the pinned dependencies (issue #385). Every
+# package any install uses is a row of requirements/*.txt, for every
+# platform: the CLI and the Docker image's Python packages (cli.txt), the
+# desktop app (gui.txt), the test tools (dev.txt) and the release builds
+# (build.txt). OSV-Scanner checks them against the OSV database, which
+# includes the PyPI and GitHub advisories, and fails on any known
+# vulnerability. An advisory that does not apply is listed with its reason
+# in .github/osv-scanner.toml.
+#
+# It runs when the dependencies change, every week for advisories
+# published since, by hand, and before every release.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "requirements/**"
+      - "pyproject.toml"
+      - ".github/osv-scanner.toml"
+      - ".github/workflows/dependency-audit.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "requirements/**"
+      - "pyproject.toml"
+      - ".github/osv-scanner.toml"
+      - ".github/workflows/dependency-audit.yml"
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  osv-scanner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install OSV-Scanner
+        # The release binary, checked against its published SHA-256.
+        shell: bash
+        run: |
+          url="https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/osv-scanner" "$url"
+          echo "fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8  $RUNNER_TEMP/osv-scanner" | sha256sum --check --strict
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+      - name: Scan the dependency locks
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/osv-scanner" scan source \
+            --config=.github/osv-scanner.toml \
+            --lockfile=requirements.txt:requirements/cli.txt \
+            --lockfile=requirements.txt:requirements/gui.txt \
+            --lockfile=requirements.txt:requirements/dev.txt \
+            --lockfile=requirements.txt:requirements/build.txt

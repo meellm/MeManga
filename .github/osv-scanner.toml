@@ -1,0 +1,9 @@
+# Advisories the dependency audit (.github/workflows/dependency-audit.yml)
+# does not fail on. Prefer updating the package; list an advisory here
+# only when it does not affect MeManga, with the reason, and an expiry
+# date when a fix is expected:
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"
+# effectiveUntil = 2027-01-31
+# reason = "Only affects the server side of the package, which MeManga does not use."
