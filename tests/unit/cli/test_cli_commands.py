@@ -5992,18 +5992,21 @@ class TestStdinIsTty:
     Windows the NUL device a scheduled task gets also reports isatty()."""
 
     class _Stdin:
-        def __init__(self, tty):
+        def __init__(self, tty, has_fd=True):
             self._tty = tty
+            self._has_fd = has_fd
 
         def isatty(self):
             return self._tty
 
         def fileno(self):
+            if not self._has_fd:
+                raise io.UnsupportedOperation("fileno")
             return 0
 
-    def _check(self, monkeypatch, *, tty, platform, console=None):
+    def _check(self, monkeypatch, *, tty, platform, console=None, has_fd=True):
         from memanga import cli
-        monkeypatch.setattr(sys, "stdin", self._Stdin(tty))
+        monkeypatch.setattr(sys, "stdin", self._Stdin(tty, has_fd))
         monkeypatch.setattr(sys, "platform", platform)
 
         def is_console(fd):
@@ -6023,6 +6026,12 @@ class TestStdinIsTty:
     def test_windows_console_is_interactive(self, monkeypatch):
         assert self._check(monkeypatch, tty=True, platform="win32",
                            console=True) is True
+
+    def test_windows_terminal_without_descriptor_is_interactive(self, monkeypatch):
+        # An IDE's shell (or the scripted stdin of these tests) has no OS
+        # handle, so it cannot be the NUL device; no console check runs.
+        assert self._check(monkeypatch, tty=True, platform="win32",
+                           has_fd=False) is True
 
     def test_windows_console_check_error_is_not_interactive(self, monkeypatch):
         assert self._check(monkeypatch, tty=True, platform="win32",
