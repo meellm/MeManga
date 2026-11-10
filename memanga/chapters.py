@@ -38,7 +38,8 @@ def chapter_number(label: Any) -> Optional[float]:
     match = CHAPTER_NUMBER_RE.search(str(label))
     if not match:
         return None
-    return float(match.group(1))
+    value = float(match.group(1))
+    return value if math.isfinite(value) else None
 
 
 def chapter_value(label: Any) -> Optional[float]:
@@ -53,7 +54,8 @@ def chapter_value(label: Any) -> Optional[float]:
         return value if math.isfinite(value) else None
     text = str(label)
     if PLAIN_NUMBER_RE.fullmatch(text):
-        return float(text)
+        value = float(text)
+        return value if math.isfinite(value) else None
     return chapter_number(text)
 
 
