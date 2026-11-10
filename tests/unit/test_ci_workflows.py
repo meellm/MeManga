@@ -154,6 +154,20 @@ def test_test_jobs_install_the_hashed_dev_lock(ci):
         assert "python -m pip install --no-deps -e ." in runs
 
 
+def test_package_mirror_stall_fails_fast(ci):
+    # A stalled Ubuntu mirror held a test shard in apt-get until the job
+    # timeout; every apt step now has its own short timeout and retries.
+    steps = [s for job in ci["jobs"].values() for s in job.get("steps", [])
+             if "apt-get" in s.get("run", "")]
+    assert steps
+    for step in steps:
+        assert step["timeout-minutes"] <= 10, step["name"]
+        assert "Acquire::http::Timeout=" in step["run"], step["name"]
+        for line in step["run"].splitlines():
+            if "apt-get" in line:
+                assert "$apt_options" in line, line
+
+
 def test_lint_installs_ruff_from_its_hashed_wheel(ci):
     (run,) = [r for r in _runs(ci["jobs"]["lint"]) if "ruff" in r]
     assert re.search(r'"ruff==[\d.]+ --hash=sha256:[0-9a-f]{64}"', run)

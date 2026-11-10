@@ -50,7 +50,7 @@ jobs:
         run: |
           echo "ruff==0.17.4 --hash=sha256:2cd025509b2e15721b426fc70fd946d71f43b3db3b08e946dfec2d696d911690" > "$RUNNER_TEMP/ruff.txt"
           python -m pip install --require-hashes --only-binary :all: -r "$RUNNER_TEMP/ruff.txt"
-          ruff check --select E9,F63,F7,F82 --target-version py310 --output-format github .
+          ruff check --select E9,F63,F7,F82 --target-version py311 --output-format github .
 
   package:
     # The sdist and wheel build and pass twine's metadata check, and the
@@ -123,10 +123,14 @@ jobs:
           cache-dependency-path: requirements/dev.txt
       - name: Install Linux system libraries for Qt
         # The libraries Qt needs on the bare runner, as in the release
-        # workflow; the tests use Qt's offscreen platform.
+        # workflow; the tests use Qt's offscreen platform. A stalled
+        # package mirror fails the step in minutes instead of holding the
+        # job until its timeout.
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt_options="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          sudo apt-get $apt_options update
+          sudo apt-get $apt_options install -y \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-sync1 libxcb-util1 \
@@ -150,7 +154,7 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            python: "3.10"
+            python: "3.11"
           - os: ubuntu-latest
             python: "3.13"
           - os: windows-latest
@@ -164,9 +168,11 @@ jobs:
           cache-dependency-path: requirements/dev.txt
       - name: Install Linux system libraries for Qt
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt_options="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          sudo apt-get $apt_options update
+          sudo apt-get $apt_options install -y \
             libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
             libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
             libxcb-shape0 libxcb-sync1 libxcb-util1 \

@@ -11,7 +11,7 @@ All notable changes are recorded here. Format loosely follows
   errors and undefined names, a check that the sdist and wheel build,
   pass `twine check` and start, the whole test suite on Linux with
   Python 3.12 in four parallel parts, and the non-GUI unit tests on
-  Python 3.10 and 3.13 and on Windows; macOS runs them on pushes to
+  Python 3.11 and 3.13 and on Windows; macOS runs them on pushes to
   `main` and releases. The live scraper probes run weekly and upload
   `health.json`.
 - Part of #317: a tag's GitHub Release, with the desktop downloads, is
@@ -453,7 +453,21 @@ All notable changes are recorded here. Format loosely follows
   `DeprecationWarning`, and is no longer collected by pytest when a test
   module imports it.
 
+### Removed
+- Python 3.10 is no longer supported: MeManga needs Python 3.11 or
+  newer. Python 3.10 reached its end of life in October 2026, and the
+  Pillow releases that fix its known vulnerabilities need Python 3.11
+  (#385). Installing on Python 3.10 now stops with pip's
+  `requires-python` error.
+
 ### Fixed
+- On Windows, `memanga` run without a console (a scheduled task, or
+  stdin from `NUL`) no longer opens the interactive menu and fails with
+  an `EOFError` traceback; it exits with an error, as on Linux and
+  macOS.
+- The license texts in the Windows release download are the exact,
+  unmodified files again; the Windows build's checkout converted their
+  line endings.
 - #233 An unsupported source is reported in one short line that points
   to `memanga sources`, instead of listing every supported domain
   (`check`, downloads and the logs). A scraper that fails with a parse
@@ -741,6 +755,11 @@ All notable changes are recorded here. Format loosely follows
   1 when the manga is not found (they used to exit 0), and `check` exits
   1 when no manga could be checked. Errors and warnings are written to
   stderr so stdout only carries results.
+
+### Security
+- #385 Pillow 13.0.0, certifi 2026.10.23 and soupsieve 3.0.4 (2.10 on
+  Python 3.11.0 to 3.11.4) replace releases with known vulnerabilities
+  in every pinned install, the Docker image and the release downloads.
 
 ## [0.4.4] - 2026-10-03
 

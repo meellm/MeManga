@@ -267,12 +267,18 @@ class TestAppPasswordStorage:
         assert "MEMANGA_SMTP_PASSWORD" in caplog.text
         assert "file-pw" not in caplog.text and "env-pw" not in caplog.text
 
-    @pytest.mark.parametrize("file_name", [
-        "smtp\x00password",                      # open() raises ValueError
-        "~memanga-no-such-user-247\x00/pw",      # expanduser() raises ValueError
+    @pytest.mark.parametrize("file_name, reason", [
+        # open() raises ValueError
+        ("smtp\x00password", "not a valid file path"),
+        # POSIX: the user lookup in expanduser() raises ValueError. Windows
+        # resolves no other user's "~name" at all (RuntimeError).
+        ("~memanga-no-such-user-247\x00/pw",
+         "cannot resolve the home folder" if sys.platform == "win32"
+         else "not a valid file path"),
     ])
     def test_nul_in_password_file_path_fails_safe(self, config, keyring_store,
-                                                  monkeypatch, caplog, file_name):
+                                                  monkeypatch, caplog, file_name,
+                                                  reason):
         # A NUL must not escape get_app_password, wherever it is caught.
         # The OS environment cannot hold a NUL, so the value is injected
         # through a mapping, and config's os.environ is replaced by a
@@ -285,7 +291,7 @@ class TestAppPasswordStorage:
             config_mod.app_password_override(environ)
         message = str(excinfo.value)
         assert "MEMANGA_SMTP_PASSWORD_FILE" in message
-        assert "not a valid file path" in message
+        assert reason in message
         monkeypatch.setattr(config_mod.os, "environ",
                             dict(config_mod.os.environ, **environ))
         with caplog.at_level("WARNING", logger="memanga.config"):

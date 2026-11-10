@@ -13,7 +13,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "meellm"}]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 keywords = [
     "manga",
     "manga-downloader",
@@ -34,7 +34,6 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -115,15 +114,18 @@ memanga-gui = "memanga.gui:launch_gui"
 [tool.lock-dependencies]
 resolve-at = "2026-05-25T08:00:00Z"
 
-# Packages read from a later PyPI: the urllib3 security floor, the Linux
-# keyring backend of the Docker image, and the test and build tools with
-# their own dependencies.
+# Packages read from a later PyPI: the urllib3 security floor, the
+# certifi, Pillow and soupsieve releases with fixes for known
+# vulnerabilities (#385), the Linux keyring backend of the Docker image,
+# and the test and build tools with their own dependencies.
 [tool.lock-dependencies.resolve-package-at]
+certifi = "2026-11-02T00:00:00Z"
 cffi = "2026-11-02T00:00:00Z"
 coverage = "2026-11-02T00:00:00Z"
 cryptography = "2026-11-02T00:00:00Z"
 importlib-metadata = "2026-11-02T00:00:00Z"
 iniconfig = "2026-11-02T00:00:00Z"
+pillow = "2026-11-02T00:00:00Z"
 pluggy = "2026-11-02T00:00:00Z"
 pycparser = "2026-11-02T00:00:00Z"
 pyinstaller = "2026-11-02T00:00:00Z"
@@ -133,7 +135,7 @@ pytest-env = "2026-11-02T00:00:00Z"
 pytest-mock = "2026-11-02T00:00:00Z"
 python-dotenv = "2026-11-02T00:00:00Z"
 setuptools = "2026-11-02T00:00:00Z"
-tomli = "2026-11-02T00:00:00Z"
+soupsieve = "2026-11-02T00:00:00Z"
 urllib3 = "2026-11-02T00:00:00Z"
 zipp = "2026-11-02T00:00:00Z"
 

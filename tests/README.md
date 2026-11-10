@@ -109,7 +109,7 @@ pytest -n auto --dist worksteal tests/integration
 
 Most GUI and integration tests build the main window, which is what
 makes them slow, so those parts hand out single tests to the workers
-rather than whole files. The non-GUI unit tests also run on Python 3.10
+rather than whole files. The non-GUI unit tests also run on Python 3.11
 and 3.13, on Windows and, except for pull requests, on macOS. Every test
 file must run in exactly one part (`tests/unit/test_ci_workflows.py`
 checks this). The live probes run weekly in

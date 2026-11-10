@@ -8,7 +8,7 @@ setlocal
 
 where python >nul 2>nul
 if %errorlevel% neq 0 (
-    echo Error: Python not found. Please install Python 3.10+ from python.org
+    echo Error: Python not found. Please install Python 3.11+ from python.org
     exit /b 1
 )
 

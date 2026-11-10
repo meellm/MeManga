@@ -279,7 +279,13 @@ def theme(qapp, fresh_settings):
     default dark theme. Returns the module so tests can call
     `theme.set_theme()`, `theme.tokens()` etc."""
     from memanga.gui import theme as T
-    T._current = None
+    # Not None, which would read the persisted theme: Qt fixes the
+    # QSettings location the first time a process uses it, so a theme an
+    # earlier test on the same worker saved would leak in.
+    T._current = T.DEFAULT_THEME
+    # The legacy colour constants (T.BG, T.ACCENT, ...) follow the active
+    # theme only through a theme switch; repoint them too.
+    T._refresh_legacy_constants()
     T.apply(qapp)
     return T
 

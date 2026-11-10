@@ -192,6 +192,9 @@ class TestSourceCheckoutCronLine:
             ">>", "/data/.config/memanga/memanga.log", "2>&1",
         ]
 
+    @pytest.mark.skipif(sys.platform == "win32",
+                        reason="crontab lines run under /bin/sh; Windows "
+                               "schedules through Task Scheduler")
     def test_generated_command_imports_memanga_from_other_cwd(self, tmp_path):
         """Execute the generated shell command (check swapped for --help)
         from an unrelated cwd with a clean env: memanga must import and the

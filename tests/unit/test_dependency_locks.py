@@ -20,7 +20,7 @@ SCRIPT = ROOT / "scripts" / "lock_dependencies.py"
 TARGETS = ("cli", "gui", "dev", "build")
 # The platforms and Python versions the locks must agree on: the Docker
 # image (Linux 3.12), the release legs (3.12) and the source docs check
-# (Linux 3.10).
+# (Linux 3.11).
 ENVIRONMENTS = [
     {"sys_platform": plat, "platform_system": system, "os_name": os_name,
      "python_version": version, "python_full_version": f"{version}.0",
@@ -29,7 +29,7 @@ ENVIRONMENTS = [
     for plat, system, os_name in (("linux", "Linux", "posix"),
                                   ("win32", "Windows", "nt"),
                                   ("darwin", "Darwin", "posix"))
-    for version in ("3.10", "3.12")
+    for version in ("3.11", "3.12")
 ]
 
 
@@ -134,8 +134,8 @@ def test_shared_packages_have_one_version_across_locks(env):
 
 
 def test_lock_python_floor_is_requires_python(locks, project):
-    assert project["requires-python"] == ">=3.10"
-    assert locks.python_floor(project) == "3.10"
+    assert project["requires-python"] == ">=3.11"
+    assert locks.python_floor(project) == "3.11"
 
 
 def test_lock_policy_times_are_utc(locks):

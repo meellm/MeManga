@@ -529,7 +529,8 @@ def _cron_entry_sane(line: str) -> bool:
     if "memanga check" not in fields[5] and not _runs_check(tokens):
         return False
     interpreter = _find_interpreter(tokens)
-    if interpreter and os.sep in interpreter:
+    # Crontab lines hold POSIX paths, whatever os.sep is here.
+    if interpreter and "/" in interpreter:
         return Path(interpreter).exists()
     return True
 

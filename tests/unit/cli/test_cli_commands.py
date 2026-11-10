@@ -3082,6 +3082,13 @@ def _capture_crontab(monkeypatch, existing=None, write_rc=0):
 _THIS_CHECKOUT = object()
 
 
+def _posix(path):
+    """A path as the crontab line holds it: POSIX, also when the line is
+    built on Windows (build_cron_line uses as_posix)."""
+    from pathlib import Path
+    return Path(path).as_posix()
+
+
 def _expected_cron_line(config_dir=None, runtime_dir=None,
                         source_root=_THIS_CHECKOUT):
     """The managed line: sys.executable logging to the config root (#232),
@@ -3169,13 +3176,13 @@ class TestCronCommand:
 
         line, = [l for l in submitted["crontab"].splitlines() if l]
         assert line == _expected_cron_line(root, source_root=None)
-        assert str(site) not in line
-        assert str(site / "venv") not in line
+        assert _posix(site) not in line
+        assert _posix(site / "venv") not in line
         command = shlex.split(line.split("* * * ", 1)[1], comments=True)
-        assert command[:2] == ["cd", str(root)]
+        assert command[:2] == ["cd", _posix(root)]
         assert command[3:9] == [python, "-m", "memanga",
-                                "--config-dir", str(root), "check"]
-        assert command[-3:] == [">>", str(root / "memanga.log"), "2>&1"]
+                                "--config-dir", _posix(root), "check"]
+        assert command[-3:] == [">>", _posix(root / "memanga.log"), "2>&1"]
 
     def test_cron_install_windows_uses_running_interpreter(
             self, isolated_home, monkeypatch, tmp_path):
@@ -3233,10 +3240,10 @@ class TestCronCommand:
         line, = [l for l in submitted["crontab"].splitlines() if l]
         assert line == _expected_cron_line(root, source_root=checkout)
         command = shlex.split(line.split("* * * ", 1)[1], comments=True)
-        assert command[:3] == ["cd", str(checkout), "&&"]
-        assert command[3:9] == [python, "-m", "memanga",
-                                "--config-dir", str(root), "check"]
-        assert command[-3:] == [">>", str(root / "memanga.log"), "2>&1"]
+        assert command[:3] == ["cd", _posix(checkout), "&&"]
+        assert command[3:9] == [_posix(python), "-m", "memanga",
+                                "--config-dir", _posix(root), "check"]
+        assert command[-3:] == [">>", _posix(root / "memanga.log"), "2>&1"]
 
     def test_cron_install_windows_source_checkout_changes_dir(
             self, isolated_home, monkeypatch, tmp_path):
@@ -4022,7 +4029,7 @@ class TestConfigDir:
         line, = [l for l in submitted["crontab"].splitlines() if l]
         command = shlex.split(line.split("* * * ", 1)[1])
         i = command.index("memanga")
-        assert command[i + 1:i + 4] == ["--config-dir", str(root), "check"]
+        assert command[i + 1:i + 4] == ["--config-dir", _posix(root), "check"]
 
 
 class TestFailedJson:
@@ -5980,6 +5987,55 @@ class TestNonInteractive:
             assert "error:" in proc.stderr, argv
 
 
+class TestStdinIsTty:
+    """#258: only a stdin someone can type into counts as interactive. On
+    Windows the NUL device a scheduled task gets also reports isatty()."""
+
+    class _Stdin:
+        def __init__(self, tty):
+            self._tty = tty
+
+        def isatty(self):
+            return self._tty
+
+        def fileno(self):
+            return 0
+
+    def _check(self, monkeypatch, *, tty, platform, console=None):
+        from memanga import cli
+        monkeypatch.setattr(sys, "stdin", self._Stdin(tty))
+        monkeypatch.setattr(sys, "platform", platform)
+
+        def is_console(fd):
+            if isinstance(console, Exception):
+                raise console
+            if console is None:
+                pytest.fail("the console check runs only on Windows")
+            return console
+
+        monkeypatch.setattr(cli, "_is_windows_console", is_console)
+        return cli._stdin_is_tty()
+
+    def test_windows_nul_device_is_not_interactive(self, monkeypatch):
+        assert self._check(monkeypatch, tty=True, platform="win32",
+                           console=False) is False
+
+    def test_windows_console_is_interactive(self, monkeypatch):
+        assert self._check(monkeypatch, tty=True, platform="win32",
+                           console=True) is True
+
+    def test_windows_console_check_error_is_not_interactive(self, monkeypatch):
+        assert self._check(monkeypatch, tty=True, platform="win32",
+                           console=OSError("bad handle")) is False
+
+    def test_posix_terminal_is_interactive(self, monkeypatch):
+        assert self._check(monkeypatch, tty=True, platform="linux") is True
+
+    @pytest.mark.parametrize("platform", ["linux", "win32"])
+    def test_redirected_stdin_is_not_interactive(self, monkeypatch, platform):
+        assert self._check(monkeypatch, tty=False, platform=platform) is False
+
+
 class TestInteractiveStillPrompts:
     """A real terminal keeps the confirmation flows (#258)."""
 
@@ -6179,7 +6235,7 @@ class TestExitCodes:
     def test_console_script_targets_wrapped_main(self):
         # Issue #234: the installed `memanga` script must enter through
         # main(), which owns the Ctrl-C handling, not _main().
-        # Plain-text parse: tomllib is stdlib only on 3.11+ and we support 3.10.
+        # Plain-text parse of the [project.scripts] table.
         import re
         from pathlib import Path
 
@@ -8050,7 +8106,14 @@ class TestConfigDirLock:
 
     @staticmethod
     def _dir_files(root):
-        return sorted((p.name, p.read_bytes()) for p in root.iterdir()
+        def content(path):
+            try:
+                return path.read_bytes()
+            except PermissionError:
+                # Windows enforces msvcrt locks: the held memanga.lock
+                # cannot be read, so it is compared by size.
+                return ("locked", path.stat().st_size)
+        return sorted((p.name, content(p)) for p in root.iterdir()
                       if p.is_file())
 
     @pytest.mark.parametrize("argv", [

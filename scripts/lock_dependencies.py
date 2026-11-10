@@ -57,10 +57,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # Python 3.10
-    import tomli as tomllib
+import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK_DIR = "requirements"
@@ -149,7 +146,7 @@ def target_requirements(project: dict, extras) -> list[str]:
 def python_floor(project: dict) -> str:
     match = re.fullmatch(r">=\s*(\d+\.\d+)", project["requires-python"].strip())
     if not match:
-        raise SystemExit("requires-python must be a plain floor such as >=3.10, "
+        raise SystemExit("requires-python must be a plain floor such as >=3.11, "
                          f"got {project['requires-python']!r}")
     return match.group(1)
 
