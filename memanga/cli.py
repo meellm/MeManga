@@ -183,11 +183,35 @@ def _stdin_is_tty() -> bool:
 
     Cron, pipes and CI run with stdin closed or redirected; prompting
     there either blocks or dies with EOFError, so callers must bail.
+    On Windows isatty() is also true for the NUL device (Task Scheduler,
+    `< NUL`), so a stdin backed by a file descriptor must be a console
+    there too. A stdin without one (an IDE's shell) cannot be the NUL
+    device; its isatty() answer stands, as on other systems.
     """
     try:
-        return sys.stdin is not None and sys.stdin.isatty()
-    except (AttributeError, ValueError):
+        if sys.stdin is None or not sys.stdin.isatty():
+            return False
+        if sys.platform == "win32":
+            try:
+                fd = sys.stdin.fileno()
+            except (AttributeError, ValueError, OSError):
+                return True
+            return _is_windows_console(fd)
+        return True
+    except (AttributeError, ValueError, OSError):
         return False
+
+
+def _is_windows_console(fd: int) -> bool:
+    """True when ``fd`` is a Windows console; only a console handle has
+    a console mode."""
+    import ctypes
+    import msvcrt
+
+    mode = ctypes.c_ulong()
+    handle = msvcrt.get_osfhandle(fd)
+    return bool(ctypes.windll.kernel32.GetConsoleMode(
+        ctypes.c_void_p(handle), ctypes.byref(mode)))
 
 
 def _non_interactive_error(message: str) -> int:

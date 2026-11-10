@@ -1,0 +1,3 @@
+# License texts are shipped verbatim (issue #380): no line-ending
+# conversion on checkout, also on Windows.
+packaging/licenses/** -text

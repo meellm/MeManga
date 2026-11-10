@@ -46,7 +46,7 @@ them to your Kindle.
 
 ### Requirements
 
-- Python 3.10+ — download from [python.org](https://www.python.org/downloads/)
+- Python 3.11+ — download from [python.org](https://www.python.org/downloads/)
   - During installation, **check "Add Python to PATH"**
 - Git — download from [git-scm.com](https://git-scm.com/download/win)
 
@@ -118,7 +118,7 @@ download to `Downloads\MeManga` in your user folder by default.
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.11+
 - Git (comes preinstalled on macOS)
 
 Install Python via Homebrew:
@@ -184,7 +184,7 @@ Chapters download to `~/Downloads/MeManga` by default.
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.11+
 - Git
 - pip and venv
 
@@ -265,7 +265,7 @@ instead. Chapters download to `~/Downloads/MeManga` by default.
 
 ## Setup — pip install
 
-Any platform with Python 3.10+ can install the package with pip, best
+Any platform with Python 3.11+ can install the package with pip, best
 into a virtual environment:
 
 ```bash

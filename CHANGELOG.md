@@ -7,6 +7,31 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #255 Pushes and pull requests to `main` run CI: a lint for syntax
+  errors and undefined names, a check that the sdist and wheel build,
+  pass `twine check` and start, the whole test suite on Linux with
+  Python 3.12 in four parallel parts, and the non-GUI unit tests on
+  Python 3.11 and 3.13 and on Windows; macOS runs them on pushes to
+  `main` and releases. The live scraper probes run weekly and upload
+  `health.json`.
+- Part of #317: a tag's GitHub Release, with the desktop downloads, is
+  created only when that CI and the dependency check below pass on the
+  tag; the release builds run alongside them. The Docker image is not
+  gated yet: its own workflow still builds and publishes it for every
+  tag, whatever the tests show, until this is coordinated with the
+  Docker workflow changes in #477.
+- Part of #285: the GitHub Release text is the version's section of
+  this changelog, followed by GitHub's list of merged pull requests. A
+  tag whose version has no section here fails within seconds, before
+  the tests and release builds start. Publishing to PyPI and syncing the
+  `cli` branch are not automated yet.
+- Part of #385: the pinned dependencies in `requirements/` are checked
+  against known vulnerabilities when they change, weekly and before
+  every GitHub Release; a known vulnerability fails the check unless it
+  is listed with a reason in `.github/osv-scanner.toml`. This covers the
+  Python packages of the Docker image too, not its operating system
+  packages, which are not scanned yet. Dependabot proposes updates of the
+  GitHub Actions the workflows use.
 - #217 `memanga setup` prepares a first run after `pip install`, which
   itself still sets nothing up. It creates `config.yaml` with the default
   settings when there is none (an existing file is never changed) and
@@ -428,7 +453,21 @@ All notable changes are recorded here. Format loosely follows
   `DeprecationWarning`, and is no longer collected by pytest when a test
   module imports it.
 
+### Removed
+- Python 3.10 is no longer supported: MeManga needs Python 3.11 or
+  newer. Python 3.10 reached its end of life in October 2026, and the
+  Pillow releases that fix its known vulnerabilities need Python 3.11
+  (#385). Installing on Python 3.10 now stops with pip's
+  `requires-python` error.
+
 ### Fixed
+- On Windows, `memanga` run without a console (a scheduled task, or
+  stdin from `NUL`) no longer opens the interactive menu and fails with
+  an `EOFError` traceback; it exits with an error, as on Linux and
+  macOS.
+- The license texts in the Windows release download are the exact,
+  unmodified files again; the Windows build's checkout converted their
+  line endings.
 - #233 An unsupported source is reported in one short line that points
   to `memanga sources`, instead of listing every supported domain
   (`check`, downloads and the logs). A scraper that fails with a parse
@@ -716,6 +755,11 @@ All notable changes are recorded here. Format loosely follows
   1 when the manga is not found (they used to exit 0), and `check` exits
   1 when no manga could be checked. Errors and warnings are written to
   stderr so stdout only carries results.
+
+### Security
+- #385 Pillow 13.0.0, certifi 2026.10.23 and soupsieve 3.0.4 (2.10 on
+  Python 3.11.0 to 3.11.4) replace releases with known vulnerabilities
+  in every pinned install, the Docker image and the release downloads.
 
 ## [0.4.4] - 2026-10-03
 

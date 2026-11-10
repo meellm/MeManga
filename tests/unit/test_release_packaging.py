@@ -38,9 +38,11 @@ import importlib.util
 import plistlib
 import stat
 import struct
+import sys
 import zipfile
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -65,6 +67,12 @@ def _load_macos_app():
 
 
 macos_app = _load_macos_app()
+
+# The executable bit these tests build and check is a POSIX permission;
+# Windows files have none. The archives they model are made on the Linux
+# and macOS release legs, where these tests run.
+needs_posix_modes = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX permission bits do not exist on Windows")
 
 
 def _fake_macho(arch: str) -> bytes:
@@ -242,6 +250,7 @@ def test_package_and_gate_precede_upload():
         f"steps out of order: package={pkg} gate={gate} upload={upload}"
 
 
+@needs_posix_modes
 def test_targz_roundtrip_preserves_executable_bit(tmp_path):
     """Mechanism check for issue #167: the format the workflow ships
     (`tar czf` / `tar xzf`) records the Unix mode inside the archive, so
@@ -343,6 +352,7 @@ def test_read_macho_arch_identifies_slices():
     assert macos_app.read_macho_arch(b"\x00\x00") is None
 
 
+@needs_posix_modes
 def test_build_app_bundle_layout(tmp_path):
     exe = tmp_path / "MeManga"
     exe.write_bytes(_fake_macho("arm64"))
@@ -406,6 +416,7 @@ def test_build_app_bundle_missing_resource_raises(tmp_path):
     raise AssertionError("expected FileNotFoundError for a missing resource")
 
 
+@needs_posix_modes
 def test_validate_require_resource_dir_and_zip(tmp_path):
     exe = tmp_path / "MeManga"
     exe.write_bytes(_fake_macho("x86_64"))
@@ -429,6 +440,7 @@ def test_validate_require_resource_dir_and_zip(tmp_path):
             "missing MeManga.app/Contents/Resources/THIRD_PARTY_NOTICES.txt"]
 
 
+@needs_posix_modes
 def test_macos_cli_resource_flags(tmp_path, capsys):
     exe = tmp_path / "MeManga"
     exe.write_bytes(_fake_macho("arm64"))
@@ -462,12 +474,14 @@ def _build_and_zip(tmp_path, arch="x86_64"):
     return app, zip_path
 
 
+@needs_posix_modes
 def test_validate_roundtrip_dir_and_zip(tmp_path):
     app, zip_path = _build_and_zip(tmp_path, "x86_64")
     assert macos_app.validate_app_bundle(app, expected_arch="x86_64") == []
     assert macos_app.validate_app_bundle(zip_path, expected_arch="x86_64") == []
 
 
+@needs_posix_modes
 def test_zip_preserves_executable_bit(tmp_path):
     """The exec bit must survive into the archive — its loss is the #163
     failure mode. Read it from the stored Unix mode, as macOS does."""
@@ -908,6 +922,7 @@ def test_has_code_signature_reads_first_fat_slice():
     assert macos_app.has_code_signature(fat)
 
 
+@needs_posix_modes
 def test_unsigned_bundle_fails_require_signed(tmp_path):
     """The exact v0.4.3 shape (no _CodeSignature, no ticket) must be
     rejected once signing is required — it passed the old gate."""
@@ -922,6 +937,7 @@ def test_unsigned_bundle_fails_require_signed(tmp_path):
         assert any("notarization ticket" in p for p in problems), problems
 
 
+@needs_posix_modes
 def test_signed_stapled_bundle_passes_dir_and_zip(tmp_path):
     app = _signed_app(tmp_path, "x86_64")
     zip_path = macos_app.zip_app_bundle(app, tmp_path / "signed.zip")
@@ -931,6 +947,7 @@ def test_signed_stapled_bundle_passes_dir_and_zip(tmp_path):
             require_signed=True, require_stapled=True) == []
 
 
+@needs_posix_modes
 def test_signed_but_unstapled_bundle_fails_require_stapled(tmp_path):
     app = _signed_app(tmp_path, "arm64", stapled=False)
     zip_path = macos_app.zip_app_bundle(app, tmp_path / "unstapled.zip")
@@ -950,6 +967,7 @@ def test_sealed_bundle_with_unsigned_binary_fails(tmp_path):
     assert any("no embedded code signature" in p for p in problems), problems
 
 
+@needs_posix_modes
 def test_validate_cli_require_flags(tmp_path, capsys):
     unsigned_dir = tmp_path / "unsigned"
     unsigned_dir.mkdir()
