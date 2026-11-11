@@ -225,6 +225,12 @@ class TestFormatChapterNumber:
     @pytest.mark.parametrize("continuation", [".cbz", ".pdf", ".zip", ""])
     def test_full_names_sort_under_installed_locale(self, name, continuation):
         # Test-only: the application itself never changes the locale.
+        if sys.platform == "darwin" and not name.startswith("C."):
+            # macOS (like other BSDs) collates its UTF-8 language locales
+            # with a plain ASCII table rather than language rules, so
+            # strxfrm says nothing about what this test checks there
+            # (https://bugs.python.org/issue23195).
+            pytest.skip(f"{name} collation on macOS is an ASCII table")
         import locale
         saved = locale.setlocale(locale.LC_COLLATE)
         try:
