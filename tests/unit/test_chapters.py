@@ -55,6 +55,16 @@ class TestChapterValues:
         assert chapter_number("Chapter 12.5 (Part 2)") == 12.5
         assert chapter_number("Extra") is None
 
+    def test_huge_digit_strings_have_no_value(self):
+        # A huge digit string overflows float(); it must not become inf,
+        # which would break the always-finite sort-key contract and crash
+        # format_chapter_value via int(inf).
+        huge = "9" * 400
+        assert chapter_value(huge) is None
+        assert chapter_number(huge) is None
+        assert chapter_sort_key(huge) == 0.0
+        assert Chapter(number=huge).numeric == 0.0
+
     def test_chapters_sort_by_numeric_value(self):
         chapters = [Chapter(number=n) for n in ("10 Part 1", "2", "Chapter 3", "1.5")]
         assert [c.number for c in sorted(chapters)] == [
