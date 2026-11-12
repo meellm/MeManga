@@ -98,9 +98,16 @@ You can also build from source; see [Build from source](#build-from-source) belo
 
 When you open MeManga for the first time:
 
-1. The Library page is empty — click **+ Add manga** in the header.
-2. Paste a manga URL from any [supported source](docs/SUPPORTED_SOURCES.md), or click **Search** in the sidebar and type the title.
-3. The app remembers what you added, what you've downloaded, and what you've read across restarts and across machines
+1. It offers to download the browser components some sources need
+   (about 250 MB). **Skip for now** opens the app right away: sources
+   that don't need a browser, such as MangaDex, work as usual, and you
+   can install the components later in **Settings → Advanced**.
+2. It asks where downloads should go, with a default filled in. The
+   folder is also shown on the empty Library page and in
+   **Settings → About**, and can be changed in **Settings → General**.
+3. The Library page is empty — click **Add manga** in the header.
+4. Paste a manga URL from any [supported source](docs/SUPPORTED_SOURCES.md), or click **Search** in the sidebar and type the title.
+5. The app remembers what you added, what you've downloaded, and what you've read across restarts and across machines
    (config lives in your [MeManga config folder](#where-your-data-lives), you can import/export it).
 
 <p align="center">
@@ -118,8 +125,12 @@ chapters, and an in-progress bar for the current chapter you're on.
 </p>
 
 - Click a card → **Detail** page (chapter list, status, mode, Kindle toggle)
-- Right-click → quick actions (mark as read, change status, remove)
-- Top-right chip row filters by status; the chip count updates live
+- Right-click → quick actions (check, download all, set any status, remove)
+- The chip row filters by status (Reading, Plan to read, On hold,
+  Completed, Dropped); the count of manga shown is beside **ALL MANGA**
+- **Continue Reading** lists the manga you last opened in the reader;
+  a card opens the reader at that chapter
+- A manga without a cover shows its title on a coloured placeholder
 - Keyboard: `Tab` moves to a card, `Enter` or `Space` opens it, and the
   `Menu` key or `Shift+F10` opens its quick actions (see
   [Keyboard shortcuts](#keyboard-shortcuts))
@@ -220,9 +231,13 @@ Select **Re-check health** to check every enabled source and update its status.
 
 - **General** — output format (PDF/EPUB/CBZ/…), download folder, theme, concurrency
 - **Kindle / Email** — Gmail App Password setup for sending chapters to your Kindle
-- **Advanced** — fallback-source delay, post-processing, cron, cache management,
+- **Advanced** — fallback-source delay, post-processing, cron,
+  **Browser Components** (install them here if you skipped the first-run
+  download), the **Cover Cache** (its size, a size limit and Clear cache),
   and **Network & Privacy** (the connection check and MangaDex cover lookup,
   see the [FAQ](#faq)).
+- **About** — version and environment details for bug reports, and the
+  download folder with an **Open folder** button.
   The downloaded desktop app can't set up scheduled checks; use
   `memanga cron install` from the command-line version instead (see
   [Schedule daily checks](#schedule-daily-checks)).
@@ -759,7 +774,7 @@ MeManga keeps its files in the config folder of your platform:
 | `<config folder>/state.json` | Read/unread state, download history, source health |
 | `<config folder>/*.bak` | Previous copy of `config.yaml` / `state.json`, kept on every save |
 | `<config folder>/state.json.corrupt-*` | A damaged state file, kept for recovery instead of being overwritten |
-| `<config folder>/covers/` | Cover image cache |
+| `<config folder>/covers/` | Cover image cache, 200 MB at most by default (`gui.cover_cache_max_mb`, or **Settings → Advanced**); past the limit the covers used longest ago are removed |
 | `<config folder>/crash.log` | Uncaught exceptions from the windowed release exe |
 | `<config folder>/runtime.log` | Diagnostics from the windowed release exe; the last three sessions are kept as `runtime.log.1` to `.3` |
 | `<config folder>/memanga.log` | Output of the daily check set up with `cron install` on Linux and macOS |
@@ -866,11 +881,15 @@ The desktop app contacts:
 
 The same switches exist as `gui.network_check`,
 `gui.mangadex_cover_fallback` and `gui.search_chapter_counts` for
-`memanga config set`.
+`memanga config set`, as does the cover cache limit,
+`gui.cover_cache_max_mb`.
 
 **Why does the first launch take a while?**
 It downloads Playwright's Firefox build (about 80 MB), which sources
 that need a browser use. This happens once, behind a progress dialog.
+You can skip it and install the components later in
+**Settings → Advanced**; until then only the sources that need a
+browser are affected.
 
 **A source I use stopped working — what now?**
 - Check **Sources → Re-check health** for status. If it's red, the
