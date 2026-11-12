@@ -234,3 +234,64 @@ class TestDiskLimit:
         assert cover_cache.disk_usage() == 0
         assert not cover_cache._memory and cover_cache._memory_bytes == 0
         assert not cover_cache._failed
+
+
+class TestDiskAccounting:
+    """The running total that spares a folder listing on every save must
+    not hide what is really in the folder."""
+
+    MB = 1024 * 1024
+    _put = staticmethod(TestDiskLimit._put)
+
+    def test_limit_change_measures_the_folder_again(self, cover_cache):
+        # The total was taken while the folder was empty (Settings does
+        # this when it shows the cache size); the files arrived without
+        # passing through the cache object.
+        assert cover_cache.disk_usage() == 0
+        _, old = self._put(cover_cache, "old", 8 * self.MB, age=300)
+        _, new = self._put(cover_cache, "new", 8 * self.MB, age=100)
+
+        cover_cache.set_disk_limit_mb(10)
+
+        assert not old.exists() and new.exists()
+        assert cover_cache._disk_bytes == 8 * self.MB
+
+    def test_running_total_triggers_the_trim_on_save(self, cover_cache):
+        import os
+        import time
+        cover_cache._max_disk_bytes = 10 * self.MB
+        assert cover_cache.disk_usage() == 0  # total known from here on
+        paths = []
+        for i, name in enumerate(("a", "b", "c")):
+            url = f"https://covers.test/{name}.jpg"
+            cover_cache.save_to_disk(url, b"z" * (4 * self.MB))
+            path = cover_cache._disk_path(url)
+            if name != "c":
+                stamp = time.time() - (300 - 100 * i)
+                os.utime(path, (stamp, stamp))
+            paths.append(path)
+            if name == "b":
+                # Two covers, 8 MB: under the limit, counted, kept.
+                assert cover_cache._disk_bytes == 8 * self.MB
+                assert all(p.exists() for p in paths)
+
+        a, b, c = paths
+        assert not a.exists()          # the one used longest ago
+        assert b.exists() and c.exists()
+        assert cover_cache._disk_bytes == 8 * self.MB
+
+    def test_saving_over_a_cover_counts_the_difference(self, cover_cache):
+        url = "https://covers.test/same.jpg"
+        assert cover_cache.disk_usage() == 0
+        cover_cache.save_to_disk(url, b"z" * 3000)
+        cover_cache.save_to_disk(url, b"z" * 1000)
+        assert cover_cache._disk_bytes == 1000 == cover_cache.disk_usage()
+
+    def test_oldest_go_first_until_back_under(self, cover_cache):
+        cover_cache._max_disk_bytes = 10 * self.MB
+        files = [self._put(cover_cache, f"n{i}", 3 * self.MB, age=500 - 100 * i)[1]
+                 for i in range(5)]  # n0 oldest ... n4 newest, 15 MB
+
+        assert cover_cache._trim_disk() == 2
+
+        assert [f.exists() for f in files] == [False, False, True, True, True]

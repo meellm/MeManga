@@ -173,9 +173,16 @@ class CoverCache:
         return self._max_disk_bytes
 
     def set_disk_limit_mb(self, value) -> None:
-        """Change the disk limit and trim to it right away."""
+        """Change the disk limit and trim to it right away.
+
+        The folder is measured again for this, rather than trusting the
+        running total: the total only knows what this object wrote and
+        removed, and a limit the user has just chosen has to hold for
+        whatever is really in the folder.
+        """
         with self._disk_lock:
             self._max_disk_bytes = disk_limit_mb(value) * 1024 * 1024
+            self._disk_bytes = None
         self._trim_disk()
 
     def disk_usage(self) -> int:
@@ -226,7 +233,9 @@ class CoverCache:
 
         The folder is only listed when the running total says the limit
         is passed, or the total is unknown; a normal save costs nothing
-        more than the addition in `save_to_disk`.
+        more than the addition in `save_to_disk`. The total is this
+        object's own count of what it wrote; callers that must not rely
+        on it (`set_disk_limit_mb`) reset it to unknown first.
         """
         with self._disk_lock:
             limit = self._max_disk_bytes

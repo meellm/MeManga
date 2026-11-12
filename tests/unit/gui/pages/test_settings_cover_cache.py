@@ -33,6 +33,9 @@ def test_limit_is_shown_saved_and_applied(app_window, page):
     cache = app_window.cover_cache
     assert page._cache_limit.value() == 200
     assert page._cache_limit.accessibleName() == "Cover cache size limit"
+    # Reproduce the size-label timer having measured an empty folder
+    # before files arrive outside the cache's own save path.
+    assert cache.disk_usage() == 0
     old = _put(cache, "old", 8 * MB, age=300)
     new = _put(cache, "new", 8 * MB, age=100)
 

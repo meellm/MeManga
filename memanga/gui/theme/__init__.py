@@ -164,11 +164,8 @@ def apply(qapp):
     palette = _build_palette(THEMES[current_theme()])
     if qapp.palette() != palette:
         qapp.setPalette(palette)
-    # Force a polish pass so style-property-driven selectors re-evaluate.
-    try:
-        qapp.style().polish(qapp)
-    except Exception:
-        pass
+    # setStyleSheet handles widget re-polishing. polish(QApplication)
+    # initializes the application style; it does not refresh selectors.
 
 
 def _build_palette(theme: dict):
