@@ -154,16 +154,13 @@ def apply(qapp):
     on macOS / Windows light mode), which leaks through as a white
     flash on launch and around the frameless modal panels.
 
-    A style sheet or palette the application already has is not set
-    again: Qt re-polishes every widget of every window each time one is
-    set, whether or not anything changed.
+    Re-apply both even when their values match: setting the stylesheet
+    also asks Qt to re-polish existing widgets.
     """
     sheet = build_stylesheet(THEMES[current_theme()])
-    if qapp.styleSheet() != sheet:
-        qapp.setStyleSheet(sheet)
+    qapp.setStyleSheet(sheet)
     palette = _build_palette(THEMES[current_theme()])
-    if qapp.palette() != palette:
-        qapp.setPalette(palette)
+    qapp.setPalette(palette)
     # setStyleSheet handles widget re-polishing. polish(QApplication)
     # initializes the application style; it does not refresh selectors.
 
