@@ -14,12 +14,80 @@ Public entry points:
     tokens()                    — flat dotted-key view of current tokens
 """
 
+import weakref
+
 from .tokens import THEMES, DEFAULT_THEME, flat
 from .qss_builder import build_stylesheet
 from PySide6.QtCore import QSettings
 
 _current = None
 _subscribers: list = []
+
+
+class _MethodSubscriber:
+    """A subscribed bound method, holding its object weakly.
+
+    Cards, rows and drop-downs subscribe when they are built and are
+    thrown away on the next page refresh. Held strongly, each of them
+    stayed in the subscriber list for the rest of the session and every
+    theme switch called into widgets Qt had already deleted. Held
+    weakly, a subscriber goes away with its widget.
+    """
+
+    __slots__ = ("_ref", "_name")
+
+    def __init__(self, owner, name):
+        self._ref = weakref.ref(owner)
+        self._name = name
+
+    def matches(self, callback) -> bool:
+        return (getattr(callback, "__self__", None) is self._ref()
+                and self._ref() is not None
+                and getattr(callback, "__name__", None) == self._name)
+
+    def resolve(self):
+        """The method to call, or None once its object is gone."""
+        owner = self._ref()
+        if owner is None or not _alive(owner):
+            return None
+        return getattr(owner, self._name, None)
+
+
+def _alive(obj) -> bool:
+    """False for a Qt object whose C++ side has been deleted."""
+    try:
+        import shiboken6
+    except Exception:
+        return True
+    try:
+        # Only Qt wrappers can be invalid; anything else is alive for as
+        # long as it is referenced.
+        if not isinstance(obj, shiboken6.Object):
+            return True
+        return bool(shiboken6.isValid(obj))
+    except Exception:
+        return True
+
+
+def _wrap(callback):
+    """Subscriber entry for ``callback``: weak for a bound method of an
+    object that allows weak references, the callback itself otherwise
+    (functions, lambdas, closures), which stay subscribed until removed.
+    """
+    owner = getattr(callback, "__self__", None)
+    name = getattr(callback, "__name__", None)
+    if owner is None or not name or isinstance(owner, type(weakref)):
+        return callback
+    try:
+        return _MethodSubscriber(owner, name)
+    except TypeError:
+        return callback
+
+
+def _same(entry, callback) -> bool:
+    if isinstance(entry, _MethodSubscriber):
+        return entry.matches(callback)
+    return entry is callback or entry == callback
 
 
 def _load_persisted() -> str:
@@ -54,7 +122,18 @@ def set_theme(name: str, qapp=None):
     QSettings("MeManga", "desktop").setValue("theme", name)
     if qapp is not None:
         apply(qapp)
-    for cb in list(_subscribers):
+    for entry in list(_subscribers):
+        if isinstance(entry, _MethodSubscriber):
+            cb = entry.resolve()
+            if cb is None:
+                # Its widget is gone: drop it instead of calling into it.
+                try:
+                    _subscribers.remove(entry)
+                except ValueError:
+                    pass
+                continue
+        else:
+            cb = entry
         try:
             cb()
         except Exception:
@@ -145,14 +224,30 @@ def _build_palette(theme: dict):
 
 
 def on_theme_change(callback):
-    """Subscribe to theme switches. Callback takes no args."""
-    if callback not in _subscribers:
-        _subscribers.append(callback)
+    """Subscribe to theme switches. Callback takes no args.
+
+    A bound method is held weakly and unsubscribes itself when its
+    object goes away; pass a method (not a lambda around one) from
+    widgets that are created and destroyed while the app runs. Plain
+    functions and lambdas stay subscribed until `off_theme_change`.
+    """
+    if any(_same(entry, callback) for entry in _subscribers):
+        return
+    _subscribers.append(_wrap(callback))
 
 
 def off_theme_change(callback):
-    if callback in _subscribers:
-        _subscribers.remove(callback)
+    for entry in list(_subscribers):
+        if _same(entry, callback):
+            _subscribers.remove(entry)
+
+
+def subscriber_count() -> int:
+    """Live subscribers, after dropping those whose object is gone."""
+    for entry in list(_subscribers):
+        if isinstance(entry, _MethodSubscriber) and entry.resolve() is None:
+            _subscribers.remove(entry)
+    return len(_subscribers)
 
 
 def generate_stylesheet() -> str:

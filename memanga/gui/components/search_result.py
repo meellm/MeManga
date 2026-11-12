@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics, QPainter
 
 from .. import theme as T
+from ..theme.tokens import TYPOGRAPHY
 
 
 class _ElideLabel(QLabel):
@@ -96,19 +97,11 @@ class SearchResultRow(QFrame):
         info.setSpacing(2)
         info.setContentsMargins(0, 0, 0, 0)
         title = _ElideLabel(result.get("title", "Unknown"))
-        title.setStyleSheet(
-            f"color: {T.tokens()['text.t_1']}; font-size: 11pt;"
-            f"font-weight: 600;"
-        )
         info.addWidget(title)
 
         source = result.get("source", "")
         url = result.get("url", "") or ""
         sub = _ElideLabel(f"{source}  ·  {url}")
-        sub.setStyleSheet(
-            f"color: {T.tokens()['text.t_3']}; font-size: 9pt;"
-            f"font-family: 'Geist Mono', monospace;"
-        )
         info.addWidget(sub)
         # `1` here means: this column gets all the leftover horizontal
         # space after the chip + Add button claim their fixed widths.
@@ -192,12 +185,22 @@ class SearchResultRow(QFrame):
             f"  border-radius: 8px;"
             f"}}"
         )
+        # Title and sub-line colours are theme tokens too; set here so a
+        # theme switch reaches rows that are already on screen.
+        self._title_lbl.setStyleSheet(
+            f"color: {toks.get('text.t_1', '#FFFFFF')}; font-size: 11pt;"
+            f"font-weight: 600;"
+        )
+        self._sub_lbl.setStyleSheet(
+            f"color: {toks.get('text.t_3', '#888')}; font-size: 10pt;"
+            f"font-family: 'Geist Mono', monospace;"
+        )
         # The chip palette tracks t_3, refresh on theme flip.
         self._count_chip.setStyleSheet(
             f"QLabel {{"
             f"  color: {toks.get('text.t_3', '#888')};"
             f"  font-family: 'Geist Mono', monospace;"
-            f"  font-size: 8pt; font-weight: 600;"
+            f"  font-size: {TYPOGRAPHY['size_min']}pt; font-weight: 600;"
             f"  letter-spacing: 0.5px;"
             f"  padding: 0px 6px;"
             f"}}"

@@ -543,6 +543,35 @@ QFrame[role="row"] {{
 }}
 QFrame[role="row"]:hover {{ background-color: {bg_2}; }}
 
+/* Detail chapter rows. Styled here, by role, instead of one style sheet
+   per row widget: a long series has thousands of these, and rows built
+   this way follow a theme switch on their own. */
+QFrame[role="chapter_row"] {{
+    background: transparent;
+    border: none;
+    border-top: 1px solid {border};
+}}
+QFrame[role="chapter_row"][first="true"] {{ border-top: none; }}
+QLabel[role="row_title"] {{
+    font-size: {sz_hint}pt; font-weight: 500; color: {t_1};
+}}
+QLabel[role="row_title"][read="true"] {{ font-weight: 400; color: {t_3}; }}
+QLabel[role="chapter_state"] {{
+    background-color: {bg_2};
+    border-radius: {rsm}px;
+}}
+QLabel[role="chapter_state"][state="read"] {{ background-color: {a_primary}; }}
+QLabel[role="chapter_state"][state="downloaded"] {{ background-color: {a_soft10}; }}
+QLabel[role="chapter_state"][state="partial"],
+QLabel[role="chapter_state"][state="external"] {{ background-color: {warn_soft}; }}
+
+/* Centered "nothing here" text of a list or grid. */
+QLabel[role="empty"] {{
+    color: {t_2};
+    font-size: {sz_body}pt;
+    padding: 48px;
+}}
+
 /* ════════════════════════════════════════════════════════════════
    Badges
    ════════════════════════════════════════════════════════════════ */

@@ -5,6 +5,13 @@ This is the single source of truth for colors. Every widget pulls from
 here (directly via `tokens()` or indirectly via QSS substitution).
 
 Don't hardcode hex anywhere outside this file.
+
+Text colours are held to WCAG 2.x AA (issue #395): `text.t_1`..`t_3`,
+the accent, the lilac and the status colours reach 4.5:1 on every
+surface they are written on, and `accent.on_primary` reaches it on the
+accent and status fills. `text.t_4` is for decoration only (dots,
+dividers), never for text. tests/unit/gui/theme/test_tokens.py checks
+the pairs.
 """
 
 DEFAULT_THEME = "dark"
@@ -25,7 +32,7 @@ THEMES = {
         "text": {
             "t_1": "#F1ECDF",
             "t_2": "#BCB6A5",
-            "t_3": "#8A836F",
+            "t_3": "#A39C88",
             "t_4": "#4F483D",
         },
         "accent": {
@@ -73,32 +80,32 @@ THEMES = {
         "text": {
             "t_1": "#18170F",
             "t_2": "#55524A",
-            "t_3": "#8A877B",
+            "t_3": "#65625A",
             "t_4": "#B7B3A4",
         },
         "accent": {
-            "primary": "#648C4F",
-            "primary_2": "#517438",
+            "primary": "#456B33",
+            "primary_2": "#38592A",
             "on_primary": "#FFFFFF",
-            "soft_10": "rgba(100,140,79,0.08)",
-            "soft_16": "rgba(100,140,79,0.14)",
-            "ring": "rgba(100,140,79,0.25)",
+            "soft_10": "rgba(69,107,51,0.08)",
+            "soft_16": "rgba(69,107,51,0.14)",
+            "ring": "rgba(69,107,51,0.25)",
         },
         "secondary_lilac": {
-            "primary": "#7869A8",
-            "primary_2": "#5F5093",
+            "primary": "#685A9A",
+            "primary_2": "#574A85",
             "on_primary": "#FFFFFF",
-            "soft": "rgba(120,105,168,0.09)",
-            "fade": "rgba(120,105,168,0.15)",
+            "soft": "rgba(104,90,154,0.09)",
+            "fade": "rgba(104,90,154,0.15)",
         },
         "status": {
-            "danger": "#B85043",
-            "danger_soft": "rgba(184,80,67,0.10)",
-            "warn": "#B07A35",
-            "warn_soft": "rgba(176,122,53,0.12)",
-            "info": "#7869A8",
-            "info_soft": "rgba(120,105,168,0.09)",
-            "success": "#648C4F",
+            "danger": "#A8443A",
+            "danger_soft": "rgba(168,68,58,0.10)",
+            "warn": "#7F5218",
+            "warn_soft": "rgba(127,82,24,0.12)",
+            "info": "#685A9A",
+            "info_soft": "rgba(104,90,154,0.09)",
+            "success": "#456B33",
         },
         "scrollbar": {
             "track": "transparent",
@@ -117,6 +124,30 @@ STATUS_TOKEN = {
     "completed": "secondary_lilac.primary",
     "dropped": "status.danger",
 }
+
+# ── Status labels (manga status → text shown to the user) ──
+# One wording for chips, menus, pills and screen readers. "paused" is
+# the older spelling of "on-hold" and reads the same.
+STATUS_LABELS = {
+    "reading": "Reading",
+    "plan": "Plan to read",
+    "on-hold": "On hold",
+    "paused": "On hold",
+    "completed": "Completed",
+    "dropped": "Dropped",
+}
+
+# Order statuses sort and list in.
+STATUS_ORDER = ("reading", "plan", "on-hold", "completed", "dropped")
+
+
+def status_label(status) -> str:
+    """Display text for a manga status key; unknown keys are tidied."""
+    key = str(status or "reading").lower()
+    if key in STATUS_LABELS:
+        return STATUS_LABELS[key]
+    return key.replace("-", " ").capitalize()
+
 
 # ── Typography (theme-independent) ──
 TYPOGRAPHY = {
@@ -138,6 +169,10 @@ TYPOGRAPHY = {
     "size_tag": 10,
     "size_brand": 17,
     "size_brand_version": 10,
+    # Smallest size any text is drawn at (issue #395). Painted labels
+    # (cover pill, NEW badge) and chips use it instead of their own
+    # smaller numbers.
+    "size_min": 9,
 }
 
 # ── Radii ──
