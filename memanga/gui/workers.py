@@ -62,6 +62,10 @@ _COVER_REFERERS = (
 
 _COVER_USER_AGENT = BROWSER_USER_AGENT_SHORT
 
+# Parallel cover downloads. Covers are small and come from many hosts;
+# a few at a time fills a library quickly without a burst on any site.
+COVER_WORKERS = 4
+
 
 def cover_request_headers(url: str) -> Dict[str, str]:
     """Headers for a cover fetch, with a Referer for CDNs known to
@@ -104,6 +108,12 @@ class BackgroundWorker:
             max_workers=CHAPTER_COUNT_WORKERS,
             thread_name_prefix="chapter-count",
         )
+        # Covers get their own small pool too: on the shared one a cover
+        # waited behind running downloads and checks, so a new library
+        # stayed on placeholders until the queue drained.
+        self._cover_pool = ThreadPoolExecutor(
+            max_workers=COVER_WORKERS, thread_name_prefix="cover-fetch",
+        )
         # Optional NetworkMonitor — wired up by MeMangaApp after both
         # the worker and the monitor exist. When set, network-bound
         # entry points short-circuit (with a friendly event) instead
@@ -121,10 +131,11 @@ class BackgroundWorker:
         """Clean up the thread pool."""
         self._shutdown = True
         self._pool.shutdown(wait=False)
-        try:
-            self._count_pool.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
+        for pool in (self._count_pool, self._cover_pool):
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
         # Tear down any in-flight search so its threads don't outlive
         # the app and try to publish into a destroyed event bus.
         with self._search_lock:
@@ -197,7 +208,12 @@ class BackgroundWorker:
                     cache.mark_failed(url)
                 self._events.publish("cover_loaded", {"url": url, "error": True})
 
-        self._safe_submit(_task)
+        if getattr(self, "_shutdown", False):
+            return None
+        try:
+            return self._cover_pool.submit(_task)
+        except RuntimeError:
+            return None  # pool already shut down
 
     # ------------------------------------------------------------------
     # Chapter checking

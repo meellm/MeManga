@@ -235,54 +235,130 @@ def _install_playwright_browsers_stream(on_line, cancelled):
     return False, "\n".join(errors) if errors else "no install strategy available"
 
 
-def _ensure_browsers():
-    """Ensure the Playwright browsers (Firefox and Chromium) are installed.
+# Set when the user chose "Skip for now" at the first-run browser prompt
+# (issue #344). While it is set the prompt is not shown again; installing
+# the browsers, from Settings or any other way, clears it.
+BROWSER_SKIP_KEY = "gui.browser_install_skipped"
 
-    Drives the install via the streaming progress dialog
-    (:class:`FirefoxInstallDialog`). If the install fails, the dialog
-    surfaces the captured subprocess log so the failure cause is
-    diagnosable; the surrounding loop offers a retry/quit choice.
+_BROWSER_PROMPT_TEXT = (
+    "Some sources need Firefox and Chromium browser components to load "
+    "their pages.\n\n"
+    "Download them now? (about 250 MB, needs internet)\n\n"
+    "If you skip, MeManga opens right away. Sources that don't need a "
+    "browser, such as MangaDex, work as usual; sources that do need one "
+    "will fail until the components are installed. You can install them "
+    "later in Settings → Advanced."
+)
+
+
+def _ask_browser_install(failure=None):
+    """Ask what to do about the missing browsers. Returns ``"install"``,
+    ``"skip"`` or ``"quit"``.
+
+    ``failure`` is the error text of an install that just failed; the
+    question then offers to try again. Closing the box or pressing Esc
+    is the same as "Skip for now".
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    box = QMessageBox()
+    box.setIcon(QMessageBox.Icon.Question)
+    if failure:
+        box.setWindowTitle("Installation Failed")
+        box.setText(
+            "Browser installation failed.\n\n"
+            "Check your internet connection and try again, or skip for "
+            "now and install later in Settings → Advanced.\n\n"
+            "You can also install manually with:\n"
+            "    playwright install firefox chromium\n\n"
+            f"--- details ---\n{failure}"
+        )
+        install_text = "Try again"
+    else:
+        box.setWindowTitle("MeManga — Browser Components")
+        box.setText(_BROWSER_PROMPT_TEXT)
+        install_text = "Download now"
+    install_btn = box.addButton(install_text, QMessageBox.ButtonRole.AcceptRole)
+    skip_btn = box.addButton("Skip for now", QMessageBox.ButtonRole.RejectRole)
+    quit_btn = box.addButton("Quit", QMessageBox.ButtonRole.DestructiveRole)
+    box.setDefaultButton(install_btn)
+    box.setEscapeButton(skip_btn)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked == install_btn:
+        return "install"
+    if clicked == quit_btn:
+        return "quit"
+    return "skip"
+
+
+def _set_browser_skip(config, skipped: bool) -> None:
+    """Record (or clear) the user's choice to run without the browsers."""
+    if config is None or bool(config.get(BROWSER_SKIP_KEY)) == skipped:
+        return
+    try:
+        config.set(BROWSER_SKIP_KEY, skipped)
+        config.save()
+    except Exception:
+        logger.exception("Could not save %s", BROWSER_SKIP_KEY)
+
+
+def _ensure_browsers(config=None):
+    """Offer to install the Playwright browsers (Firefox and Chromium)
+    when they are missing. Returns whether they are installed.
+
+    The download can be skipped (issue #344): the app then starts
+    without them, sources that don't use a browser keep working, and
+    Settings → Advanced installs them later. A skip is remembered in
+    ``config``, so the question is asked once, not on every launch.
+
+    The install runs in the streaming progress dialog
+    (:class:`FirefoxInstallDialog`), which shows the captured log when
+    it fails; the question is then asked again with "Try again".
     """
     if _check_playwright_browsers():
+        _set_browser_skip(config, False)
         return True
+    if config is not None and config.get(BROWSER_SKIP_KEY):
+        return False
 
-    from PySide6.QtWidgets import QMessageBox
     from .components.firefox_install_dialog import FirefoxInstallDialog
 
+    failure = None
     while True:
-        confirm = QMessageBox.question(
-            None, "MeManga — Browser Required",
-            "MeManga needs Firefox and Chromium browser components to "
-            "scrape manga.\n\n"
-            "Download now? (~250 MB, requires internet)",
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            quit_answer = QMessageBox.question(
-                None, "MeManga",
-                "MeManga cannot work without browser components.\n\nQuit?",
-            )
-            if quit_answer == QMessageBox.StandardButton.Yes:
-                sys.exit(0)
-            continue
+        choice = _ask_browser_install(failure)
+        if choice == "quit":
+            sys.exit(0)
+        if choice == "skip":
+            _set_browser_skip(config, True)
+            return False
 
         dlg = FirefoxInstallDialog()
         ok, error_text = dlg.run_install()
         if ok:
+            _set_browser_skip(config, False)
             return True
+        # Cancelled by the user: back to the first question, not a
+        # failure report. Otherwise the dialog already showed the log;
+        # ask again with the reason.
+        cancelled = getattr(dlg, "_cancelled", False)
+        failure = None if cancelled else (error_text or "unknown error")[:1200]
 
-        # The dialog already surfaced the captured log in its own UI;
-        # offer a retry-or-quit choice and loop.
-        detail = (error_text or "unknown error")[:1200]
-        retry = QMessageBox.question(
-            None, "Installation Failed",
-            "Browser installation failed.\n\n"
-            "Check your internet connection and try again.\n\n"
-            "You can also install manually with:\n"
-            "    playwright install firefox chromium\n\n"
-            f"--- details ---\n{detail}",
-        )
-        if retry != QMessageBox.StandardButton.Yes:
-            sys.exit(0)
+
+def _first_run_setup(window, config):
+    """First-run questions asked once the window is up: where downloads
+    go, for a new library (issue #370)."""
+    from .components.download_location_dialog import (
+        DownloadLocationDialog, needs_download_location)
+    if not needs_download_location(config):
+        return
+    dialog = DownloadLocationDialog(window, config)
+    if dialog.exec():
+        # Show the chosen folder where the old one was on screen.
+        settings = getattr(window, "_pages", {}).get("settings")
+        if settings is not None:
+            settings.reload_from_config()
+        window.events.publish("library_updated", {"action": "download_dir"})
 
 
 def _load_app_icon():
@@ -633,10 +709,12 @@ def launch_gui(config=None, state=None, explicit_config_dir=None):
         QMessageBox.critical(None, "MeManga", problem)
         sys.exit(1)
 
-    _ensure_browsers()
+    browsers_installed = _ensure_browsers(config)
 
     window = MeMangaApp(config=config, app_state=state,
                         explicit_config_dir=explicit_config_dir)
+    # Settings → Advanced shows this and offers the install (issue #344).
+    window.browsers_installed = browsers_installed
     # NOTE: don't subscribe `lambda: T.apply(qapp)` here.
     # `T.set_theme(name, qapp)` already calls `apply(qapp)` BEFORE
     # notifying subscribers, so a re-subscribed apply() would run a
@@ -647,4 +725,7 @@ def launch_gui(config=None, state=None, explicit_config_dir=None):
         notice = state.recovery_notice
         QTimer.singleShot(
             0, lambda: QMessageBox.warning(window, "MeManga", notice))
+    # After the window is on screen, so the question appears over the
+    # app it is about.
+    QTimer.singleShot(0, lambda: _first_run_setup(window, config))
     sys.exit(qapp.exec())

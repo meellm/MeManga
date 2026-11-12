@@ -10,9 +10,11 @@ Matches memanga-pyside6-spec.json `components.manga_cover_card`:
     - status_pill bottom-left (rgba(0,0,0,0.6) + blur with leading colored dot)
     - if 0 < progress < 100 → 3px progress bar at the very bottom, accent fill
 - Below cover: title (clamp 2 lines) + sub (mono small)
-- Placeholder paint: gradient + halftone dots + JP serif title text
+- Placeholder paint: gradient + halftone dots + the manga's own title
   when there's no real cover image.
 """
+
+import zlib
 
 from PySide6.QtCore import (
     Qt, QRectF, QSize, QPoint, QPropertyAnimation, QEasingCurve, Property,
@@ -25,6 +27,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QWidget
 
 from .. import theme as T
+from ..theme.tokens import TYPOGRAPHY, status_label
 from .keyboard import is_activation, is_context_menu, menu_anchor
 
 
@@ -36,21 +39,26 @@ COVER_H = int(CARD_W * 1.5)  # 2:3 ratio → 255
 CARD_H = COVER_H + 77
 
 
-# A small rotation of gradient + JP text combos for the placeholder paint.
-# Mirrors memanga-pyside6-spec.json svg_assets.cover_paint_examples.
+# A small rotation of gradients for the placeholder paint, all dark
+# enough for the white title drawn on them (4.5:1 or better on every
+# stop). Mirrors memanga-pyside6-spec.json svg_assets.cover_paint_examples.
 _PALETTES = [
-    {"top": "#2A3441", "mid": "#5A4666", "bot": "#A3677E", "jp": "恋愛\nマニュアル"},
-    {"top": "#D44A1A", "mid": "#E55F30", "bot": "#F47438", "jp": ".A\nDOT ALICE"},
-    {"top": "#BD3030", "mid": "#8A2424", "bot": "#5A1717", "jp": "殺戮\nロボト"},
-    {"top": "#E8A23D", "mid": "#C77E2E", "bot": "#9E5C1D", "jp": "チェンソー"},
-    {"top": "#1E3A5F", "mid": "#3A5F8A", "bot": "#5F8AB5", "jp": "君に\n言いたい\n事がある"},
-    {"top": "#5A2D5F", "mid": "#7E3F88", "bot": "#A35BAE", "jp": "魔女"},
+    {"top": "#2A3441", "mid": "#4A3A56", "bot": "#6E4458"},
+    {"top": "#8F3312", "mid": "#A03D18", "bot": "#B0481C"},
+    {"top": "#9E2828", "mid": "#7A2020", "bot": "#5A1717"},
+    {"top": "#8A5A1C", "mid": "#7A4E1A", "bot": "#6A4116"},
+    {"top": "#1E3A5F", "mid": "#2C4A72", "bot": "#3A5A85"},
+    {"top": "#5A2D5F", "mid": "#6A3672", "bot": "#7A3F84"},
 ]
+
+# Longest title drawn on a placeholder; the full one is under the cover.
+_PLACEHOLDER_TITLE_CHARS = 60
 
 
 def _palette_for(title: str) -> dict:
-    """Deterministic palette pick from a title hash."""
-    return _PALETTES[abs(hash(title)) % len(_PALETTES)]
+    """Palette for a title, the same on every launch. (The built-in
+    ``hash`` of a string changes from one run to the next.)"""
+    return _PALETTES[zlib.crc32(title.encode("utf-8")) % len(_PALETTES)]
 
 
 class _CoverArea(QWidget):
@@ -68,7 +76,8 @@ class _CoverArea(QWidget):
         self._new_count = new_count
         self._read_count = int(read_count or 0)
         self._total_count = int(total_count or 0)
-        # cached pixmap of placeholder paint per palette to avoid re-painting.
+        # The placeholder is painted once and kept: its halftone is over
+        # a thousand dots, too many to redo on every hover repaint.
         self._placeholder_cache: QPixmap | None = None
         # Repaint when theme switches (status pill / NEW badge colors change).
         T.on_theme_change(self.update)
@@ -88,17 +97,12 @@ class _CoverArea(QWidget):
 
             # 1. Cover image OR paint placeholder
             if self._cover is not None:
-                scaled = self._cover.scaled(
-                    self.size(),
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                # Centered crop
-                x = (scaled.width() - self.width()) // 2
-                y = (scaled.height() - self.height()) // 2
-                p.drawPixmap(0, 0, scaled, x, y, self.width(), self.height())
+                # The cover cache hands out the pixmap already cropped to
+                # this shape, at the screen's pixel density; drawing it
+                # into the widget's rectangle keeps it sharp there.
+                p.drawPixmap(self.rect(), self._cover)
             else:
-                self._paint_placeholder(p, rect)
+                p.drawPixmap(self.rect(), self._placeholder_pixmap())
 
             # 2. Gradient overlay (bottom-half dim) for text legibility
             grad = QLinearGradient(QPointF(0, 0), QPointF(0, self.height()))
@@ -147,8 +151,27 @@ class _CoverArea(QWidget):
         path.addRoundedRect(rect, radius, radius)
         return path
 
+    def _placeholder_pixmap(self) -> QPixmap:
+        """The painted placeholder, rendered once per pixel density."""
+        ratio = self.devicePixelRatioF() or 1.0
+        cached = self._placeholder_cache
+        if cached is not None and cached.devicePixelRatio() == ratio:
+            return cached
+        pm = QPixmap(round(self.width() * ratio), round(self.height() * ratio))
+        pm.setDevicePixelRatio(ratio)
+        pm.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pm)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            self._paint_placeholder(
+                painter, QRectF(0, 0, self.width(), self.height()))
+        finally:
+            painter.end()
+        self._placeholder_cache = pm
+        return pm
+
     def _paint_placeholder(self, p: QPainter, rect: QRectF):
-        title = self._manga.get("title", "?")
+        title = (self._manga.get("title") or "?").strip() or "?"
         pal = _palette_for(title)
 
         # gradient bg
@@ -167,15 +190,20 @@ class _CoverArea(QWidget):
             for x in range(2, int(rect.width()), step):
                 p.drawEllipse(QPointF(x, y), 0.7, 0.7)
 
-        # JP-style title text, centered
-        jp_text = pal["jp"]
-        font = QFont("Noto Serif JP", 22, QFont.Weight.Bold)
-        font.setFamilies(["Noto Serif JP", "Hiragino Mincho ProN",
-                          "Yu Mincho", "Songti SC", "serif"])
+        # The manga's own title, centered and wrapped, so a card without
+        # a cover still says what it is.
+        if len(title) > _PLACEHOLDER_TITLE_CHARS:
+            title = title[:_PLACEHOLDER_TITLE_CHARS - 1].rstrip() + "…"
+        font = QFont()
+        font.setPointSizeF(15)
+        font.setWeight(QFont.Weight.Bold)
         p.setFont(font)
-        p.setPen(QColor(255, 255, 255, 235))
-        text_rect = rect.adjusted(8, 8, -8, -COVER_H * 0.35)
-        p.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, jp_text)
+        p.setPen(QColor(255, 255, 255))
+        text_rect = rect.adjusted(12, 12, -12, -COVER_H * 0.30)
+        # Two different flag enums; drawText takes their combined value.
+        flags = (Qt.AlignmentFlag.AlignCenter.value
+                 | Qt.TextFlag.TextWordWrap.value)
+        p.drawText(text_rect, flags, title)
 
     def _paint_new_badge(self, p: QPainter):
         """Subtle NEW-chapter badge top-right of the cover.
@@ -186,14 +214,14 @@ class _CoverArea(QWidget):
         """
         accent = QColor(T.tokens()["accent.primary"])
         on_accent = QColor(T.tokens()["accent.on_primary"])
-        # Translucent fill — image shows through faintly.
+        # Solid fill: a translucent one let a bright cover wash it out
+        # until the label was hard to read (issue #395).
         accent_bg = QColor(accent)
-        accent_bg.setAlpha(220)
         label = f"+{self._new_count} NEW"
 
         font = QFont()
         font.setFamilies(["Geist Mono", "JetBrains Mono", "Consolas", "monospace"])
-        font.setPointSizeF(8.5)
+        font.setPointSizeF(TYPOGRAPHY["size_min"])
         font.setWeight(QFont.Weight.Bold)
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.4)
         p.setFont(font)
@@ -225,13 +253,13 @@ class _CoverArea(QWidget):
         dot_token = STATUS_TOKEN.get(status, "accent.primary")
         dot_color = QColor(T.tokens()[dot_token])
 
-        # Map the human label to match the design ("paused" → "Paused" in
-        # CSS, but rendered uppercase). "On hold" → "ON HOLD".
-        label = status.replace("-", " ").upper()
+        # The shared status wording, uppercase: "ON HOLD", "PLAN TO READ".
+        label = status_label(status).upper()
 
-        # 10px in CSS ≈ 7.5pt at 96dpi. Use 7.5pt + letter-spacing.
+        # The smallest text size the app uses (issue #395); the design's
+        # 7.5pt was too small to read.
         font = QFont()
-        font.setPointSizeF(7.5)
+        font.setPointSizeF(TYPOGRAPHY["size_min"])
         font.setWeight(QFont.Weight.DemiBold)
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.6)
         p.setFont(font)
@@ -346,11 +374,9 @@ class MangaCard(QFrame):
         # ── Below cover: title + sub ──
         title_text = manga.get("title", "Unknown")
         title_lbl = QLabel(title_text)
+        # Titles come from source sites; show them literally.
+        title_lbl.setTextFormat(Qt.TextFormat.PlainText)
         title_lbl.setWordWrap(True)
-        title_lbl.setStyleSheet(
-            f"color: {T.tokens()['text.t_1']}; font-size: 11pt; font-weight: 600;"
-            f"padding: 4px 2px 0 2px;"
-        )
         # Two-line clamp + headroom for descenders ('g', 'y', 'p', 'q')
         # on the SECOND line. 11pt × 1.45 line-height = ~21px per line;
         # 48px gives 2 lines + ~6px breathing room so the bottom of 'g'
@@ -363,14 +389,15 @@ class MangaCard(QFrame):
                                     read_count=self._read_count,
                                     total_count=self._total_count)
         sub_lbl = QLabel(sub_text)
-        sub_lbl.setStyleSheet(
-            f"color: {T.tokens()['text.t_3']}; font-size: 9pt;"
-            f"font-family: 'Geist Mono', monospace; padding: 0 2px;"
-        )
         layout.addWidget(sub_lbl)
 
-        # Refresh theme-aware label colors on theme switch.
-        T.on_theme_change(lambda: self._on_theme(title_lbl, sub_lbl))
+        # Label colours follow the theme. A method, not a lambda: the
+        # subscription is then dropped with the card, which is rebuilt
+        # on every Library refresh.
+        self._title_lbl = title_lbl
+        self._sub_lbl = sub_lbl
+        self._apply_label_theme()
+        T.on_theme_change(self._apply_label_theme)
 
         # Hover translate animation.
         self._anim = QPropertyAnimation(self, b"_offset", self)
@@ -489,8 +516,7 @@ class MangaCard(QFrame):
                          read_count: int = 0, total_count: int = 0) -> str:
         """Spoken summary of the painted status pill, progress and NEW
         badge, plus what activating the card does."""
-        status = (manga.get("status") or "reading").replace("-", " ")
-        parts = [status.capitalize()]
+        parts = [status_label(manga.get("status"))]
         if total_count > 0:
             parts.append(f"read {read_count} of {total_count} chapters")
         else:
@@ -502,14 +528,13 @@ class MangaCard(QFrame):
         parts.append("opens details")
         return ", ".join(parts)
 
-    @staticmethod
-    def _on_theme(title_lbl: QLabel, sub_lbl: QLabel):
-        title_lbl.setStyleSheet(
+    def _apply_label_theme(self):
+        self._title_lbl.setStyleSheet(
             f"color: {T.tokens()['text.t_1']}; font-size: 11pt; font-weight: 600;"
             f"padding: 4px 2px 0 2px;"
         )
-        sub_lbl.setStyleSheet(
-            f"color: {T.tokens()['text.t_3']}; font-size: 9pt;"
+        self._sub_lbl.setStyleSheet(
+            f"color: {T.tokens()['text.t_3']}; font-size: 10pt;"
             f"font-family: 'Geist Mono', monospace; padding: 0 2px;"
         )
 

@@ -64,7 +64,13 @@ class MeMangaApp(QMainWindow):
             )
         except Exception:
             pass
-        self.cover_cache = CoverCache(self.config.config_dir, self.events)
+        self.cover_cache = CoverCache(
+            self.config.config_dir, self.events,
+            max_disk_mb=self.config.get("gui.cover_cache_max_mb"))
+        # Whether the Playwright browsers are installed: True/False from
+        # the launch check, None when nothing checked (issue #344).
+        # Settings → Advanced shows it and offers the install.
+        self.browsers_installed = None
         # Cover URLs we already tried to replace after a failed fetch —
         # once per URL per session, see _on_cover_load_failed.
         self._cover_fallback_attempted: set = set()
