@@ -153,9 +153,17 @@ def apply(qapp):
     Without the palette swap, Qt6 inherits the OS palette (light gray
     on macOS / Windows light mode), which leaks through as a white
     flash on launch and around the frameless modal panels.
+
+    A style sheet or palette the application already has is not set
+    again: Qt re-polishes every widget of every window each time one is
+    set, whether or not anything changed.
     """
-    qapp.setStyleSheet(build_stylesheet(THEMES[current_theme()]))
-    qapp.setPalette(_build_palette(THEMES[current_theme()]))
+    sheet = build_stylesheet(THEMES[current_theme()])
+    if qapp.styleSheet() != sheet:
+        qapp.setStyleSheet(sheet)
+    palette = _build_palette(THEMES[current_theme()])
+    if qapp.palette() != palette:
+        qapp.setPalette(palette)
     # Force a polish pass so style-property-driven selectors re-evaluate.
     try:
         qapp.style().polish(qapp)

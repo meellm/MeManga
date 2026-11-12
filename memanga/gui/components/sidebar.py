@@ -255,21 +255,26 @@ class Sidebar(QWidget):
         self._buttons[name] = btn
         return btn
 
+    def _restyle_footer(self):
+        toks = T.tokens()
+        self._footer.setStyleSheet(
+            f"#sidebar_footer {{"
+            f"  background-color: {toks['surfaces.bg_1']};"
+            f"  border-top: 1px solid {toks['surfaces.border']};"
+            f"}}"
+        )
+
     def _build_footer(self) -> QWidget:
         w = QWidget()
         w.setObjectName("sidebar_footer")
         # Same instance-stylesheet trick as the sidebar parent.
         w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        def _restyle():
-            toks = T.tokens()
-            w.setStyleSheet(
-                f"#sidebar_footer {{"
-                f"  background-color: {toks['surfaces.bg_1']};"
-                f"  border-top: 1px solid {toks['surfaces.border']};"
-                f"}}"
-            )
-        _restyle()
-        T.on_theme_change(_restyle)
+        # A method, not a local function: the theme module holds methods
+        # weakly, so the subscription goes away with the sidebar. A local
+        # function stayed subscribed, with the footer, for good.
+        self._footer = w
+        self._restyle_footer()
+        T.on_theme_change(self._restyle_footer)
         outer = QVBoxLayout(w)
         outer.setContentsMargins(12, 12, 12, 12)
         outer.setSpacing(0)

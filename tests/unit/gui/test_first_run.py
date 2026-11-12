@@ -242,7 +242,9 @@ class TestDownloadLocation:
         a_file = tmp_path / "file.txt"
         a_file.write_text("x", encoding="utf-8")
         before = config.get("delivery.download_dir")
-        dialog = DownloadLocationDialog(QWidget(), config)
+        # Kept in a name: Qt deletes a dialog whose parent is collected.
+        parent = QWidget()
+        dialog = DownloadLocationDialog(parent, config)
         dialog._path_input.setText(str(a_file))
         dialog._confirm()
         assert not dialog._problem.isHidden()
@@ -253,12 +255,18 @@ class TestDownloadLocation:
     def test_closing_keeps_the_folder_and_is_not_asked_again(
             self, qapp, theme, config):
         from PySide6.QtWidgets import QWidget
+        from memanga.config import Config
         from memanga.gui.components.download_location_dialog import (
             DownloadLocationDialog, needs_download_location)
         before = config.get("delivery.download_dir")
-        DownloadLocationDialog(QWidget(), config).reject()
+        assert needs_download_location(config)
+        parent = QWidget()
+        dialog = DownloadLocationDialog(parent, config)
+        dialog.reject()
         assert config.get("delivery.download_dir") == before
         assert not needs_download_location(config)
+        # Recorded on disk, so the next launch doesn't ask either.
+        assert not needs_download_location(Config(config.config_dir))
 
     def test_first_run_setup_skips_the_dialog_when_not_needed(
             self, gui, config, sample_manga, monkeypatch):
