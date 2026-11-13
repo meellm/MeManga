@@ -837,9 +837,13 @@ class DetailPage(BasePage):
         ch_title_text = (entry.get("title") or "").strip()
         title_l = QVBoxLayout()
         title_l.setSpacing(2)
-        # Wraps: a long chapter title from a source would otherwise set
-        # the width of the whole list and push the buttons off the page.
-        main_title = WrappingLabel(ch_title_text or f"Chapter {num}")
+        # One line, shortened with "…" when long (full title in the
+        # tooltip and the label text): a long title from a source would
+        # otherwise set the width of the whole list. Not wrapped, so a
+        # row's height never depends on its width: with wrapped titles
+        # rows were seen squashed after the list was rebuilt (sorted)
+        # without the window being resized.
+        main_title = ElideLabel(ch_title_text or f"Chapter {num}")
         # Chapter titles come from source sites; show them literally.
         main_title.setTextFormat(Qt.TextFormat.PlainText)
         main_title.setProperty("role", "row_title")

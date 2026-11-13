@@ -518,8 +518,8 @@ All notable changes are recorded here. Format loosely follows
   Download all button and the chapter counts were cut off at the right
   edge. The controls, the action buttons, the Send to Kindle line and
   the chapter filter chips now wrap onto another line when they do not
-  fit, long chapter titles wrap, and a long source address is shortened
-  with "…" (the full address is in its tooltip).
+  fit, and a long chapter title or source address is shortened with "…"
+  (the full text is in its tooltip).
 - Settings: the tab icons, the theme card's check mark and the
   concurrent-downloads number kept the previous theme's colours after a
   theme switch on that page.

@@ -199,6 +199,46 @@ class TestLongListsBuildInBatches:
         assert len(page._chapter_rows) == 5
         assert page._rows_to_build == []
 
+    def test_rows_keep_their_height_when_the_list_is_rebuilt(
+            self, detail, qapp, qtbot, small_batches):
+        # After "Oldest first" (a rebuild in batches, with no window
+        # resize after it) rows were seen squashed, their text and
+        # buttons cut off, and the page did not scroll.
+        from PySide6.QtWidgets import QComboBox, QLabel, QPushButton
+        page = detail(numbers=range(1, 41))
+
+        def settled():
+            qtbot.waitUntil(lambda: not page._rows_to_build
+                            and len(page._chapter_rows) == 40, timeout=5000)
+            for _ in range(5):
+                qapp.processEvents()
+
+        def sort_box():
+            return next(c for c in page.findChildren(QComboBox)
+                        if c.accessibleName() == "Sort chapters"
+                        and c.isVisible())
+
+        settled()
+        for change in (lambda: sort_box().setCurrentText("Oldest first"),
+                       lambda: page._chapter_chips["unread"].click(),
+                       lambda: sort_box().setCurrentText("Newest first")):
+            page._scroll.verticalScrollBar().setValue(0)
+            change()
+            settled()
+            for num, row in page._chapter_rows.items():
+                assert row.height() >= row.minimumSizeHint().height(), num
+                for child in (row.findChildren(QLabel)
+                              + row.findChildren(QPushButton)):
+                    box = child.geometry()
+                    assert box.top() >= 0 and box.bottom() < row.height(), num
+            content = page._scroll.widget()
+            assert content.height() >= content.minimumSizeHint().height()
+            bar = page._scroll.verticalScrollBar()
+            bar.setValue(430)
+            qapp.processEvents()
+            assert bar.value() == 430
+        assert list(page._chapter_rows)[:2] == ["40", "39"]
+
     def test_download_of_a_row_not_built_yet_updates_the_counts(
             self, app_window, detail, sample_manga, small_batches):
         title = sample_manga["title"]
@@ -331,3 +371,13 @@ class TestFitsTheWindow:
                  "Edit", "Remove"]
         assert (_tab_sequence(actions[order[0]], 4)
                 == [actions[name] for name in order[1:]])
+        # The long chapter title stays one line, shortened on screen, with
+        # its full text for assistive technology and on hover.
+        from PySide6.QtWidgets import QLabel
+        name = next(label for label in
+                    page._chapter_rows["120"].findChildren(QLabel)
+                    if label.property("role") == "row_title")
+        full = chapters[-1]["title"]
+        assert name.text() == full and name.toolTip() == full
+        assert not name.wordWrap()
+        assert name.height() < 2 * name.fontMetrics().height()
