@@ -201,6 +201,42 @@ class TestThemePicker:
         p._on_pick("dark")
         assert theme.current_theme() == "dark"
 
+    def test_check_mark_takes_the_new_accent(self, qapp, theme):
+        # It kept the accent of the theme the card was built in.
+        from memanga.gui.components.theme_picker import ThemePicker
+        p = ThemePicker()
+        theme.set_theme("light")  # subscribers only; no app restyle needed
+        sheet = p._cards["light"]._check.styleSheet()
+        assert theme.tokens()["accent.primary"] in sheet
+        assert theme.tokens()["accent.on_primary"] in sheet
+
+    def test_cards_stack_when_two_do_not_fit(self, qapp, theme):
+        # Live finding: the Light card was cut off at the right edge of
+        # the Settings pane. Narrower than two cards, they stack.
+        from PySide6.QtWidgets import QVBoxLayout, QWidget
+        from memanga.gui.components.theme_picker import ThemePicker
+        # Inside a host, as in Settings: a window would take the
+        # two-card minimum from its own layout.
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        p = ThemePicker()
+        layout.addWidget(p)
+        host.show()
+        both = p._side_by_side_width()
+        assert p.minimumSizeHint().width() < both
+        host.resize(both - 40, 700)
+        qapp.processEvents()
+        assert p.is_stacked()
+        dark, light = p._cards["dark"], p._cards["light"]
+        assert light.geometry().top() > dark.geometry().bottom()
+        assert light.geometry().right() < p.width()
+        host.resize(both + 40, 700)
+        qapp.processEvents()
+        assert not p.is_stacked()
+        assert dark.geometry().top() == light.geometry().top()
+        host.close()
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Modal base class

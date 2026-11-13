@@ -504,8 +504,19 @@ All notable changes are recorded here. Format loosely follows
 ### Fixed
 - Toasts and the list view's NEW badge had white text on the theme's
   accent and status colours (1.9:1 in the dark theme); they use the
-  matching text colour now. Toasts also follow a theme switch, no longer
-  cover each other, wrap long messages and stay up longer for them.
+  matching text colour now. Toasts also follow a theme switch, including
+  one already on screen, no longer cover each other, wrap long messages
+  and stay up longer for them.
+- At the default window size the Library filter box shrank to a few
+  letters and the status chips were cut off; when one row is too narrow
+  the chips now move to a row of their own, and Tab follows the rows.
+  In Settings, the Light theme card was cut off at the right edge: the
+  theme cards stack in a narrow pane, long hints wrap, and a tab that is
+  still too wide for a small window scrolls sideways instead of hiding
+  its right edge.
+- Settings: the tab icons, the theme card's check mark and the
+  concurrent-downloads number kept the previous theme's colours after a
+  theme switch on that page.
 - The Library said "No manga tracked yet" when a filter or status chip
   simply matched nothing.
 - Switching theme no longer calls into Library cards, search rows and

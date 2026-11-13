@@ -91,7 +91,6 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
 
     def _build(self):
         from PySide6.QtWidgets import QFrame
-        from ..assets.icons import icon
         from ... import __version__
 
         root = QVBoxLayout(self)
@@ -113,7 +112,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         reset_btn = QPushButton("  Reset to defaults")
         reset_btn.setProperty("variant", "ghost")
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.setIcon(icon("refresh", T.tokens()["text.t_2"], 14))
+        self._reset_btn = reset_btn  # icon recoloured by _refresh_icons
         reset_btn.setToolTip("Reset all settings to defaults")
         reset_btn.clicked.connect(self._reset_to_defaults)
         top_row.addWidget(reset_btn)
@@ -150,6 +149,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         nav_l.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self._tab_buttons: dict[str, QPushButton] = {}
+        self._tab_icons: dict[str, str] = {}
         nav_items = [
             ("general",  "General",        "settings"),
             ("email",    "Kindle / Email", "bell"),
@@ -168,7 +168,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
             # from clipping on Windows; the button needs the full
             # height to honour the padding.
             btn.setFixedHeight(42)
-            btn.setIcon(icon(icon_name, T.tokens()["text.t_2"], 16))
+            self._tab_icons[key] = icon_name
             from PySide6.QtCore import QSize
             btn.setIconSize(QSize(16, 16))
             btn.clicked.connect(lambda _, t=key: self._switch_tab(t))
@@ -186,7 +186,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # ── General tab ──
         self._general_scroll = QScrollArea()
         self._general_scroll.setWidgetResizable(True)
-        self._general_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._general_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         general_content = QWidget()
         self._general_layout = QVBoxLayout(general_content)
         self._general_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -197,7 +197,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # ── Email tab ──
         self._email_scroll = QScrollArea()
         self._email_scroll.setWidgetResizable(True)
-        self._email_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._email_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         email_content = QWidget()
         self._email_layout = QVBoxLayout(email_content)
         self._email_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -208,7 +208,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # ── Advanced tab ──
         self._advanced_scroll = QScrollArea()
         self._advanced_scroll.setWidgetResizable(True)
-        self._advanced_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._advanced_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         advanced_content = QWidget()
         self._advanced_layout = QVBoxLayout(advanced_content)
         self._advanced_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -219,7 +219,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # ── About tab ──
         self._about_scroll = QScrollArea()
         self._about_scroll.setWidgetResizable(True)
-        self._about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         about_content = QWidget()
         self._about_layout = QVBoxLayout(about_content)
         self._about_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -259,6 +259,8 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # construct time and never refreshed.
         self._restyle_save_bar()
         T.on_theme_change(self._restyle_save_bar)
+        self._refresh_icons()
+        T.on_theme_change(self._refresh_icons)
 
         self._switch_tab("general")
 
@@ -301,6 +303,16 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         )
         # Re-render the icon at the new on-accent color too.
         self._save_bar_btn.setIcon(_ic("check", toks["accent.on_primary"], 14))
+
+    def _refresh_icons(self):
+        """Draw the header and tab-rail icons in the current theme's
+        secondary text colour. Drawn once, they kept the colour of the
+        theme the page was built in after a switch from this page."""
+        from ..assets.icons import icon
+        colour = T.tokens()["text.t_2"]
+        self._reset_btn.setIcon(icon("refresh", colour, 14))
+        for key, btn in self._tab_buttons.items():
+            btn.setIcon(icon(self._tab_icons[key], colour, 16))
 
     def _switch_tab(self, tab_name):
         self._current_tab = tab_name

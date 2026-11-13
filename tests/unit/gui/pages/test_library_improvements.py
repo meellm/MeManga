@@ -229,6 +229,62 @@ class TestCovers:
         assert not cache.is_placeholder(rail_card._cover.pixmap())
 
 
+def _tab_sequence(start, count):
+    """The next ``count`` widgets Tab would visit after ``start``."""
+    from PySide6.QtCore import Qt
+    tab = (Qt.FocusPolicy.TabFocus, Qt.FocusPolicy.StrongFocus,
+           Qt.FocusPolicy.WheelFocus)
+    seen, widget = [], start
+    while len(seen) < count:
+        widget = widget.nextInFocusChain()
+        assert widget is not start, "focus chain ended early"
+        if (widget.focusPolicy() in tab and widget.isVisible()
+                and widget.isEnabled()):
+            seen.append(widget)
+    return seen
+
+
+class TestFilterBarFits:
+    def test_filter_row_is_never_cut_off(self, app_window, library, qapp):
+        # Live finding: at 1100x750 the filter box shrank to "Fi…" and
+        # the status chips were cropped. One window for all three sizes:
+        # the minimum, the default and a wide one.
+        bar = library._filter_bar
+        chips = list(library._chip_buttons.values())
+        views = list(library._view_buttons.values())
+        search, sort = library._search_entry, library._sort_menu
+        for width in (900, 1100, 2000):
+            app_window.resize(width, 750)
+            qapp.processEvents()
+            for widget in (search, library._chips_wrap, sort,
+                           library._view_wrap):
+                left = widget.mapTo(bar, widget.rect().topLeft()).x()
+                assert left >= 0, (width, widget)
+                assert left + widget.width() <= bar.width(), (width, widget)
+            for chip in chips:
+                assert chip.width() >= chip.sizeHint().width(), (width, chip.text())
+            assert sort.width() >= sort.sizeHint().width(), width
+            assert search.width() >= min(search.sizeHint().width(),
+                                         search.maximumWidth()), width
+
+            if library._chips_on_own_row:
+                # Second row; Tab goes along the first row, then the chips.
+                assert library._chips_wrap.y() >= search.y() + search.height()
+                expected = [sort, *views, *chips]
+            else:
+                assert library._chips_wrap.y() < search.y() + search.height()
+                expected = [*chips, sort, *views]
+            assert _tab_sequence(search, len(expected)) == expected, width
+
+        # The minimum window cannot fit one row, a wide one can.
+        app_window.resize(900, 750)
+        qapp.processEvents()
+        assert library._chips_on_own_row
+        app_window.resize(2000, 750)
+        qapp.processEvents()
+        assert not library._chips_on_own_row
+
+
 class TestPlaceholderPalette:
     def test_palette_is_the_same_on_every_launch(self):
         # The built-in hash() of a string differs between processes.

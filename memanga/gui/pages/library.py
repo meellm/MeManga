@@ -18,8 +18,15 @@ from ..components.manga_row import MangaRow
 from ..components.context_menu import ContextMenu
 from ..focus import focus_into
 from ..components.toast import Toast
+from ..components.wrapping_label import WrappingLabel
 from ..components.remove_manga_modal import (RemoveMangaModal, remove_manga,
                                               removed_message)
+
+# Left and right margin of the page body, in px.
+_BODY_MARGIN = 32
+# Narrowest the filter box may get while the chips share its row: wide
+# enough to read its placeholder.
+_FILTER_MIN_WIDTH = 200
 
 
 class LibraryPage(BasePage):
@@ -114,7 +121,8 @@ class LibraryPage(BasePage):
         # Multi-part meta line: "{n} manga · {ch} chapters · {unread} unread · Synced {ago}"
         # Render a placeholder so the header height is stable from the
         # very first paint; the real numbers fill in once on_show fires.
-        self._stats_label = QLabel("0 manga  ·  0 chapters tracked  ·  0 read  ·  0 unread  ·  Synced never")
+        # Wraps at the minimum window width instead of losing its end.
+        self._stats_label = WrappingLabel("0 manga  ·  0 chapters tracked  ·  0 read  ·  0 unread  ·  Synced never")
         self._stats_label.setProperty("role", "meta")
         h_layout.addWidget(self._stats_label)
 
@@ -129,13 +137,26 @@ class LibraryPage(BasePage):
         # ── Body wrapper ──
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(32, 20, 32, 20)
+        body_layout.setContentsMargins(_BODY_MARGIN, 20, _BODY_MARGIN, 20)
         body_layout.setSpacing(T.PAD_SM)
         layout.addWidget(body, 1)
 
         # Filter bar — per design spec, search + status chip-row + sort dropdown.
+        # One row when the page is wide enough; otherwise the status chips
+        # get a second row of their own (see _fit_filter_bar), so nothing
+        # is cut off at the default or the minimum window size.
+        self._filter_bar = QWidget()
+        bar_l = QVBoxLayout(self._filter_bar)
+        bar_l.setContentsMargins(0, 0, 0, 0)
+        bar_l.setSpacing(T.PAD_SM)
         filter_bar = QHBoxLayout()
         filter_bar.setSpacing(10)
+        self._filter_row = filter_bar
+        bar_l.addLayout(filter_bar)
+        self._chip_row = QHBoxLayout()
+        self._chip_row.setSpacing(10)
+        bar_l.addLayout(self._chip_row)
+        self._chips_on_own_row = False
 
         self._search_entry = QLineEdit()
         self._search_entry.setPlaceholderText("Filter library…")
@@ -170,6 +191,7 @@ class LibraryPage(BasePage):
             chips_l.addWidget(chip)
             self._chip_buttons[key] = chip
         filter_bar.addWidget(chips_wrap)
+        self._chips_wrap = chips_wrap
 
         # Kept as a hidden combobox to preserve back-compat for callers
         # that probe ._status_filter; not displayed.
@@ -218,8 +240,9 @@ class LibraryPage(BasePage):
             self._view_buttons[mode] = btn
         self._describe_view_buttons()
         filter_bar.addWidget(view_wrap)
+        self._view_wrap = view_wrap
 
-        body_layout.addLayout(filter_bar)
+        body_layout.addWidget(self._filter_bar)
 
         # ── Continue Reading rail ──
         # Rebuilt on each refresh. Holds up to 4 ContinueCard widgets in
@@ -272,13 +295,52 @@ class LibraryPage(BasePage):
         body_layout.addWidget(self._scroll, 1)
 
     def on_show(self, **kwargs):
+        self._fit_filter_bar(self.width())
         self._refresh()
         # Remember the grid column count we just laid out for so resize
         # events can tell whether they need to re-layout or not.
         self._last_grid_cols = self._current_col_count()
 
+    def _filter_bar_one_row_width(self) -> int:
+        """Width the filter bar needs to keep the chips beside the
+        filter box, with the box still wide enough to show its
+        placeholder."""
+        spacing = self._filter_row.spacing()
+        return (_FILTER_MIN_WIDTH
+                + self._chips_wrap.sizeHint().width()
+                + self._sort_menu.sizeHint().width()
+                + self._view_wrap.sizeHint().width()
+                + 4 * spacing)
+
+    def _fit_filter_bar(self, page_width: int):
+        """Move the status chips to a row of their own when the page is
+        too narrow for one row, and back when it is wide enough again.
+        Tab order follows what is on screen, row by row."""
+        if not hasattr(self, "_chips_wrap"):
+            return
+        available = page_width - 2 * _BODY_MARGIN
+        own_row = available < self._filter_bar_one_row_width()
+        if own_row == self._chips_on_own_row:
+            return
+        self._chips_on_own_row = own_row
+        chips = self._chips_wrap
+        if own_row:
+            self._filter_row.removeWidget(chips)
+            self._chip_row.addWidget(chips, 0, Qt.AlignmentFlag.AlignLeft)
+            order = [self._search_entry, self._sort_menu,
+                     *self._view_buttons.values(),
+                     *self._chip_buttons.values()]
+        else:
+            self._chip_row.removeWidget(chips)
+            self._filter_row.insertWidget(1, chips)
+            order = [self._search_entry, *self._chip_buttons.values(),
+                     self._sort_menu, *self._view_buttons.values()]
+        for first, second in zip(order, order[1:]):
+            QWidget.setTabOrder(first, second)
+
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
+        self._fit_filter_bar(ev.size().width())
         # When the window changes size enough that the manga grid needs
         # a different number of columns (e.g. fullscreen toggle), the
         # existing card positions stay in their old slots until the
