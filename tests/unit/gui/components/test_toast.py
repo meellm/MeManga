@@ -48,6 +48,37 @@ class TestToastColours:
         assert dark != light
         assert light[0] == theme.tokens()["accent.primary"].upper()
 
+    @pytest.mark.parametrize("kind,token", [
+        ("info", "accent.primary"), ("success", "status.success"),
+        ("error", "status.danger")])
+    def test_a_shown_toast_takes_the_new_colours(self, parent, theme,
+                                                 kind, token):
+        # Live finding: a toast still on screen kept the old theme's
+        # colours next to a new one in the new theme. No QApplication
+        # restyle is needed for this: the colours are the toast's own.
+        from memanga.gui.components.toast import Toast
+        toast = Toast(parent, "Saved", kind=kind)
+        theme.set_theme("light")
+        toks = theme.tokens()
+        assert _colours(toast) == (toks[token].upper(),
+                                   toks["accent.on_primary"].upper())
+        theme.set_theme("dark")
+        toks = theme.tokens()
+        assert _colours(toast) == (toks[token].upper(),
+                                   toks["accent.on_primary"].upper())
+
+    def test_a_dismissed_toast_is_no_longer_subscribed(self, parent, theme):
+        from memanga.gui.components.toast import Toast
+        toast = Toast(parent, "Saved")
+
+        def subscribed():
+            return any(theme._same(entry, toast._apply_theme)
+                       for entry in theme._subscribers)
+
+        assert subscribed()
+        toast._dismiss()
+        assert not subscribed()
+
     def test_unknown_kind_uses_the_accent(self, parent, theme):
         from memanga.gui.components.toast import Toast
         background, _text = _colours(Toast(parent, "hm", kind="other"))

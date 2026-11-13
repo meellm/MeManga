@@ -34,23 +34,20 @@ class Toast(QLabel):
     """Auto-dismissing toast shown at top-right of parent.
 
     Several toasts on the same parent stack downwards instead of
-    covering each other, and follow the parent when it is resized.
+    covering each other, follow the parent when it is resized, and
+    take the new colours when the theme is switched while they show.
     """
 
     def __init__(self, parent: QWidget, message: str, kind: str = "info", duration: int = 3000):
         super().__init__(message, parent)
         # Messages often quote error text from sites; show it literally.
         self.setTextFormat(Qt.TextFormat.PlainText)
-        # Colours are read now, not at import, so a toast shown after a
-        # theme switch uses the new theme.
-        toks = T.tokens()
-        bg = toks.get(_FILL_TOKENS.get(kind, "accent.primary"),
-                      toks["accent.primary"])
-        self.setStyleSheet(
-            f"background: {bg}; color: {toks['accent.on_primary']};"
-            f" border-radius: 6px;"
-            f" font-size: {T.FONT_SIZE_SM}pt; font-weight: 500;"
-        )
+        self._kind = kind
+        self._apply_theme()
+        # A toast can still be on screen when the theme is switched (the
+        # Save that follows a switch in Settings shows one). Held weakly:
+        # the subscription goes with the toast.
+        T.on_theme_change(self._apply_theme)
         # The padding, as margins: the label's own size and
         # height-for-width maths include these.
         self.setContentsMargins(16, 8, 16, 8)
@@ -74,6 +71,18 @@ class Toast(QLabel):
             extra = max(0, len(message or "") - 40) * _MS_PER_CHAR
             duration = min(_MAX_DURATION, duration + extra)
         QTimer.singleShot(duration, self._dismiss)
+
+    def _apply_theme(self):
+        """Colours from the current theme. Read at show time and again
+        on every switch, never at import."""
+        toks = T.tokens()
+        bg = toks.get(_FILL_TOKENS.get(self._kind, "accent.primary"),
+                      toks["accent.primary"])
+        self.setStyleSheet(
+            f"background: {bg}; color: {toks['accent.on_primary']};"
+            f" border-radius: 6px;"
+            f" font-size: {T.FONT_SIZE_SM}pt; font-weight: 500;"
+        )
 
     def _fit(self, parent):
         """Size to the text; wrap what does not fit beside the margins."""
@@ -109,6 +118,7 @@ class Toast(QLabel):
 
     def _dismiss(self):
         try:
+            T.off_theme_change(self._apply_theme)
             parent = self._parent_ref() if self._parent_ref else None
             if parent is not None:
                 siblings = _live.get(parent)
