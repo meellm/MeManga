@@ -21,7 +21,7 @@ from .. import theme as T
 from ..theme.tokens import TYPOGRAPHY
 
 
-class _ElideLabel(QLabel):
+class ElideLabel(QLabel):
     """QLabel that paints its text with right-elision when there
     isn't enough room.
 
@@ -61,6 +61,10 @@ class _ElideLabel(QLabel):
             p.drawText(self.rect(), int(self.alignment()) | Qt.TextFlag.TextSingleLine, elided)
         finally:
             p.end()
+
+
+# The earlier private name, still used below.
+_ElideLabel = ElideLabel
 
 
 class SearchResultRow(QFrame):

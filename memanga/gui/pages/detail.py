@@ -19,6 +19,9 @@ from ..components.dialogs import InputDialog
 from ..components.remove_manga_modal import (RemoveMangaModal, remove_manga,
                                               removed_message)
 from ..components.error_details import detail_tooltip
+from ..components.flow import FlowFrame
+from ..components.search_result import ElideLabel
+from ..components.wrapping_label import WrappingLabel
 
 # Chapter rows built per pass of the event loop. A list up to this long
 # is built in one go, as before; a longer one shows its first rows at
@@ -69,7 +72,9 @@ class DetailPage(BasePage):
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # The rows wrap to fit; should something still be wider than the
+        # window, it scrolls sideways instead of being cut off unseen.
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         root.addWidget(self._scroll)
 
         self._scroll_content = QWidget()
@@ -221,15 +226,20 @@ class DetailPage(BasePage):
             src_row.addWidget(pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
         if primary_url:
-            url_lbl = QLabel(primary_url)
+            # Elided to the room left, full URL in the tooltip and the
+            # accessible text: a long source URL (often 70+ characters)
+            # would otherwise set the width of the whole page.
+            url_lbl = ElideLabel(primary_url)
             url_lbl.setProperty("role", "mono_meta")
             url_lbl.setStyleSheet(
                 f"font-family: 'Geist Mono', monospace; color: {T.tokens()['text.t_3']};"
                 f"font-size: 10pt;"
             )
+            # Takes the rest of the row (its text stays left-aligned), so
+            # it is only shortened when the row really is too narrow.
             src_row.addWidget(url_lbl, 1, Qt.AlignmentFlag.AlignVCenter)
-
-        src_row.addStretch(1)
+        else:
+            src_row.addStretch(1)
         info_layout.addLayout(src_row)
 
         if backup:
@@ -259,18 +269,21 @@ class DetailPage(BasePage):
         # dropdown sizes to a natural width instead of stretching to the
         # full column, which had been making the layout look "ugly" with
         # huge empty space around "Reading" / "Manual".
-        controls_card = QFrame()
+        # The columns wrap onto another line when the info column is
+        # narrower than all three (it is at the default window size);
+        # in one line they could not shrink and were cut off on the right.
+        controls_card = FlowFrame(h_spacing=28, v_spacing=12)
         controls_card.setProperty("role", "card")
-        cc_l = QHBoxLayout(controls_card)
-        cc_l.setContentsMargins(16, 12, 16, 12)
-        cc_l.setSpacing(28)
+        controls_card.flow().setContentsMargins(16, 12, 16, 12)
+        self._controls_card = controls_card
 
         from ..components.status_dropdown import StatusDropdown
         from ..components.mode_dropdown import ModeDropdown
         from ..components.layout_dropdown import LayoutDropdown
 
-        def _control_column(label_text: str, widget: QWidget) -> QVBoxLayout:
-            col = QVBoxLayout()
+        def _control_column(label_text: str, widget: QWidget) -> QWidget:
+            column = QWidget()
+            col = QVBoxLayout(column)
             col.setSpacing(6)
             col.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel(label_text)
@@ -280,16 +293,16 @@ class DetailPage(BasePage):
             widget.setMaximumWidth(200)
             widget.setMinimumWidth(160)
             col.addWidget(widget, 0, Qt.AlignmentFlag.AlignLeft)
-            return col
+            return column
 
         self._status_combo = StatusDropdown(initial=manga.get("status", "reading"))
         self._status_combo.value_changed.connect(self._on_status_change)
-        cc_l.addLayout(_control_column("STATUS", self._status_combo))
+        controls_card.addWidget(_control_column("STATUS", self._status_combo))
 
         current_mode = manga.get("mode", "auto")
         self._mode_combo = ModeDropdown(initial=current_mode)
         self._mode_combo.value_changed.connect(self._on_mode_change)
-        cc_l.addLayout(_control_column("MODE", self._mode_combo))
+        controls_card.addWidget(_control_column("MODE", self._mode_combo))
 
         # Reader layout (issue #32) — same fallback chain the reader
         # uses: per-manga value, then the global default, then the
@@ -302,14 +315,13 @@ class DetailPage(BasePage):
         )
         self._layout_combo = LayoutDropdown(initial=current_layout)
         self._layout_combo.value_changed.connect(self._on_layout_change)
-        cc_l.addLayout(_control_column("READER LAYOUT", self._layout_combo))
-
-        cc_l.addStretch(1)  # push columns left, no centering void
+        controls_card.addWidget(
+            _control_column("READER LAYOUT", self._layout_combo))
 
         info_layout.addWidget(controls_card)
 
         # Mode hint label (below controls card)
-        mode_hint = QLabel(
+        mode_hint = WrappingLabel(
             "Manual: download chapters individually below"
             if current_mode == "manual"
             else "Auto: new chapters download after each check"
@@ -324,7 +336,11 @@ class DetailPage(BasePage):
         # Issue #345: a manga without its own choice follows the
         # Settings choice of which manga to send.
         manga_kindle = manga_sends_to_kindle(manga, kindle_scope(self.app.config))
-        kindle_row = QHBoxLayout()
+        # The hint moves under the check box when the two do not fit on
+        # one line, instead of widening the page past a narrow window.
+        kindle_row = FlowFrame(h_spacing=T.PAD_SM, v_spacing=2)
+        kindle_row.flow().setContentsMargins(0, 0, 0, 0)
+        self._kindle_row = kindle_row
         self._kindle_check = QCheckBox("Send to Kindle after download")
         self._kindle_check.setChecked(bool(manga_kindle and global_email_on))
         self._kindle_check.stateChanged.connect(self._on_kindle_toggle)
@@ -334,13 +350,12 @@ class DetailPage(BasePage):
             hint = QLabel("— enable email in Settings first")
             hint.setProperty("role", "hint")
             kindle_row.addWidget(hint)
-        kindle_row.addStretch(1)
-        info_layout.addLayout(kindle_row)
+        info_layout.addWidget(kindle_row)
 
         info_layout.addSpacing(12)
 
         # Stats
-        stats_label = QLabel(self._stats_text(state_data))
+        stats_label = WrappingLabel(self._stats_text(state_data))
         stats_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_SECONDARY};")
         info_layout.addWidget(stats_label)
         self._stats_label = stats_label
@@ -349,9 +364,15 @@ class DetailPage(BasePage):
 
         # Action row: primary "Check updates" + default "Download from…" +
         # default "Download all" + spacer + ghost "Edit" + danger "Remove"
+        # Wraps onto a second line when the info column is too narrow for
+        # all five buttons, which it is at the default window size. Edit
+        # and Remove stay together at the right end, as with the stretch
+        # they used to follow.
         from ..assets.icons import icon as _ic
-        actions = QHBoxLayout()
-        actions.setSpacing(T.PAD_SM)
+        actions = FlowFrame(h_spacing=T.PAD_SM, v_spacing=T.PAD_SM,
+                            last_right=True)
+        actions.flow().setContentsMargins(0, 0, 0, 0)
+        self._actions_row = actions
 
         check_btn = QPushButton("  Check updates")
         check_btn.setProperty("variant", "primary")
@@ -372,14 +393,17 @@ class DetailPage(BasePage):
         dl_all_btn.clicked.connect(self._download_all)
         actions.addWidget(dl_all_btn)
 
-        actions.addStretch(1)
+        manage = QWidget()
+        manage_l = QHBoxLayout(manage)
+        manage_l.setContentsMargins(0, 0, 0, 0)
+        manage_l.setSpacing(T.PAD_SM)
 
         edit_btn = QPushButton("Edit")
         edit_btn.setProperty("variant", "ghost")
         edit_btn.setProperty("size", "sm")
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         edit_btn.clicked.connect(self._show_edit_form)
-        actions.addWidget(edit_btn)
+        manage_l.addWidget(edit_btn)
 
         remove_btn = QPushButton("Remove")
         remove_btn.setProperty("variant", "danger")
@@ -388,9 +412,10 @@ class DetailPage(BasePage):
         remove_btn.clicked.connect(self._confirm_remove)
         remove_btn.setAccessibleDescription(
             f"Remove {title} from the library (asks first)")
-        actions.addWidget(remove_btn)
+        manage_l.addWidget(remove_btn)
+        actions.addWidget(manage)
 
-        info_layout.addLayout(actions)
+        info_layout.addWidget(actions)
 
         main_row.addLayout(info_layout, 1)
 
@@ -637,12 +662,14 @@ class DetailPage(BasePage):
         layout.addSpacing(8)
 
         # Filter chip row + sort dropdown (matches HTML)
+        # The chips wrap inside their frame when the page is too narrow
+        # for them and the sort box on one line (it is at the default
+        # window size once the counts have three digits).
         filter_row = QHBoxLayout()
-        chips_wrap = QFrame()
+        chips_wrap = FlowFrame(h_spacing=0, v_spacing=0)
         chips_wrap.setProperty("role", "card_2")
-        chip_l = QHBoxLayout(chips_wrap)
-        chip_l.setContentsMargins(3, 3, 3, 3)
-        chip_l.setSpacing(0)
+        chips_wrap.flow().setContentsMargins(3, 3, 3, 3)
+        self._chapter_chips_wrap = chips_wrap
         # Preserve the user's chip choice across rebuilds — _build_chapter_list
         # runs on every chip click via _set_chapter_filter, so resetting to
         # "all" here would clobber the click before the new chips paint.
@@ -658,7 +685,7 @@ class DetailPage(BasePage):
             chip.setProperty("active", "true" if key == self._chapter_filter else "false")
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
             chip.clicked.connect(lambda _, k=key: self._set_chapter_filter(k))
-            chip_l.addWidget(chip)
+            chips_wrap.addWidget(chip)
             self._chapter_chips[key] = chip
         self._show_chapter_counts(ctx["counts"])
         filter_row.addWidget(chips_wrap)
@@ -810,7 +837,9 @@ class DetailPage(BasePage):
         ch_title_text = (entry.get("title") or "").strip()
         title_l = QVBoxLayout()
         title_l.setSpacing(2)
-        main_title = QLabel(ch_title_text or f"Chapter {num}")
+        # Wraps: a long chapter title from a source would otherwise set
+        # the width of the whole list and push the buttons off the page.
+        main_title = WrappingLabel(ch_title_text or f"Chapter {num}")
         # Chapter titles come from source sites; show them literally.
         main_title.setTextFormat(Qt.TextFormat.PlainText)
         main_title.setProperty("role", "row_title")

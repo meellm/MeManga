@@ -246,3 +246,88 @@ class TestHero:
         assert cache.is_placeholder(page._cover_label.pixmap())
         page._on_cover_loaded({"url": self.URL})
         assert not cache.is_placeholder(page._cover_label.pixmap())
+
+
+def _tab_sequence(start, count):
+    """The next ``count`` widgets Tab would visit after ``start``."""
+    from PySide6.QtCore import Qt
+    tab = (Qt.FocusPolicy.TabFocus, Qt.FocusPolicy.StrongFocus,
+           Qt.FocusPolicy.WheelFocus)
+    seen, widget = [], start
+    while len(seen) < count:
+        widget = widget.nextInFocusChain()
+        assert widget is not start, "focus chain ended early"
+        if (widget.focusPolicy() in tab and widget.isVisible()
+                and widget.isEnabled()):
+            seen.append(widget)
+    return seen
+
+
+class TestFitsTheWindow:
+    """At the default 1100x750 window the reader-layout control, the
+    Download all area and the chapter summary were cut off at the right
+    edge, with no way to scroll to them."""
+
+    LONG_URL = ("https://mangadex.org/title/3f8b2c1a-9d4e-4b7a-8c6d-"
+                "2e1f0a9b8c7d/a-very-long-series-name-for-the-layout-test")
+
+    def test_nothing_runs_past_the_right_edge(self, app_window, qapp,
+                                              sample_manga):
+        from PySide6.QtCore import QPoint
+        from PySide6.QtWidgets import QPushButton
+        manga = dict(sample_manga, url=self.LONG_URL)
+        app_window.config.set("manga", [manga])
+        # Three-digit counts in the chips, and one long source title.
+        chapters = [{"number": str(n),
+                     "title": ("The one where the chapter title from the "
+                               "source goes on for a long while" if n == 120
+                               else ""),
+                     "source": "mangadex.org", "source_url": self.LONG_URL,
+                     "url": f"https://mangadex.org/chapter/{n}"}
+                    for n in range(1, 121)]
+        app_window.app_state.set_available_chapters(manga["title"], chapters)
+        app_window.show()
+        app_window.show_page("detail", manga=manga)
+        page = app_window._pages["detail"]
+        actions = {b.text().strip(): b
+                   for b in page._actions_row.findChildren(QPushButton)}
+
+        for width in (900, 1100, 1600):  # minimum, default, wide
+            app_window.resize(width, 750)
+            for _ in range(3):
+                qapp.processEvents()
+            viewport = page._scroll.viewport()
+            assert page._scroll.widget().width() <= viewport.width(), width
+            assert not page._scroll.horizontalScrollBar().isVisible(), width
+
+            def inside(widget):
+                left = widget.mapTo(viewport, QPoint(0, 0)).x()
+                return left >= 0 and left + widget.width() <= viewport.width()
+
+            watched = [page._status_combo, page._mode_combo,
+                       page._layout_combo, page._chapters_summary,
+                       page._kindle_check, page._kindle_row,
+                       *actions.values(), *page._chapter_chips.values(),
+                       page._chapter_rows["120"]]
+            for widget in watched:
+                assert inside(widget), (width, widget)
+            for button in actions.values():
+                assert button.width() >= button.sizeHint().width(), width
+            # Wrapped rows get the height of all their lines.
+            for frame in (page._controls_card, page._actions_row,
+                          page._kindle_row, page._chapter_chips_wrap):
+                assert frame.height() >= frame.heightForWidth(frame.width())
+
+        # Wide: one action line (Edit and Remove are the smaller size and
+        # centred on it), with Edit and Remove at its right end.
+        centres = [b.mapTo(page, QPoint(0, b.height() // 2)).y()
+                   for b in actions.values()]
+        assert max(centres) - min(centres) <= 2
+        remove = actions["Remove"]
+        assert (remove.mapTo(page._actions_row, QPoint(0, 0)).x()
+                + remove.width()) == page._actions_row.width()
+        # Tab follows the reading order whatever the wrapping.
+        order = ["Check updates", "Download from…", "Download all",
+                 "Edit", "Remove"]
+        assert (_tab_sequence(actions[order[0]], 4)
+                == [actions[name] for name in order[1:]])

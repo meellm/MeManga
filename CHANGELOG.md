@@ -514,6 +514,12 @@ All notable changes are recorded here. Format loosely follows
   theme cards stack in a narrow pane, long hints wrap, and a tab that is
   still too wide for a small window scrolls sideways instead of hiding
   its right edge.
+- Detail: at the default window size the Reader layout control, the
+  Download all button and the chapter counts were cut off at the right
+  edge. The controls, the action buttons, the Send to Kindle line and
+  the chapter filter chips now wrap onto another line when they do not
+  fit, long chapter titles wrap, and a long source address is shortened
+  with "…" (the full address is in its tooltip).
 - Settings: the tab icons, the theme card's check mark and the
   concurrent-downloads number kept the previous theme's colours after a
   theme switch on that page.
