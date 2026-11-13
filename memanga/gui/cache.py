@@ -12,6 +12,7 @@ import hashlib
 import logging
 import os
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Optional, Tuple
@@ -40,6 +41,9 @@ MAX_DISK_LIMIT_MB = 10_000
 # Trimming goes a little below the limit so that it does not run again
 # on the very next cover.
 _TRIM_TO = 0.9
+
+# A cover in use has its file time renewed at most this often (seconds).
+_TOUCH_INTERVAL = 60.0
 
 # Pixmaps are rendered for the screen's device pixel ratio, up to this.
 _MAX_PIXEL_RATIO = 3.0
@@ -83,6 +87,9 @@ class CoverCache:
         self._disk_lock = threading.Lock()
         self._max_disk_bytes = disk_limit_mb(max_disk_mb) * 1024 * 1024
         self._disk_bytes: Optional[int] = None
+        # Cover file -> monotonic time it was last marked used (under
+        # `_lock`); spares a file-time update on every repaint.
+        self._touched: dict[str, float] = {}
 
     # ── Placeholder ───────────────────────────────────────────────────
 
@@ -116,17 +123,23 @@ class CoverCache:
 
         key = self._cache_key(url, size)
 
-        with self._lock:
-            if key in self._memory:
-                self._memory.move_to_end(key)
-                return self._memory[key]
-
         disk_path = self._disk_path(url)
+        with self._lock:
+            pm = self._memory.get(key)
+            if pm is not None:
+                self._memory.move_to_end(key)
+        if pm is not None:
+            # Shown from memory is still a use: without this, the file of
+            # a cover on screen all session aged on disk and the trim
+            # removed it ahead of covers nobody had looked at.
+            self._mark_used(disk_path)
+            return pm
+
         if disk_path.exists():
             try:
                 pm = self._load_and_cache(url, disk_path, size)
                 if pm is not None:
-                    self._touch(disk_path)
+                    self._mark_used(disk_path)
                     return pm
                 # Cached bytes don't decode as an image (e.g. an HTML
                 # block page saved before fetch responses were
@@ -146,7 +159,23 @@ class CoverCache:
         return self.get_placeholder(size)
 
     def save_to_disk(self, url: str, image_bytes: bytes):
-        """Store a fetched cover. Called from a worker thread."""
+        """Store a fetched cover. Called from a worker thread.
+
+        A cover larger than the whole disk limit is not stored: kept, it
+        would hold the folder over the limit on its own. It is reported
+        like a failed download (the card keeps its placeholder, the
+        cover is not fetched again this session, and the usual
+        replacement lookup may find a smaller one)."""
+        with self._disk_lock:
+            limit = self._max_disk_bytes
+        if len(image_bytes) > limit:
+            logger.warning("Cover not cached: %d bytes is more than the "
+                           "cover cache limit of %d bytes",
+                           len(image_bytes), limit)
+            self.mark_failed(url)
+            self._events.publish("cover_loaded", {"url": url, "error": True,
+                                                  "too_large": True})
+            return
         disk_path = self._disk_path(url)
         try:
             previous = disk_path.stat().st_size if disk_path.exists() else 0
@@ -208,6 +237,7 @@ class CoverCache:
             self._memory.clear()
             self._memory_bytes = 0
             self._failed.clear()
+            self._touched.clear()
         return removed
 
     def _disk_files(self) -> list:
@@ -228,8 +258,10 @@ class CoverCache:
 
     def _trim_disk(self, keep: Optional[Path] = None) -> int:
         """Remove the covers used longest ago until the folder is back
-        under the limit. ``keep`` (the cover just saved) is never
-        removed. Returns the number of files removed.
+        under the limit. ``keep`` (the cover just saved) goes last, and
+        only when it alone is over the limit (the limit was lowered
+        while it was being saved); the limit always holds. Returns the
+        number of files removed.
 
         The folder is only listed when the running total says the limit
         is passed, or the total is unknown; a normal save costs nothing
@@ -246,13 +278,15 @@ class CoverCache:
             removed = 0
             if total > limit:
                 target = int(limit * _TRIM_TO)
-                # Oldest modification time first: `_touch` renews it on
-                # every use, so this is least recently used first.
-                for path, size, _mtime in sorted(files, key=lambda f: f[2]):
+                # Oldest modification time first: `_mark_used` renews it
+                # when a cover is shown, so this is least recently used
+                # first. The cover just saved is put last.
+                order = sorted(files, key=lambda f: (f[0] == keep, f[2]))
+                for path, size, _mtime in order:
                     if total <= target:
                         break
-                    if keep is not None and path == keep:
-                        continue
+                    if path == keep and total <= limit:
+                        break  # everything else is gone and it fits
                     try:
                         path.unlink()
                     except OSError:
@@ -265,15 +299,25 @@ class CoverCache:
                         "recently used cover(s)", removed)
         return removed
 
-    @staticmethod
-    def _touch(disk_path: Path) -> None:
-        """Mark a cover as just used. The modification time is the
-        recency the trim sorts by: access times are often not kept
-        (`noatime`, `relatime`)."""
+    def _mark_used(self, disk_path: Path) -> None:
+        """Mark a cover as just used, on disk. The modification time is
+        the recency the trim sorts by: access times are often not kept
+        (`noatime`, `relatime`).
+
+        Cards ask for their cover on every refresh and repaint, so the
+        file is touched at most once per `_TOUCH_INTERVAL`; the order
+        of covers used within that time does not matter for the trim."""
+        now = time.monotonic()
+        key = str(disk_path)
+        with self._lock:
+            last = self._touched.get(key)
+            if last is not None and now - last < _TOUCH_INTERVAL:
+                return
+            self._touched[key] = now
         try:
             os.utime(disk_path, None)
         except OSError:
-            pass
+            pass  # removed meanwhile: the copy in memory still shows
 
     # ── Decoding ──────────────────────────────────────────────────────
 

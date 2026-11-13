@@ -214,6 +214,117 @@ class TestDiskLimit:
         assert not idle.exists()
         assert recent.exists()
 
+    @staticmethod
+    def _clock(monkeypatch):
+        """Replace the cache's monotonic clock; returns a one-item list
+        holding the current time, in seconds."""
+        import types
+        import memanga.gui.cache as cache_mod
+        now = [1000.0]
+        monkeypatch.setattr(cache_mod, "time",
+                            types.SimpleNamespace(monotonic=lambda: now[0]))
+        return now
+
+    @staticmethod
+    def _age(path, seconds):
+        import os
+        import time
+        stamp = time.time() - seconds
+        os.utime(path, (stamp, stamp))
+
+    def _shown_cover(self, cache, monkeypatch):
+        """A real cover, decoded once (so it is in memory) and then left
+        on screen while its file time ages to 300 s ago."""
+        from PIL import Image
+        import memanga.gui.cache as cache_mod
+        monkeypatch.setattr(cache_mod, "_pixel_ratio", lambda: 1.0)
+        url, path = self._put(cache, "shown", 1, age=0)
+        Image.new("RGB", (20, 30), "white").save(path, format="PNG")
+        cache.get_cover(url, (20, 30))
+        assert cache._cache_key(url, (20, 30)) in cache._memory
+        self._age(path, 300)
+        return url, path
+
+    def test_a_cover_shown_from_memory_is_not_evicted_first(
+            self, cover_cache, monkeypatch):
+        # A hit in memory did not renew the file time, so the cover on
+        # screen all session was the first to go.
+        now = self._clock(monkeypatch)
+        cover_cache._max_disk_bytes = 10 * self.MB
+        url, shown = self._shown_cover(cover_cache, monkeypatch)
+        _, idle = self._put(cover_cache, "idle", 6 * self.MB, age=200)
+        _, recent = self._put(cover_cache, "recent", 6 * self.MB, age=100)
+        decoded = len(cover_cache._memory)
+
+        now[0] += 120  # a later refresh of the same card
+        cover_cache.get_cover(url, (20, 30))
+        assert len(cover_cache._memory) == decoded  # served from memory
+        cover_cache._trim_disk()
+
+        assert shown.exists()
+        assert not idle.exists()
+        assert recent.exists()
+
+    def test_memory_hits_touch_the_file_at_most_once_a_minute(
+            self, cover_cache, monkeypatch):
+        from memanga.gui.cache import _TOUCH_INTERVAL
+        now = self._clock(monkeypatch)
+        url, shown = self._shown_cover(cover_cache, monkeypatch)
+        aged = shown.stat().st_mtime
+
+        now[0] += _TOUCH_INTERVAL / 2  # repaints in quick succession
+        cover_cache.get_cover(url, (20, 30))
+        assert shown.stat().st_mtime == aged
+
+        now[0] += _TOUCH_INTERVAL
+        cover_cache.get_cover(url, (20, 30))
+        assert shown.stat().st_mtime > aged + 200
+
+    def test_a_cover_larger_than_the_limit_is_not_stored(
+            self, cover_cache, event_bus):
+        # Written first and then spared by the trim, one oversized cover
+        # kept the folder over its limit.
+        cover_cache._max_disk_bytes = 10 * self.MB
+        _, other = self._put(cover_cache, "other", 1 * self.MB, age=100)
+        url = "https://covers.test/huge.jpg"
+        events = []
+        event_bus.subscribe("cover_loaded", events.append)
+        event_bus.subscribe("cover_fetch_request", events.append)
+
+        cover_cache.save_to_disk(url, b"h" * (10 * self.MB + 1))
+
+        assert not cover_cache._disk_path(url).exists()
+        assert other.exists()  # nothing else was evicted for it
+        assert cover_cache.disk_usage() <= cover_cache.disk_limit_bytes
+        # Shown as a cover that failed: placeholder, and no fetch loop.
+        assert cover_cache.is_placeholder(cover_cache.get_cover(url, (20, 30)))
+        event_bus.poll()
+        assert events == [{"url": url, "error": True, "too_large": True}]
+
+    def test_a_cover_that_fits_only_alone_replaces_the_rest(
+            self, cover_cache):
+        cover_cache._max_disk_bytes = 10 * self.MB
+        _, old = self._put(cover_cache, "old", 4 * self.MB, age=300)
+        url = "https://covers.test/big.jpg"
+
+        cover_cache.save_to_disk(url, b"b" * (10 * self.MB))
+
+        assert cover_cache._disk_path(url).exists()
+        assert not old.exists()
+        assert cover_cache.disk_usage() == 10 * self.MB
+
+    def test_limit_holds_even_for_the_cover_just_saved(self, cover_cache):
+        # The limit was lowered while this cover was being written.
+        cover_cache._max_disk_bytes = 10 * self.MB
+        _, other = self._put(cover_cache, "other", 1 * self.MB, age=300)
+        _, kept = self._put(cover_cache, "kept", 12 * self.MB, age=0)
+
+        cover_cache._trim_disk(keep=kept)
+
+        assert not other.exists()
+        assert not kept.exists()
+        assert cover_cache.disk_usage() <= cover_cache.disk_limit_bytes
+
     def test_lowering_the_limit_trims_at_once(self, cover_cache):
         _, a = self._put(cover_cache, "a", 8 * self.MB, age=300)
         _, b = self._put(cover_cache, "b", 8 * self.MB, age=100)
