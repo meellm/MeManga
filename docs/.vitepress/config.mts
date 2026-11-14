@@ -38,8 +38,9 @@ export default defineConfig({
       {
         text: 'Desktop app',
         items: [
-          { text: 'Library, downloads and settings', link: '/desktop/library' },
-          { text: 'Reader', link: '/desktop/reader' }
+          { text: 'Library and downloads', link: '/desktop/library' },
+          { text: 'Reader', link: '/desktop/reader' },
+          { text: 'Settings', link: '/desktop/settings' }
         ]
       }
     ],

@@ -16,8 +16,8 @@ import { release } from '../.vitepress/release'
 - [Download and install](./install): the desktop download, the command line
   from source, and what is not available yet.
 - [First steps](./first-steps): start MeManga and check that it works.
-- [Library, downloads and settings](../desktop/library) and
-  [Reader](../desktop/reader): the desktop app in detail.
+- [Library and downloads](../desktop/library), [Reader](../desktop/reader)
+  and [Settings](../desktop/settings): the desktop app in detail.
 
 ## Where to read today
 

@@ -96,3 +96,16 @@
 .vp-doc td:first-child code {
   white-space: nowrap;
 }
+
+/*
+ * Tabs of a code group are radio buttons that the default theme hides, so
+ * keyboard focus has to be drawn on the label. The selected tab keeps its
+ * underline; the focused tab gets a ring and a tinted background.
+ */
+.vp-code-group .tabs input:focus-visible + label {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: -2px;
+  border-radius: 6px;
+  background-color: var(--vp-c-brand-soft);
+  color: var(--vp-c-text-1);
+}
