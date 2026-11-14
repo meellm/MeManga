@@ -325,3 +325,25 @@ def test_scraper_health_runs_the_live_probes_on_a_schedule_only():
                  if str(s.get("uses", "")).startswith("actions/upload-artifact@")]
     assert upload["if"] == "always()"
     assert upload["with"]["path"] == "health.json"
+
+
+def _apt_packages(step):
+    words = step["run"].split("install -y", 1)[1].split()
+    return {w for w in words if w != "\\"}
+
+
+def test_scraper_health_installs_the_qt_libraries_before_the_probes(ci):
+    # pytest-qt imports Qt in every pytest run; without libEGL the health
+    # run stopped before any probe and wrote no health.json.
+    steps = _load("scraper-health.yml")["jobs"]["live"]["steps"]
+    names = [s.get("name") for s in steps]
+    (qt_libs,) = [s for s in steps if "apt-get" in s.get("run", "")]
+    assert names.index(qt_libs["name"]) < names.index("Run live probes")
+    (ci_libs,) = [s for s in ci["jobs"]["tests"]["steps"]
+                  if "apt-get" in s.get("run", "")]
+    assert _apt_packages(qt_libs) == _apt_packages(ci_libs)
+    assert "libegl1" in _apt_packages(qt_libs)
+    assert qt_libs["timeout-minutes"] <= 10
+    for line in qt_libs["run"].splitlines():
+        if "apt-get" in line:
+            assert "$apt_options" in line, line
