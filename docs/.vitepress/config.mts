@@ -21,6 +21,7 @@ export default defineConfig({
     nav: [
       { text: 'Docs', link: '/guide/', activeMatch: '^/guide/$' },
       { text: 'Install', link: '/guide/install' },
+      { text: 'Desktop app', link: '/desktop/library', activeMatch: '^/desktop/' },
       { text: 'Releases', link: `${repo}/releases` },
       { text: 'Changelog', link: `${repo}/blob/main/CHANGELOG.md` }
     ],
@@ -32,6 +33,13 @@ export default defineConfig({
           { text: 'Docs overview', link: '/guide/' },
           { text: 'Download and install', link: '/guide/install' },
           { text: 'First steps', link: '/guide/first-steps' }
+        ]
+      },
+      {
+        text: 'Desktop app',
+        items: [
+          { text: 'Library, downloads and settings', link: '/desktop/library' },
+          { text: 'Reader', link: '/desktop/reader' }
         ]
       }
     ],

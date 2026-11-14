@@ -28,6 +28,10 @@ downloading any chapters. If MeManga is not installed yet, start with
 To follow a series, use **Add manga** in the Library, or find it with
 **Search**.
 
+The desktop app is described in two pages:
+[Library, downloads and settings](../desktop/library) and
+[Reader](../desktop/reader).
+
 These areas are the same in {{ release.tag }} and in the development version.
 
 ## Command line
@@ -112,5 +116,7 @@ Your settings, library and downloads are in the folders listed under
 
 ## Next
 
-More pages are on the way. Until then, the [docs overview](./) lists where
-to read about everything else.
+- [Library, downloads and settings](../desktop/library) and the
+  [Reader](../desktop/reader) describe the desktop app.
+- More pages are on the way. Until then, the [docs overview](./) lists where
+  to read about everything else.
