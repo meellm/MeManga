@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from PySide6.QtWidgets import (
     QApplication, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QScrollArea, QWidget, QComboBox, QCheckBox, QLineEdit,
+    QScrollArea, QWidget, QComboBox, QCheckBox, QLineEdit, QLayout,
 )
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QKeySequence
@@ -81,6 +81,15 @@ class DetailPage(BasePage):
         self._layout = QVBoxLayout(self._scroll_content)
         self._layout.setContentsMargins(T.PAD_XL, T.PAD_LG, T.PAD_XL, T.PAD_XL)
         self._layout.setSpacing(0)
+        # The chapter list grows in batches after the page is shown. Under
+        # the default constraint each nested layout lays its rows out in
+        # its widget's old, smaller size and only then asks its parent for
+        # more room, one event-loop pass per level, so rows were squashed
+        # until the scroll area caught up. With SetMinimumSize a layout
+        # first raises its widget's minimum (which resizes the widget at
+        # once) and the scroll area sees the content resize directly; see
+        # "Size Hints and Layouts" in the QScrollArea documentation.
+        self._layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self._scroll.setWidget(self._scroll_content)
 
         # Alt+Left (Cmd+[ on macOS) → back to Library, like the
@@ -492,6 +501,8 @@ class DetailPage(BasePage):
         chapters_layout = QVBoxLayout(self._chapters_container)
         chapters_layout.setContentsMargins(0, 0, 0, 0)
         chapters_layout.setSpacing(0)
+        # Grows with the list at once; see the page layout above.
+        chapters_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self._layout.addWidget(self._chapters_container)
         self._build_chapter_list()
 
@@ -728,6 +739,9 @@ class DetailPage(BasePage):
         list_l = QVBoxLayout(list_card)
         list_l.setContentsMargins(0, 0, 0, 0)
         list_l.setSpacing(0)
+        # Rows added by a batch never get less than their own height: the
+        # card grows first; see the page layout in __init__.
+        list_l.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self._chapter_list_layout = list_l
         self._first_chapter_row = visible[0] if visible else None
 

@@ -199,12 +199,60 @@ class TestLongListsBuildInBatches:
         assert len(page._chapter_rows) == 5
         assert page._rows_to_build == []
 
+    def test_list_layouts_raise_their_minimum_as_they_grow(self, detail):
+        # What keeps the rows from being squashed while batches arrive:
+        # each layout from the page down to the list card resizes its
+        # widget before it lays out the rows (QScrollArea documentation,
+        # "Size Hints and Layouts").
+        from PySide6.QtWidgets import QLayout
+        page = detail()
+        list_card = page._chapter_list_layout.parentWidget()
+        for layout in (page._scroll.widget().layout(),
+                       page._chapters_container.layout(),
+                       page._chapter_list_layout):
+            assert (layout.sizeConstraint()
+                    == QLayout.SizeConstraint.SetMinimumSize), layout
+        assert list_card.minimumHeight() >= (
+            page._chapter_list_layout.totalMinimumSize().height())
+
     def test_rows_keep_their_height_when_the_list_is_rebuilt(
-            self, detail, qapp, qtbot, small_batches):
+            self, detail, qapp, qtbot, small_batches, monkeypatch):
         # After "Oldest first" (a rebuild in batches, with no window
         # resize after it) rows were seen squashed, their text and
-        # buttons cut off, and the page did not scroll.
+        # buttons cut off, until later event-loop passes caught up.
+        # The settled state alone hid this, so every resize a layout
+        # gives a shown row is recorded, while the batches arrive too.
+        from PySide6.QtCore import QEvent, QObject
         from PySide6.QtWidgets import QComboBox, QLabel, QPushButton
+        from memanga.gui.pages.detail import DetailPage
+
+        class SquashRecorder(QObject):
+            def __init__(self):
+                super().__init__()
+                self.names = {}
+                self.squashed = []
+
+            def eventFilter(self, obj, event):
+                # A pending resize sent at show time has no old size;
+                # only resizes made by a layout pass are of interest.
+                if (event.type() == QEvent.Type.Resize
+                        and event.oldSize().isValid() and obj.isVisible()):
+                    needed = obj.minimumSizeHint().height()
+                    if event.size().height() < needed:
+                        self.squashed.append((self.names.get(obj),
+                                              event.size().height(), needed))
+                return False
+
+        recorder = SquashRecorder()
+        make_row = DetailPage._make_chapter_row
+
+        def recorded_row(self, ctx, num):
+            row = make_row(self, ctx, num)
+            recorder.names[row] = num
+            row.installEventFilter(recorder)
+            return row
+
+        monkeypatch.setattr(DetailPage, "_make_chapter_row", recorded_row)
         page = detail(numbers=range(1, 41))
 
         def settled():
@@ -212,6 +260,7 @@ class TestLongListsBuildInBatches:
                             and len(page._chapter_rows) == 40, timeout=5000)
             for _ in range(5):
                 qapp.processEvents()
+            assert recorder.squashed == []
 
         def sort_box():
             return next(c for c in page.findChildren(QComboBox)
