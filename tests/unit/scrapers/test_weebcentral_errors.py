@@ -349,8 +349,12 @@ class TestTimeBudget:
 
         assert [c.number for c in chapters] == ["1"]
         limit = (40 - STEP_RESERVE_S) * 1000
-        assert 0 < first.goto_timeouts[0] <= limit
-        assert 0 < second.goto_timeouts[0] <= limit
+        for page in (first, second):
+            # Up to float rounding: with a coarse clock (15.6 ms on
+            # Windows before Python 3.13) no time passes before the first
+            # step, and the deadline sum can round one bit above it.
+            timeout = page.goto_timeouts[0]
+            assert 0 < timeout <= limit or timeout == pytest.approx(limit)
 
     def test_full_budget_keeps_the_usual_navigation_limit(self, site):
         page = _Page(chapters=["1"])

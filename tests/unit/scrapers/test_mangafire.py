@@ -853,8 +853,12 @@ class TestVRFWorker:
                                         timeout=30)
 
         assert set(seen) == {"launch", "goto", "wait_for_function"}
+        budget_ms = (30 - STEP_RESERVE_S) * 1000
         for step, limit in seen.items():
-            assert 0 < limit <= (30 - STEP_RESERVE_S) * 1000, step
+            # Up to float rounding of the deadline sum when the clock
+            # has not moved (15.6 ms steps on Windows before 3.13).
+            assert (0 < limit <= budget_ms
+                    or limit == pytest.approx(budget_ms)), step
 
     def test_token_browser_is_replaced_after_its_mint_limit(
             self, worker, monkeypatch, caplog):
