@@ -19,7 +19,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Check the release notes in CHANGELOG.md
         run: python3 scripts/release_notes.py "${{ github.ref_name }}" > /dev/null
@@ -55,10 +55,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -111,7 +111,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Detect macOS notarization credentials
         # Issue #163: Developer ID signing and notarization need a paid
@@ -148,7 +148,7 @@ jobs:
           fi
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -603,7 +603,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Release notes from CHANGELOG.md
         # Issue #285: the release body is the tag's CHANGELOG.md section;
