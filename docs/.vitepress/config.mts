@@ -19,7 +19,8 @@ export default defineConfig({
 
   themeConfig: {
     nav: [
-      { text: 'Docs', link: '/guide/' },
+      { text: 'Docs', link: '/guide/', activeMatch: '^/guide/$' },
+      { text: 'Install', link: '/guide/install' },
       { text: 'Releases', link: `${repo}/releases` },
       { text: 'Changelog', link: `${repo}/blob/main/CHANGELOG.md` }
     ],
@@ -27,7 +28,11 @@ export default defineConfig({
     sidebar: [
       {
         text: 'Getting started',
-        items: [{ text: 'Docs overview', link: '/guide/' }]
+        items: [
+          { text: 'Docs overview', link: '/guide/' },
+          { text: 'Download and install', link: '/guide/install' },
+          { text: 'First steps', link: '/guide/first-steps' }
+        ]
       }
     ],
 

@@ -91,3 +91,8 @@
   outline: 2px solid var(--vp-c-brand-1);
   outline-offset: 2px;
 }
+
+/* Keep a command or file name in the first column of a table on one line. */
+.vp-doc td:first-child code {
+  white-space: nowrap;
+}

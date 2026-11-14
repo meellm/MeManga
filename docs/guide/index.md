@@ -4,12 +4,18 @@ MeManga tracks manga series, checks their sources for new chapters and
 downloads them. It comes as a desktop app and as the `memanga` command-line
 tool.
 
-This site is new. The pages below will fill in over time; until then, the
-existing guide on GitHub covers setup and everyday use.
+This site is new and is being filled in page by page. For topics that do not
+have a page here yet, the existing documents on GitHub are listed below.
 
 <script setup>
 import { release } from '../.vitepress/release'
 </script>
+
+## Start here
+
+- [Download and install](./install): the desktop download, the command line
+  from source, and what is not available yet.
+- [First steps](./first-steps): start MeManga and check that it works.
 
 ## Where to read today
 
@@ -70,6 +76,6 @@ These are planned and not available yet:
 
 - **Installing from a package index** with pip, pipx or uv. Tracked in
   [issue 218](https://github.com/meellm/MeManga/issues/218).
-- **The rest of this site:** installation, the desktop app, the command line,
-  Docker, configuration and troubleshooting pages. Tracked in
+- **The rest of this site:** the desktop app, the command line, Docker,
+  configuration and troubleshooting pages. Tracked in
   [issue 423](https://github.com/meellm/MeManga/issues/423).

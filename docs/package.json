@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build",
-    "preview": "vitepress preview"
+    "preview": "vite preview --outDir .vitepress/dist --base /MeManga/ --host 127.0.0.1 --port 4173 --strictPort"
   },
   "devDependencies": {
     "vitepress": "1.6.4"
