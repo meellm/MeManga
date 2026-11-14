@@ -1,0 +1,56 @@
+name: Documentation site
+
+# Builds the documentation site in docs/ and publishes it to GitHub Pages
+# (issue #423). A push that changes the site or this workflow rebuilds and
+# redeploys it. docs/423-documentation-site is listed so the site can be
+# published while it is being written; remove it once that branch is merged.
+
+on:
+  push:
+    branches:
+      - main
+      - docs/423-documentation-site
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+
+permissions:
+  contents: read
+
+# One deployment at a time. A running deployment is left to finish; of the
+# runs waiting behind it only the newest is kept.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/.vitepress/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
