@@ -275,12 +275,16 @@ class TestConcurrency:
 class TestTaskDeadline:
     def test_task_sees_its_callers_deadline(self, worker):
         left = worker.call("src", 30, task_seconds_left)
-        assert 25 < left <= 30
+        # Up to float rounding: with a coarse clock (15.6 ms on Windows
+        # before Python 3.13) no time may pass inside the call, and the
+        # deadline sum can round one bit above it.
+        assert 25 < left <= 30 or left == pytest.approx(30)
         assert task_seconds_left() is None
 
     def test_step_timeout_is_cut_to_the_remaining_budget(self, worker):
         capped = worker.call("src", 30, step_timeout_ms, 60000)
-        assert capped <= (30 - STEP_RESERVE_S) * 1000
+        limit = (30 - STEP_RESERVE_S) * 1000
+        assert capped <= limit or capped == pytest.approx(limit)
         assert capped > 20000
         # Short steps keep their own limit.
         assert worker.call("src", 30, step_timeout_ms, 500) == 500

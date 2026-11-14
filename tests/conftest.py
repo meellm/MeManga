@@ -11,6 +11,7 @@ Everything every test needs lives here:
 
 from __future__ import annotations
 
+import gc
 import os
 import subprocess
 import sys
@@ -249,7 +250,15 @@ def fake_trash(monkeypatch, tmp_path) -> Path:
 @pytest.fixture
 def qapp(qapp_session, isolated_home, fake_trash):
     """Per-test alias that pulls in HOME and trash isolation
-    automatically."""
+    automatically.
+
+    Widgets an earlier test left in a reference cycle are freed here,
+    before the test applies the theme. Otherwise the cyclic garbage
+    collector frees them at an arbitrary moment, which can be inside
+    one of Qt's loops over every widget (an application style sheet or
+    palette change, with a Python event filter running per widget), and
+    the process then crashes on the widget it just freed."""
+    gc.collect()
     return qapp_session
 
 
