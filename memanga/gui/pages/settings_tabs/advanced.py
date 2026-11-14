@@ -1,6 +1,7 @@
 """Settings > Advanced: reader, network and privacy, scheduled checks,
-partial chapters, post-processing, import/export and diagnostics. The
-actions behind its buttons run on the page."""
+partial chapters, post-processing, import/export, browser components,
+the cover cache and diagnostics. The actions behind its buttons run on
+the page."""
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
@@ -9,7 +10,23 @@ from PySide6.QtWidgets import (
 )
 
 from ... import theme as T
+from ...cache import (DEFAULT_DISK_LIMIT_MB, MAX_DISK_LIMIT_MB,
+                      MIN_DISK_LIMIT_MB, disk_limit_mb)
 from ...trash import trash_name
+
+BROWSERS_INSTALLED_TEXT = (
+    "The Firefox and Chromium components are installed. Installing "
+    "again only downloads what is missing."
+)
+BROWSERS_MISSING_TEXT = (
+    "Not installed. Sources that need a real browser can't check or "
+    "download until they are (about 250 MB); every other source works "
+    "without them."
+)
+BROWSERS_UNKNOWN_TEXT = (
+    "Some sources need the Firefox and Chromium components (about "
+    "250 MB). Install them here if those sources fail to start a browser."
+)
 
 # Shown instead of installing a scheduled check from the desktop app
 # (issues #324, #336).
@@ -297,29 +314,90 @@ class AdvancedTabMixin:
         ie_row.addStretch()
         f.addLayout(ie_row)
 
+        # ── Browser components ──
+        # Issue #344: the first-run download can be skipped; this is
+        # where it is done later.
+        f.addSpacing(T.PAD_XL)
+        self._section(f, "Browser Components")
+        self._browser_hint = QLabel("")
+        self._browser_hint.setProperty("role", "hint")
+        self._browser_hint.setWordWrap(True)
+        f.addWidget(self._browser_hint)
+
+        browser_row = QHBoxLayout()
+        self._browser_install_btn = QPushButton("Install browser components")
+        self._browser_install_btn.setMinimumHeight(36)
+        self._browser_install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._browser_install_btn.clicked.connect(self._install_browsers)
+        browser_row.addWidget(self._browser_install_btn)
+        browser_row.addStretch()
+        f.addLayout(browser_row)
+        self._refresh_browser_status()
+
+        # ── Cover cache ──
+        # Issue #404: the cache on disk has a size limit.
+        f.addSpacing(T.PAD_XL)
+        self._section(f, "Cover Cache")
+        cache_hint = QLabel(
+            "Covers are kept on disk so the Library opens without "
+            "downloading them again. Past the limit, the covers used "
+            "longest ago are removed; they are downloaded again when "
+            "needed."
+        )
+        cache_hint.setProperty("role", "hint")
+        cache_hint.setWordWrap(True)
+        f.addWidget(cache_hint)
+
+        limit_row = QHBoxLayout()
+        limit_lbl = QLabel("Size limit:")
+        limit_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
+        limit_row.addWidget(limit_lbl)
+
+        self._cache_limit = QSpinBox()
+        self._cache_limit.setMinimum(MIN_DISK_LIMIT_MB)
+        self._cache_limit.setMaximum(MAX_DISK_LIMIT_MB)
+        self._cache_limit.setSingleStep(50)
+        self._cache_limit.setSuffix(" MB")
+        self._cache_limit.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self._cache_limit.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._cache_limit.setValue(disk_limit_mb(
+            self.app.config.get("gui.cover_cache_max_mb", DEFAULT_DISK_LIMIT_MB)))
+        self._cache_limit.setMinimumWidth(88)
+        self._cache_limit.setMaximumWidth(110)
+        limit_lbl.setBuddy(self._cache_limit)
+        self._cache_limit.setAccessibleName("Cover cache size limit")
+        self._cache_limit.setAccessibleDescription(
+            f"In megabytes, from {MIN_DISK_LIMIT_MB} to {MAX_DISK_LIMIT_MB}")
+        limit_row.addWidget(self._cache_limit)
+        limit_row.addStretch(1)
+        f.addLayout(limit_row)
+
+        cache_row = QHBoxLayout()
+        # Clear cache — wipes the cover cache + on-disk thumbs.
+        self._clear_cache_btn = QPushButton("Clear cache")
+        self._clear_cache_btn.setMinimumHeight(36)
+        self._clear_cache_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_cache_btn.clicked.connect(self._clear_cache)
+        cache_row.addWidget(self._clear_cache_btn)
+
+        # Cache size label, updated lazily.
+        self._cache_size_label = QLabel("")
+        self._cache_size_label.setProperty("role", "hint")
+        cache_row.addWidget(self._cache_size_label)
+        cache_row.addStretch()
+        f.addLayout(cache_row)
+
         # ── Diagnostics section ──
         f.addSpacing(T.PAD_XL)
         self._section(f, "Diagnostics")
 
         diag_row = QHBoxLayout()
 
-        # Clear cache — wipes the cover cache + on-disk thumbs.
-        self._clear_cache_btn = QPushButton("Clear cache")
-        self._clear_cache_btn.setMinimumHeight(36)
-        self._clear_cache_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._clear_cache_btn.clicked.connect(self._clear_cache)
-        diag_row.addWidget(self._clear_cache_btn)
-
         open_logs_btn = QPushButton("Open logs folder")
         open_logs_btn.setMinimumHeight(36)
         open_logs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         open_logs_btn.clicked.connect(self._open_logs_folder)
         diag_row.addWidget(open_logs_btn)
-
-        # Cache size label, updated lazily.
-        self._cache_size_label = QLabel("")
-        self._cache_size_label.setProperty("role", "hint")
-        diag_row.addWidget(self._cache_size_label)
 
         diag_row.addStretch()
         f.addLayout(diag_row)
@@ -359,25 +437,37 @@ class AdvancedTabMixin:
         self._post_processing_command.setEnabled(enabled)
         self._post_processing_fail_check.setEnabled(enabled)
 
+    def _refresh_browser_status(self):
+        """Say whether the browser components are installed, from what
+        the launch check or a later install found (issue #344)."""
+        if not hasattr(self, "_browser_hint"):
+            return
+        installed = getattr(self.app, "browsers_installed", None)
+        if installed is True:
+            text = BROWSERS_INSTALLED_TEXT
+        elif installed is False:
+            text = BROWSERS_MISSING_TEXT
+        else:
+            text = BROWSERS_UNKNOWN_TEXT
+        self._browser_hint.setText(text)
+        self._browser_install_btn.setAccessibleDescription(text)
+
     def _refresh_cache_size(self):
-        """Compute the on-disk size of the cover cache and update the label."""
-        from pathlib import Path
-        cache_dir = self.app.config.config_dir / "covers"
-        total = 0
+        """Show the on-disk size of the cover cache against its limit."""
         try:
-            if cache_dir.exists():
-                for f in cache_dir.iterdir():
-                    if f.is_file():
-                        total += f.stat().st_size
+            cache = self.app.cover_cache
+            total = cache.disk_usage()
+            limit_mb = cache.disk_limit_bytes // (1024 * 1024)
         except Exception:
-            pass
+            total, limit_mb = 0, 0
+        of_limit = f" of {limit_mb} MB" if limit_mb else ""
         mb = total / (1024 * 1024)
         if mb >= 1:
-            self._cache_size_label.setText(f"{mb:.1f} MB cached")
+            self._cache_size_label.setText(f"{mb:.1f} MB{of_limit} used")
             self._clear_cache_btn.setText(f"Clear {mb:.0f} MB")
         elif total > 0:
             kb = total / 1024
-            self._cache_size_label.setText(f"{kb:.0f} KB cached")
+            self._cache_size_label.setText(f"{kb:.0f} KB{of_limit} used")
             self._clear_cache_btn.setText("Clear cache")
         else:
             self._cache_size_label.setText("Cache is empty")

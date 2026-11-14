@@ -81,7 +81,9 @@ def fake_qt(qapp, monkeypatch):
     monkeypatch.setattr(PySide6.QtCore, "QTimer", FakeTimer)
     monkeypatch.setattr(app_mod, "MeMangaApp", FakeWindow)
     monkeypatch.setattr(gui, "_set_windows_app_user_model_id", lambda: None)
-    monkeypatch.setattr(gui, "_ensure_browsers", lambda: None)
+    monkeypatch.setattr(gui, "_ensure_browsers", lambda config=None: None)
+    # The first-run questions open dialogs; they have tests of their own.
+    monkeypatch.setattr(gui, "_first_run_setup", lambda window, config: None)
     monkeypatch.setattr(gui, "_load_app_icon", lambda: None)
     monkeypatch.setattr("memanga.gui.theme.apply", lambda qapp: None)
     return calls

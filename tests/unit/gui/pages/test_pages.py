@@ -1208,6 +1208,9 @@ class TestSettingsPage:
             "Partial Chapters",
             "Post-Processing",
             "Import / Export",
+            # Issues #344 and #404.
+            "Browser Components",
+            "Cover Cache",
             "Diagnostics",
         ]
         assert (

@@ -555,13 +555,13 @@ def test_sidebar_navigation_keeps_focus_in_sidebar(app_window, qapp, qtbot):
 
 def test_focus_returns_to_card_after_quick_action(
         app_window, qapp, qtbot, sample_manga, monkeypatch):
-    # Live check: after "Set: On-hold" from the keyboard menu the cards
+    # Live check: after "Set: On hold" from the keyboard menu the cards
     # were rebuilt and focus was gone.
     from PySide6.QtCore import Qt
     from memanga.gui.pages import library as library_mod
 
     def _pick_on_hold(parent, x, y, items):
-        dict(i for i in items if i[0])["Set: On-hold"]()
+        dict(i for i in items if i[0])["Set: On hold"]()
 
     monkeypatch.setattr(library_mod, "ContextMenu", _pick_on_hold)
     library = _active_library(app_window, qtbot, [sample_manga])

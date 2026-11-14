@@ -104,7 +104,9 @@ class FirefoxInstallDialog(QDialog):
         layout.addWidget(self._bar)
 
         self._status_label = QLabel("Connecting…")
-        self._status_label.setStyleSheet("color: #888;")
+        # Theme hint colour: a fixed grey was unreadable on the light
+        # theme (issue #395).
+        self._status_label.setProperty("role", "hint")
         layout.addWidget(self._status_label)
 
         # Collapsible log block — hidden by default, auto-shown on error.

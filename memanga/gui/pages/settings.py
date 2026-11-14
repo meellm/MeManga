@@ -91,7 +91,6 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
 
     def _build(self):
         from PySide6.QtWidgets import QFrame
-        from ..assets.icons import icon
         from ... import __version__
 
         root = QVBoxLayout(self)
@@ -113,7 +112,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         reset_btn = QPushButton("  Reset to defaults")
         reset_btn.setProperty("variant", "ghost")
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.setIcon(icon("refresh", T.tokens()["text.t_2"], 14))
+        self._reset_btn = reset_btn  # icon recoloured by _refresh_icons
         reset_btn.setToolTip("Reset all settings to defaults")
         reset_btn.clicked.connect(self._reset_to_defaults)
         top_row.addWidget(reset_btn)
@@ -150,6 +149,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         nav_l.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self._tab_buttons: dict[str, QPushButton] = {}
+        self._tab_icons: dict[str, str] = {}
         nav_items = [
             ("general",  "General",        "settings"),
             ("email",    "Kindle / Email", "bell"),
@@ -168,7 +168,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
             # from clipping on Windows; the button needs the full
             # height to honour the padding.
             btn.setFixedHeight(42)
-            btn.setIcon(icon(icon_name, T.tokens()["text.t_2"], 16))
+            self._tab_icons[key] = icon_name
             from PySide6.QtCore import QSize
             btn.setIconSize(QSize(16, 16))
             btn.clicked.connect(lambda _, t=key: self._switch_tab(t))
@@ -186,7 +186,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # ── General tab ──
         self._general_scroll = QScrollArea()
         self._general_scroll.setWidgetResizable(True)
-        self._general_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._general_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         general_content = QWidget()
         self._general_layout = QVBoxLayout(general_content)
         self._general_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -197,7 +197,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # ── Email tab ──
         self._email_scroll = QScrollArea()
         self._email_scroll.setWidgetResizable(True)
-        self._email_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._email_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         email_content = QWidget()
         self._email_layout = QVBoxLayout(email_content)
         self._email_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -208,7 +208,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # ── Advanced tab ──
         self._advanced_scroll = QScrollArea()
         self._advanced_scroll.setWidgetResizable(True)
-        self._advanced_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._advanced_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         advanced_content = QWidget()
         self._advanced_layout = QVBoxLayout(advanced_content)
         self._advanced_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -219,7 +219,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # ── About tab ──
         self._about_scroll = QScrollArea()
         self._about_scroll.setWidgetResizable(True)
-        self._about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         about_content = QWidget()
         self._about_layout = QVBoxLayout(about_content)
         self._about_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -259,6 +259,8 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # construct time and never refreshed.
         self._restyle_save_bar()
         T.on_theme_change(self._restyle_save_bar)
+        self._refresh_icons()
+        T.on_theme_change(self._refresh_icons)
 
         self._switch_tab("general")
 
@@ -302,6 +304,16 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         # Re-render the icon at the new on-accent color too.
         self._save_bar_btn.setIcon(_ic("check", toks["accent.on_primary"], 14))
 
+    def _refresh_icons(self):
+        """Draw the header and tab-rail icons in the current theme's
+        secondary text colour. Drawn once, they kept the colour of the
+        theme the page was built in after a switch from this page."""
+        from ..assets.icons import icon
+        colour = T.tokens()["text.t_2"]
+        self._reset_btn.setIcon(icon("refresh", colour, 14))
+        for key, btn in self._tab_buttons.items():
+            btn.setIcon(icon(self._tab_icons[key], colour, 16))
+
     def _switch_tab(self, tab_name):
         self._current_tab = tab_name
 
@@ -309,8 +321,10 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         self._email_scroll.setVisible(tab_name == "email")
         self._advanced_scroll.setVisible(tab_name == "advanced")
         self._about_scroll.setVisible(tab_name == "about")
-        if tab_name == "about" and self._about_info is None:
-            self._start_about_checks()
+        if tab_name == "about":
+            self._refresh_about_download_dir()
+            if self._about_info is None:
+                self._start_about_checks()
 
         for name, btn in self._tab_buttons.items():
             is_active = (name == tab_name)
@@ -353,29 +367,15 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
 
     def _clear_cache(self):
         """Delete cached cover thumbnails and reset the in-memory cache."""
-        from pathlib import Path
         from ..components.dialogs import ConfirmDialog
-        cache_dir = self.app.config.config_dir / "covers"
 
         def _do_clear():
-            removed = 0
+            # Files and in-memory pixmaps go together, so stale entries
+            # don't linger.
             try:
-                if cache_dir.exists():
-                    for f in cache_dir.iterdir():
-                        if f.is_file():
-                            try:
-                                f.unlink()
-                                removed += 1
-                            except Exception:
-                                pass
+                removed = self.app.cover_cache.clear()
             except Exception:
-                pass
-            # Reset the in-memory pixmap cache so stale entries don't linger.
-            try:
-                self.app.cover_cache._memory.clear()
-                self.app.cover_cache._failed.clear()
-            except Exception:
-                pass
+                removed = 0
             Toast(self, f"Cleared {removed} cached file(s)", kind="success")
             self._refresh_cache_size()
 
@@ -384,6 +384,34 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
             message="This removes all locally-cached cover thumbnails. They'll be re-fetched next time.",
             on_confirm=_do_clear,
         )
+
+    def _install_browsers(self):
+        """Download the Playwright browsers from Settings (issue #344):
+        the first-run download can be skipped, and this is how it is
+        done later. Uses the same progress dialog as the first run."""
+        network = getattr(self.app, "network", None)
+        if network is not None and not network.is_online:
+            Toast(self, "You're offline — connect to install the browser "
+                        "components.", kind="warn")
+            return
+        from ..components.firefox_install_dialog import FirefoxInstallDialog
+        ok, _error = FirefoxInstallDialog(self.window()).run_install()
+        if ok:
+            self.app.browsers_installed = True
+            if self.app.config.get("gui.browser_install_skipped"):
+                # Installed now: the next launch checks as usual again.
+                self.app.config.set("gui.browser_install_skipped", False)
+                self.app.config.save()
+            Toast(self, "Browser components installed", kind="success")
+        # A failure is shown, with its log, by the dialog itself.
+        self._refresh_browser_status()
+
+    def _open_download_dir(self):
+        """Open the download folder in the OS file manager."""
+        from .._subprocess import open_in_file_manager
+        # Creates the folder when the first download hasn't yet.
+        if not open_in_file_manager(self.app.config.download_dir):
+            Toast(self, "Couldn't open the download folder", kind="error")
 
     def _open_logs_folder(self):
         """Open the user config dir (where state.json + logs live) in the
@@ -500,6 +528,16 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
             cfg.set("gui.search_chapter_counts",
                     self._search_chapter_counts_check.isChecked())
 
+        # Cover cache limit (issue #404): applied to the live cache now.
+        if hasattr(self, "_cache_limit"):
+            limit_mb = int(self._cache_limit.value())
+            cfg.set("gui.cover_cache_max_mb", limit_mb)
+            try:
+                self.app.cover_cache.set_disk_limit_mb(limit_mb)
+            except Exception:
+                logger.exception("Could not apply the cover cache limit")
+            self._refresh_cache_size()
+
         cfg.save()
         kindle_notice = _kindle_format_toast_text(cfg)
         if password_in_config:
@@ -528,6 +566,11 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         network = getattr(self.app, "network", None)
         if network is not None:
             network.set_enabled(bool(cfg.get("gui.network_check", True)))
+        try:
+            self.app.cover_cache.set_disk_limit_mb(
+                cfg.get("gui.cover_cache_max_mb"))
+        except Exception:
+            logger.exception("Could not apply the cover cache limit")
         self._load_config_into_widgets()
         if had_custom_hosts:
             # Issue #337: say that the user's own probe hosts are gone.
@@ -536,6 +579,11 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
                         "after a restart.", kind="success", duration=10000)
         else:
             Toast(self, "Settings reset to defaults", kind="success")
+
+    def reload_from_config(self):
+        """Show the saved settings again, dropping unsaved edits. For
+        code that changed the config from outside this page."""
+        self._load_config_into_widgets()
 
     def _load_config_into_widgets(self):
         cfg = self.app.config
@@ -602,6 +650,11 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
                 bool(cfg.get("gui.search_chapter_counts", True)))
         if hasattr(self, "_network_hint"):
             self._network_hint.setText(self._network_hint_text())
+        if hasattr(self, "_cache_limit"):
+            from ..cache import disk_limit_mb
+            self._cache_limit.setValue(
+                disk_limit_mb(cfg.get("gui.cover_cache_max_mb")))
+        self._refresh_browser_status()
 
         self._refresh_filename_preview()
 

@@ -66,3 +66,81 @@ class TestApplyTheme:
         assert calls == ["light"]
         theme.set_theme("dark", qapp)
         assert calls == ["light", "dark"]
+
+
+class TestRepeatedApply:
+    """Repeated applications refresh the style without changing the theme."""
+
+    @pytest.fixture
+    def sheets_set(self, qapp, theme, monkeypatch):
+        """Every style sheet handed to the application from here on."""
+        real = qapp.setStyleSheet
+        seen = []
+
+        def _set(sheet):
+            seen.append(sheet)
+            real(sheet)
+
+        monkeypatch.setattr(qapp, "setStyleSheet", _set)
+        return seen
+
+    @staticmethod
+    def _sheet(theme, name):
+        from memanga.gui.theme.qss_builder import build_stylesheet
+        return build_stylesheet(theme.THEMES[name])
+
+    @staticmethod
+    def _window_colour(qapp):
+        from PySide6.QtGui import QPalette
+        return qapp.palette().color(QPalette.ColorRole.Window).name().lower()
+
+    def test_same_theme_is_reapplied(self, qapp, theme, sheets_set):
+        theme.apply(qapp)
+        theme.apply(qapp)
+        assert sheets_set == [self._sheet(theme, "dark")] * 2
+        assert qapp.styleSheet() == self._sheet(theme, "dark")
+        assert self._window_colour(qapp) == theme.tokens()["surfaces.bg_0"].lower()
+
+    def test_a_switch_is_applied_once_and_takes_effect(self, qapp, theme,
+                                                       sheets_set):
+        theme.set_theme("light", qapp)
+        assert sheets_set == [self._sheet(theme, "light")]
+        assert qapp.styleSheet() == self._sheet(theme, "light")
+        assert self._window_colour(qapp) == theme.tokens()["surfaces.bg_0"].lower()
+
+        theme.set_theme("dark", qapp)
+        assert sheets_set == [self._sheet(theme, "light"),
+                              self._sheet(theme, "dark")]
+        assert self._window_colour(qapp) == theme.tokens()["surfaces.bg_0"].lower()
+
+    def test_choosing_the_active_theme_still_notifies(self, qapp, theme,
+                                                      sheets_set):
+        # Reapplying the active theme still notifies subscribers once.
+        calls = []
+        subscriber = lambda: calls.append(theme.current_theme())  # noqa: E731
+        theme.on_theme_change(subscriber)
+        try:
+            theme.set_theme("dark", qapp)
+        finally:
+            theme.off_theme_change(subscriber)
+        assert calls == ["dark"]
+        assert sheets_set == [self._sheet(theme, "dark")]
+
+    def test_a_sheet_set_by_someone_else_is_replaced(self, qapp, theme,
+                                                     sheets_set):
+        qapp.setStyleSheet("QLabel { color: red; }")
+        theme.apply(qapp)
+        assert qapp.styleSheet() == self._sheet(theme, "dark")
+        assert sheets_set[-1] == self._sheet(theme, "dark")
+
+    def test_widget_made_after_repeated_apply_is_styled(
+            self, qapp, theme, sheets_set):
+        # Newly created widgets inherit the current application sheet.
+        from PySide6.QtWidgets import QPushButton
+        theme.apply(qapp)
+        button = QPushButton("Save")
+        button.setProperty("variant", "primary")
+        button.ensurePolished()
+        accent = theme.tokens()["accent.primary"].lower()
+        assert button.palette().button().color().name().lower() == accent
+        assert sheets_set == [self._sheet(theme, "dark")]

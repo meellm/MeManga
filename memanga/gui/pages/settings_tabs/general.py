@@ -23,7 +23,10 @@ class GeneralTabMixin:
         # the token system. Persisted in QSettings.
         from ...components.theme_picker import ThemePicker
         self._section(f, "Appearance")
-        appearance_hint = QLabel("Pick a look. Affects every screen — switches instantly, no restart.")
+        # Hints on this tab wrap: a one-line label sets the minimum width
+        # of the whole tab, and the tab was cut off at the right edge
+        # (the second theme card first) at the default window size.
+        appearance_hint = WrappingLabel("Pick a look. Affects every screen — switches instantly, no restart.")
         appearance_hint.setProperty("role", "hint")
         f.addWidget(appearance_hint)
         f.addSpacing(8)
@@ -84,7 +87,7 @@ class GeneralTabMixin:
 
         self._dir_entry = QLineEdit(str(self.app.config.download_dir))
         self._dir_entry.setMinimumHeight(36)
-        self._dir_entry.setMinimumWidth(300)
+        self._dir_entry.setMinimumWidth(200)
         dir_lbl.setBuddy(self._dir_entry)
         self._dir_entry.setAccessibleName("Download Directory")
         dir_row.addWidget(self._dir_entry, 1)
@@ -112,7 +115,7 @@ class GeneralTabMixin:
         self._format_combo.currentTextChanged.connect(lambda _: self._refresh_filename_preview())
         format_row.addWidget(self._format_combo)
 
-        hint = QLabel("pdf/epub = e-reader, Kindle  |  cbz/zip/images = local only")
+        hint = WrappingLabel("pdf/epub = e-reader, Kindle  |  cbz/zip/images = local only")
         hint.setProperty("role", "hint")
         format_row.addWidget(hint, 1)
         # Spelled out: the visible hint's "=" and "|" read badly aloud.
@@ -141,7 +144,7 @@ class GeneralTabMixin:
         self._section(f, "Concurrent Downloads")
         slider_row = QHBoxLayout()
         slider_row.setSpacing(14)
-        slider_hint = QLabel("Higher = faster, may trip rate limits.")
+        slider_hint = WrappingLabel("Higher = faster, may trip rate limits.")
         slider_hint.setProperty("role", "hint")
         slider_row.addWidget(slider_hint)
 
@@ -159,10 +162,7 @@ class GeneralTabMixin:
         slider_row.addWidget(self._concurrent_slider)
 
         self._concurrent_value_lbl = QLabel(str(self._concurrent_slider.value()))
-        self._concurrent_value_lbl.setStyleSheet(
-            f"font-family: 'Geist Mono', monospace; font-size: 13pt; "
-            f"color: {T.tokens()['accent.primary']}; min-width: 24px;"
-        )
+        # Styled with the preview frame below, on build and on theme switch.
         self._concurrent_slider.valueChanged.connect(
             lambda v: self._concurrent_value_lbl.setText(str(v))
         )
@@ -248,10 +248,15 @@ class GeneralTabMixin:
             self._dir_entry.setText(path)
 
     def _style_preview_frame(self):
-        """Apply theme colors to the filename preview frame + its label.
+        """Apply theme colors to the filename preview frame + its label,
+        and to the accent-coloured concurrent-downloads value.
         Called once at build + again on every theme switch."""
         if not hasattr(self, "_preview_frame"):
             return
+        self._concurrent_value_lbl.setStyleSheet(
+            f"font-family: 'Geist Mono', monospace; font-size: 13pt; "
+            f"color: {T.tokens()['accent.primary']}; min-width: 24px;"
+        )
         self._preview_frame.setStyleSheet(
             f"QFrame {{"
             f"  background-color: {T.tokens()['surfaces.bg_0']};"

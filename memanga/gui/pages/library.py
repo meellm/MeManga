@@ -12,13 +12,21 @@ from PySide6.QtGui import QKeySequence
 from .base import BasePage
 from ...perf import timed
 from .. import theme as T
+from ..theme.tokens import STATUS_ORDER, status_label
 from ..components.manga_card import MangaCard
 from ..components.manga_row import MangaRow
 from ..components.context_menu import ContextMenu
 from ..focus import focus_into
 from ..components.toast import Toast
+from ..components.wrapping_label import WrappingLabel
 from ..components.remove_manga_modal import (RemoveMangaModal, remove_manga,
                                               removed_message)
+
+# Left and right margin of the page body, in px.
+_BODY_MARGIN = 32
+# Narrowest the filter box may get while the chips share its row: wide
+# enough to read its placeholder.
+_FILTER_MIN_WIDTH = 200
 
 
 class LibraryPage(BasePage):
@@ -35,6 +43,9 @@ class LibraryPage(BasePage):
         self._search_query = ""
         self._sort_by = self.app.config.get("gui.sort_by", "title")
         self._cards: list = []
+        # Continue Reading cards as (manga, card), for in-place cover
+        # updates like the grid's.
+        self._continue_cards: list = []
         # Coalesces event-driven refreshes (check/download/read/library
         # events) so a burst - e.g. every chapter of a batch download
         # completing - triggers one grid rebuild, not one per event.
@@ -110,7 +121,8 @@ class LibraryPage(BasePage):
         # Multi-part meta line: "{n} manga · {ch} chapters · {unread} unread · Synced {ago}"
         # Render a placeholder so the header height is stable from the
         # very first paint; the real numbers fill in once on_show fires.
-        self._stats_label = QLabel("0 manga  ·  0 chapters tracked  ·  0 read  ·  0 unread  ·  Synced never")
+        # Wraps at the minimum window width instead of losing its end.
+        self._stats_label = WrappingLabel("0 manga  ·  0 chapters tracked  ·  0 read  ·  0 unread  ·  Synced never")
         self._stats_label.setProperty("role", "meta")
         h_layout.addWidget(self._stats_label)
 
@@ -125,13 +137,26 @@ class LibraryPage(BasePage):
         # ── Body wrapper ──
         body = QWidget()
         body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(32, 20, 32, 20)
+        body_layout.setContentsMargins(_BODY_MARGIN, 20, _BODY_MARGIN, 20)
         body_layout.setSpacing(T.PAD_SM)
         layout.addWidget(body, 1)
 
         # Filter bar — per design spec, search + status chip-row + sort dropdown.
+        # One row when the page is wide enough; otherwise the status chips
+        # get a second row of their own (see _fit_filter_bar), so nothing
+        # is cut off at the default or the minimum window size.
+        self._filter_bar = QWidget()
+        bar_l = QVBoxLayout(self._filter_bar)
+        bar_l.setContentsMargins(0, 0, 0, 0)
+        bar_l.setSpacing(T.PAD_SM)
         filter_bar = QHBoxLayout()
         filter_bar.setSpacing(10)
+        self._filter_row = filter_bar
+        bar_l.addLayout(filter_bar)
+        self._chip_row = QHBoxLayout()
+        self._chip_row.setSpacing(10)
+        bar_l.addLayout(self._chip_row)
+        self._chips_on_own_row = False
 
         self._search_entry = QLineEdit()
         self._search_entry.setPlaceholderText("Filter library…")
@@ -150,9 +175,15 @@ class LibraryPage(BasePage):
         chips_l = QHBoxLayout(chips_wrap)
         chips_l.setContentsMargins(3, 3, 3, 3)
         chips_l.setSpacing(0)
-        for key, label in [("all","All"),("reading","Reading"),("plan","Plan"),
-                            ("on-hold","Paused"),("completed","Complete")]:
-            chip = QPushButton(label)
+        # Every status a manga can have, in the wording used everywhere
+        # else ("Plan" is short for "Plan to read", to keep the row
+        # narrow; its tooltip and accessible name give the full label).
+        for key in ("all", *STATUS_ORDER):
+            full = "All" if key == "all" else status_label(key)
+            chip = QPushButton("Plan" if key == "plan" else full)
+            if key == "plan":
+                chip.setToolTip(full)
+                chip.setAccessibleName(full)
             chip.setProperty("variant", "chip")
             chip.setProperty("active", "true" if key == self._filter_status else "false")
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -160,6 +191,7 @@ class LibraryPage(BasePage):
             chips_l.addWidget(chip)
             self._chip_buttons[key] = chip
         filter_bar.addWidget(chips_wrap)
+        self._chips_wrap = chips_wrap
 
         # Kept as a hidden combobox to preserve back-compat for callers
         # that probe ._status_filter; not displayed.
@@ -208,12 +240,9 @@ class LibraryPage(BasePage):
             self._view_buttons[mode] = btn
         self._describe_view_buttons()
         filter_bar.addWidget(view_wrap)
+        self._view_wrap = view_wrap
 
-        self._count_label = QLabel("")
-        self._count_label.setProperty("role", "meta")
-        filter_bar.addWidget(self._count_label)
-
-        body_layout.addLayout(filter_bar)
+        body_layout.addWidget(self._filter_bar)
 
         # ── Continue Reading rail ──
         # Rebuilt on each refresh. Holds up to 4 ContinueCard widgets in
@@ -240,10 +269,19 @@ class LibraryPage(BasePage):
         body_layout.addWidget(self._continue_section)
 
         # ALL MANGA section label (between filter and grid) — matches HTML.
+        # The "N of M shown" count sits at its right end, like the count
+        # of the Continue Reading section; in the filter bar it left no
+        # room for the status chips at the default window width.
+        all_head = QHBoxLayout()
+        all_head.setContentsMargins(0, 16, 0, 8)
         all_label = QLabel("ALL MANGA")
         all_label.setProperty("role", "section")
-        all_label.setContentsMargins(0, 16, 0, 8)
-        body_layout.addWidget(all_label)
+        all_head.addWidget(all_label)
+        all_head.addStretch(1)
+        self._count_label = QLabel("")
+        self._count_label.setProperty("role", "mono_meta")
+        all_head.addWidget(self._count_label)
+        body_layout.addLayout(all_head)
 
         # Scrollable grid
         self._scroll = QScrollArea()
@@ -257,13 +295,52 @@ class LibraryPage(BasePage):
         body_layout.addWidget(self._scroll, 1)
 
     def on_show(self, **kwargs):
+        self._fit_filter_bar(self.width())
         self._refresh()
         # Remember the grid column count we just laid out for so resize
         # events can tell whether they need to re-layout or not.
         self._last_grid_cols = self._current_col_count()
 
+    def _filter_bar_one_row_width(self) -> int:
+        """Width the filter bar needs to keep the chips beside the
+        filter box, with the box still wide enough to show its
+        placeholder."""
+        spacing = self._filter_row.spacing()
+        return (_FILTER_MIN_WIDTH
+                + self._chips_wrap.sizeHint().width()
+                + self._sort_menu.sizeHint().width()
+                + self._view_wrap.sizeHint().width()
+                + 4 * spacing)
+
+    def _fit_filter_bar(self, page_width: int):
+        """Move the status chips to a row of their own when the page is
+        too narrow for one row, and back when it is wide enough again.
+        Tab order follows what is on screen, row by row."""
+        if not hasattr(self, "_chips_wrap"):
+            return
+        available = page_width - 2 * _BODY_MARGIN
+        own_row = available < self._filter_bar_one_row_width()
+        if own_row == self._chips_on_own_row:
+            return
+        self._chips_on_own_row = own_row
+        chips = self._chips_wrap
+        if own_row:
+            self._filter_row.removeWidget(chips)
+            self._chip_row.addWidget(chips, 0, Qt.AlignmentFlag.AlignLeft)
+            order = [self._search_entry, self._sort_menu,
+                     *self._view_buttons.values(),
+                     *self._chip_buttons.values()]
+        else:
+            self._chip_row.removeWidget(chips)
+            self._filter_row.insertWidget(1, chips)
+            order = [self._search_entry, *self._chip_buttons.values(),
+                     self._sort_menu, *self._view_buttons.values()]
+        for first, second in zip(order, order[1:]):
+            QWidget.setTabOrder(first, second)
+
     def resizeEvent(self, ev):
         super().resizeEvent(ev)
+        self._fit_filter_bar(ev.size().width())
         # When the window changes size enough that the manga grid needs
         # a different number of columns (e.g. fullscreen toggle), the
         # existing card positions stay in their old slots until the
@@ -309,39 +386,49 @@ class LibraryPage(BasePage):
         cover) just to bump a timestamp.
         """
         try:
-            from datetime import datetime
-            stats = self._tracked_stats()
-            last_check = self.app.app_state.get("last_check")
-            check_text = "never"
-            if last_check:
-                try:
-                    elapsed = (datetime.now() - datetime.fromisoformat(last_check)).total_seconds()
-                    if elapsed < 60:
-                        check_text = "just now"
-                    elif elapsed < 3600:
-                        check_text = f"{int(elapsed // 60)}m ago"
-                    elif elapsed < 86400:
-                        check_text = f"{int(elapsed // 3600)}h ago"
-                    else:
-                        check_text = f"{int(elapsed // 86400)}d ago"
-                except Exception:
-                    pass
-            unread_total = sum(
-                self.app.app_state.get_new_chapters(m.get("title", ""))
-                for m in self.app.config.get("manga", [])
-            )
-            read_total = sum(
-                self.app.app_state.get_read_count(m.get("title", ""))
-                for m in self.app.config.get("manga", [])
-            )
-            self._stats_label.setText(
-                f"{stats['total_manga']} manga  ·  {stats['total_chapters']} chapters tracked  "
-                f"·  {read_total} read  ·  {unread_total} unread  "
-                f"·  Synced {check_text}"
-            )
+            self._update_stats_label()
         except Exception:
             # Tick must never raise — it fires on a timer.
             pass
+
+    def _synced_text(self) -> str:
+        """How long ago the last check finished: "never", "just now",
+        "5m ago", "3h ago" or "2d ago"."""
+        last_check = self.app.app_state.get("last_check")
+        if not last_check:
+            return "never"
+        try:
+            elapsed = (datetime.now() - datetime.fromisoformat(last_check)).total_seconds()
+        except Exception:
+            return "never"
+        if elapsed < 60:
+            return "just now"
+        if elapsed < 3600:
+            return f"{int(elapsed // 60)}m ago"
+        if elapsed < 86400:
+            return f"{int(elapsed // 3600)}h ago"
+        return f"{int(elapsed // 86400)}d ago"
+
+    def _update_stats_label(self) -> dict:
+        """Write the header meta line: count · chapters · read · unread
+        · synced. Returns the tracked-manga stats it used."""
+        stats = self._tracked_stats()
+        manga_list = self.app.config.get("manga", []) or []
+        unread_total = sum(
+            self.app.app_state.get_new_chapters(m.get("title", ""))
+            for m in manga_list
+        )
+        # Issue #18: total chapters read across the whole library.
+        read_total = sum(
+            self.app.app_state.get_read_count(m.get("title", ""))
+            for m in manga_list
+        )
+        self._stats_label.setText(
+            f"{stats['total_manga']} manga  \u00b7  {stats['total_chapters']} chapters tracked  "
+            f"\u00b7  {read_total} read  \u00b7  {unread_total} unread  "
+            f"\u00b7  Synced {self._synced_text()}"
+        )
+        return stats
 
     def _tracked_stats(self):
         """Header counts for tracked manga only. Removing a manga can
@@ -371,47 +458,13 @@ class LibraryPage(BasePage):
 
         manga_list = self._get_filtered_manga()
 
-        # Update stats
-        stats = self._tracked_stats()
-        last_check = self.app.app_state.get("last_check")
-        check_text = "never"
-        if last_check:
-            try:
-                elapsed = (datetime.now() - datetime.fromisoformat(last_check)).total_seconds()
-                if elapsed < 60:
-                    check_text = "just now"
-                elif elapsed < 3600:
-                    check_text = f"{int(elapsed // 60)}m ago"
-                elif elapsed < 86400:
-                    check_text = f"{int(elapsed // 3600)}h ago"
-                else:
-                    check_text = f"{int(elapsed // 86400)}d ago"
-            except Exception:
-                pass
-        # Multi-part meta line per design spec: count \u00b7 chapters \u00b7 read \u00b7 unread \u00b7 synced.
-        unread_total = sum(
-            self.app.app_state.get_new_chapters(m.get("title", ""))
-            for m in self.app.config.get("manga", [])
-        )
-        # Issue #18: total chapters read across the whole library.
-        read_total = sum(
-            self.app.app_state.get_read_count(m.get("title", ""))
-            for m in self.app.config.get("manga", [])
-        )
-        self._stats_label.setText(
-            f"{stats['total_manga']} manga  \u00b7  {stats['total_chapters']} chapters tracked  "
-            f"\u00b7  {read_total} read  \u00b7  {unread_total} unread  "
-            f"\u00b7  Synced {check_text}"
-        )
+        stats = self._update_stats_label()
         # "10 of 10 shown" format from spec.
         total_manga = stats['total_manga']
         self._count_label.setText(f"{len(manga_list)} of {total_manga} shown")
 
         if not manga_list:
-            empty = QLabel("No manga tracked yet. Click '+ Add' to get started.")
-            empty.setStyleSheet(f"color: {T.FG_MUTED}; font-size: {T.FONT_SIZE_MD}pt; padding: 60px;")
-            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._grid_layout.addWidget(empty, 0, 0)
+            self._grid_layout.addWidget(self._empty_state(total_manga), 0, 0)
             return
 
         if self._view_mode == "grid":
@@ -419,14 +472,42 @@ class LibraryPage(BasePage):
         else:
             self._build_list(manga_list)
 
+    def _empty_state(self, total_manga: int) -> QLabel:
+        """The text shown instead of the grid: how to start on a new
+        library (and where downloads will go, issue #370), or that the
+        filter matches nothing."""
+        if total_manga:
+            text = ("No manga match the current filter.\n"
+                    "Clear the filter box or choose All to see your library.")
+        else:
+            text = ("No manga tracked yet.\n"
+                    "Use Add manga above, or Search, to get started.\n\n"
+                    f"Downloads are saved to {self.app.config.download_dir}\n"
+                    "You can change the folder in Settings.")
+        empty = QLabel(text)
+        # A folder path is user text; show it literally.
+        empty.setTextFormat(Qt.TextFormat.PlainText)
+        empty.setProperty("role", "empty")
+        empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty.setWordWrap(True)
+        return empty
+
+    def _card_cover(self, cover_url):
+        """Cover for a grid card, or None when there is no real one yet,
+        so the card paints its own titled placeholder."""
+        cover = self.app.cover_cache.get_cover(
+            cover_url, size=(T.CARD_WIDTH, T.CARD_COVER_HEIGHT))
+        if self.app.cover_cache.is_placeholder(cover):
+            return None
+        return cover
+
     def _build_grid(self, manga_list):
         cols = max(1, (self._scroll.width() - 40) // (T.CARD_WIDTH + T.PAD_MD))
         if cols < 1:
             cols = 4
 
         for i, manga in enumerate(manga_list):
-            cover_url = manga.get("cover_url")
-            cover_img = self.app.cover_cache.get_cover(cover_url, size=(T.CARD_WIDTH, T.CARD_COVER_HEIGHT))
+            cover_img = self._card_cover(manga.get("cover_url"))
             title = manga.get("title", "")
             new_count = self.app.app_state.get_new_chapters(title)
             # Issue #18: pass per-chapter read / total counts so the card
@@ -486,13 +567,20 @@ class LibraryPage(BasePage):
             elif sort_key == "chapter_count":
                 results.sort(key=lambda m: len(cache.get(m.get("title", ""), {}).get("downloaded", [])), reverse=True)
         elif sort_key == "status":
-            order = {"reading": 0, "on-hold": 1, "completed": 2, "dropped": 3}
-            results.sort(key=lambda m: order.get(m.get("status", "reading"), 4))
+            order = {status: i for i, status in enumerate(STATUS_ORDER)}
+            order["paused"] = order["on-hold"]  # older spelling
+            results.sort(key=lambda m: order.get(m.get("status", "reading"),
+                                                 len(order)))
         return results
 
     def _refresh_continue_rail(self):
-        """Repopulate the Continue Reading rail with up to 4 most-recently-read
-        manga that have an unfinished chapter."""
+        """Repopulate the Continue Reading rail with up to 4 manga, the
+        most recently read first.
+
+        "Read" means opened in the built-in reader: the rail follows the
+        reading cursor, not the newest downloaded chapter (which it used
+        to show as "last read" for manga that were never opened).
+        """
         from ..components.continue_card import ContinueCard
         # Drain old cards (hidden first, as in _refresh)
         while self._continue_grid.count():
@@ -500,21 +588,21 @@ class LibraryPage(BasePage):
             if item.widget():
                 item.widget().hide()
                 item.widget().deleteLater()
+        self._continue_cards.clear()
 
         candidates = []
         for m in self.app.config.get("manga", []) or []:
             title = m.get("title", "")
             if not title:
                 continue
-            state = self.app.app_state.get_manga_state(title) or {}
-            last_chapter = state.get("last_chapter")
-            if not last_chapter:
-                continue
             # Skip completed/dropped from rail
             if m.get("status") in ("completed", "dropped"):
                 continue
-            # Sort key = last_updated timestamp (most recent first)
-            candidates.append((state.get("last_updated") or "", m, state))
+            progress = self.app.app_state.get_reading_progress(title) or {}
+            chapter = progress.get("last_chapter")
+            if not chapter:
+                continue
+            candidates.append((progress.get("last_read") or "", m, str(chapter)))
 
         candidates.sort(key=lambda x: x[0], reverse=True)
         candidates = candidates[:4]
@@ -524,21 +612,31 @@ class LibraryPage(BasePage):
         if not candidates:
             return
 
-        for col, (_, m, state) in enumerate(candidates):
+        for col, (_, m, chapter) in enumerate(candidates):
+            title = m.get("title", "")
             cover = self.app.cover_cache.get_cover(m.get("cover_url"), size=(48, 68))
-            try:
-                done = len(state.get("downloaded", []))
-                total = int(m.get("chapters_total") or done * 2 or 1)
-                pct = min(100, (done / max(total, 1)) * 100)
-            except Exception:
-                pct = 0
+            # Read chapters out of those known for the manga; an unknown
+            # total shows an empty bar rather than a made-up half.
+            total = self.app.app_state.get_available_chapter_count(title)
+            read = self.app.app_state.get_read_count(title)
+            pct = min(100, (read / total) * 100) if total > 0 else 0
             card = ContinueCard(
                 self._scroll_content, manga=m, cover_pixmap=cover,
-                last_chapter=str(state.get("last_chapter", "")),
+                last_chapter=chapter,
                 progress_pct=pct,
-                on_click=lambda mm: self.app.show_page("detail", manga=mm),
+                on_click=lambda mm, ch=chapter: self._continue_reading(mm, ch),
             )
             self._continue_grid.addWidget(card, 0, col)
+            self._continue_cards.append((m, card))
+
+    def _continue_reading(self, manga, chapter):
+        """Open the reader where the user left off; the Detail page when
+        that chapter's download is no longer there."""
+        title = manga.get("title", "")
+        if self.app.app_state.is_chapter_downloaded(title, chapter):
+            self.app.show_page("reader", manga=manga, chapter=chapter)
+        else:
+            self.app.show_page("detail", manga=manga)
 
     def _on_search(self, text):
         self._search_query = text.strip()
@@ -606,9 +704,8 @@ class LibraryPage(BasePage):
             ("Check Updates", lambda: self._ctx_check(manga)),
             ("Download All", lambda: self._ctx_download_all(manga)),
             (None, None),
-            ("Set: Reading", lambda: self._ctx_set_status(manga, "reading")),
-            ("Set: On-hold", lambda: self._ctx_set_status(manga, "on-hold")),
-            ("Set: Completed", lambda: self._ctx_set_status(manga, "completed")),
+            *[(f"Set: {status_label(status)}", self._status_setter(manga, status))
+              for status in STATUS_ORDER],
             (None, None),
             ("Remove", lambda: self._ctx_remove(manga)),
         ]
@@ -648,6 +745,12 @@ class LibraryPage(BasePage):
             force=True, queue_all=True,
         )
         self.app.show_page("downloads")
+
+    def _status_setter(self, manga, status):
+        """A menu callback that takes no arguments. (A lambda with the
+        status as a default argument would receive the menu action's
+        "checked" flag in its place.)"""
+        return lambda: self._ctx_set_status(manga, status)
 
     def _ctx_set_status(self, manga, status):
         for m in self.app.config.get("manga", []):
@@ -691,14 +794,27 @@ class LibraryPage(BasePage):
             Toast(self, "Checking for updates...", kind="info")
 
     def _on_cover_loaded(self, data):
-        if not hasattr(self, "_cover_pending") or not self._cover_pending:
-            self._cover_pending = True
-            QTimer.singleShot(500, self._debounced_cover_refresh)
-
-    def _debounced_cover_refresh(self):
-        self._cover_pending = False
-        if self.isVisible():
-            self._refresh()
+        """A cover finished downloading: show it on the cards that use
+        it. The grid used to be rebuilt for this, once per batch of
+        covers, which made a new library flicker while its covers
+        arrived."""
+        data = data or {}
+        url = data.get("url")
+        if not url or data.get("error") or not self.isVisible():
+            return
+        cache = self.app.cover_cache
+        for manga, card in self._cards:
+            if manga.get("cover_url") != url:
+                continue
+            if self._view_mode == "grid":
+                cover = self._card_cover(url)
+                if cover is not None:
+                    card.update_cover(cover)
+            else:
+                card.update_cover(cache.get_cover(url, size=(36, 48)))
+        for manga, card in self._continue_cards:
+            if manga.get("cover_url") == url:
+                card.update_cover(cache.get_cover(url, size=(48, 68)))
 
     def _on_check_done(self):
         if not self.isVisible() or self._refresh_pending:

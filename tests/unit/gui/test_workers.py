@@ -648,6 +648,28 @@ class _RecordingCache:
         self.failed.append(url)
 
 
+class TestCoverPool:
+    def test_covers_have_their_own_pool(self, event_bus):
+        # Covers no longer queue behind downloads and checks on the
+        # shared pool.
+        from memanga.gui.workers import COVER_WORKERS, BackgroundWorker
+        w = BackgroundWorker(event_bus)
+        try:
+            assert w._cover_pool is not w._pool
+            assert w._cover_pool._max_workers == COVER_WORKERS == 4
+        finally:
+            w.shutdown()
+
+    def test_shutdown_closes_the_cover_pool(self, event_bus):
+        from memanga.gui.workers import BackgroundWorker
+        w = BackgroundWorker(event_bus)
+        w.shutdown()
+        # Nothing is submitted after shutdown, and the pool refuses work.
+        assert w.fetch_cover("https://covers.test/late.jpg") is None
+        with pytest.raises(RuntimeError):
+            w._cover_pool.submit(lambda: None)
+
+
 class TestCoverFetch:
     """Issue #48 — MangaPill covers live on a hotlink-protected CDN
     that answers 403 (or an HTML block page) unless the request carries

@@ -2,13 +2,14 @@
 Detail page - Manga info, edit, chapters, download from chapter, and actions.
 """
 
+import html
 from pathlib import Path
 from urllib.parse import urlparse
 from PySide6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QScrollArea, QWidget, QComboBox, QCheckBox, QLineEdit,
+    QApplication, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
+    QScrollArea, QWidget, QComboBox, QCheckBox, QLineEdit, QLayout,
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QKeySequence
 from ...chapters import format_chapter_value
 from .base import BasePage
@@ -18,6 +19,17 @@ from ..components.dialogs import InputDialog
 from ..components.remove_manga_modal import (RemoveMangaModal, remove_manga,
                                               removed_message)
 from ..components.error_details import detail_tooltip
+from ..components.flow import FlowFrame
+from ..components.search_result import ElideLabel
+from ..components.wrapping_label import WrappingLabel
+
+# Chapter rows built per pass of the event loop. A list up to this long
+# is built in one go, as before; a longer one shows its first rows at
+# once and fills in the rest without holding the window.
+CHAPTER_ROWS_PER_BATCH = 150
+
+# Hero cover size, in device-independent pixels.
+_COVER_SIZE = (220, 330)
 
 
 class DetailPage(BasePage):
@@ -42,6 +54,17 @@ class DetailPage(BasePage):
         self._chapter_filter = "all"
         self._chapter_chips: dict = {}
         self._chapter_sort = "Newest first"
+        # Chapter list bookkeeping: row widget per chapter number, the
+        # numbers of a long list still to be built, and a counter that
+        # tells a queued batch its list has been replaced.
+        self._chapter_rows: dict = {}
+        self._rows_to_build: list = []
+        self._row_build_gen = 0
+        self._chapter_list_layout = None
+        self._chapters_summary = None
+        self._first_chapter_row = None
+        # One rebuild for a burst of finished downloads.
+        self._chapter_refresh_pending = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -49,13 +72,24 @@ class DetailPage(BasePage):
 
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # The rows wrap to fit; should something still be wider than the
+        # window, it scrolls sideways instead of being cut off unseen.
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         root.addWidget(self._scroll)
 
         self._scroll_content = QWidget()
         self._layout = QVBoxLayout(self._scroll_content)
         self._layout.setContentsMargins(T.PAD_XL, T.PAD_LG, T.PAD_XL, T.PAD_XL)
         self._layout.setSpacing(0)
+        # The chapter list grows in batches after the page is shown. Under
+        # the default constraint each nested layout lays its rows out in
+        # its widget's old, smaller size and only then asks its parent for
+        # more room, one event-loop pass per level, so rows were squashed
+        # until the scroll area caught up. With SetMinimumSize a layout
+        # first raises its widget's minimum (which resizes the widget at
+        # once) and the scroll area sees the content resize directly; see
+        # "Size Hints and Layouts" in the QScrollArea documentation.
+        self._layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self._scroll.setWidget(self._scroll_content)
 
         # Alt+Left (Cmd+[ on macOS) → back to Library, like the
@@ -74,6 +108,8 @@ class DetailPage(BasePage):
         # Issue #389: remove-after-read can finish while this page is
         # already showing — the row flips back to Download in place.
         self.app.events.subscribe("chapter_removed", self._on_chapter_removed)
+        # The hero cover can still be downloading when the page opens.
+        self.app.events.subscribe("cover_loaded", self._on_cover_loaded)
 
     def on_show(self, **kwargs):
         manga = kwargs.get("manga")
@@ -146,14 +182,12 @@ class DetailPage(BasePage):
 
         # Cover — 220x330 per spec
         cover_url = manga.get("cover_url")
-        cover_pixmap = self.app.cover_cache.get_cover(cover_url, size=(220, 330))
+        cover_pixmap = self.app.cover_cache.get_cover(cover_url, size=_COVER_SIZE)
         cover_label = QLabel()
-        cover_label.setFixedSize(220, 330)
-        cover_label.setPixmap(cover_pixmap.scaled(
-            220, 330,
-            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            Qt.TransformationMode.SmoothTransformation,
-        ))
+        cover_label.setFixedSize(*_COVER_SIZE)
+        # Already at this size, and at the screen's pixel density.
+        cover_label.setPixmap(cover_pixmap)
+        self._cover_label = cover_label
         cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cover_label.setStyleSheet(
             f"border-radius: 8px; border: 1px solid {T.tokens()['surfaces.border']};"
@@ -169,13 +203,17 @@ class DetailPage(BasePage):
         # "By Author" line above title — matches HTML
         author = manga.get("author", "")
         if author:
-            by_label = QLabel(f"By  <span style='color:{T.tokens()['text.t_1']};font-weight:500'>{author}</span>")
+            # The author comes from a source site: escaped, so it can't
+            # add markup of its own to this rich-text label.
+            by_label = QLabel(f"By  <span style='color:{T.tokens()['text.t_1']};font-weight:500'>{html.escape(str(author))}</span>")
             by_label.setProperty("role", "t2")
             by_label.setStyleSheet(f"color: {T.tokens()['text.t_2']}; font-size: 12pt;")
             info_layout.addWidget(by_label)
 
         # Title — use the new detail_title typography role.
         title_label = QLabel(title)
+        # Titles come from source sites; show them literally.
+        title_label.setTextFormat(Qt.TextFormat.PlainText)
         title_label.setProperty("role", "detail_title")
         title_label.setWordWrap(True)
         info_layout.addWidget(title_label)
@@ -197,15 +235,20 @@ class DetailPage(BasePage):
             src_row.addWidget(pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
         if primary_url:
-            url_lbl = QLabel(primary_url)
+            # Elided to the room left, full URL in the tooltip and the
+            # accessible text: a long source URL (often 70+ characters)
+            # would otherwise set the width of the whole page.
+            url_lbl = ElideLabel(primary_url)
             url_lbl.setProperty("role", "mono_meta")
             url_lbl.setStyleSheet(
                 f"font-family: 'Geist Mono', monospace; color: {T.tokens()['text.t_3']};"
                 f"font-size: 10pt;"
             )
+            # Takes the rest of the row (its text stays left-aligned), so
+            # it is only shortened when the row really is too narrow.
             src_row.addWidget(url_lbl, 1, Qt.AlignmentFlag.AlignVCenter)
-
-        src_row.addStretch(1)
+        else:
+            src_row.addStretch(1)
         info_layout.addLayout(src_row)
 
         if backup:
@@ -235,18 +278,21 @@ class DetailPage(BasePage):
         # dropdown sizes to a natural width instead of stretching to the
         # full column, which had been making the layout look "ugly" with
         # huge empty space around "Reading" / "Manual".
-        controls_card = QFrame()
+        # The columns wrap onto another line when the info column is
+        # narrower than all three (it is at the default window size);
+        # in one line they could not shrink and were cut off on the right.
+        controls_card = FlowFrame(h_spacing=28, v_spacing=12)
         controls_card.setProperty("role", "card")
-        cc_l = QHBoxLayout(controls_card)
-        cc_l.setContentsMargins(16, 12, 16, 12)
-        cc_l.setSpacing(28)
+        controls_card.flow().setContentsMargins(16, 12, 16, 12)
+        self._controls_card = controls_card
 
         from ..components.status_dropdown import StatusDropdown
         from ..components.mode_dropdown import ModeDropdown
         from ..components.layout_dropdown import LayoutDropdown
 
-        def _control_column(label_text: str, widget: QWidget) -> QVBoxLayout:
-            col = QVBoxLayout()
+        def _control_column(label_text: str, widget: QWidget) -> QWidget:
+            column = QWidget()
+            col = QVBoxLayout(column)
             col.setSpacing(6)
             col.setContentsMargins(0, 0, 0, 0)
             lbl = QLabel(label_text)
@@ -256,16 +302,16 @@ class DetailPage(BasePage):
             widget.setMaximumWidth(200)
             widget.setMinimumWidth(160)
             col.addWidget(widget, 0, Qt.AlignmentFlag.AlignLeft)
-            return col
+            return column
 
         self._status_combo = StatusDropdown(initial=manga.get("status", "reading"))
         self._status_combo.value_changed.connect(self._on_status_change)
-        cc_l.addLayout(_control_column("STATUS", self._status_combo))
+        controls_card.addWidget(_control_column("STATUS", self._status_combo))
 
         current_mode = manga.get("mode", "auto")
         self._mode_combo = ModeDropdown(initial=current_mode)
         self._mode_combo.value_changed.connect(self._on_mode_change)
-        cc_l.addLayout(_control_column("MODE", self._mode_combo))
+        controls_card.addWidget(_control_column("MODE", self._mode_combo))
 
         # Reader layout (issue #32) — same fallback chain the reader
         # uses: per-manga value, then the global default, then the
@@ -278,14 +324,13 @@ class DetailPage(BasePage):
         )
         self._layout_combo = LayoutDropdown(initial=current_layout)
         self._layout_combo.value_changed.connect(self._on_layout_change)
-        cc_l.addLayout(_control_column("READER LAYOUT", self._layout_combo))
-
-        cc_l.addStretch(1)  # push columns left, no centering void
+        controls_card.addWidget(
+            _control_column("READER LAYOUT", self._layout_combo))
 
         info_layout.addWidget(controls_card)
 
         # Mode hint label (below controls card)
-        mode_hint = QLabel(
+        mode_hint = WrappingLabel(
             "Manual: download chapters individually below"
             if current_mode == "manual"
             else "Auto: new chapters download after each check"
@@ -300,7 +345,11 @@ class DetailPage(BasePage):
         # Issue #345: a manga without its own choice follows the
         # Settings choice of which manga to send.
         manga_kindle = manga_sends_to_kindle(manga, kindle_scope(self.app.config))
-        kindle_row = QHBoxLayout()
+        # The hint moves under the check box when the two do not fit on
+        # one line, instead of widening the page past a narrow window.
+        kindle_row = FlowFrame(h_spacing=T.PAD_SM, v_spacing=2)
+        kindle_row.flow().setContentsMargins(0, 0, 0, 0)
+        self._kindle_row = kindle_row
         self._kindle_check = QCheckBox("Send to Kindle after download")
         self._kindle_check.setChecked(bool(manga_kindle and global_email_on))
         self._kindle_check.stateChanged.connect(self._on_kindle_toggle)
@@ -310,13 +359,12 @@ class DetailPage(BasePage):
             hint = QLabel("— enable email in Settings first")
             hint.setProperty("role", "hint")
             kindle_row.addWidget(hint)
-        kindle_row.addStretch(1)
-        info_layout.addLayout(kindle_row)
+        info_layout.addWidget(kindle_row)
 
         info_layout.addSpacing(12)
 
         # Stats
-        stats_label = QLabel(self._stats_text(state_data))
+        stats_label = WrappingLabel(self._stats_text(state_data))
         stats_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_SECONDARY};")
         info_layout.addWidget(stats_label)
         self._stats_label = stats_label
@@ -325,9 +373,15 @@ class DetailPage(BasePage):
 
         # Action row: primary "Check updates" + default "Download from…" +
         # default "Download all" + spacer + ghost "Edit" + danger "Remove"
+        # Wraps onto a second line when the info column is too narrow for
+        # all five buttons, which it is at the default window size. Edit
+        # and Remove stay together at the right end, as with the stretch
+        # they used to follow.
         from ..assets.icons import icon as _ic
-        actions = QHBoxLayout()
-        actions.setSpacing(T.PAD_SM)
+        actions = FlowFrame(h_spacing=T.PAD_SM, v_spacing=T.PAD_SM,
+                            last_right=True)
+        actions.flow().setContentsMargins(0, 0, 0, 0)
+        self._actions_row = actions
 
         check_btn = QPushButton("  Check updates")
         check_btn.setProperty("variant", "primary")
@@ -348,14 +402,17 @@ class DetailPage(BasePage):
         dl_all_btn.clicked.connect(self._download_all)
         actions.addWidget(dl_all_btn)
 
-        actions.addStretch(1)
+        manage = QWidget()
+        manage_l = QHBoxLayout(manage)
+        manage_l.setContentsMargins(0, 0, 0, 0)
+        manage_l.setSpacing(T.PAD_SM)
 
         edit_btn = QPushButton("Edit")
         edit_btn.setProperty("variant", "ghost")
         edit_btn.setProperty("size", "sm")
         edit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         edit_btn.clicked.connect(self._show_edit_form)
-        actions.addWidget(edit_btn)
+        manage_l.addWidget(edit_btn)
 
         remove_btn = QPushButton("Remove")
         remove_btn.setProperty("variant", "danger")
@@ -364,9 +421,10 @@ class DetailPage(BasePage):
         remove_btn.clicked.connect(self._confirm_remove)
         remove_btn.setAccessibleDescription(
             f"Remove {title} from the library (asks first)")
-        actions.addWidget(remove_btn)
+        manage_l.addWidget(remove_btn)
+        actions.addWidget(manage)
 
-        info_layout.addLayout(actions)
+        info_layout.addWidget(actions)
 
         main_row.addLayout(info_layout, 1)
 
@@ -443,40 +501,22 @@ class DetailPage(BasePage):
         chapters_layout = QVBoxLayout(self._chapters_container)
         chapters_layout.setContentsMargins(0, 0, 0, 0)
         chapters_layout.setSpacing(0)
+        # Grows with the list at once; see the page layout above.
+        chapters_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self._layout.addWidget(self._chapters_container)
         self._build_chapter_list()
 
         self._layout.addStretch()
 
-    def _build_chapter_list(self):
-        """Render the merged chapter list (downloaded + available).
-
-        - Each row: "Chapter N" + Read button (if downloaded) OR Download button.
-        - Sorted descending by numeric chapter number.
-        - Falls back to a downloaded-only render when no available_chapters
-          are cached yet (e.g. legacy auto manga that haven't been re-checked).
-        """
-        if not self._chapters_container or not self._manga:
-            return
-
-        # Reset the container layout
-        layout = self._chapters_container.layout()
-        while layout.count():
-            item = layout.takeAt(0)
-            w = item.widget()
-            if w:
-                w.deleteLater()
-            elif item.layout():
-                self._clear_child_layout(item.layout())
-        # Forget any stale download-button references
-        self._pending_downloads.clear()
-
+    def _chapter_context(self) -> dict:
+        """Everything the chapter list is built from, read once: the
+        merged chapters (available, downloaded, read elsewhere) and the
+        per-chapter records the rows show."""
         title = self._manga.get("title", "")
-        downloaded = self.app.app_state.get_downloaded_chapters(title)
-        available = self.app.app_state.get_available_chapters(title)
-        external = self.app.app_state.get_external_chapters(title)
-        partials = self.app.app_state.get_partial_chapters(title)
-        undelivered = self.app.app_state.failures.get_undelivered(title)
+        state = self.app.app_state
+        downloaded = state.get_downloaded_chapters(title)
+        available = state.get_available_chapters(title)
+        external = state.get_external_chapters(title)
 
         # Build the merged set, keyed by chapter number string.
         # Available entries provide source/url metadata; downloaded entries
@@ -486,7 +526,6 @@ class DetailPage(BasePage):
         # Hide cached MangaDex entries from groups that asked for removal.
         from ...scrapers.mangadex import removed_group_ids
         removed_groups = removed_group_ids(self.app.config)
-        saved_groups = self.app.app_state.get_chapter_groups
         for entry in available:
             num = str(entry.get("number", ""))
             if num and not (removed_groups & set(entry.get("group_ids", []))):
@@ -504,72 +543,168 @@ class DetailPage(BasePage):
             if num and num not in merged:
                 merged[num] = {"number": num}
 
+        # Real per-chapter read tracking (issue #18). "Unread" means
+        # actually-not-opened-in-Reader, not the "new since last check" badge.
+        read_set = set(state.get_read_chapters(title))
+        partials = state.get_partial_chapters(title)
+        n_total = len(merged)
+        n_dl = len(downloaded)
+        return {
+            "title": title,
+            "merged": merged,
+            "partials": partials,
+            "undelivered": state.failures.get_undelivered(title),
+            "removed_groups": removed_groups,
+            "read_set": read_set,
+            "counts": {
+                "all": n_total,
+                "downloaded": n_dl,
+                "partial": len(partials),
+                "not_downloaded": n_total - n_dl,
+                "unread": n_total - sum(1 for num in merged if num in read_set),
+                "new": state.get_new_chapters(title) or 0,
+            },
+        }
+
+    _CHAPTER_CHIPS = (
+        ("all", "All"),
+        ("downloaded", "Downloaded"),
+        ("partial", "Partial"),
+        ("not_downloaded", "Not downloaded"),
+        ("unread", "Unread"),
+    )
+
+    def _show_chapter_counts(self, counts: dict):
+        """Write the counts into the section's summary line and chips."""
+        try:
+            if self._chapters_summary is not None:
+                self._chapters_summary.setText(
+                    f"{counts['downloaded']} downloaded  ·  {counts['partial']} partial"
+                    f"  ·  {counts['all']} total  ·  {counts['new']} new")
+            for key, label in self._CHAPTER_CHIPS:
+                chip = (self._chapter_chips or {}).get(key)
+                if chip is not None:
+                    chip.setText(f"{label}  {counts[key]}")
+        except RuntimeError:
+            pass  # deleted by a rebuild
+
+    def _chapter_row_visible(self, ctx: dict, num: str) -> bool:
+        """Whether the current filter chip shows chapter ``num``."""
+        f = self._chapter_filter
+        if f == "all":
+            return True
+        title = ctx["title"]
+        is_dl = self.app.app_state.is_chapter_downloaded(title, num)
+        if f == "downloaded":
+            return is_dl
+        if f == "partial":
+            return bool(is_dl and ctx["partials"].get(num))
+        if f == "not_downloaded":
+            return not is_dl
+        if f == "unread":
+            # Issue #18: Unread = actually not opened in Reader (read_set
+            # is the canonical source). "Read elsewhere" chapters are
+            # excluded from Unread too.
+            if num in ctx["read_set"]:
+                return False
+            return is_dl or not self.app.app_state.is_external_chapter(title, num)
+        return True
+
+    def _build_chapter_list(self):
+        """Render the merged chapter list (downloaded + available).
+
+        - Each row: "Chapter N" + Read button (if downloaded) OR Download button.
+        - Sorted descending by numeric chapter number.
+        - Falls back to a downloaded-only render when no available_chapters
+          are cached yet (e.g. legacy auto manga that haven't been re-checked).
+
+        A long series is built in batches: the first rows now, the rest
+        from the event loop, so opening a manga with a thousand chapters
+        doesn't hold the window while every row is created.
+        """
+        if not self._chapters_container or not self._manga:
+            return
+
+        # Any batch still queued belongs to the list being replaced.
+        self._row_build_gen += 1
+        self._rows_to_build = []
+        self._chapter_rows = {}
+        self._chapter_list_layout = None
+        self._chapters_summary = None
+        self._chapter_refresh_pending = False
+
+        # Reset the container layout
+        layout = self._chapters_container.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            w = item.widget()
+            if w:
+                # Hidden first: a deleted widget stays on screen and
+                # focusable until control returns to the event loop.
+                w.hide()
+                w.deleteLater()
+            elif item.layout():
+                self._clear_child_layout(item.layout())
+        # Forget any stale download-button references
+        self._pending_downloads.clear()
+
+        ctx = self._chapter_context()
+        merged = ctx["merged"]
+
         if not merged:
             empty = QLabel(
                 "No chapters yet. Use 'Check Updates' to see what's available."
             )
-            empty.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; color: {T.FG_MUTED};")
+            empty.setProperty("role", "meta")
             layout.addWidget(empty)
             return
 
         # Section header: "Chapters" h3 + "{dl} downloaded · {total} total · {new} new"
-        n_dl = len(downloaded)
-        n_partial = len(partials)
-        n_total = len(merged)
-        n_new = self.app.app_state.get_new_chapters(title) or 0
         head_row = QHBoxLayout()
         h_lbl = QLabel("Chapters")
         h_lbl.setProperty("role", "card_title")
         head_row.addWidget(h_lbl)
         head_row.addStretch(1)
-        sub = QLabel(
-            f"{n_dl} downloaded  ·  {n_partial} partial  ·  {n_total} total  ·  {n_new} new"
-        )
+        sub = QLabel("")
         sub.setProperty("role", "mono_meta")
         head_row.addWidget(sub)
+        self._chapters_summary = sub
         layout.addLayout(head_row)
         layout.addSpacing(8)
 
         # Filter chip row + sort dropdown (matches HTML)
+        # The chips wrap inside their frame when the page is too narrow
+        # for them and the sort box on one line (it is at the default
+        # window size once the counts have three digits).
         filter_row = QHBoxLayout()
-        chips_wrap = QFrame()
+        chips_wrap = FlowFrame(h_spacing=0, v_spacing=0)
         chips_wrap.setProperty("role", "card_2")
-        chip_l = QHBoxLayout(chips_wrap)
-        chip_l.setContentsMargins(3, 3, 3, 3)
-        chip_l.setSpacing(0)
-        # Real per-chapter read tracking (issue #18). "Unread" now means
-        # actually-not-opened-in-Reader, not the "new since last check" badge.
-        read_set = set(self.app.app_state.get_read_chapters(title))
-        n_read = sum(1 for num in merged.keys() if num in read_set)
-        n_unread = n_total - n_read
+        chips_wrap.flow().setContentsMargins(3, 3, 3, 3)
+        self._chapter_chips_wrap = chips_wrap
         # Preserve the user's chip choice across rebuilds — _build_chapter_list
         # runs on every chip click via _set_chapter_filter, so resetting to
         # "all" here would clobber the click before the new chips paint.
-        # Same fix-shape as the Newest/Oldest sort combo two sessions ago.
-        valid_filters = {"all", "downloaded", "partial", "not_downloaded", "unread"}
+        valid_filters = {key for key, _label in self._CHAPTER_CHIPS}
         current_filter = getattr(self, "_chapter_filter", "all")
         if current_filter not in valid_filters:
             current_filter = "all"
         self._chapter_filter = current_filter
-        self._chapter_chips: dict = {}
-        for key, label, count in [
-            ("all", "All", n_total),
-            ("downloaded", "Downloaded", n_dl),
-            ("partial", "Partial", n_partial),
-            ("not_downloaded", "Not downloaded", n_total - n_dl),
-            ("unread", "Unread", n_unread),
-        ]:
-            chip = QPushButton(f"{label}  {count}")
+        self._chapter_chips = {}
+        for key, _label in self._CHAPTER_CHIPS:
+            chip = QPushButton("")
             chip.setProperty("variant", "chip")
             chip.setProperty("active", "true" if key == self._chapter_filter else "false")
             chip.setCursor(Qt.CursorShape.PointingHandCursor)
             chip.clicked.connect(lambda _, k=key: self._set_chapter_filter(k))
-            chip_l.addWidget(chip)
+            chips_wrap.addWidget(chip)
             self._chapter_chips[key] = chip
+        self._show_chapter_counts(ctx["counts"])
         filter_row.addWidget(chips_wrap)
         filter_row.addStretch(1)
         sort_combo = QComboBox()
         sort_combo.addItems(["Newest first", "Oldest first"])
+        sort_combo.setAccessibleName("Sort chapters")
+        sort_combo.setAccessibleDescription("Order of the chapter list")
         # Was 150 — the QSS adds 28px right padding for the caret, so
         # "Newest first" wrapped/clipped the trailing 't'. 180 fits.
         sort_combo.setMinimumWidth(180)
@@ -593,8 +728,10 @@ class DetailPage(BasePage):
             except (ValueError, TypeError):
                 return 0.0
 
-        sort_desc = (getattr(self, "_chapter_sort", "Newest first") == "Newest first")
-        sorted_nums = sorted(merged.keys(), key=_sort_key, reverse=sort_desc)
+        sort_desc = (self._chapter_sort == "Newest first")
+        visible = [num for num in sorted(merged.keys(), key=_sort_key,
+                                         reverse=sort_desc)
+                   if self._chapter_row_visible(ctx, num)]
 
         # Single card holds all rows separated by 1px borders.
         list_card = QFrame()
@@ -602,213 +739,264 @@ class DetailPage(BasePage):
         list_l = QVBoxLayout(list_card)
         list_l.setContentsMargins(0, 0, 0, 0)
         list_l.setSpacing(0)
+        # Rows added by a batch never get less than their own height: the
+        # card grows first; see the page layout in __init__.
+        list_l.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self._chapter_list_layout = list_l
+        self._first_chapter_row = visible[0] if visible else None
 
-        from ..assets.icons import icon as _ic
-        for i, num in enumerate(sorted_nums):
-            entry = merged[num]
-            is_dl = self.app.app_state.is_chapter_downloaded(title, num)
-            partial_info = partials.get(num) if is_dl else None
-            undelivered_info = undelivered.get(num) if is_dl else None
-            is_external = (not is_dl and self.app.app_state.is_external_chapter(title, num))
-
-            # Filter
-            f = self._chapter_filter
-            if f == "downloaded" and not is_dl:
-                continue
-            if f == "partial" and not partial_info:
-                continue
-            if f == "not_downloaded" and is_dl:
-                continue
-            # Issue #18: Unread = actually not opened in Reader (read_set
-            # is the canonical source). is_external means "marked read
-            # elsewhere" so those are also excluded from Unread.
-            if f == "unread" and (num in read_set or is_external):
-                continue
-
-            ch_frame = QFrame()
-            if i > 0:
-                ch_frame.setStyleSheet(
-                    f"border-top: 1px solid {T.tokens()['surfaces.border']};"
-                )
-            ch_row = QHBoxLayout(ch_frame)
-            ch_row.setContentsMargins(16, 10, 16, 10)
-            ch_row.setSpacing(12)
-
-            # Status icon column (28x28). Four distinct visual states so
-            # the user can scan chapter status at a glance:
-            #   * Read       → filled accent bg + on_accent check
-            #   * Downloaded → accent.soft bg + accent check-circle
-            #   * External   → warn.soft bg + warn external-link
-            #   * Not yet    → bg_2 + t_3 download-tray arrow
-            # Computed up-front so we can also drive the title style + label.
-            is_read = self.app.app_state.is_chapter_read(title, num)
-            status_box = QLabel()
-            status_box.setFixedSize(28, 28)
-            status_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            toks = T.tokens()
-            if partial_info:
-                status_box.setPixmap(
-                    _ic("alert_triangle", toks["status.warn"], 15).pixmap(QSize(15, 15)))
-                status_box.setStyleSheet(
-                    f"background-color: {toks['status.warn_soft']};"
-                    f"border-radius: 6px;"
-                )
-            elif is_read:
-                # Filled bright accent — strongest visual weight.
-                status_box.setPixmap(
-                    _ic("check", toks["accent.on_primary"], 14).pixmap(QSize(14, 14)))
-                status_box.setStyleSheet(
-                    f"background-color: {toks['accent.primary']};"
-                    f"border-radius: 6px;"
-                )
-            elif is_dl:
-                # Subtle accent — file on disk, not opened yet.
-                status_box.setPixmap(
-                    _ic("check_circle", toks["accent.primary"], 16).pixmap(QSize(16, 16)))
-                status_box.setStyleSheet(
-                    f"background-color: {toks['accent.soft_10']};"
-                    f"border-radius: 6px;"
-                )
-            elif is_external:
-                status_box.setPixmap(
-                    _ic("external", toks["status.warn"], 14).pixmap(QSize(14, 14)))
-                status_box.setStyleSheet(
-                    f"background-color: {toks['status.warn_soft']};"
-                    f"border-radius: 6px;"
-                )
-            else:
-                status_box.setPixmap(
-                    _ic("download_tray", toks["text.t_3"], 14).pixmap(QSize(14, 14)))
-                status_box.setStyleSheet(
-                    f"background-color: {toks['surfaces.bg_2']};"
-                    f"border-radius: 6px;"
-                )
-            ch_row.addWidget(status_box, 0, Qt.AlignmentFlag.AlignVCenter)
-
-            # Vol / Ch column (mono, two-line)
-            vol_lbl = QLabel(f"Ch.{num}")
-            vol_lbl.setStyleSheet(
-                f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
-                f"color: {T.tokens()['text.t_3']};"
-            )
-            vol_lbl.setFixedWidth(60)
-            ch_row.addWidget(vol_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-
-            # Title block — issue #18: distinguish "actually read in the
-            # Reader" from "just downloaded". Dim read chapters' title so
-            # they visually fade like read mail. (`is_read` was computed
-            # above next to the status-box selection.)
-            ch_title_text = (entry.get("title") or "").strip()
-            title_l = QVBoxLayout()
-            title_l.setSpacing(2)
-            main_title = QLabel(ch_title_text or f"Chapter {num}")
-            title_color = T.tokens()["text.t_3"] if is_read else T.tokens()["text.t_1"]
-            title_weight = 400 if is_read else 500
-            main_title.setStyleSheet(
-                f"font-size: 12pt; font-weight: {title_weight}; color: {title_color};"
-            )
-            title_l.addWidget(main_title)
-            if partial_info:
-                missing = partial_info.get("failed_pages", [])
-                total = partial_info.get("total_pages", 0)
-                sub_state = (
-                    f"Partial - {len(missing)}/{total} page(s) missing"
-                    if total else "Partial - missing pages"
-                )
-            elif is_dl and removed_groups & set(
-                    saved_groups(title, num).get("group_ids", [])):
-                sub_state = "Unavailable at the group's request"
-            elif is_read:
-                sub_state = "Read"
-            elif is_dl:
-                sub_state = "Downloaded"
-            elif is_external:
-                sub_state = "Read elsewhere"
-            else:
-                sub_state = "Not downloaded"
-            if undelivered_info:
-                # Issue #360: saved, but the Kindle never got it.
-                sub_state = (f"{sub_state} · Not sent to Kindle"
-                             if partial_info else "Not sent to Kindle")
-            sub_lbl = QLabel(sub_state)
-            sub_lbl.setProperty("role", "hint")
-            if undelivered_info and undelivered_info.get("error"):
-                sub_lbl.setToolTip(detail_tooltip(undelivered_info["error"]))
-            title_l.addWidget(sub_lbl)
-            ch_row.addLayout(title_l, 1)
-
-            # Date column (mono, t_3)
-            date_str = entry.get("date") or ""
-            if date_str:
-                date_lbl = QLabel(str(date_str).split("T")[0])
-                date_lbl.setStyleSheet(
-                    f"font-family: 'Geist Mono', monospace; font-size: 10pt;"
-                    f"color: {T.tokens()['text.t_3']};"
-                )
-                date_lbl.setFixedWidth(96)
-                ch_row.addWidget(date_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
-
-            # Action column. Every row repeats the same button labels,
-            # so each one says which chapter it acts on (issue #394).
-            ch_context = f"Chapter {num}"
-            if partial_info or undelivered_info:
-                actions = QHBoxLayout()
-                actions.setSpacing(8)
-                if partial_info:
-                    retry_btn = QPushButton("Retry")
-                    retry_btn.setProperty("size", "sm")
-                    retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                    retry_btn.setAccessibleDescription(ch_context)
-                    retry_btn.clicked.connect(
-                        lambda _, e=entry, b=retry_btn: self._download_chapter(
-                            e, b, retry_partial=True
-                        )
-                    )
-                    actions.addWidget(retry_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-                if undelivered_info:
-                    send_btn = QPushButton("Send")
-                    send_btn.setProperty("size", "sm")
-                    send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                    send_btn.setToolTip("Send this chapter to Kindle again")
-                    send_btn.setAccessibleDescription(
-                        f"Send {ch_context} to Kindle again")
-                    if (title, num) in self._sending:
-                        send_btn.setEnabled(False)
-                        send_btn.setText("Sending…")
-                    send_btn.clicked.connect(
-                        lambda _, c=num, b=send_btn: self._send_pending(c, b)
-                    )
-                    actions.addWidget(send_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-
-                read_btn = QPushButton("Read")
-                read_btn.setProperty("variant", "primary")
-                read_btn.setProperty("size", "sm")
-                read_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                read_btn.setAccessibleDescription(ch_context)
-                read_btn.clicked.connect(lambda _, c=num: self._read_chapter(c))
-                actions.addWidget(read_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-                ch_row.addLayout(actions)
-            elif is_dl:
-                btn = QPushButton("Read")
-                btn.setProperty("variant", "primary")
-                btn.setProperty("size", "sm")
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setAccessibleDescription(ch_context)
-                btn.clicked.connect(lambda _, c=num: self._read_chapter(c))
-                ch_row.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
-            else:
-                btn = QPushButton("Download")
-                btn.setProperty("size", "sm")
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setAccessibleDescription(ch_context)
-                btn.clicked.connect(
-                    lambda _, e=entry, b=btn: self._download_chapter(e, b)
-                )
-                ch_row.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
-
-            list_l.addWidget(ch_frame)
+        # Batches only while the page is at its top. Scrolled down (a
+        # filter or sort changed from further down the page), a list
+        # that is short for a moment would pull the view back up.
+        at_top = self._scroll.verticalScrollBar().value() == 0
+        first = visible[:CHAPTER_ROWS_PER_BATCH] if at_top else visible
+        self._rows_to_build = visible[len(first):]
+        for num in first:
+            self._add_chapter_row(ctx, num)
 
         layout.addWidget(list_card)
+        if self._rows_to_build:
+            self._queue_row_batch(ctx)
+
+    def _queue_row_batch(self, ctx: dict):
+        generation = self._row_build_gen
+        QTimer.singleShot(
+            0, lambda: self._build_row_batch(generation, ctx))
+
+    def _build_row_batch(self, generation: int, ctx: dict):
+        """Add the next batch of rows of a long list, unless the list
+        was rebuilt (or the page left) since this batch was queued."""
+        if generation != self._row_build_gen or not self._rows_to_build:
+            return
+        batch = self._rows_to_build[:CHAPTER_ROWS_PER_BATCH]
+        self._rows_to_build = self._rows_to_build[CHAPTER_ROWS_PER_BATCH:]
+        try:
+            for num in batch:
+                self._add_chapter_row(ctx, num)
+        except RuntimeError:
+            self._rows_to_build = []  # the list was deleted meanwhile
+            return
+        if self._rows_to_build:
+            self._queue_row_batch(ctx)
+
+    def _add_chapter_row(self, ctx: dict, num: str):
+        row = self._make_chapter_row(ctx, num)
+        self._chapter_list_layout.addWidget(row)
+        self._chapter_rows[num] = row
+
+    def _make_chapter_row(self, ctx: dict, num: str) -> QFrame:
+        """One chapter's row: status box, number, title and state, date
+        and its action buttons. Colours and sizes come from style roles
+        (theme/qss_builder.py), not from a style sheet per widget."""
+        from ..assets.icons import icon as _ic
+        title = ctx["title"]
+        entry = ctx["merged"].get(num) or {"number": num}
+        state = self.app.app_state
+        is_dl = state.is_chapter_downloaded(title, num)
+        partial_info = ctx["partials"].get(num) if is_dl else None
+        undelivered_info = ctx["undelivered"].get(num) if is_dl else None
+        is_external = (not is_dl and state.is_external_chapter(title, num))
+        is_read = state.is_chapter_read(title, num)
+
+        ch_frame = QFrame()
+        ch_frame.setProperty("role", "chapter_row")
+        ch_frame.setProperty(
+            "first", "true" if num == self._first_chapter_row else "false")
+        ch_row = QHBoxLayout(ch_frame)
+        ch_row.setContentsMargins(16, 10, 16, 10)
+        ch_row.setSpacing(12)
+
+        # Status icon column (28x28). Distinct visual states so the user
+        # can scan chapter status at a glance:
+        #   * Partial    → warn.soft bg + warn triangle
+        #   * Read       → filled accent bg + on_accent check
+        #   * Downloaded → accent.soft bg + accent check-circle
+        #   * External   → warn.soft bg + warn external-link
+        #   * Not yet    → bg_2 + t_3 download-tray arrow
+        status_box = QLabel()
+        status_box.setFixedSize(28, 28)
+        status_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_box.setProperty("role", "chapter_state")
+        toks = T.tokens()
+        if partial_info:
+            box_state, glyph, colour, size = (
+                "partial", "alert_triangle", toks["status.warn"], 15)
+        elif is_read:
+            # Filled bright accent — strongest visual weight.
+            box_state, glyph, colour, size = (
+                "read", "check", toks["accent.on_primary"], 14)
+        elif is_dl:
+            # Subtle accent — file on disk, not opened yet.
+            box_state, glyph, colour, size = (
+                "downloaded", "check_circle", toks["accent.primary"], 16)
+        elif is_external:
+            box_state, glyph, colour, size = (
+                "external", "external", toks["status.warn"], 14)
+        else:
+            box_state, glyph, colour, size = (
+                "none", "download_tray", toks["text.t_3"], 14)
+        status_box.setProperty("state", box_state)
+        status_box.setPixmap(_ic(glyph, colour, size).pixmap(QSize(size, size)))
+        ch_row.addWidget(status_box, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Vol / Ch column (mono)
+        vol_lbl = QLabel(f"Ch.{num}")
+        vol_lbl.setProperty("role", "mono_meta")
+        vol_lbl.setFixedWidth(64)
+        ch_row.addWidget(vol_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Title block — issue #18: distinguish "actually read in the
+        # Reader" from "just downloaded". Read chapters' titles are
+        # dimmed so they visually fade like read mail.
+        ch_title_text = (entry.get("title") or "").strip()
+        title_l = QVBoxLayout()
+        title_l.setSpacing(2)
+        # One line, shortened with "…" when long (full title in the
+        # tooltip and the label text): a long title from a source would
+        # otherwise set the width of the whole list. Not wrapped, so a
+        # row's height never depends on its width: with wrapped titles
+        # rows were seen squashed after the list was rebuilt (sorted)
+        # without the window being resized.
+        main_title = ElideLabel(ch_title_text or f"Chapter {num}")
+        # Chapter titles come from source sites; show them literally.
+        main_title.setTextFormat(Qt.TextFormat.PlainText)
+        main_title.setProperty("role", "row_title")
+        main_title.setProperty("read", "true" if is_read else "false")
+        title_l.addWidget(main_title)
+        if partial_info:
+            missing = partial_info.get("failed_pages", [])
+            total = partial_info.get("total_pages", 0)
+            sub_state = (
+                f"Partial - {len(missing)}/{total} page(s) missing"
+                if total else "Partial - missing pages"
+            )
+        elif is_dl and ctx["removed_groups"] & set(
+                state.get_chapter_groups(title, num).get("group_ids", [])):
+            sub_state = "Unavailable at the group's request"
+        elif is_read:
+            sub_state = "Read"
+        elif is_dl:
+            sub_state = "Downloaded"
+        elif is_external:
+            sub_state = "Read elsewhere"
+        else:
+            sub_state = "Not downloaded"
+        if undelivered_info:
+            # Issue #360: saved, but the Kindle never got it.
+            sub_state = (f"{sub_state} · Not sent to Kindle"
+                         if partial_info else "Not sent to Kindle")
+        sub_lbl = QLabel(sub_state)
+        sub_lbl.setProperty("role", "hint")
+        if undelivered_info and undelivered_info.get("error"):
+            sub_lbl.setToolTip(detail_tooltip(undelivered_info["error"]))
+        title_l.addWidget(sub_lbl)
+        ch_row.addLayout(title_l, 1)
+
+        # Date column (mono, t_3)
+        date_str = entry.get("date") or ""
+        if date_str:
+            date_lbl = QLabel(str(date_str).split("T")[0])
+            date_lbl.setProperty("role", "mono_meta")
+            date_lbl.setFixedWidth(100)
+            ch_row.addWidget(date_lbl, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # Action column. Every row repeats the same button labels,
+        # so each one says which chapter it acts on (issue #394).
+        ch_context = f"Chapter {num}"
+        if partial_info or undelivered_info:
+            actions = QHBoxLayout()
+            actions.setSpacing(8)
+            if partial_info:
+                retry_btn = QPushButton("Retry")
+                retry_btn.setProperty("size", "sm")
+                retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                retry_btn.setAccessibleDescription(ch_context)
+                retry_btn.clicked.connect(
+                    lambda _, e=entry, b=retry_btn: self._download_chapter(
+                        e, b, retry_partial=True
+                    )
+                )
+                actions.addWidget(retry_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+            if undelivered_info:
+                send_btn = QPushButton("Send")
+                send_btn.setProperty("size", "sm")
+                send_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                send_btn.setToolTip("Send this chapter to Kindle again")
+                send_btn.setAccessibleDescription(
+                    f"Send {ch_context} to Kindle again")
+                if (title, num) in self._sending:
+                    send_btn.setEnabled(False)
+                    send_btn.setText("Sending…")
+                send_btn.clicked.connect(
+                    lambda _, c=num, b=send_btn: self._send_pending(c, b)
+                )
+                actions.addWidget(send_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+            read_btn = QPushButton("Read")
+            read_btn.setProperty("variant", "primary")
+            read_btn.setProperty("size", "sm")
+            read_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            read_btn.setAccessibleDescription(ch_context)
+            read_btn.clicked.connect(lambda _, c=num: self._read_chapter(c))
+            actions.addWidget(read_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+            ch_row.addLayout(actions)
+        elif is_dl:
+            btn = QPushButton("Read")
+            btn.setProperty("variant", "primary")
+            btn.setProperty("size", "sm")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setAccessibleDescription(ch_context)
+            btn.clicked.connect(lambda _, c=num: self._read_chapter(c))
+            ch_row.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
+        else:
+            btn = QPushButton("Download")
+            btn.setProperty("size", "sm")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setAccessibleDescription(ch_context)
+            btn.clicked.connect(
+                lambda _, e=entry, b=btn: self._download_chapter(e, b)
+            )
+            ch_row.addWidget(btn, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        return ch_frame
+
+    def _update_chapter_row(self, num: str) -> bool:
+        """Replace one chapter's row after its download finished, and
+        bring the counts up to date, without rebuilding the list.
+
+        Returns False when that isn't possible (a filter is on, so the
+        row may have to appear or disappear; the chapter has no row yet),
+        and the caller rebuilds instead."""
+        if self._chapter_filter != "all" or self._chapter_list_layout is None:
+            return False
+        ctx = self._chapter_context()
+        if num not in ctx["merged"]:
+            return False
+        old = self._chapter_rows.get(num)
+        if old is None:
+            if num not in self._rows_to_build:
+                return False
+            # Still waiting in a batch: it is built from current state.
+            self._show_chapter_counts(ctx["counts"])
+            return True
+        try:
+            focused = QApplication.focusWidget()
+            had_focus = focused is not None and old.isAncestorOf(focused)
+            new = self._make_chapter_row(ctx, num)
+            self._chapter_list_layout.replaceWidget(old, new)
+            old.hide()
+            old.deleteLater()
+            self._chapter_rows[num] = new
+            if had_focus:
+                # The button that had focus is gone with the old row;
+                # its replacement (Read, where Download was) takes it.
+                button = new.findChild(QPushButton)
+                if button is not None:
+                    button.setFocus(Qt.FocusReason.OtherFocusReason)
+        except RuntimeError:
+            return False  # the list was deleted by a rebuild
+        self._show_chapter_counts(ctx["counts"])
+        return True
 
     def _set_chapter_filter(self, key: str):
         self._chapter_filter = key
@@ -1313,8 +1501,49 @@ class DetailPage(BasePage):
         # Drop the pending button reference (the row will be rebuilt anyway)
         self._pending_downloads.pop(data.get("task_id", ""), None)
         # Only refresh if this page is currently visible to avoid wasted work
-        if self.isVisible():
+        if not self.isVisible():
+            return
+        self._refresh_stats()
+        # Only that chapter's row changes. Rebuilding the whole list for
+        # every finished chapter stalled the window through a batch
+        # download of a long series, and lost the scroll position.
+        chapter = data.get("chapter")
+        if chapter is not None and self._update_chapter_row(str(chapter)):
+            return
+        self._schedule_chapter_refresh()
+
+    def _schedule_chapter_refresh(self):
+        """One rebuild shortly, for however many downloads finish until
+        then."""
+        if self._chapter_refresh_pending:
+            return
+        self._chapter_refresh_pending = True
+        generation = self._row_build_gen
+        QTimer.singleShot(
+            200, lambda: self._run_chapter_refresh(generation))
+
+    def _run_chapter_refresh(self, generation: int):
+        if not self._chapter_refresh_pending:
+            return
+        self._chapter_refresh_pending = False
+        # Rebuilt for another reason in the meantime: already current.
+        if generation == self._row_build_gen and self.isVisible():
             self._refresh_chapter_list()
+
+    def _on_cover_loaded(self, data):
+        """Show the hero cover once its download finishes."""
+        data = data or {}
+        if (not self._manga or data.get("error") or not self.isVisible()
+                or data.get("url") != self._manga.get("cover_url")):
+            return
+        label = getattr(self, "_cover_label", None)
+        if label is None:
+            return
+        try:
+            label.setPixmap(self.app.cover_cache.get_cover(
+                data["url"], size=_COVER_SIZE))
+        except RuntimeError:
+            self._cover_label = None  # deleted by a rebuild
 
     @staticmethod
     def _stats_text(state_data) -> str:

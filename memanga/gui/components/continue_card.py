@@ -44,12 +44,10 @@ class ContinueCard(QFrame):
         # ── Mini cover (48×68) ──
         cover = QLabel()
         cover.setFixedSize(48, 68)
-        if cover_pixmap and not cover_pixmap.isNull():
-            cover.setPixmap(cover_pixmap.scaled(
-                48, 68,
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                Qt.TransformationMode.SmoothTransformation,
-            ))
+        self._cover = cover
+        # The cover cache hands out the pixmap at this size (and at the
+        # screen's pixel density); it is shown as it is.
+        self.update_cover(cover_pixmap)
         cover.setStyleSheet(
             f"background-color: {T.tokens()['surfaces.bg_2']};"
             f"border-radius: 4px;"
@@ -63,6 +61,8 @@ class ContinueCard(QFrame):
         info.setSpacing(4)
 
         title = QLabel(manga.get("title", "Unknown"))
+        # Titles come from source sites; show them literally.
+        title.setTextFormat(Qt.TextFormat.PlainText)
         title.setStyleSheet(
             f"color: {T.tokens()['text.t_1']}; font-size: 12pt; font-weight: 600;"
         )
@@ -99,6 +99,11 @@ class ContinueCard(QFrame):
         self._anim = QPropertyAnimation(self, b"_offset", self)
         self._anim.setDuration(150)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def update_cover(self, cover_pixmap: QPixmap):
+        """Show the cover, also one that finished loading later."""
+        if cover_pixmap and not cover_pixmap.isNull():
+            self._cover.setPixmap(cover_pixmap)
 
     # ── Hover translate ──
     def get_offset(self): return self._hover_offset

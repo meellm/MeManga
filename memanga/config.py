@@ -335,6 +335,10 @@ class Config:
                 # Chapter-count chips on Search (issue #405): one
                 # chapter-list fetch per result, retried when it fails.
                 "search_chapter_counts": True,
+                # Size limit of the cover image cache on disk, in MB
+                # (issue #404). Past it, the covers used longest ago are
+                # removed; they are fetched again when needed.
+                "cover_cache_max_mb": 200,
             },
             # Built-in reader behaviour (issue #104). Kept separate from
             # delivery.delete_after_send, which is tied to email delivery —
@@ -676,6 +680,8 @@ CONFIG_KEYS = {
         "kind": "list", "items": "host_port", "read_only": "memanga config edit"},
     "gui.mangadex_cover_fallback": {"kind": "bool"},
     "gui.search_chapter_counts": {"kind": "bool"},
+    # Bounds match MIN/MAX_DISK_LIMIT_MB in gui/cache.py.
+    "gui.cover_cache_max_mb": {"kind": "int", "min": 10, "max": 10000},
     "reader.remove_after_read": {"kind": "bool"},
     "mangadex.data_saver": {"kind": "bool"},
     "mangadex.removed_group_ids": {

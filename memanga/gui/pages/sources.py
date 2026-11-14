@@ -20,6 +20,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QKeySequence
 from .base import BasePage
 from .. import theme as T
+from ..theme.tokens import TYPOGRAPHY
 
 
 class SourcesPage(BasePage):
@@ -659,7 +660,8 @@ class SourcesPage(BasePage):
                     "error": T.tokens()["status.danger"],
                 }.get(hh.get("status", "unknown"), T.tokens()["text.t_4"])
                 dot = QLabel("●")
-                dot.setStyleSheet(f"color: {dot_color}; font-size: 8pt;")
+                dot.setStyleSheet(
+                    f"color: {dot_color}; font-size: {TYPOGRAPHY['size_min']}pt;")
                 row_layout.addWidget(dot)
 
                 name = QLabel(source)
@@ -674,13 +676,13 @@ class SourcesPage(BasePage):
                     f"QLabel {{"
                     f"  color: {T.tokens()['text.t_3']};"
                     f"  font-family: 'Geist Mono', monospace;"
-                    f"  font-size: 8pt; font-weight: 600;"
+                    f"  font-size: {TYPOGRAPHY['size_min']}pt; font-weight: 600;"
                     f"  letter-spacing: 0.5px;"
-                    f"  padding: 0px 4px;"
+                    f"  padding: 0px 2px;"
                     f"}}"
                 )
                 lang_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                lang_chip.setFixedWidth(28)
+                lang_chip.setFixedWidth(32)
                 row_layout.addWidget(lang_chip)
 
                 # Latency (if pinged) — fixed-width mono so columns align

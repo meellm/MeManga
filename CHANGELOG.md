@@ -210,8 +210,49 @@ All notable changes are recorded here. Format loosely follows
   a `scheduler` service for it (`docker compose up -d scheduler`) with
   `restart: unless-stopped`, `init: true` and a one-minute stop grace
   period; the `memanga` service for one-off commands is unchanged.
+- #344 The desktop app's first-run browser download can be skipped:
+  the prompt has **Download now**, **Skip for now** and **Quit**, and
+  says what skipping means. After a skip the app opens right away and
+  does not ask again; sources that don't need a browser work as usual,
+  and **Settings → Advanced → Browser Components** shows whether the
+  components are installed and installs them later. A failed install
+  offers **Try again** or the same skip instead of only quitting.
+- #370 (desktop) A new library is asked once where downloads should go,
+  with the default folder filled in and checked before it is accepted.
+  The folder is also shown on the empty Library page and in
+  **Settings → About**, with an **Open folder** button; it stays out of
+  the copied diagnostics.
+- #404 The cover cache on disk has a size limit, 200 MB by default
+  (**Settings → Advanced → Cover Cache**, or `gui.cover_cache_max_mb`,
+  10 to 10000). Past it, the covers used longest ago are removed; they
+  are downloaded again when needed. The size shown in Settings is now
+  given against the limit.
+- Library: a **Dropped** filter chip, and every status (Reading, Plan to
+  read, On hold, Completed, Dropped) in the right-click menu.
 
 ### Changed
+- #395 Desktop text meets WCAG AA contrast (4.5:1) in both themes: the
+  muted text colour of both themes and the light theme's accent,
+  warning, danger and lilac colours are darker or lighter as needed,
+  and nothing is drawn below 9pt (the cover status pill was 7.5pt, the
+  NEW badge 8.5pt, the source and search chips 8pt). The light theme's
+  green is darker as a result.
+- Library: **Continue Reading** lists the manga last opened in the
+  built-in reader, shows read progress out of the known chapters, and
+  opens the reader at that chapter. It used to list any manga with
+  downloads as "last read", showed 50% when the total was unknown, and
+  opened the Detail page.
+- Library: statuses read the same everywhere ("On hold", "Plan to
+  read"), the status sort includes Plan to read, and the "N of M shown"
+  count moved beside **ALL MANGA**.
+- A manga without a cover shows its own title on its placeholder, in a
+  colour that stays the same between launches.
+- Covers are drawn at the screen's pixel density, are downloaded on
+  their own connections instead of waiting behind chapter downloads,
+  and appear on their cards without the Library being rebuilt.
+- Detail: when a chapter finishes downloading only its row changes, and
+  a long chapter list is built in steps, so the window stays responsive
+  during batch downloads and when opening a long series.
 - #405 Chapter counts in search results can be turned off: **Show
   chapter counts in search results** in **Settings → Advanced → Network
   & Privacy** (`gui.search_chapter_counts` for `memanga config set`,
@@ -461,6 +502,37 @@ All notable changes are recorded here. Format loosely follows
   `requires-python` error.
 
 ### Fixed
+- Toasts and the list view's NEW badge had white text on the theme's
+  accent and status colours (1.9:1 in the dark theme); they use the
+  matching text colour now. Toasts also follow a theme switch, including
+  one already on screen, no longer cover each other, wrap long messages
+  and stay up longer for them.
+- At the default window size the Library filter box shrank to a few
+  letters and the status chips were cut off; when one row is too narrow
+  the chips now move to a row of their own, and Tab follows the rows.
+  In Settings, the Light theme card was cut off at the right edge: the
+  theme cards stack in a narrow pane, long hints wrap, and a tab that is
+  still too wide for a small window scrolls sideways instead of hiding
+  its right edge.
+- Detail: at the default window size the Reader layout control, the
+  Download all button and the chapter counts were cut off at the right
+  edge. The controls, the action buttons, the Send to Kindle line and
+  the chapter filter chips now wrap onto another line when they do not
+  fit, and a long chapter title or source address is shortened with "…"
+  (the full text is in its tooltip).
+- Settings: the tab icons, the theme card's check mark and the
+  concurrent-downloads number kept the previous theme's colours after a
+  theme switch on that page.
+- The Library said "No manga tracked yet" when a filter or status chip
+  simply matched nothing.
+- Switching theme no longer calls into Library cards, search rows and
+  drop-downs that were already gone; they were kept for the whole
+  session and grew with every refresh.
+- Detail: the cover appears when its download finishes instead of on
+  the next visit, an author name from a source can no longer add markup
+  to the page, and chapter rows follow a theme switch.
+- The first-run install dialog's status line was unreadable in the
+  light theme.
 - On Windows, `memanga` run without a console (a scheduled task, or
   stdin from `NUL`) no longer opens the interactive menu and fails with
   an `EOFError` traceback; it exits with an error, as on Linux and

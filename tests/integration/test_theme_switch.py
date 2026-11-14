@@ -8,11 +8,15 @@ pytestmark = pytest.mark.integration
 
 def test_palette_flips_on_theme_switch(qapp, theme):
     from PySide6.QtGui import QPalette
-    theme.set_theme("dark", qapp)
-    dark_bg = qapp.palette().color(QPalette.ColorRole.Window).name()
-    theme.set_theme("light", qapp)
-    light_bg = qapp.palette().color(QPalette.ColorRole.Window).name()
-    assert dark_bg.lower() != light_bg.lower()
+    from memanga.gui.theme.qss_builder import build_stylesheet
+
+    # Exercise both real transitions and repeated application of the
+    # active theme on the same application/style instance.
+    for name in ("dark", "dark", "light", "light", "dark", "light", "dark"):
+        theme.set_theme(name, qapp)
+        bg = qapp.palette().color(QPalette.ColorRole.Window).name().lower()
+        assert bg == theme.tokens()["surfaces.bg_0"].lower()
+        assert qapp.styleSheet() == build_stylesheet(theme.THEMES[name])
 
 
 def test_subscribers_called_in_order(qapp, theme):
