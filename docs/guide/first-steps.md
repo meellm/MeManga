@@ -118,6 +118,7 @@ Your settings, library and downloads are in the folders listed under
 
 - [Library and downloads](../desktop/library), [Reader](../desktop/reader)
   and [Settings](../desktop/settings) describe the desktop app.
+- [Use the command line](./cli) goes from search to downloaded chapters.
 - [Send chapters to a Kindle](./kindle) sets up email delivery.
 - More pages are on the way. Until then, the [docs overview](./) lists where
   to read about everything else.

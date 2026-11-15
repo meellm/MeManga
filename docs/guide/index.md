@@ -18,6 +18,8 @@ import { release } from '../.vitepress/release'
 - [First steps](./first-steps): start MeManga and check that it works.
 - [Library and downloads](../desktop/library), [Reader](../desktop/reader)
   and [Settings](../desktop/settings): the desktop app in detail.
+- [Use the command line](./cli): search, add, check and download from a
+  terminal.
 - [Send chapters to a Kindle](./kindle): email delivery from setup to
   troubleshooting.
 
@@ -80,6 +82,6 @@ These are planned and not available yet:
 
 - **Installing from a package index** with pip, pipx or uv. Tracked in
   [issue 218](https://github.com/meellm/MeManga/issues/218).
-- **The rest of this site:** the command line, Docker, configuration and
-  troubleshooting pages. Tracked in
+- **The rest of this site:** a full command reference, Docker,
+  configuration and troubleshooting pages. Tracked in
   [issue 423](https://github.com/meellm/MeManga/issues/423).

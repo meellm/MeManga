@@ -44,6 +44,10 @@ export default defineConfig({
         ]
       },
       {
+        text: 'Command line',
+        items: [{ text: 'Use the command line', link: '/guide/cli' }]
+      },
+      {
         text: 'Delivery',
         items: [{ text: 'Send to a Kindle', link: '/guide/kindle' }]
       }
