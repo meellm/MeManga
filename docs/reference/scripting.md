@@ -12,27 +12,35 @@ and what the JSON output contains.
 For the commands themselves see [Use the command line](../guide/cli) and the
 [command reference](./cli).
 
-::: warning What this page is, and is not
+::: info What this page covers
 - It describes the **development version** as it behaves now.
   {{ release.tag }} is older: of the JSON output described here it has only
   `search --json`, and the rules on this page were not checked against it.
-- MeManga has **no written compatibility promise** yet. Nothing here is a
-  guarantee that a later version behaves the same way. A written contract,
-  including how long old spellings stay, is planned:
-  [issue 358](https://github.com/meellm/MeManga/issues/358).
+- Apart from the [deprecation policy](#deprecation-policy), the page
+  describes behaviour; it is not a promise that every detail stays the
+  same.
 - Check what your version does with `memanga COMMAND --help`.
 :::
 
 ## Output
 
-- Results go to standard output. Warnings, errors and progress go to
-  standard error.
+- Results go to standard output. Error messages go to standard error, and
+  so do the diagnostics of a run, such as a source that could not be
+  reached.
+- This split is not complete. Some commands also print warnings, hints or
+  progress lines on standard output as part of their normal text: for
+  example `cron status`, `doctor` and `setup`. Do not rely on plain-text
+  standard output holding results only.
+- With `--json`, a command prints the JSON on standard output and nothing
+  else there. This is the reliable way to read results in a program: see
+  [JSON output](#json-output).
 - When the output is not a terminal, for example in a pipe or a file,
   MeManga prints plain text without colour, emoji, borders or line
   wrapping. `memanga --plain COMMAND` asks for the same in a terminal.
-- `memanga -q COMMAND` hides warnings and progress. Errors still show.
-- The wording of plain-text output is meant for people. To read results in
-  a program, use [JSON output](#json-output) where a command offers it.
+- `memanga -q COMMAND` hides the warning and progress diagnostics on
+  standard error; errors still show. It does not remove lines that a
+  command prints as part of its normal text.
+- The wording of plain-text output is meant for people and can change.
 
 ## How a series is picked
 
@@ -108,15 +116,19 @@ question or stops with exit code 1 and an `error:` line on standard error.
   and `-u` instead.
 - **`remove`** asks to confirm. Without a terminal it exits 1 and removes
   nothing. `--yes` skips the question.
-- **`check`** asks for each new chapter. Without a terminal it downloads
-  nothing and exits 1 if chapters were waiting. Use `--download`, or
-  `--dry-run` to only list them.
-- **`search`** asks which result to add. Without a terminal it only prints
-  the results. `--add N` adds one without asking.
+- **`check`** asks for each new chapter. Without a terminal, and without
+  `--download`, it downloads nothing and exits 1 if chapters were waiting.
+  `--download` downloads without asking, with or without a terminal;
+  `--dry-run` only lists.
+- **`search`** asks which result to add. Without a terminal, and without
+  `--add`, it only prints the results. `--add N` adds that result without
+  asking, with or without a terminal.
 - **`import --replace`** asks to confirm. Without a terminal it exits 1 and
   changes nothing. `--yes` skips the question.
-- **`send`** with more than one chapter asks to confirm. Without a terminal
-  it exits 1 and sends nothing. Use `--yes`, or `--dry-run` to preview.
+- **`send`** asks to confirm when more than one of the named chapters can
+  be sent. In that case, without a terminal, it exits 1 and sends nothing.
+  `--yes` sends without asking, and `--dry-run` only previews; neither
+  asks.
 - **`config`** with no action and no option starts a series of questions.
   Without a terminal it exits 1. Use `config show`, `config get` and
   `config set` instead.
@@ -124,9 +136,10 @@ question or stops with exit code 1 and an `error:` line on standard error.
   `config set` instead.
 - **`cron install`** asks for the time. Without a terminal it exits 1.
   `--time HH:MM` skips the question.
-- **`setup`** asks before it downloads browsers. Without a terminal it
-  downloads nothing. `--install-browsers` and `--no-install-browsers`
-  decide without a question.
+- **`setup`** asks before it downloads browsers. Without a terminal, and
+  without an option, it downloads nothing. `--install-browsers` downloads
+  missing browsers without asking, also without a terminal;
+  `--no-install-browsers` never downloads.
 
 Things worth knowing:
 
@@ -159,14 +172,18 @@ else on that stream:
 - `memanga config show --json`
 - `memanga search "TITLE" --json`
 
-The first five carry a `schema_version` key. `config show` and `search` do
-not.
+Six of the seven outputs contain a key named `schema_version`. It does not
+mean the same thing in all of them:
 
-`schema_version` is `1` today. A note in the program's source says the
-number is meant to go up when a key is renamed or removed or changes its
-type, and that new keys may appear without a change of number. That is the
-developers' stated intent, not a promise. Read the keys you need and ignore
-the ones you do not know.
+- In `list`, `status`, `failed`, `sources` and `doctor` it is the version
+  of that JSON report. It is `1` today. A note in the program's source says
+  the number is meant to go up when a key is renamed or removed or changes
+  its type, and that new keys may appear without a change of number.
+- In `config show` it is a setting: the version of the settings file
+  itself, also `1` today. It says nothing about the shape of a report.
+- `search` has no `schema_version`.
+
+Read the keys you need and ignore the ones you do not know.
 
 `failed --json` only lists. It cannot be combined with `retry` or `clear`.
 
@@ -253,8 +270,10 @@ A `sources` list with one entry per source. Each entry has `domain`,
 
 ### `config show --json`
 
-The settings file as it is, with the password and the email addresses
-masked. It has no `schema_version`; its keys are the settings themselves.
+The settings as MeManga has loaded them, with the password and the email
+addresses masked. The keys are the settings themselves. One of them is
+`schema_version`, the version of the settings file; it is not a version of
+this output.
 
 ### `search --json`
 
@@ -271,7 +290,7 @@ This command uses the network.
 ## Other spellings
 
 These spellings are accepted today and do the same as the form on the
-right. The program states no end date for them, except for `set`.
+right. None of them is deprecated.
 
 | Also accepted | Same as |
 |---|---|
@@ -284,10 +303,43 @@ right. The program states no end date for them, except for `set`.
 | `failed --retry`, `failed --clear` | `failed retry`, `failed clear` |
 | `add --yes`, `-y` | `add --force` |
 
-**Deprecated: `memanga set`.** It still changes the status of a series, and
-each time it prints a warning on standard error that it will be removed in
-the next release. Use `memanga edit "TITLE" --status STATUS` instead. This
-is the only command that announces its removal today.
+## Deprecation policy
+
+When a command or an option is going to be removed, MeManga first marks it
+as deprecated: using it prints a warning that names the replacement.
+
+**A deprecated command or option is kept for at least one tagged release
+after the warning, except for urgent security fixes.**
+
+In practice:
+
+- The warning comes first, and at least one tagged release carries it
+  before the command or option is removed. Urgent security fixes are the
+  only exception.
+- Read the release notes before you update a setup that runs unattended,
+  and watch standard error for lines that start with `warning:`.
+- The policy is about removing commands and options. It does not promise
+  that output wording, JSON keys or exit codes never change.
+
+### Deprecated today: `memanga set`
+
+`memanga set "TITLE" STATUS` still changes the status of a series. In the
+development version it prints a warning on standard error each time and
+names the replacement:
+
+```sh
+memanga edit "TITLE" --status STATUS
+```
+
+Where this stands:
+
+- {{ release.tag }} has `set` without a warning, and has no `edit` command.
+  The warning has not been part of a tagged release yet.
+- The warning text says `set` will be removed "in the next release". Under
+  the policy above, `set` stays at least in the first tagged release that
+  prints the warning.
+
+No other command or option is deprecated today.
 
 ## Examples
 
@@ -319,9 +371,3 @@ Use another settings folder for one command. Replace `DIR`:
 ```sh
 memanga --config-dir "DIR" status --json
 ```
-
-## Planned
-
-A written contract for scripts, with a policy for how long old spellings
-are kept, does not exist yet. It is tracked in
-[issue 358](https://github.com/meellm/MeManga/issues/358).
