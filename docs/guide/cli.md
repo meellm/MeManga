@@ -77,11 +77,23 @@ If you already have the address of the series page on a supported source:
 memanga add -t "TITLE" -u "SERIES-URL"
 ```
 
-`memanga add -i` asks for the same things one by one.
+Adding saves the series in your library. It downloads no chapters. For a
+supported source, MeManga may contact the source once to look up the cover
+image.
 
-Adding only saves the series in your library. It downloads nothing. If the
-source does not look supported, or a similar title is already in your
-library, MeManga asks before it adds the series.
+Written this way, the command asks no questions. MeManga refuses to add the
+series, and says why, in three cases:
+
+- The source does not look supported. Check the address, and the list from
+  `memanga sources`.
+- A similar title is already in your library. Check `memanga list`.
+- The same title is already in your library.
+
+If you have checked and still want the series in the first two cases, repeat
+the command with `--force`. The same title is never added twice.
+
+`memanga add -i` asks for the title and the address one by one. In the
+first two cases it asks **Add anyway?** where the command above refuses.
 
 A second source can stand in when the first one is late with a chapter:
 

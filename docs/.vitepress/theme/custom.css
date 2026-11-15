@@ -109,3 +109,16 @@
   background-color: var(--vp-c-brand-soft);
   color: var(--vp-c-text-1);
 }
+
+/*
+ * When only the part after # in the address changes, the browser jumps to
+ * the heading itself and would put it under the sticky bar. These margins
+ * place the heading where the theme's own link handling places it.
+ */
+.vp-doc :is(h1, h3, h4, h5, h6) {
+  scroll-margin-top: 134px;
+}
+
+.vp-doc h2 {
+  scroll-margin-top: 110px;
+}
