@@ -6,7 +6,8 @@ import { release } from '../.vitepress/release'
 
 Every `memanga` command, with its aliases, arguments and options. To learn
 the commands in the order you would use them, start with
-[Use the command line](../guide/cli).
+[Use the command line](../guide/cli). For exit codes, JSON output and
+running without a terminal, see [Use MeManga in scripts](./scripting).
 
 ::: info How to read this page
 - This reference is produced from the program's own command definitions in

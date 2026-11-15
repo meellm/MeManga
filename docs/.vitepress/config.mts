@@ -53,7 +53,8 @@ export default defineConfig({
         text: 'Command line',
         items: [
           { text: 'Use the command line', link: '/guide/cli' },
-          { text: 'Command reference', link: '/reference/cli' }
+          { text: 'Command reference', link: '/reference/cli' },
+          { text: 'Use MeManga in scripts', link: '/reference/scripting' }
         ]
       },
       {

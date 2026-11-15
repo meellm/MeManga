@@ -20,7 +20,8 @@ import { release } from '../.vitepress/release'
   and [Settings](../desktop/settings): the desktop app in detail.
 - [Use the command line](./cli): search, add, check and download from a
   terminal. The [command reference](../reference/cli) lists every command
-  and option.
+  and option, and [Use MeManga in scripts](../reference/scripting) covers
+  exit codes and JSON output.
 - [Send chapters to a Kindle](./kindle): email delivery from setup to
   troubleshooting.
 
