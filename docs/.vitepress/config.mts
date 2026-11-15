@@ -58,6 +58,10 @@ export default defineConfig({
         ]
       },
       {
+        text: 'Servers',
+        items: [{ text: 'Run MeManga in Docker', link: '/guide/docker' }]
+      },
+      {
         text: 'Delivery',
         items: [{ text: 'Send to a Kindle', link: '/guide/kindle' }]
       }

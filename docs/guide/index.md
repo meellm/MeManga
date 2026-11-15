@@ -22,6 +22,8 @@ import { release } from '../.vitepress/release'
   terminal. The [command reference](../reference/cli) lists every command
   and option, and [Use MeManga in scripts](../reference/scripting) covers
   exit codes and JSON output.
+- [Run MeManga in Docker](./docker): the published image, your data and
+  scheduled checks.
 - [Send chapters to a Kindle](./kindle): email delivery from setup to
   troubleshooting.
 
@@ -84,6 +86,6 @@ These are planned and not available yet:
 
 - **Installing from a package index** with pip, pipx or uv. Tracked in
   [issue 218](https://github.com/meellm/MeManga/issues/218).
-- **The rest of this site:** Docker, configuration and troubleshooting
-  pages. Tracked in
+- **The rest of this site:** configuration and troubleshooting pages.
+  Tracked in
   [issue 423](https://github.com/meellm/MeManga/issues/423).

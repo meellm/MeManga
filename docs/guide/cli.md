@@ -275,6 +275,8 @@ exception: it is being replaced by `edit`.
 - The [command reference](../reference/cli) lists every command and option.
 - [Use MeManga in scripts](../reference/scripting) covers exit codes, JSON
   output and running without a terminal.
-- Pages about running checks on a schedule, Docker and all settings are
-  planned as part of this site
+- [Run MeManga in Docker](./docker) covers containers and scheduled checks
+  there.
+- Pages about running checks on a schedule outside Docker and about all
+  settings are planned as part of this site
   ([issue 423](https://github.com/meellm/MeManga/issues/423)).

@@ -10,7 +10,7 @@ There are three ways to run MeManga. Pick the one that fits you.
 |---|---|---|
 | The desktop app | [A release download](#desktop-app) | Available |
 | The command line, for example on a server | [An install from source](#command-line-from-source) | Available |
-| A container | [Docker](#docker) | Available, page still to come |
+| A container | [Docker](#docker) | Available |
 | `pip`, `pipx` or `uv` from a package index | [Not available yet](#package-installs) | Coming soon |
 
 ## Desktop app
@@ -160,16 +160,9 @@ this page.
 
 ## Docker
 
-The repository has a
-[Dockerfile](https://github.com/meellm/MeManga/blob/main/Dockerfile) and a
-[Compose file](https://github.com/meellm/MeManga/blob/main/compose.yaml) for
-running the command line in a container. The image does not include the
-desktop app.
-
-A Docker page for this site is still to come. Until then, the
-[existing guide on GitHub](https://github.com/meellm/MeManga/blob/main/docs/Guide.md)
-has a Docker section. That guide is older than this site and may be out of
-date in places.
+A published image runs the command line in a container. It does not
+include the desktop app. [Run MeManga in Docker](./docker) explains the
+image, where your data is kept, and how to check on a schedule.
 
 ## Package installs
 
