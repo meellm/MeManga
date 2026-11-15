@@ -8,7 +8,8 @@ This page follows one ordinary journey with the `memanga` command: find a
 series, add it, check for new chapters, download them, and deal with the
 chapters that did not work.
 
-It is not a list of every command and option. Each command explains itself
+It is not a list of every command and option: that is the
+[command reference](../reference/cli). Each command also explains itself
 with `--help`, for example `memanga check --help`.
 
 ::: info Which version this describes
@@ -269,11 +270,9 @@ commands and options.
 These older spellings still work in the development version. `set` is the
 exception: it is being replaced by `edit`.
 
-## What is still to come
+## Where to go next
 
-- A complete reference of every command and option is planned. Until then,
-  `memanga --help` and `memanga COMMAND --help` are complete and current.
-  Tracked in [issue 305](https://github.com/meellm/MeManga/issues/305).
+- The [command reference](../reference/cli) lists every command and option.
 - Pages about running checks on a schedule, Docker and all settings are
   planned as part of this site
   ([issue 423](https://github.com/meellm/MeManga/issues/423)).

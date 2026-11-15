@@ -15,7 +15,13 @@ export default defineConfig({
   // These documents are still read on GitHub and linked from the app and the
   // package metadata. They stay where they are until their content has been
   // moved into the site.
-  srcExclude: ['Guide.md', 'SUPPORTED_SOURCES.md', 'ACCESSIBILITY.md'],
+  srcExclude: [
+    'Guide.md',
+    'SUPPORTED_SOURCES.md',
+    'ACCESSIBILITY.md',
+    // Generated; shown as part of reference/cli.md.
+    'reference/cli-commands.md'
+  ],
 
   themeConfig: {
     nav: [
@@ -45,7 +51,10 @@ export default defineConfig({
       },
       {
         text: 'Command line',
-        items: [{ text: 'Use the command line', link: '/guide/cli' }]
+        items: [
+          { text: 'Use the command line', link: '/guide/cli' },
+          { text: 'Command reference', link: '/reference/cli' }
+        ]
       },
       {
         text: 'Delivery',
