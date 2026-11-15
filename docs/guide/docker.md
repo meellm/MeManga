@@ -47,8 +47,8 @@ example a 64-bit Raspberry Pi). There is no image for 32-bit ARM.
 
 **Size:** the download for `0.4.4` is about 750 MB compressed on both
 systems, as Docker Hub reports it for the image pushed on 3 October 2026.
-Unpacked on disk it is larger. To see the size on your machine after the
-pull:
+Unpacked on disk it is larger: about 1.9 GB was measured for the `arm64`
+image in November 2026. To see the size on your machine after the pull:
 
 ```sh
 docker image ls meellm/memanga
@@ -71,8 +71,8 @@ your downloaded chapters live in two folders that you must keep outside it:
 
 ### Named volumes
 
-The simplest way. Docker creates the volumes on first use and keeps them
-until you remove them:
+The simplest way, and the one to start with. Docker creates the volumes on
+first use and keeps them until you remove them:
 
 ```sh
 docker run --rm --init \
@@ -86,29 +86,69 @@ Everything on this page uses this command. Only the last part changes:
 
 - `--rm` removes the container after the run. The named volumes stay.
 - `--init` is explained under [Stopping](#stopping-and-the-init-option).
+- New named volumes need no preparation. In a test with the published
+  image, MeManga's user could write to both right away.
 
 ### Folders on your machine
 
-To have the chapters in a normal folder, give a path instead of a volume
-name. Replace `DOWNLOADS-DIR` and `CONFIG-DIR` with full paths:
-
-```sh
-docker run --rm --init \
-  -v "CONFIG-DIR:/home/memanga/.config/memanga" \
-  -v "DOWNLOADS-DIR:/home/memanga/Downloads/MeManga" \
-  meellm/memanga:0.4.4 list
-```
+To have the chapters in a normal folder, you can give a path instead of a
+volume name. This needs more care, because of who may write to the folder.
 
 MeManga runs in the container as a user with the ID `1000`, not as root.
-Both folders must exist and be writable for that user ID. If MeManga
-reports that it cannot write, give the folders to that ID:
+A folder from your machine keeps the owner and permissions it has there, so
+it must be writable for user ID `1000`.
 
-```sh
-chown -R 1000:1000 "CONFIG-DIR" "DOWNLOADS-DIR"
-```
+**Use two new, empty folders made only for MeManga.** Do not point MeManga
+at a folder that already holds other files, such as your whole downloads
+folder or your home folder.
 
-You may need administrator rights for this command. Files that MeManga
-creates belong to user ID `1000` on your machine.
+1. Create the folders. Replace `CONFIG-DIR` and `DOWNLOADS-DIR` with full
+   paths of folders that do not exist yet:
+
+   ```sh
+   mkdir -p "CONFIG-DIR" "DOWNLOADS-DIR"
+   ```
+
+2. Check your own user ID:
+
+   ```sh
+   id -u
+   ```
+
+   If it prints `1000`, the folders you just created already belong to the
+   right ID. Go to step 4.
+
+3. Otherwise, give these two new folders to ID `1000`. This changes the
+   owner of the two folders only, and you may need administrator rights
+   for it:
+
+   ```sh
+   chown 1000:1000 "CONFIG-DIR" "DOWNLOADS-DIR"
+   ```
+
+4. Run MeManga with the folders:
+
+   ```sh
+   docker run --rm --init \
+     -v "CONFIG-DIR:/home/memanga/.config/memanga" \
+     -v "DOWNLOADS-DIR:/home/memanga/Downloads/MeManga" \
+     meellm/memanga:0.4.4 list
+   ```
+
+Things to know:
+
+- Files that MeManga creates in these folders belong to user ID `1000` on
+  your machine. If that is not you, you can read them only as far as their
+  permissions allow.
+- Do not change the owner of an existing folder and everything in it to
+  make MeManga work. That can take files away from you or from other
+  programs. Start with new folders instead.
+- Giving access through a shared group or an access-control list also
+  works in principle. It depends on your system and is not covered here.
+- With rootless Docker, Podman or user-namespace remapping, ID `1000`
+  inside the container is a different ID on your machine, and the steps
+  above do not fit. Use named volumes there.
+- This path was not tested as thoroughly as named volumes.
 
 ## Run commands
 
@@ -153,8 +193,8 @@ Email delivery works in a container as it does elsewhere:
 [Send chapters to a Kindle](./kindle) explains the settings.
 
 **Published image:** enter the email settings with the `config` command
-above. A container normally has no system keyring, so the password is saved
-as plain text in `config.yaml`, in the config volume. Anyone who can read that
+above. The published image has no usable system keyring, so the password is
+saved as plain text in `config.yaml`, in the config volume. Anyone who can read that
 volume can read the password.
 
 **Image built from source:** you can keep the password out of the config
@@ -248,20 +288,38 @@ Removing an image does not touch the volumes.
 
 ## Time zone
 
-The image sets no time zone, so the times MeManga prints and saves in a
-container are in UTC.
+Without a setting, the clock in the published image shows UTC. MeManga
+uses the container's local time for the times it prints and saves, so
+those are in UTC too.
 
-- A schedule from your machine's cron follows your machine's clock.
+To use another time zone, set the `TZ` variable to a zone name when you
+start the container. Replace `Europe/Berlin` with your zone:
+
+```sh
+docker run --rm --init -e TZ=Europe/Berlin \
+  -v memanga-config:/home/memanga/.config/memanga \
+  -v memanga-downloads:/home/memanga/Downloads/MeManga \
+  meellm/memanga:0.4.4 status
+```
+
+What this does and does not change:
+
+- It changes the local time inside the container. In a test with the
+  published image, the container's clock followed the zone that was set.
+- It does not change when a run starts. A schedule in your machine's cron
+  follows your machine's clock, whatever `TZ` says.
 - `memanga watch` counts intervals and does not depend on the time of day.
+- Pass the same `TZ` on every run, so that saved times stay comparable.
 
-Setting a local time zone for the container is not documented as supported
-yet: see [Planned](#planned).
+One zone was tried, on the `arm64` image. An image built from source and
+the Compose file were not checked for this: see [Planned](#planned).
 
 ## When something does not work
 
 - **"Permission denied" or MeManga cannot save.** A folder from your
   machine is not writable for user ID `1000`. See
-  [Folders on your machine](#folders-on-your-machine).
+  [Folders on your machine](#folders-on-your-machine), or switch to named
+  volumes.
 - **A command stops and says it needs a terminal, or a question never
   appears.** Add `-it`, or write the command so that it asks nothing. See
   [Run commands](#run-commands).
@@ -283,7 +341,8 @@ These are not available yet:
 - A Compose file that uses the published image, so that no copy of the
   repository is needed:
   [issue 328](https://github.com/meellm/MeManga/issues/328).
-- A smaller image with fewer browsers, and documented sizes:
+- A smaller image with fewer browsers:
   [issue 332](https://github.com/meellm/MeManga/issues/332).
-- Time zone support and guidance for containers:
+- A time zone setting in the Compose file, and a check of time zones in an
+  image built from source:
   [issue 331](https://github.com/meellm/MeManga/issues/331).
