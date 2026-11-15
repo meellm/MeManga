@@ -60,8 +60,7 @@ The command line reads and writes the same file with `memanga export` and
 ## Kindle delivery
 
 Sending chapters to a Kindle is set up under **Settings → Kindle / Email**.
-A page for it is still to come; until then the
-[docs overview](../guide/) lists where to read about it.
+[Send chapters to a Kindle](../guide/kindle) explains it step by step.
 
 ## Reader and partial chapters
 

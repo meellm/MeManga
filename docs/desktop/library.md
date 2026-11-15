@@ -141,5 +141,6 @@ These are not in {{ release.tag }}:
   unless you choose **Also delete progress and history**. Downloaded files
   stay in your download folder either way.
 - A chapter whose email to your Kindle failed says **Not sent to Kindle** on
-  its row and can be sent again from there.
+  its row and can be sent again from there. See
+  [Send chapters to a Kindle](../guide/kindle#when-a-chapter-does-not-arrive).
 - Search can show why a source failed, with **Failure details**.

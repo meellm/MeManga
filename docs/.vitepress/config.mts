@@ -42,6 +42,10 @@ export default defineConfig({
           { text: 'Reader', link: '/desktop/reader' },
           { text: 'Settings', link: '/desktop/settings' }
         ]
+      },
+      {
+        text: 'Delivery',
+        items: [{ text: 'Send to a Kindle', link: '/guide/kindle' }]
       }
     ],
 
