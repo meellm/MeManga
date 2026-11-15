@@ -17,13 +17,30 @@ is the same in {{ release.tag }}.
 |---|---|
 | A Send to Kindle address | The address Amazon gives each Kindle device and app, ending in `@kindle.com`. Chapters are sent **to** it. |
 | A sender email account | An email account of yours with SMTP access. Chapters are sent **from** it. |
-| An app password | A password for that account made for one program. With Gmail this is an app password, not your normal password. |
+| The sender account's password | The password MeManga signs in to that account with. For Gmail this is a Google app password, not your normal password: see [Gmail app passwords](#gmail-app-passwords). |
 | PDF or EPUB output | Amazon accepts PDF and EPUB by email. CBZ, ZIP and image folders are not sent. |
 
 MeManga does not use your Amazon password and does not sign in to Amazon.
 
 The development version checks the format and does not send anything else.
 {{ release.tag }} does not check it, so choose PDF or EPUB yourself.
+
+### Gmail app passwords
+
+MeManga signs in to the sender account with a password. A Gmail account
+needs a Google app password for this. According to
+[Google's help page on app passwords](https://support.google.com/mail/answer/185833):
+
+- You need 2-Step Verification turned on in your Google Account before you
+  can create an app password.
+- The option can be missing when 2-Step Verification is set up only for
+  security keys, when the account belongs to a work, school or other
+  organization, or when the account has Advanced Protection.
+- Google revokes app passwords when you change your Google Account
+  password. You then need a new one.
+
+For any other provider, follow that provider's instructions for signing in
+to SMTP from a program.
 
 ## Step 1: approve your sender address at Amazon
 
@@ -36,11 +53,11 @@ Amazon only delivers documents from addresses you have approved.
 4. On the same page, note your **Send to Kindle** address for the device or
    app you want to read on.
 
-Amazon describes these steps in
-[Add an Email Address to Receive Documents in Your Kindle Library](https://www.amazon.com/gp/help/customer/display.html?nodeId=GX9XLEVV8G4DB28H)
-and the service in
+Amazon describes the service and its requirements in
 [Learn How to Use Your Send to Kindle Email Address](https://www.amazon.com/gp/help/customer/display.html?nodeId=G7NECT4B4ZWHQ8WV).
-The wording on Amazon's pages can differ by country and may change.
+The names of Amazon's menus can differ by country and may change. If the
+steps above do not match what you see, search Amazon's help for "Send to
+Kindle".
 
 ## Step 2: enter the settings
 
@@ -56,7 +73,7 @@ The wording on Amazon's pages can differ by country and may change.
 | Sender Email | The approved sender address |
 | SMTP Server | Your email provider's SMTP server. The default is `smtp.gmail.com`. |
 | SMTP Port | The default is `587`. |
-| App Password | The app password of the sender account |
+| App Password | The password for the sender account (for Gmail, the app password) |
 
 3. Choose **Save settings**.
 
@@ -99,8 +116,8 @@ memanga config email --send-test
 
 A test that succeeds means your mail server accepted the email. It does not
 prove that it reached your Kindle: Amazon delivers it only when the sender is
-approved. Look for the test document in your Kindle library after a few
-minutes. If Amazon rejects an email, it usually writes to the sender address.
+approved. Check your Kindle library for the test document. If it does not
+appear, see [When a chapter does not arrive](#when-a-chapter-does-not-arrive).
 
 {{ release.tag }} has one button, **Test Connection**, which signs in only.
 
@@ -136,8 +153,9 @@ been sent, and only then.
 The subject of each email is the chapter's file name without its extension.
 With the default file naming this looks like `Some Title - Chapter 12`.
 
-There is no setting to change the subject. In particular, MeManga never
-sends the subject `convert`, and it does not ask Amazon to convert a file in
+There is no setting to change the subject, and MeManga adds nothing to it
+apart from the part numbers described below. It does not add a conversion
+request such as `convert`, and it does not ask Amazon to convert a file in
 any other way. What Amazon does with a PDF or EPUB after it arrives is
 decided by Amazon.
 
@@ -165,19 +183,20 @@ total, according to its help page linked above.
 
 ## Where the password is stored
 
-MeManga stores the app password in your system's keyring when one is
-available: for example the Windows Credential Manager or the macOS Keychain.
+MeManga stores the password in your system's keyring when one is available,
+for example the macOS Keychain or the Windows Credential Locker. Whether a
+keyring is available depends on your system and how it is set up.
 If no keyring can be used, the password is saved as plain text in
 `config.yaml`. Keep that file private. The development version tells you
 when this happens; {{ release.tag }} does not.
 
 In the development version you can supply the password from outside instead,
-which suits servers and containers. Set one of these, not both:
+which suits servers and containers. Set one of these environment variables,
+not both:
 
-| Environment variable | Value |
-|---|---|
-| `MEMANGA_SMTP_PASSWORD` | The password itself |
-| `MEMANGA_SMTP_PASSWORD_FILE` | The path of a file that contains only the password |
+- `MEMANGA_SMTP_PASSWORD`: the password itself.
+- `MEMANGA_SMTP_PASSWORD_FILE`: the path of a file that contains only the
+  password.
 
 A password supplied this way is used instead of the stored one and is never
 written to disk by MeManga.
@@ -188,7 +207,7 @@ The default settings are for Gmail. For another provider, enter its SMTP
 server and port.
 
 In {{ release.tag }} the connection always starts unencrypted and is
-upgraded with STARTTLS, which is what port 587 expects.
+upgraded with STARTTLS. There is no setting for this.
 
 In the development version, `email.smtp_tls` chooses how the connection is
 secured:
@@ -206,16 +225,21 @@ is 60.
 
 Work through these in order.
 
-1. **Is the format PDF or EPUB?** Amazon does not accept the other formats
-   by email.
+1. **Is the output format PDF or EPUB?** See
+   [What you need](#what-you-need).
 2. **Does sign-in work?** Use the sign-in test in step 3. If it fails, check
-   the server, the port and the app password.
-3. **Is the sender approved at Amazon?** This is the most common cause when
-   the email is accepted but nothing arrives. Check the mailbox of the sender
-   account for a message from Amazon.
-4. **Was the chapter too large?** A large EPUB is not sent. Switch to PDF.
-5. **Is the device online?** Amazon delivers a document when the device or
-   app next connects.
+   the server, the port and the password. With Gmail, check that the app
+   password still exists: see [Gmail app passwords](#gmail-app-passwords).
+3. **Is the sender approved at Amazon?** Open the approved list from step 1
+   and check that it contains the sender address exactly as you entered it
+   in MeManga. Also look in the sender account's mailbox for any message
+   about the email.
+4. **Is the Kindle address right?** Compare it with the address shown at
+   Amazon for the device or app you read on.
+5. **Was the chapter too large?** A large EPUB is not sent. Switch to PDF.
+6. **Is the device online?** Amazon's help page lists an internet connection
+   among the requirements, and says Amazon keeps trying to deliver a
+   document for up to 60 days.
 
 In the development version, a chapter that was downloaded but could not be
 emailed is remembered:
