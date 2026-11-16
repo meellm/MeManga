@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from memanga import backup
-from memanga.schema import STATE_SCHEMA_VERSION
+from memanga.state import STATE_SCHEMA_VERSION
 from memanga.state_stores.activity import ActivityStore
 from memanga.state_stores.notifications import NotificationStore
 
