@@ -20,3 +20,4 @@ jobs:
       - run: python -m pip install -r requirements/cli.txt
       - run: python -m memanga.source_docs --check
       - run: python -m memanga.cli_docs --check
+      - run: python -m memanga.config_docs --check

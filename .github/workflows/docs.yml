@@ -16,6 +16,8 @@ on:
       # Shown in full on the Docker page.
       - "compose.yaml"
       - "compose.dev.yaml"
+      # Shown in full on the settings reference.
+      - "examples/config.example.yaml"
       - ".github/workflows/docs.yml"
 
 permissions:

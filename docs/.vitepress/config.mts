@@ -19,8 +19,9 @@ export default defineConfig({
     'Guide.md',
     'SUPPORTED_SOURCES.md',
     'ACCESSIBILITY.md',
-    // Generated; shown as part of reference/cli.md.
-    'reference/cli-commands.md'
+    // Generated; shown as part of reference/cli.md and reference/config.md.
+    'reference/cli-commands.md',
+    'reference/config-keys.md'
   ],
 
   themeConfig: {
@@ -64,6 +65,10 @@ export default defineConfig({
       {
         text: 'Delivery',
         items: [{ text: 'Send to a Kindle', link: '/guide/kindle' }]
+      },
+      {
+        text: 'Reference',
+        items: [{ text: 'Settings reference', link: '/reference/config' }]
       }
     ],
 
