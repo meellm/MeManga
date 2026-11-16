@@ -9,7 +9,8 @@
 | Included in search | 114 |
 | In the default selection | 15 |
 | Adult content | 10 |
-| In the full weekly check | 27 |
+| In the weekly live probe | 27 |
+| Live probe through to an image download | 25 |
 
 ## Adult sources
 
@@ -60,25 +61,25 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 
 114 sources, in search order.
 
-| Source | Other domains | Engine | Language | Adult | Search | Full check | Notes |
+| Source | Other domains | Engine | Language | Adult | Search | Live probe | Notes |
 |---|---|---|---|---|---|---|---|
-| mangadex.org | api.mangadex.org | api | en | — | Included in search | Yes | Fan-translation library |
-| mangapill.com | — | http | — | — | Included in search | Yes | General library |
-| mangapark1.com | — | browser | — | — | Included in search | Yes | General library |
-| mangafire.to | — | browser | — | — | Included in search | Yes | General library |
+| mangadex.org | api.mangadex.org | api | en | — | Included in search | Search, chapters, pages, image | Fan-translation library |
+| mangapill.com | — | http | — | — | Included in search | Search, chapters, pages, image | General library |
+| mangapark1.com | — | browser | — | — | Included in search | Search, chapters, pages, image | General library |
+| mangafire.to | — | browser | — | — | Included in search | Search, chapters, pages, image | General library |
 | mangabuddy.com | — | browser | — | — | Included in search | — | General library |
-| weebcentral.com | — | browser | — | — | Included in search | Yes | General library |
+| weebcentral.com | — | browser | — | — | Included in search | Search, chapters, pages, image | General library |
 | mangakatana.com | — | browser | — | — | Included in search | — | General library |
-| asurascans.com | asuracomic.net (not searched: alias, [issue 177](https://github.com/meellm/MeManga/issues/177)), asuratoon.com (not searched: alias, [issue 177](https://github.com/meellm/MeManga/issues/177)) | api | — | — | Included in search | Yes | Manhwa specialist |
-| comix.to | — | browser | — | — | Included in search | Yes | General library |
-| comick.io | comick.dev | api | — | — | Included in search | Yes | General library |
-| mangahub.io | — | http | — | — | Included in search | Yes | MangaHub network |
-| mangahere.cc | — | http | — | — | Included in search | Yes | General library |
+| asurascans.com | asuracomic.net (not searched: alias, [issue 177](https://github.com/meellm/MeManga/issues/177)), asuratoon.com (not searched: alias, [issue 177](https://github.com/meellm/MeManga/issues/177)) | api | — | — | Included in search | Search, chapters, pages, image | Manhwa specialist |
+| comix.to | — | browser | — | — | Included in search | Search, chapters, pages, image | General library |
+| comick.io | comick.dev | api | — | — | Included in search | Search, chapters | General library |
+| mangahub.io | — | http | — | — | Included in search | Search, chapters, pages, image | MangaHub network |
+| mangahere.cc | — | http | — | — | Included in search | Search, chapters, pages, image | General library |
 | mangapanda.onl | — | http | — | — | Included in search | — | MangaHub network |
 | mangahere.onl | — | browser | — | — | Included in search | — | Alternate mirror |
-| mangataro.org | — | http | — | — | Included in search | Yes | ComicK replacement |
+| mangataro.org | — | http | — | — | Included in search | Search, chapters, pages, image | ComicK replacement |
 | luminousscans.com | — | http | — | — | Included in search | — | Manhwa translations |
-| tcbonepiecechapters.com | tcbscans.com, tcbscans.me | http | en | — | Included in search | Yes | Jump manga (One Piece, JJK) |
+| tcbonepiecechapters.com | tcbscans.com, tcbscans.me | http | en | — | Included in search | Search, chapters, pages, image | Jump manga (One Piece, JJK) |
 | fanfox.net | mangafox.me | browser | — | — | Included in search | — | — |
 | 1manga.co | — | http | — | — | Included in search | — | MangaHub network |
 | coffeemanga.io | — | http | — | — | Included in search | — | — |
@@ -88,7 +89,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | mangayy.org | likemanga.io | browser | — | — | Included in search | — | — |
 | 1piecemanga.com | w064.1piecemanga.com | http | — | — | Included in search | — | One Piece |
 | ajimenoippo.com | — | http | — | — | Included in search | — | Hajime no Ippo |
-| atsu.moe | — | api | — | — | Included in search | Yes | — |
+| atsu.moe | — | api | — | — | Included in search | Search, chapters, pages, image | — |
 | bakirahen.com | — | http | — | — | Included in search | — | Baki Rahen |
 | beastarsmanga.com | — | http | — | — | Included in search | — | Beastars |
 | berserkmang.org | — | http | — | — | Included in search | — | Berserk |
@@ -106,7 +107,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | drstonemanga.com | — | http | — | — | Included in search | — | Dr. Stone |
 | e-hentai.org | exhentai.org | http | — | Yes | Included in search | — | Galleries |
 | elusive-samurai.com | w4.elusive-samurai.com | http | — | — | Included in search | — | The Elusive Samurai |
-| en-thunderscans.com | — | http | en | — | Included in search | Yes | English manhwa scans |
+| en-thunderscans.com | — | http | en | — | Included in search | Search, chapters, pages, image | English manhwa scans |
 | fairytailmangafree.com | — | http | — | — | Included in search | — | Fairy Tail: 100 Years Quest |
 | fireforcemanga.org | w1.fireforcemanga.org | http | — | — | Included in search | — | Fire Force |
 | hajime-no-ippo-manga.online | — | http | — | — | Included in search | — | Hajime no Ippo |
@@ -121,7 +122,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | jojolionmanga.com | — | http | — | — | Included in search | — | JoJo Part 8: JoJolion |
 | kaijuno8-manga.com | — | http | — | — | Included in search | — | Kaiju No. 8 |
 | kenganashura.com | — | http | — | — | Included in search | — | Kengan Ashura / Omega |
-| lector-mangas.lat | lectormangass.net (not searched: alias, [issue 186](https://github.com/meellm/MeManga/issues/186)) | http | es | — | Included in search | Yes | Spanish manga/manhwa reader |
+| lector-mangas.lat | lectormangass.net (not searched: alias, [issue 186](https://github.com/meellm/MeManga/issues/186)) | http | es | — | Included in search | Search, chapters, pages, image | Spanish manga/manhwa reader |
 | mangaball.net | — | http | — | — | Included in search | — | Multi-language |
 | mangadna.com | — | http | — | — | Included in search | — | — |
 | mangadot.net | — | http | — | — | Included in search | — | Multi-language aggregator |
@@ -129,11 +130,11 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | mangoasis.com | — | http | — | — | Included in search | — | — |
 | manytoon.com | — | browser | — | Yes | Included in search | — | Adult manhwa |
 | mashle-manga.online | — | http | — | — | Included in search | — | Mashle |
-| mgeko.cc | — | http | — | — | Included in search | Yes | — |
+| mgeko.cc | — | http | — | — | Included in search | Search, chapters, pages, image | — |
 | monster-manga.online | — | http | — | — | Included in search | — | — |
 | monstermanga.org | — | http | — | — | Included in search | — | Monster |
 | nhentai.net | — | http | — | Yes | Included in search | — | Doujinshi |
-| olympusxyz.com | — | http | es | — | Included in search | Yes | Spanish manhwa scans (Olympus Scanlation) |
+| olympusxyz.com | — | http | es | — | Included in search | Search, chapters, pages, image | Spanish manhwa scans (Olympus Scanlation) |
 | omegascans.org | — | browser | — | — | Included in search | — | Manhwa translations |
 | one-punch.online | read.one-punch.online | http | — | — | Included in search | — | One Punch Man |
 | onepieceread.com | — | http | — | — | Included in search | — | One Piece |
@@ -162,7 +163,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | readonepiece.com | ww8.readonepiece.com, ww12.readonepiece.com | http | — | — | Included in search | — | One Piece |
 | readopm.com | ww6.readopm.com | http | — | — | Included in search | — | One Punch Man |
 | readoshinoko.com | w13.readoshinoko.com | http | — | — | Included in search | — | Oshi no Ko |
-| readsnk.com | — | http | — | — | Included in search | Yes | Attack on Titan |
+| readsnk.com | — | http | — | — | Included in search | Search | Attack on Titan |
 | readsnkmanga.com | — | http | — | — | Included in search | — | Attack on Titan |
 | sakamoto-days.online | — | http | — | — | Included in search | — | Sakamoto Days |
 | sakamotomanga.com | — | http | — | — | Included in search | — | Sakamoto Days |
@@ -173,15 +174,15 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | tokyoghoul.club | — | http | — | — | Included in search | — | Tokyo Ghoul |
 | toonily.me | — | browser | — | — | Included in search | — | Manhwa focused |
 | vagabondmanga.org | — | http | — | — | Included in search | — | Vagabond |
-| wurmz.net | — | http | id | — | Included in search | Yes | Indonesian manga/manhwa/manhua reader |
+| wurmz.net | — | http | id | — | Included in search | Search, chapters, pages, image | Indonesian manga/manhwa/manhua reader |
 | zazamanga.com | deathnotemanga.com, death-note-online.com, fairytail100yearsquest.com, gintama.site, initialdmanga.com, inuyasha.net, onepunchmanmanga.org, readhellsing.com, readoverlord.com | browser | — | — | Included in search | — | Also serves several redirected series sites |
-| zonatmo.org | — | http | es | — | Included in search | Yes | Spanish manga/manhwa library |
+| zonatmo.org | — | http | es | — | Included in search | Search, chapters, pages, image | Spanish manga/manhwa library |
 
 ## Sources left out of search
 
 23 sources. Series you already follow from them are still checked, and you can add a series by its address.
 
-| Source | Other domains | Engine | Language | Adult | Search | Full check | Notes |
+| Source | Other domains | Engine | Language | Adult | Search | Live probe | Notes |
 |---|---|---|---|---|---|---|---|
 | bato.to | batoto.to | http | — | — | Not searched (unreliable) | — | Community uploads |
 | flamecomics.xyz | — | browser | — | — | Not searched (needs-js) | — | Manhwa translations |
@@ -195,8 +196,8 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | mangafreak.ws | mangafreak.me, ww2.mangafreak.me | http | — | — | Not searched (unreliable) | — | — |
 | mangago.me | — | http | — | — | Not searched (region-blocked), [issue 151](https://github.com/meellm/MeManga/issues/151) | — | Yaoi/Shoujo collection |
 | mangahub.us | — | http | — | — | Not searched (needs-js) | — | MangaHub network |
-| mangakakalot.com | mangakakalot.to (not searched: unreachable) | http | — | — | Not searched (replaced) | Yes | — |
-| manganato.com | chapmanganato.to, readmanganato.com | http | — | — | Not searched (unreachable) | Yes | — |
+| mangakakalot.com | mangakakalot.to (not searched: unreachable) | http | — | — | Not searched (replaced) | Search, chapters, pages, image | — |
+| manganato.com | chapmanganato.to, readmanganato.com | http | — | — | Not searched (unreachable) | Search, chapters, pages, image | — |
 | manganato.gg | — | browser | — | — | Not searched (challenge) | — | — |
 | mangareader.to | — | http | — | — | Not searched (unreachable) | — | General library |
 | mangasee123.com | — | http | — | — | Not searched (shutdown) | — | — |
@@ -211,9 +212,9 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 
 97 sites built on shared site templates.
 
-| Source | Other domains | Engine | Language | Adult | Search | Full check | Notes |
+| Source | Other domains | Engine | Language | Adult | Search | Live probe | Notes |
 |---|---|---|---|---|---|---|---|
-| akiramanga.com | — | http | — | — | Not searched (template) | Yes | Akira |
+| akiramanga.com | — | http | — | — | Not searched (template) | Chapters, pages, image | Akira |
 | ao-ashi-manga.com | — | http | — | — | Not searched (template) | — | Ao Ashi |
 | apollcomics.es | — | http | — | — | Not searched (template) | — | — |
 | aquareader.net | — | http | — | — | Not searched (template) | — | — |
@@ -234,7 +235,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | chainsawdevil.com | — | http | — | — | Not searched (template) | — | Chainsaw Man |
 | d-grayman.online | — | http | — | — | Not searched (template) | — | D.Gray-man |
 | dandadanmanga.net | ww2.dandadanmanga.net, w2.dandadanmanga.net | http | — | — | Not searched (template) | — | Dandadan |
-| dddmanga.com | — | http | — | — | Not searched (template) | Yes | Dandadan |
+| dddmanga.com | — | http | — | — | Not searched (template) | Chapters, pages, image | Dandadan |
 | deathnotemangafree.com | — | http | — | — | Not searched (template) | — | Death Note |
 | detective-conan-manga.online | — | http | — | — | Not searched (template) | — | Detective Conan (Case Closed) |
 | detective-conan.online | — | http | — | — | Not searched (template) | — | Detective Conan |
@@ -252,7 +253,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | heavenly-delusion.com | — | http | — | — | Not searched (template) | — | Tengoku Daimakyou (Heavenly Delusion) |
 | hipercool.net | — | http | — | — | Not searched (template) | — | — |
 | hiperdex.com | — | http | — | — | Not searched (template), [issue 180](https://github.com/meellm/MeManga/issues/180) | — | — |
-| hxhmanga.com | — | http | — | — | Not searched (template) | Yes | Hunter x Hunter |
+| hxhmanga.com | — | http | — | — | Not searched (template) | Chapters, pages, image | Hunter x Hunter |
 | hyoukamanga.com | — | http | — | — | Not searched (template) | — | Hyouka |
 | ichithewitchread.com | — | http | — | — | Not searched (template) | — | Ichi the Witch |
 | jjkaisen.com | — | http | — | — | Not searched (template) | — | Jujutsu Kaisen |
@@ -268,7 +269,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | manga18fx.com | — | http | — | Yes | Not searched (template) | — | Adult manga |
 | mangadistrict.com | — | http | — | — | Not searched (template) | — | — |
 | mangaforfree.net | — | http | — | — | Not searched (template) | — | — |
-| mangaread.org | — | http | — | — | Not searched (template) | Yes | — |
+| mangaread.org | — | http | — | — | Not searched (template) | Search, chapters, pages, image | — |
 | mangasehri.com | — | http | — | — | Not searched (template) | — | — |
 | mangawow.com | — | http | — | — | Not searched (template) | — | — |
 | mangazin.org | — | http | — | — | Not searched (template) | — | — |
@@ -279,7 +280,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | onepiece-manga-online.net | w57.onepiece-manga-online.net, w58.onepiece-manga-online.net | http | — | — | Not searched (template) | — | One Piece |
 | onepunchmanofficial.com | — | http | — | — | Not searched (template) | — | One Punch Man |
 | oshinokoyo.com | — | http | — | — | Not searched (template) | — | Oshi no Ko |
-| overlord-manga.online | — | http | — | — | Not searched (template) | Yes | Overlord |
+| overlord-manga.online | — | http | — | — | Not searched (template) | Chapters, pages, image | Overlord |
 | parasytemanga.com | w9.parasytemanga.com | http | — | — | Not searched (template) | — | Parasyte |
 | pawmanga.com | — | http | — | — | Not searched (template) | — | — |
 | punpunmanga.com | — | http | — | — | Not searched (template) | — | Goodnight Punpun (Oyasumi Punpun) |

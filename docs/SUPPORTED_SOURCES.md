@@ -3,28 +3,28 @@
 MeManga registers 310 domains across 234 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
-Full live check: the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs search, chapters, pages and an image download against this source. Being in the check does not mean the last run passed.
+Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
 The [documentation site](https://meellm.github.io/MeManga/reference/sources) explains these columns.
 
-| Source | Aliases | Engine | Language | NSFW | Search status | Notes | Full live check |
+| Source | Aliases | Engine | Language | NSFW | Search status | Notes | Live probe |
 |---|---|---|---|---|---|---|---|
-| mangadex.org | api.mangadex.org (Included in search) | api | en | No | Included in search | Fan-translation library | Yes |
-| mangapill.com | — | http | — | No | Included in search | General library | Yes |
-| mangapark1.com | — | browser | — | No | Included in search | General library | Yes |
-| mangafire.to | — | browser | — | No | Included in search | General library | Yes |
+| mangadex.org | api.mangadex.org (Included in search) | api | en | No | Included in search | Fan-translation library | Search, chapters, pages, image |
+| mangapill.com | — | http | — | No | Included in search | General library | Search, chapters, pages, image |
+| mangapark1.com | — | browser | — | No | Included in search | General library | Search, chapters, pages, image |
+| mangafire.to | — | browser | — | No | Included in search | General library | Search, chapters, pages, image |
 | mangabuddy.com | — | browser | — | No | Included in search | General library | — |
-| weebcentral.com | — | browser | — | No | Included in search | General library | Yes |
+| weebcentral.com | — | browser | — | No | Included in search | General library | Search, chapters, pages, image |
 | mangakatana.com | — | browser | — | No | Included in search | General library | — |
-| asurascans.com | asuracomic.net (Not searched (alias)), asuratoon.com (Not searched (alias)) | api | — | No | Included in search | Manhwa specialist | Yes |
-| comix.to | — | browser | — | No | Included in search | General library | Yes |
-| comick.io | comick.dev (Included in search) | api | — | No | Included in search | General library | Yes |
-| mangahub.io | — | http | — | No | Included in search | MangaHub network | Yes |
-| mangahere.cc | — | http | — | No | Included in search | General library | Yes |
+| asurascans.com | asuracomic.net (Not searched (alias)), asuratoon.com (Not searched (alias)) | api | — | No | Included in search | Manhwa specialist | Search, chapters, pages, image |
+| comix.to | — | browser | — | No | Included in search | General library | Search, chapters, pages, image |
+| comick.io | comick.dev (Included in search) | api | — | No | Included in search | General library | Search, chapters |
+| mangahub.io | — | http | — | No | Included in search | MangaHub network | Search, chapters, pages, image |
+| mangahere.cc | — | http | — | No | Included in search | General library | Search, chapters, pages, image |
 | mangapanda.onl | — | http | — | No | Included in search | MangaHub network | — |
 | mangahere.onl | — | browser | — | No | Included in search | Alternate mirror | — |
-| mangataro.org | — | http | — | No | Included in search | ComicK replacement | Yes |
+| mangataro.org | — | http | — | No | Included in search | ComicK replacement | Search, chapters, pages, image |
 | luminousscans.com | — | http | — | No | Included in search | Manhwa translations | — |
-| tcbonepiecechapters.com | tcbscans.com (Included in search), tcbscans.me (Included in search) | http | en | No | Included in search | Jump manga (One Piece, JJK) | Yes |
+| tcbonepiecechapters.com | tcbscans.com (Included in search), tcbscans.me (Included in search) | http | en | No | Included in search | Jump manga (One Piece, JJK) | Search, chapters, pages, image |
 | fanfox.net | mangafox.me (Included in search) | browser | — | No | Included in search | — | — |
 | 1manga.co | — | http | — | No | Included in search | MangaHub network | — |
 | coffeemanga.io | — | http | — | No | Included in search | — | — |
@@ -34,11 +34,11 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | mangayy.org | likemanga.io (Included in search) | browser | — | No | Included in search | — | — |
 | 1piecemanga.com | w064.1piecemanga.com (Included in search) | http | — | No | Included in search | One Piece | — |
 | ajimenoippo.com | — | http | — | No | Included in search | Hajime no Ippo | — |
-| akiramanga.com | — | http | — | No | Not searched (template) | Akira | Yes |
+| akiramanga.com | — | http | — | No | Not searched (template) | Akira | Chapters, pages, image |
 | ao-ashi-manga.com | — | http | — | No | Not searched (template) | Ao Ashi | — |
 | apollcomics.es | — | http | — | No | Not searched (template) | — | — |
 | aquareader.net | — | http | — | No | Not searched (template) | — | — |
-| atsu.moe | — | api | — | No | Included in search | — | Yes |
+| atsu.moe | — | api | — | No | Included in search | — | Search, chapters, pages, image |
 | azmanga.com | — | http | — | No | Not searched (template) | — | — |
 | bakidou.com | — | http | — | No | Not searched (template) | Baki (All Series) | — |
 | bakirahen.com | — | http | — | No | Included in search | Baki Rahen | — |
@@ -67,7 +67,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | chainsawdevil.com | — | http | — | No | Not searched (template) | Chainsaw Man | — |
 | d-grayman.online | — | http | — | No | Not searched (template) | D.Gray-man | — |
 | dandadanmanga.net | ww2.dandadanmanga.net (Not searched (template)), w2.dandadanmanga.net (Not searched (template)) | http | — | No | Not searched (template) | Dandadan | — |
-| dddmanga.com | — | http | — | No | Not searched (template) | Dandadan | Yes |
+| dddmanga.com | — | http | — | No | Not searched (template) | Dandadan | Chapters, pages, image |
 | death-note-manga.com | w13.death-note-manga.com (Included in search) | http | — | No | Included in search | Death Note | — |
 | deathnotemangafree.com | — | http | — | No | Not searched (template) | Death Note | — |
 | demon-slayer.online | w4.demon-slayer.online (Included in search) | http | — | No | Included in search | Demon Slayer | — |
@@ -80,7 +80,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | drstonemanga.com | — | http | — | No | Included in search | Dr. Stone | — |
 | e-hentai.org | exhentai.org (Included in search) | http | — | Yes | Included in search | Galleries | — |
 | elusive-samurai.com | w4.elusive-samurai.com (Included in search) | http | — | No | Included in search | The Elusive Samurai | — |
-| en-thunderscans.com | — | http | en | No | Included in search | English manhwa scans | Yes |
+| en-thunderscans.com | — | http | en | No | Included in search | English manhwa scans | Search, chapters, pages, image |
 | fairytailmangafree.com | — | http | — | No | Included in search | Fairy Tail: 100 Years Quest | — |
 | fireforcemanga.org | w1.fireforcemanga.org (Included in search) | http | — | No | Included in search | Fire Force | — |
 | flamecomics.xyz | — | browser | — | No | Not searched (needs-js) | Manhwa translations | — |
@@ -104,7 +104,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | hiperdex.com | — | http | — | No | Not searched (template) | — | — |
 | hivetoons.org | hivetoon.com (Not searched (needs-js)) | browser | — | No | Not searched (needs-js) | Void Scans network | — |
 | homunculusmanga.com | — | http | — | No | Included in search | Homunculus | — |
-| hxhmanga.com | — | http | — | No | Not searched (template) | Hunter x Hunter | Yes |
+| hxhmanga.com | — | http | — | No | Not searched (template) | Hunter x Hunter | Chapters, pages, image |
 | hyoukamanga.com | — | http | — | No | Not searched (template) | Hyouka | — |
 | ichithewitchread.com | — | http | — | No | Not searched (template) | Ichi the Witch | — |
 | imhentai.xxx | — | http | — | Yes | Included in search | Doujinshi | — |
@@ -124,7 +124,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | kimetsu-yaiba.online | — | http | — | No | Not searched (template) | Demon Slayer: Kimetsu no Yaiba | — |
 | kokounohito.com | — | http | — | No | Not searched (template) | The Climber (Kokou no Hito) | — |
 | kunmanga.com | — | browser | — | No | Not searched (needs-js) | — | — |
-| lector-mangas.lat | lectormangass.net (Not searched (alias)) | http | es | No | Included in search | Spanish manga/manhwa reader | Yes |
+| lector-mangas.lat | lectormangass.net (Not searched (alias)) | http | es | No | Included in search | Spanish manga/manhwa reader | Search, chapters, pages, image |
 | madeabyss.com | — | http | — | No | Not searched (template) | Made in Abyss | — |
 | manga18fx.com | — | http | — | Yes | Not searched (template) | Adult manga | — |
 | manga4life.com | mangalife.us (Not searched (unreachable)) | browser | — | No | Not searched (unreachable) | — | — |
@@ -138,10 +138,10 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | mangafreak.ws | mangafreak.me (Not searched (unreliable)), ww2.mangafreak.me (Not searched (unreliable)) | http | — | No | Not searched (unreliable) | — | — |
 | mangago.me | — | http | — | No | Not searched (region-blocked) | Yaoi/Shoujo collection | — |
 | mangahub.us | — | http | — | No | Not searched (needs-js) | MangaHub network | — |
-| mangakakalot.com | mangakakalot.to (Not searched (unreachable)) | http | — | No | Not searched (replaced) | — | Yes |
-| manganato.com | chapmanganato.to (Not searched (unreachable)), readmanganato.com (Not searched (unreachable)) | http | — | No | Not searched (unreachable) | — | Yes |
+| mangakakalot.com | mangakakalot.to (Not searched (unreachable)) | http | — | No | Not searched (replaced) | — | Search, chapters, pages, image |
+| manganato.com | chapmanganato.to (Not searched (unreachable)), readmanganato.com (Not searched (unreachable)) | http | — | No | Not searched (unreachable) | — | Search, chapters, pages, image |
 | manganato.gg | — | browser | — | No | Not searched (challenge) | — | — |
-| mangaread.org | — | http | — | No | Not searched (template) | — | Yes |
+| mangaread.org | — | http | — | No | Not searched (template) | — | Search, chapters, pages, image |
 | mangareader.to | — | http | — | No | Not searched (unreachable) | General library | — |
 | mangasee123.com | — | http | — | No | Not searched (shutdown) | — | — |
 | mangasehri.com | — | http | — | No | Not searched (template) | — | — |
@@ -157,13 +157,13 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | manytoon.com | — | browser | — | Yes | Included in search | Adult manhwa | — |
 | mashle-manga.online | — | http | — | No | Included in search | Mashle | — |
 | mashlemanga.net | — | http | — | No | Not searched (template) | Mashle: Magic and Muscles | — |
-| mgeko.cc | — | http | — | No | Included in search | — | Yes |
+| mgeko.cc | — | http | — | No | Included in search | — | Search, chapters, pages, image |
 | monster-manga.online | — | http | — | No | Included in search | — | — |
 | monstermanga.org | — | http | — | No | Included in search | Monster | — |
 | mushoku-tensei-manga.online | — | http | — | No | Not searched (template) | Mushoku Tensei: Isekai Ittara Honki Dasu | — |
 | nanamanga.online | w2.nanamanga.online (Not searched (template)) | http | — | No | Not searched (template) | Nana | — |
 | nhentai.net | — | http | — | Yes | Included in search | Doujinshi | — |
-| olympusxyz.com | — | http | es | No | Included in search | Spanish manhwa scans (Olympus Scanlation) | Yes |
+| olympusxyz.com | — | http | es | No | Included in search | Spanish manhwa scans (Olympus Scanlation) | Search, chapters, pages, image |
 | omegascans.org | — | browser | — | No | Included in search | Manhwa translations | — |
 | one-punch.online | read.one-punch.online (Included in search) | http | — | No | Included in search | One Punch Man | — |
 | onepiece-manga-online.net | w57.onepiece-manga-online.net (Not searched (template)), w58.onepiece-manga-online.net (Not searched (template)) | http | — | No | Not searched (template) | One Piece | — |
@@ -172,7 +172,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | onepunchmanofficial.com | — | http | — | No | Not searched (template) | One Punch Man | — |
 | onepunchmanread.com | — | http | — | No | Included in search | One Punch Man | — |
 | oshinokoyo.com | — | http | — | No | Not searched (template) | Oshi no Ko | — |
-| overlord-manga.online | — | http | — | No | Not searched (template) | Overlord | Yes |
+| overlord-manga.online | — | http | — | No | Not searched (template) | Overlord | Chapters, pages, image |
 | oyasumipunpun.com | — | http | — | No | Included in search | Goodnight Punpun | — |
 | parasytemanga.com | w9.parasytemanga.com (Not searched (template)) | http | — | No | Not searched (template) | Parasyte | — |
 | pawmanga.com | — | http | — | No | Not searched (template) | — | — |
@@ -203,7 +203,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | readonepiece.com | ww8.readonepiece.com (Included in search), ww12.readonepiece.com (Included in search) | http | — | No | Included in search | One Piece | — |
 | readopm.com | ww6.readopm.com (Included in search) | http | — | No | Included in search | One Punch Man | — |
 | readoshinoko.com | w13.readoshinoko.com (Included in search) | http | — | No | Included in search | Oshi no Ko | — |
-| readsnk.com | — | http | — | No | Included in search | Attack on Titan | Yes |
+| readsnk.com | — | http | — | No | Included in search | Attack on Titan | Search |
 | readsnkmanga.com | — | http | — | No | Included in search | Attack on Titan | — |
 | readundeadunluck.com | — | http | — | No | Not searched (template) | Undead Unluck | — |
 | real-manga.online | — | http | — | No | Not searched (template) | Real | — |
@@ -237,8 +237,8 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | witch-hat-atelier.online | — | http | — | No | Not searched (template) | Witch Hat Atelier (Tongari Boushi no Atelier) | — |
 | witch-watch.com | — | http | — | No | Not searched (template) | Witch Watch | — |
 | world-trigger.online | — | http | — | No | Not searched (template) | World Trigger | — |
-| wurmz.net | — | http | id | No | Included in search | Indonesian manga/manhwa/manhua reader | Yes |
+| wurmz.net | — | http | id | No | Included in search | Indonesian manga/manhwa/manhua reader | Search, chapters, pages, image |
 | yakshascans.com | — | http | — | No | Not searched (template) | — | — |
 | zazamanga.com | deathnotemanga.com (Included in search), death-note-online.com (Included in search), fairytail100yearsquest.com (Included in search), gintama.site (Included in search), initialdmanga.com (Included in search), inuyasha.net (Included in search), onepunchmanmanga.org (Included in search), readhellsing.com (Included in search), readoverlord.com (Included in search) | browser | — | No | Included in search | Also serves several redirected series sites | — |
 | zinmanga.com | — | browser | — | No | Not searched (needs-js) | — | — |
-| zonatmo.org | — | http | es | No | Included in search | Spanish manga/manhwa library | Yes |
+| zonatmo.org | — | http | es | No | Included in search | Spanish manga/manhwa library | Search, chapters, pages, image |

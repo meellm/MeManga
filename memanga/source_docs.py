@@ -21,6 +21,9 @@ HEALTH_WORKFLOW = f"{REPO}/actions/workflows/scraper-health.yml"
 # weekly health check runs from search to image (issue #266).
 PROBE_FILE = "tests/scrapers/live/test_live_parsing.py"
 PROBE_TABLE = "PARSING_PROBES"
+PROBE_SPEC = "ProbeSpec"
+PROBE_STEPS = ("search", "chapters", "pages", "image")
+STEP_FLAGS = ("chapters", "pages", "image")
 
 START = "<!-- source-catalog:start -->"
 END = "<!-- source-catalog:end -->"
@@ -54,45 +57,143 @@ def render_count(sources=None):
     return f"{len(sources)} scrapers / {_domain_count(sources)} domains"
 
 
-def pipeline_probe_domains(root=None):
-    """Domains the weekly live check runs from search to image.
-
-    Read from the literal keys of ``PARSING_PROBES`` in the live probe
-    file, without importing the tests.
-    """
+def _probe_file_tree(root):
     path = (root or _repo_root()) / PROBE_FILE
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _probe_table(tree):
+    """``(domain, spec node)`` pairs of ``PARSING_PROBES``."""
     for node in tree.body:
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name)
                 and node.targets[0].id == PROBE_TABLE
                 and isinstance(node.value, ast.Dict)):
-            domains = []
-            for key in node.value.keys:
+            pairs = []
+            for key, value in zip(node.value.keys, node.value.values):
                 if not (isinstance(key, ast.Constant)
                         and isinstance(key.value, str)):
                     raise ValueError(
                         f"{PROBE_FILE}: every key of {PROBE_TABLE} must be "
                         "a domain written as a string")
-                domains.append(key.value)
-            return domains
+                pairs.append((key.value, value))
+            return pairs
     raise ValueError(f"{PROBE_FILE}: no {PROBE_TABLE} dictionary found")
 
 
-def pipeline_probed_sources(sources, domains):
-    """Canonical domains of the sources that ``domains`` belong to."""
+def pipeline_probe_domains(root=None):
+    """Domains in the weekly live probe, in the order of the probe file.
+
+    Read from the literal keys of ``PARSING_PROBES``, without importing
+    the tests.
+    """
+    return [domain for domain, _spec in _probe_table(_probe_file_tree(root))]
+
+
+def _literal(node, what):
+    try:
+        return ast.literal_eval(node)
+    except ValueError:
+        raise ValueError(f"{PROBE_FILE}: {what} must be written as a "
+                         "literal value") from None
+
+
+def _spec_fields(tree):
+    """Field names of ``ProbeSpec`` in order, and their defaults."""
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == PROBE_SPEC:
+            fields, defaults = [], {}
+            for item in node.body:
+                if (isinstance(item, ast.AnnAssign)
+                        and isinstance(item.target, ast.Name)):
+                    fields.append(item.target.id)
+                    if item.value is not None:
+                        defaults[item.target.id] = _literal(
+                            item.value, f"the default of {item.target.id}")
+            return fields, defaults
+    raise ValueError(f"{PROBE_FILE}: no {PROBE_SPEC} class found")
+
+
+def _probe_steps(values):
+    """Steps the pipeline probe runs for one spec, after the home page.
+
+    Mirrors test_scraper_pipeline_live: search only with a query; the
+    chapter list only with check_chapters; pages and image each only
+    when the step before runs and their own flag is set.
+    """
+    steps = []
+    if values["query"] is not None:
+        steps.append("search")
+    if values["check_chapters"]:
+        steps.append("chapters")
+        if values["check_pages"]:
+            steps.append("pages")
+            if values["check_image"]:
+                steps.append("image")
+    return tuple(steps)
+
+
+def pipeline_probe_steps(root=None):
+    """``{domain: steps}`` for every probe in ``PARSING_PROBES``.
+
+    Each spec must be a ``ProbeSpec(...)`` call with literal values;
+    anything else is refused rather than guessed.
+    """
+    tree = _probe_file_tree(root)
+    fields, defaults = _spec_fields(tree)
+    needed = ("query",) + tuple(f"check_{step}" for step in STEP_FLAGS)
+    result = {}
+    for domain, call in _probe_table(tree):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                and call.func.id == PROBE_SPEC):
+            raise ValueError(
+                f"{PROBE_FILE}: the probe for {domain} must be a "
+                f"{PROBE_SPEC}(...) call")
+        if len(call.args) > len(fields):
+            raise ValueError(f"{PROBE_FILE}: too many arguments for {domain}")
+        values = dict(defaults)
+        for name, arg in zip(fields, call.args):
+            values[name] = _literal(arg, f"{name} of {domain}")
+        for keyword in call.keywords:
+            if keyword.arg not in fields:
+                raise ValueError(
+                    f"{PROBE_FILE}: unknown argument {keyword.arg} for {domain}")
+            values[keyword.arg] = _literal(
+                keyword.value, f"{keyword.arg} of {domain}")
+        missing = [name for name in needed if name not in values]
+        if missing:
+            raise ValueError(f"{PROBE_FILE}: {domain} has no value for "
+                             + ", ".join(missing))
+        result[domain] = _probe_steps(values)
+    return result
+
+
+def source_probe_steps(sources, probe_steps):
+    """``{canonical domain: steps}``; a source probed under several of
+    its domains gets every step any of those probes runs."""
     owner = {}
     for source in sources:
         for domain in (source.domain,) + source.aliases:
             owner[domain] = source.domain
-    probed = set()
-    for domain in domains:
+    steps = {}
+    for domain, domain_steps in probe_steps.items():
         base = domain[4:] if domain.startswith("www.") else domain
         if base not in owner:
             raise ValueError(
                 f"{PROBE_FILE}: {domain} is not a registered source domain")
-        probed.add(owner[base])
-    return probed
+        merged = set(steps.get(owner[base], ())) | set(domain_steps)
+        steps[owner[base]] = tuple(s for s in PROBE_STEPS if s in merged)
+    return steps
+
+
+def probe_label(steps):
+    """Cell text for the live probe columns."""
+    if steps is None:
+        return "—"
+    if not steps:
+        return "Home page"
+    text = ", ".join(steps)
+    return text[0].upper() + text[1:]
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -102,17 +203,17 @@ def pipeline_probed_sources(sources, domains):
 
 def render_supported_sources(root=None):
     sources = source_catalog()
-    probed = pipeline_probed_sources(sources, pipeline_probe_domains(root))
+    probed = source_probe_steps(sources, pipeline_probe_steps(root))
     lines = [
         "# Supported Sources",
         "",
         f"MeManga registers {_domain_count(sources)} domains across {len(sources)} scrapers. Registration does not mean a site is currently reachable.",
         "Search status describes the default sweep; direct URLs remain available for registered sources.",
         "Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.",
-        f"Full live check: the weekly [scraper health check]({HEALTH_WORKFLOW}) runs search, chapters, pages and an image download against this source. Being in the check does not mean the last run passed.",
+        f"Live probe: the steps the weekly [scraper health check]({HEALTH_WORKFLOW}) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.",
         f"The [documentation site]({SITE_PAGE}) explains these columns.",
         "",
-        "| Source | Aliases | Engine | Language | NSFW | Search status | Notes | Full live check |",
+        "| Source | Aliases | Engine | Language | NSFW | Search status | Notes | Live probe |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for source in sources:
@@ -123,7 +224,7 @@ def render_supported_sources(root=None):
         lines.append(_row((
             source.domain, aliases, source.engine, source.language or "—",
             "Yes" if source.nsfw else "No", source.search_status,
-            source.note or "—", "Yes" if source.domain in probed else "—")))
+            source.note or "—", probe_label(probed.get(source.domain)))))
     return "\n".join(lines) + "\n"
 
 
@@ -180,14 +281,14 @@ def _site_aliases(source):
 
 def _site_table(sources, probed):
     lines = [
-        "| Source | Other domains | Engine | Language | Adult | Search | Full check | Notes |",
+        "| Source | Other domains | Engine | Language | Adult | Search | Live probe | Notes |",
         "|---|---|---|---|---|---|---|---|",
     ]
     for source in sources:
         lines.append(_row((
             source.domain, _site_aliases(source), source.engine,
             source.language or "—", "Yes" if source.nsfw else "—",
-            _site_search(source), "Yes" if source.domain in probed else "—",
+            _site_search(source), probe_label(probed.get(source.domain)),
             source.note or "—")))
     return lines
 
@@ -202,7 +303,7 @@ def _domain_list(domains):
 
 def render_site_list(root=None):
     sources = source_catalog()
-    probed = pipeline_probed_sources(sources, pipeline_probe_domains(root))
+    probed = source_probe_steps(sources, pipeline_probe_steps(root))
     searched = [s for s in sources if s.search_status == INCLUDED]
     templates = [s for s in sources if s.template]
     skipped = [s for s in sources if s.search_skip and not s.template]
@@ -222,7 +323,8 @@ def render_site_list(root=None):
         f"| Included in search | {len(searched)} |",
         f"| In the default selection | {len(DEFAULT_ENABLED_SOURCES)} |",
         f"| Adult content | {len(adult)} |",
-        f"| In the full weekly check | {len(probed)} |",
+        f"| In the weekly live probe | {len(probed)} |",
+        f"| Live probe through to an image download | {sum('image' in steps for steps in probed.values())} |",
         "",
         "## Adult sources",
         "",

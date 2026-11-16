@@ -86,22 +86,103 @@ def test_probe_domains_refuse_a_table_they_cannot_read(tmp_path, body):
 
 def test_probe_domains_belong_to_their_source():
     sources = source_catalog()
-    probed = source_docs.pipeline_probed_sources(
-        sources, ["asuracomic.net", "www.mangadex.org"])
-    assert probed == {"asurascans.com", "mangadex.org"}
+    steps = source_docs.source_probe_steps(sources, {
+        "asuracomic.net": ("search",),
+        "asuratoon.com": ("chapters", "pages"),
+        "www.mangadex.org": (),
+    })
+    assert steps == {"asurascans.com": ("search", "chapters", "pages"),
+                     "mangadex.org": ()}
     with pytest.raises(ValueError, match="not-registered.example"):
-        source_docs.pipeline_probed_sources(sources,
-                                            ["not-registered.example"])
+        source_docs.source_probe_steps(sources,
+                                       {"not-registered.example": ()})
+
+
+SPEC_CLASS = (
+    "class ProbeSpec:\n"
+    "    description: str\n"
+    "    query: str | None = None\n"
+    "    check_chapters: bool = True\n"
+    "    check_pages: bool = True\n"
+    "    check_image: bool = True\n"
+    "\n"
+)
+
+
+def test_probe_steps_follow_each_spec(tmp_path):
+    root = _probe_file(tmp_path, SPEC_CLASS + (
+        "PARSING_PROBES = {\n"
+        "    'full.example': ProbeSpec('Full', query='one piece'),\n"
+        "    'positional.example': ProbeSpec('Positional', 'one piece'),\n"
+        "    'no-pages.example': ProbeSpec('API', query='x', check_pages=False),\n"
+        "    'no-chapters.example': ProbeSpec('Base', query='x',\n"
+        "                                     check_chapters=False),\n"
+        "    'no-image.example': ProbeSpec('Reader', query='x', check_image=False),\n"
+        "    'template.example': ProbeSpec('Single-series template'),\n"
+        "    'home.example': ProbeSpec('Home', check_chapters=False),\n"
+        "}\n"))
+    assert source_docs.pipeline_probe_steps(root) == {
+        "full.example": ("search", "chapters", "pages", "image"),
+        "positional.example": ("search", "chapters", "pages", "image"),
+        "no-pages.example": ("search", "chapters"),
+        "no-chapters.example": ("search",),
+        "no-image.example": ("search", "chapters", "pages"),
+        "template.example": ("chapters", "pages", "image"),
+        "home.example": (),
+    }
+
+
+def test_probe_defaults_come_from_the_spec_class(tmp_path):
+    root = _probe_file(tmp_path, SPEC_CLASS.replace(
+        "check_image: bool = True", "check_image: bool = False") + (
+        "PARSING_PROBES = {'x.example': ProbeSpec('X', query='x')}\n"))
+    assert source_docs.pipeline_probe_steps(root) == {
+        "x.example": ("search", "chapters", "pages")}
+
+
+@pytest.mark.parametrize("probe, message", [
+    ("Other('X', query='x')", "ProbeSpec"),
+    ("ProbeSpec('X', query=QUERY)", "literal"),
+    ("ProbeSpec('X', check_everything=True)", "unknown argument"),
+    ("ProbeSpec('X', 'q', True, True, True, 'extra')", "too many"),
+])
+def test_probe_steps_refuse_specs_they_cannot_read(tmp_path, probe, message):
+    root = _probe_file(tmp_path, SPEC_CLASS
+                       + f"PARSING_PROBES = {{'x.example': {probe}}}\n")
+    with pytest.raises(ValueError, match=message):
+        source_docs.pipeline_probe_steps(root)
+
+
+def test_probe_steps_need_the_spec_class(tmp_path):
+    root = _probe_file(tmp_path,
+                       "PARSING_PROBES = {'x.example': ProbeSpec('X')}\n")
+    with pytest.raises(ValueError, match="ProbeSpec"):
+        source_docs.pipeline_probe_steps(root)
+
+
+def test_probe_labels():
+    assert source_docs.probe_label(None) == "—"
+    assert source_docs.probe_label(()) == "Home page"
+    assert source_docs.probe_label(("search", "chapters")) == "Search, chapters"
 
 
 def test_committed_probe_table_is_read():
     domains = source_docs.pipeline_probe_domains(ROOT)
     assert "mangadex.org" in domains
-    probed = source_docs.pipeline_probed_sources(source_catalog(), domains)
-    rows = render_supported_sources().splitlines()
-    marked = {line.split("|")[1].strip() for line in rows
-              if line.startswith("| ") and line.rstrip().endswith("| Yes |")}
-    assert marked == probed
+    probe_steps = source_docs.pipeline_probe_steps(ROOT)
+    assert list(probe_steps) == domains
+    steps = source_docs.source_probe_steps(source_catalog(), probe_steps)
+    cells = {}
+    for line in render_supported_sources().splitlines():
+        parts = [part.strip() for part in re.split(r"(?<!\\)\|", line)[1:-1]]
+        if len(parts) == 8 and parts[0] not in ("Source", "---"):
+            cells[parts[0]] = parts[7]
+    for source in source_catalog():
+        assert cells[source.domain] == source_docs.probe_label(
+            steps.get(source.domain)), source.domain
+    # Only a probe that reaches the image step may say so.
+    for source, source_steps in steps.items():
+        assert ("image" in cells[source]) == ("image" in source_steps)
 
 
 # ── Site page ──────────────────────────────────────────────────────────
