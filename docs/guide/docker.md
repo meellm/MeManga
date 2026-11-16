@@ -320,9 +320,14 @@ To avoid typing the file name, set `COMPOSE_FILE=compose.dev.yaml` in your
 shell for that folder.
 
 To use newer source code, run `git pull` in that folder and then the
-`build` command again. If `git pull` stops because it would overwrite
-`compose.dev.yaml`, delete the file you saved and run `git pull` again:
-the source code then brings the file itself.
+`build` command again.
+
+If `git pull` stops because it would overwrite `compose.dev.yaml`, the
+newer source code brings its own copy of that file. Keep yours: rename it
+to a name that no other file in the folder has, or move it to another
+folder. Then run `git pull` again. If you had changed your copy, compare it
+with the new `compose.dev.yaml` and make the same changes there before you
+build.
 
 ::: warning If you already use Compose in a copy of the source code
 Look at `compose.yaml` in that folder. If it has a `build:` setting, it
