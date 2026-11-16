@@ -506,7 +506,7 @@ def slug(text: str) -> str:
 
 
 def anchor(key: str) -> str:
-    """The anchor of a key's entry, whose heading is the key in code."""
+    """The anchor of a key's entry, whose heading is the key itself."""
     return slug(key)
 
 
@@ -591,7 +591,10 @@ def _change_text(key: str) -> str:
 
 def _key_entry(key: str, defaults: Dict[str, object]) -> List[str]:
     doc = KEYS[key]
-    lines = [f"### {_code(key)}", ""]
+    # A plain heading: the site reads the heading's source text out as
+    # the label of its permalink, so Markdown there would be read aloud.
+    # reference/config.md sets the key headings in the code font.
+    lines = [f"### {key}", ""]
     if key not in RELEASE_KEYS:
         lines += [f'<Badge type="info" text="Not in {RELEASE_TAG}" />', ""]
     lines += [doc.text, ""]

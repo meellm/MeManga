@@ -16,7 +16,7 @@
 
 Where downloaded chapters are saved, in which format, and what happens after a chapter is saved.
 
-### `delivery.mode`
+### delivery.mode
 
 `local` keeps downloaded chapters in the download folder. `email` also sends them to a Kindle by email.
 
@@ -24,7 +24,7 @@ Where downloaded chapters are saved, in which format, and what happens after a c
 - **Default:** `local`
 - **Change it:** in the desktop app, Settings → General; `memanga config` (asks questions); `memanga config set delivery.mode VALUE`.
 
-### `delivery.download_dir`
+### delivery.download_dir
 
 Folder where downloaded chapters are saved. Each series gets a folder of its own inside it.
 
@@ -32,7 +32,7 @@ Folder where downloaded chapters are saved. Each series gets a folder of its own
 - **Default:** the `Downloads/MeManga` folder in your home folder, stored as a full path
 - **Change it:** in the desktop app, Settings → General; `memanga config` (asks questions); `memanga config set delivery.download_dir VALUE`.
 
-### `delivery.delete_after_send`
+### delivery.delete_after_send
 
 With email delivery, delete a chapter's file once it has been sent. A file that cannot be deleted stays on disk.
 
@@ -40,7 +40,7 @@ With email delivery, delete a chapter's file once it has been sent. A file that 
 - **Default:** `false`
 - **Change it:** in the desktop app, Settings → Kindle / Email; `memanga config` (asks questions); `memanga config set delivery.delete_after_send VALUE`.
 
-### `delivery.output_format`
+### delivery.output_format
 
 File format of downloaded chapters: a `pdf` or `epub` document, a `cbz` or `zip` archive, or a folder of `jpg`, `png` or `webp` images. Only PDF and EPUB files are sent to a Kindle.
 
@@ -48,7 +48,7 @@ File format of downloaded chapters: a `pdf` or `epub` document, a `cbz` or `zip`
 - **Default:** `pdf`
 - **Change it:** in the desktop app, Settings → General; `memanga config` (asks questions); `memanga config set delivery.output_format VALUE`.
 
-### `delivery.naming_template`
+### delivery.naming_template
 
 Name of each chapter file, without the extension. `{title}`, `{chapter}` and `{source}` are replaced with the series title, the chapter number and the source. A folder of images is always named `Chapter` and the chapter number.
 
@@ -56,7 +56,7 @@ Name of each chapter file, without the extension. `{title}`, `{chapter}` and `{s
 - **Default:** `{title} - Chapter {chapter}`
 - **Change it:** in the desktop app, Settings → General; `memanga config set delivery.naming_template VALUE`.
 
-### `delivery.post_processing.enabled`
+### delivery.post_processing.enabled
 
 Run `delivery.post_processing.command` after each chapter's file or folder is saved.
 
@@ -64,7 +64,7 @@ Run `delivery.post_processing.command` after each chapter's file or folder is sa
 - **Default:** `false`
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config` (asks questions); `memanga config set delivery.post_processing.enabled VALUE`.
 
-### `delivery.post_processing.command`
+### delivery.post_processing.command
 
 The command to run. Only use commands you trust. It is split into arguments and started directly, without a shell. `{output_path}`, `{title}`, `{chapter}`, `{source}`, `{format}` and `{is_dir}` in it are replaced with the saved file or folder, the series title, the chapter number, the source, the output format and `1` for a folder or `0` for a file. The same values are in the environment variables `MEMANGA_OUTPUT_PATH`, `MEMANGA_MANGA_TITLE`, `MEMANGA_CHAPTER`, `MEMANGA_SOURCE`, `MEMANGA_OUTPUT_FORMAT` and `MEMANGA_IS_DIR`.
 
@@ -72,7 +72,7 @@ The command to run. Only use commands you trust. It is split into arguments and 
 - **Default:** empty
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config` (asks questions); `memanga config set delivery.post_processing.command VALUE`.
 
-### `delivery.post_processing.fail_on_error`
+### delivery.post_processing.fail_on_error
 
 When the command fails: `true` marks the chapter as failed, `false` shows a warning and keeps the chapter as downloaded.
 
@@ -84,7 +84,7 @@ When the command fails: `true` marks the chapter as failed, `false` shows a warn
 
 Sending chapters to a Kindle by email. [Send chapters to a Kindle](../guide/kindle) explains the setup.
 
-### `email.kindle_email`
+### email.kindle_email
 
 Your Kindle's Send to Kindle email address.
 
@@ -92,7 +92,7 @@ Your Kindle's Send to Kindle email address.
 - **Default:** empty
 - **Change it:** in the desktop app, Settings → Kindle / Email; `memanga config` (asks questions); `memanga config set email.kindle_email VALUE`.
 
-### `email.sender_email`
+### email.sender_email
 
 The address the emails are sent from. It has to be on the list of approved senders in your Amazon account.
 
@@ -100,7 +100,7 @@ The address the emails are sent from. It has to be on the list of approved sende
 - **Default:** empty
 - **Change it:** in the desktop app, Settings → Kindle / Email; `memanga config` (asks questions); `memanga config set email.sender_email VALUE`.
 
-### `email.smtp_server`
+### email.smtp_server
 
 The mail server that sends the emails.
 
@@ -108,7 +108,7 @@ The mail server that sends the emails.
 - **Default:** `smtp.gmail.com`
 - **Change it:** in the desktop app, Settings → Kindle / Email; `memanga config set email.smtp_server VALUE`.
 
-### `email.smtp_port`
+### email.smtp_port
 
 The port of the mail server.
 
@@ -116,7 +116,7 @@ The port of the mail server.
 - **Default:** `587`
 - **Change it:** in the desktop app, Settings → Kindle / Email; `memanga config set email.smtp_port VALUE`.
 
-### `email.smtp_tls`
+### email.smtp_tls
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -126,7 +126,7 @@ How the connection to the mail server is encrypted. `auto` uses implicit TLS on 
 - **Default:** `auto`
 - **Change it:** `memanga config set email.smtp_tls VALUE`.
 
-### `email.smtp_timeout`
+### email.smtp_timeout
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -136,7 +136,7 @@ Seconds to wait for the mail server at each step of sending.
 - **Default:** `60`
 - **Change it:** `memanga config set email.smtp_timeout VALUE`.
 
-### `email.max_email_mb`
+### email.max_email_mb
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -146,7 +146,7 @@ The largest email your mail provider accepts, in MB. A PDF that does not fit is 
 - **Default:** `25`
 - **Change it:** `memanga config set email.max_email_mb VALUE`.
 
-### `email.app_password`
+### email.app_password
 
 The password for the mail server, usually an app password. Leave it empty here: MeManga keeps the password in the system keyring and only writes it into this file, as plain text, when there is no usable keyring. `MEMANGA_SMTP_PASSWORD`, or `MEMANGA_SMTP_PASSWORD_FILE` naming a file that holds the password, is used instead when set.
 
@@ -155,7 +155,7 @@ The password for the mail server, usually an app password. Leave it empty here: 
 - **Secret:** `memanga config show` and `memanga config get` never print it.
 - **Change it:** in the desktop app, Settings → Kindle / Email; `memanga config` (asks questions); `memanga config set email.app_password` (asks for it, or reads it from standard input with `-`).
 
-### `email.kindle_scope`
+### email.kindle_scope
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -169,7 +169,7 @@ Which manga are sent: `all` sends every manga, `selected` only the manga whose K
 
 A daily check for new chapters, run by the system's scheduler.
 
-### `cron.enabled`
+### cron.enabled
 
 Whether MeManga has set up a daily check with the system's scheduler. It records what was set up: changing it here does not add or remove the scheduled check.
 
@@ -177,7 +177,7 @@ Whether MeManga has set up a daily check with the system's scheduler. It records
 - **Default:** `false`
 - **Change it:** in the desktop app, Settings → Advanced; `memanga cron install`; `memanga cron remove`.
 
-### `cron.time`
+### cron.time
 
 Time of day of the scheduled check, in the computer's local time.
 
@@ -189,7 +189,7 @@ Time of day of the scheduled check, in the computer's local time.
 
 Settings of the desktop app.
 
-### `gui.sort_by`
+### gui.sort_by
 
 Order of the library in the desktop app.
 
@@ -197,7 +197,7 @@ Order of the library in the desktop app.
 - **Default:** `title`
 - **Change it:** in the desktop app, the sort menu of the Library page; `memanga config set gui.sort_by VALUE`.
 
-### `gui.auto_check`
+### gui.auto_check
 
 When the desktop app starts or comes back online, check for new chapters if the last check is older than `gui.auto_check_interval`.
 
@@ -205,7 +205,7 @@ When the desktop app starts or comes back online, check for new chapters if the 
 - **Default:** `true`
 - **Change it:** `memanga config set gui.auto_check VALUE`.
 
-### `gui.auto_check_interval`
+### gui.auto_check_interval
 
 Seconds since the last check after which the desktop app checks again by itself.
 
@@ -213,7 +213,7 @@ Seconds since the last check after which the desktop app checks again by itself.
 - **Default:** `3600`
 - **Change it:** `memanga config set gui.auto_check_interval VALUE`.
 
-### `gui.reader_prefetch_next`
+### gui.reader_prefetch_next
 
 While you read a manga in manual mode, download its next available chapter in the background.
 
@@ -221,7 +221,7 @@ While you read a manga in manual mode, download its next available chapter in th
 - **Default:** `false`
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config set gui.reader_prefetch_next VALUE`.
 
-### `gui.network_check`
+### gui.network_check
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -231,7 +231,7 @@ Let the desktop app find out whether it is online by opening a connection to a w
 - **Default:** `true`
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config set gui.network_check VALUE`.
 
-### `gui.network_check_hosts`
+### gui.network_check_hosts
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -241,7 +241,7 @@ The hosts for that test, as `host:port` entries; IPv6 addresses go in square bra
 - **Default:** empty list
 - **Change it:** `memanga config edit`.
 
-### `gui.mangadex_cover_fallback`
+### gui.mangadex_cover_fallback
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -251,7 +251,7 @@ Look for missing or broken covers on MangaDex. This is skipped while mangadex.or
 - **Default:** `true`
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config set gui.mangadex_cover_fallback VALUE`.
 
-### `gui.search_chapter_counts`
+### gui.search_chapter_counts
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -261,7 +261,7 @@ Show how many chapters each search result has. This loads the chapter list of ev
 - **Default:** `true`
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config set gui.search_chapter_counts VALUE`.
 
-### `gui.cover_cache_max_mb`
+### gui.cover_cache_max_mb
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -271,7 +271,7 @@ Disk space for saved cover images, in MB. Beyond it, the covers used longest ago
 - **Default:** `200`
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config set gui.cover_cache_max_mb VALUE`.
 
-### `gui.max_concurrent_downloads`
+### gui.max_concurrent_downloads
 
 How many chapters the desktop app downloads at the same time.
 
@@ -279,7 +279,7 @@ How many chapters the desktop app downloads at the same time.
 - **Default:** not in a new config file. While it is missing, 2 are downloaded at the same time.
 - **Change it:** in the desktop app, Settings → General.
 
-### `gui.view_mode`
+### gui.view_mode
 
 Layout of the library in the desktop app.
 
@@ -287,7 +287,7 @@ Layout of the library in the desktop app.
 - **Default:** not in a new config file. Missing until you switch the layout; `grid` is used.
 - **Change it:** in the desktop app, the Grid view and List view buttons of the Library page.
 
-### `gui.reader_view_mode`
+### gui.reader_view_mode
 
 Reader layout for a manga without a layout of its own. A layout chosen in the reader is stored with the manga; this key is only written when that manga is no longer in the library.
 
@@ -295,7 +295,7 @@ Reader layout for a manga without a layout of its own. A layout chosen in the re
 - **Default:** not in a new config file. While it is missing, `continuous` is used, or `double` when `gui.reader_dual_page` is `true`.
 - **Change it:** by editing `config.yaml`.
 
-### `gui.reader_dual_page`
+### gui.reader_dual_page
 
 Setting from earlier versions: show two pages side by side. It is only read while `gui.reader_view_mode` is missing.
 
@@ -303,7 +303,7 @@ Setting from earlier versions: show two pages side by side. It is only read whil
 - **Default:** not in a new config file. New config files do not have it.
 - **Change it:** by editing `config.yaml`.
 
-### `gui.browser_install_skipped`
+### gui.browser_install_skipped
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -313,7 +313,7 @@ Records that you skipped the download of the browser components when the desktop
 - **Default:** not in a new config file. Missing until you skip that question.
 - **Change it:** MeManga sets it; leave it as it is.
 
-### `gui.download_dir_confirmed`
+### gui.download_dir_confirmed
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -327,7 +327,7 @@ Records that the desktop app has asked where to save downloads, so it does not a
 
 The desktop app's built-in reader.
 
-### `reader.remove_after_read`
+### reader.remove_after_read
 
 Delete a chapter's downloaded file after you have read it in the built-in reader.
 
@@ -339,7 +339,7 @@ Delete a chapter's downloaded file after you have read it in the built-in reader
 
 Options for chapters from MangaDex.
 
-### `mangadex.data_saver`
+### mangadex.data_saver
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -349,7 +349,7 @@ Download MangaDex chapters as smaller, compressed images.
 - **Default:** `false`
 - **Change it:** in the desktop app, Settings → General; `memanga config` (asks questions); `memanga config --mangadex-quality {original,data-saver}`; `memanga config set mangadex.data_saver VALUE`.
 
-### `mangadex.removed_group_ids`
+### mangadex.removed_group_ids
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -363,7 +363,7 @@ MangaDex scanlation groups whose chapters are skipped, by group ID. Resetting th
 
 What happens when some pages of a chapter cannot be downloaded.
 
-### `partial_chapters.enabled`
+### partial_chapters.enabled
 
 Keep a chapter when some of its pages fail, with only the pages that worked. When off, one missing page fails the whole chapter.
 
@@ -371,7 +371,7 @@ Keep a chapter when some of its pages fail, with only the pages that worked. Whe
 - **Default:** `false`
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config` (asks questions); `memanga config --partial {on,off}`; `memanga config set partial_chapters.enabled VALUE`.
 
-### `partial_chapters.threshold_percent`
+### partial_chapters.threshold_percent
 
 The largest share of pages, in percent, that may fail for a chapter to be kept.
 
@@ -383,7 +383,7 @@ The largest share of pages, in percent, that may fail for a chapter to be kept.
 
 Which sources are turned off. The desktop app writes these keys.
 
-### `sources.disabled`
+### sources.disabled
 
 Sources that are turned off, by domain. Search and the cover look-up skip them.
 
@@ -391,7 +391,7 @@ Sources that are turned off, by domain. Search and the cover look-up skip them.
 - **Default:** not in a new config file. Missing until the desktop app first starts. It then turns off every source outside its default selection.
 - **Change it:** in the desktop app, the Sources page.
 
-### `sources.first_run_seeded`
+### sources.first_run_seeded
 
 Records that the desktop app has set up `sources.disabled` for the first time.
 
@@ -399,7 +399,7 @@ Records that the desktop app has set up `sources.disabled` for the first time.
 - **Default:** not in a new config file. Missing until the desktop app first starts.
 - **Change it:** MeManga sets it; leave it as it is.
 
-### `sources.recurated_asura`
+### sources.recurated_asura
 
 Records that a one-time change to `sources.disabled` has been made, so it is never made again.
 
@@ -411,7 +411,7 @@ Records that a one-time change to `sources.disabled` has been made, so it is nev
 
 The keys at the top of the file.
 
-### `schema_version`
+### schema_version
 
 <Badge type="info" text="Not in v0.4.4" />
 
@@ -421,7 +421,7 @@ Layout version of this file. MeManga upgrades an older file when it saves it, an
 - **Default:** `1`
 - **Change it:** MeManga sets it; leave it as it is.
 
-### `manga`
+### manga
 
 Your library: one entry for each series you follow, with its title, its sources and your choices for it. Add and change series with the commands or in the desktop app; there is no need to edit the entries by hand.
 

@@ -1,8 +1,22 @@
+---
+pageClass: config-reference
+---
+
 # Settings reference
 
 <script setup>
 import { release } from '../.vitepress/release'
 </script>
+
+<style>
+/* Each key is a plain heading (so its permalink label is plain text) set
+   in the code font, as keys are elsewhere on the site. */
+.config-reference .vp-doc h3 {
+  font-family: var(--vp-font-family-mono);
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+</style>
 
 Every setting in `config.yaml`, the file where MeManga keeps your settings
 and your library: its type, its default, what it does and how to change it.
@@ -11,7 +25,7 @@ says where the file is; `memanga config path` prints it.
 
 ::: info How to read this page
 - This page describes the **development version**.
-- Settings marked <Badge type="info" :text="`Not in ${release.tag}`" /> have no effect in {{ release.tag }}.
+- Settings marked <Badge type="info" :text="`Not in ${release.tag}`" /> are not used by {{ release.tag }}.
 - `memanga config get`, `config set`, `config path` and `config edit` are
   not in {{ release.tag }} either; there, change settings in the desktop
   app or with `memanga config`.

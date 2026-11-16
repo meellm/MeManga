@@ -39,7 +39,7 @@ def _documented():
 
 def _entry(reference, key):
     """A key's entry, from its heading to the next heading."""
-    text = reference.split(f"\n### `{key}`\n", 1)[1]
+    text = reference.split(f"\n### {key}\n", 1)[1]
     return re.split(r"\n##+ ", text, maxsplit=1)[0]
 
 
@@ -66,6 +66,34 @@ def test_generated_files_are_current():
             "run: python -m memanga.config_docs")
 
 
+def test_check_reports_stale_files_and_generation_repairs_them(
+        tmp_path, monkeypatch, capsys, reference, example):
+    monkeypatch.setattr(config_docs, "_repo_root", lambda: tmp_path)
+    page = tmp_path / config_docs.REFERENCE_PATH
+    page.parent.mkdir(parents=True)
+    page.write_text("outdated\n", encoding="utf-8")
+    sample = tmp_path / config_docs.EXAMPLE_PATH
+
+    with pytest.raises(SystemExit) as stopped:
+        config_docs.main(["--check"])
+    assert stopped.value.code == 1
+    err = capsys.readouterr().err
+    assert str(Path(config_docs.REFERENCE_PATH)) in err
+    assert str(Path(config_docs.EXAMPLE_PATH)) in err
+    assert "Run: python -m memanga.config_docs" in err
+    # --check only reports: the stale file stays, the missing one too.
+    assert page.read_text(encoding="utf-8") == "outdated\n"
+    assert not sample.exists()
+
+    config_docs.main([])
+    assert "Updated settings reference" in capsys.readouterr().out
+    assert page.read_text(encoding="utf-8") == reference
+    assert sample.read_text(encoding="utf-8") == example
+
+    config_docs.main(["--check"])  # Current now, so no exit.
+    assert capsys.readouterr().out == ""
+
+
 def test_descriptions_fit_the_program():
     assert config_docs.problems() == []
 
@@ -86,12 +114,20 @@ def test_generated_files_are_marked(reference, example):
     assert "python -m memanga.config_docs" in example.splitlines()[2]
 
 
+def test_headings_are_plain_text(reference):
+    # The site reads a heading's source text out as its permalink label,
+    # so Markdown or attributes there would be read aloud.
+    for line in reference.splitlines():
+        if line.startswith("#"):
+            assert not re.search(r"[`*<>{}\[\]]", line), line
+
+
 # ─── Coverage ───────────────────────────────────────────────────────────
 
 def test_every_default_and_settable_key_has_an_entry(reference):
     keys = set(config_docs.default_keys()) | set(CONFIG_KEYS)
     for key in keys:
-        assert f"\n### `{key}`\n" in reference, key
+        assert f"\n### {key}\n" in reference, key
         # The overview links to the anchor the site gives that heading.
         assert f"(#{config_docs.anchor(key)})" in reference, key
 
@@ -225,6 +261,9 @@ def test_page_shows_the_reference_and_the_example():
     page = (ROOT / "docs/reference/config.md").read_text(encoding="utf-8")
     assert "<!--@include: ./config-keys.md-->" in page
     assert "\n<<< ../../examples/config.example.yaml\n" in page
+    # The plain key headings are set in the code font on this page only.
+    assert "\npageClass: config-reference\n" in page
+    assert ".config-reference .vp-doc h3 {" in page
     site = (ROOT / "docs/.vitepress/config.mts").read_text(encoding="utf-8")
     assert "'reference/config-keys.md'" in site
     assert "link: '/reference/config'" in site
