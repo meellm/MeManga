@@ -45,10 +45,9 @@ docker pull meellm/memanga:0.4.4
 **Systems:** Linux on `amd64` (most PCs and servers) and `arm64` (for
 example a 64-bit Raspberry Pi). There is no image for 32-bit ARM.
 
-**Size:** the download for `0.4.4` is about 750 MB compressed on both
-systems, as Docker Hub reports it for the image pushed on 3 October 2026.
-Unpacked on disk it is larger: about 1.9 GB was measured for the `arm64`
-image in November 2026. To see the size on your machine after the pull:
+**Size:** the download for `0.4.4` is about 750 MB, compressed. Unpacked
+on disk the image takes more space. To see its size on your machine after
+the pull:
 
 ```sh
 docker image ls meellm/memanga
@@ -86,8 +85,7 @@ Everything on this page uses this command. Only the last part changes:
 
 - `--rm` removes the container after the run. The named volumes stay.
 - `--init` is explained under [Stopping](#stopping-and-the-init-option).
-- New named volumes need no preparation. In a test with the published
-  image, MeManga's user could write to both right away.
+- New named volumes need no preparation.
 
 ### Folders on your machine
 
@@ -148,7 +146,6 @@ Things to know:
 - With rootless Docker, Podman or user-namespace remapping, ID `1000`
   inside the container is a different ID on your machine, and the steps
   above do not fit. Use named volumes there.
-- This path was not tested as thoroughly as named volumes.
 
 ## Run commands
 
@@ -312,8 +309,9 @@ now `compose.dev.yaml`, unchanged.
   same volumes, so your settings, library and downloads stay as they are.
 - A plain `docker compose …` in that folder now runs the published
   `0.4.4` image on the same volumes. That image is older than the
-  development version and was not tested with data the development version
-  has written. Do not mix the two on one set of data.
+  development version and may not be compatible with data the development
+  version has written. Keep using `-f compose.dev.yaml` for that data, and
+  do not mix the two on one set of data.
 - If the scheduler is running, it keeps running. Manage it with
   `-f compose.dev.yaml`.
 :::
@@ -370,8 +368,7 @@ docker run --rm --init -e TZ=Europe/Berlin \
 
 What this does and does not change:
 
-- It changes the local time inside the container. In a test with the
-  published image, the container's clock followed the zone that was set.
+- It changes the local time inside the container.
 - It does not change when a run starts. A schedule in your machine's cron
   follows your machine's clock, whatever `TZ` says.
 - `memanga watch` counts intervals and does not depend on the time of day.
@@ -380,10 +377,6 @@ What this does and does not change:
 With Compose, put `TZ=Europe/Berlin` in the `.env` file instead: see
 [Use Docker Compose](#use-docker-compose). `compose.dev.yaml` has no such
 setting.
-
-One zone was tried, on the `arm64` image, by looking at the container's
-clock. MeManga's own times under a zone, and an image built from source,
-were not checked: see [Planned](#planned).
 
 ## When something does not work
 
@@ -411,6 +404,5 @@ These are not available yet:
 
 - A smaller image with fewer browsers:
   [issue 332](https://github.com/meellm/MeManga/issues/332).
-- A check of time zones in an image built from source, and a time zone
-  setting for its Compose file:
+- A time zone setting in `compose.dev.yaml`:
   [issue 331](https://github.com/meellm/MeManga/issues/331).

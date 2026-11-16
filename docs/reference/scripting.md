@@ -15,7 +15,7 @@ For the commands themselves see [Use the command line](../guide/cli) and the
 ::: info What this page covers
 - It describes the **development version** as it behaves now.
   {{ release.tag }} is older: of the JSON output described here it has only
-  `search --json`, and the rules on this page were not checked against it.
+  `search --json`.
 - Apart from the [deprecation policy](#deprecation-policy), the page
   describes behaviour; it is not a promise that every detail stays the
   same.

@@ -122,3 +122,112 @@
 .vp-doc h2 {
   scroll-margin-top: 110px;
 }
+
+/*
+ * Previous and next page links at the end of a page. Only their look
+ * changes here; the default theme still decides which pages they link to
+ * and what they say. The selectors use the theme's own class names. If a
+ * later VitePress version renames them, its standard links are shown.
+ */
+.VPDocFooter .prev-next {
+  --memanga-pager-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' viewBox='0 0 24 24'%3E%3Cpath d='M5 12h14M12 5l7 7-7 7'/%3E%3C/svg%3E");
+  padding-top: 32px;
+  grid-row-gap: 12px;
+}
+
+.VPDocFooter .prev-next .pager-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  padding: 16px 20px 18px;
+  background-color: var(--vp-c-bg-soft);
+  text-align: left;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s;
+}
+
+.VPDocFooter .prev-next .pager-link:hover,
+.VPDocFooter .prev-next .pager-link:focus-visible {
+  border-color: var(--vp-c-brand-1);
+  background-color: var(--vp-c-brand-soft);
+}
+
+.VPDocFooter .prev-next .pager-link .desc {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vp-c-text-2);
+}
+
+/* The arrows are drawn without text, so screen readers skip them. */
+.VPDocFooter .prev-next .pager-link.prev .desc::before,
+.VPDocFooter .prev-next .pager-link.next .desc::after {
+  content: '';
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask: var(--memanga-pager-arrow) no-repeat center / 100%;
+  mask: var(--memanga-pager-arrow) no-repeat center / 100%;
+  transition: transform 0.2s;
+}
+
+.VPDocFooter .prev-next .pager-link.prev .desc::before {
+  transform: rotate(180deg);
+}
+
+.VPDocFooter .prev-next .pager-link.prev:hover .desc::before,
+.VPDocFooter .prev-next .pager-link.prev:focus-visible .desc::before {
+  transform: rotate(180deg) translateX(3px);
+}
+
+.VPDocFooter .prev-next .pager-link.next:hover .desc::after,
+.VPDocFooter .prev-next .pager-link.next:focus-visible .desc::after {
+  transform: translateX(3px);
+}
+
+.VPDocFooter .prev-next .pager-link .title {
+  line-height: 24px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.VPDocFooter .prev-next .pager-link:hover .title,
+.VPDocFooter .prev-next .pager-link:focus-visible .title {
+  color: var(--vp-c-brand-1);
+}
+
+/* Side by side, the next link lines up on the right; stacked, both start
+   on the left. */
+@media (min-width: 640px) {
+  .VPDocFooter .prev-next .pager-link.next {
+    align-items: flex-end;
+    text-align: right;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .VPDocFooter .prev-next .pager-link,
+  .VPDocFooter .prev-next .pager-link .desc::before,
+  .VPDocFooter .prev-next .pager-link .desc::after {
+    transition: none;
+  }
+
+  .VPDocFooter .prev-next .pager-link.prev:hover .desc::before,
+  .VPDocFooter .prev-next .pager-link.prev:focus-visible .desc::before {
+    transform: rotate(180deg);
+  }
+
+  .VPDocFooter .prev-next .pager-link.next:hover .desc::after,
+  .VPDocFooter .prev-next .pager-link.next:focus-visible .desc::after {
+    transform: none;
+  }
+}

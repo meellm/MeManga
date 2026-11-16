@@ -68,11 +68,6 @@ notarization, so macOS may warn about the app or refuse to open it the first
 time.
 :::
 
-::: info How these steps were checked
-The file names and archive contents come from the release build. Starting
-the app on each system has not been re-tested for this page.
-:::
-
 ### First start: browser components
 
 Some sources only work through a real browser, so MeManga uses its own
@@ -152,12 +147,6 @@ python -m pip install ".[gui]"
 memanga --gui
 ```
 
-::: info How these steps were checked
-The commands match the package settings and the command-line options in the
-source. A full install on Windows, macOS and Linux has not been re-tested for
-this page.
-:::
-
 ## Docker
 
 A published image runs the command line in a container. It does not
@@ -208,7 +197,3 @@ You can also:
 If your settings are still in `~/.config/memanga`, the development version
 moves that folder to the new location once, when it can do so safely.
 Otherwise it keeps using the old folder.
-
-## Next
-
-Continue with [First steps](./first-steps).
