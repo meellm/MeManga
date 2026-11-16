@@ -231,6 +231,19 @@ All notable changes are recorded here. Format loosely follows
   read, On hold, Completed, Dropped) in the right-click menu.
 
 ### Changed
+- #328 `compose.yaml` now runs the published image `meellm/memanga:0.4.4`
+  and needs no copy of the source code. It has the `memanga` service for
+  single commands, starts an init process, and takes two optional
+  settings: `MEMANGA_IMAGE` to run another image and `TZ` for the time
+  zone in the container (#331; UTC unless set). The setup that builds
+  from source, with the `scheduler` service, moved unchanged to
+  `compose.dev.yaml`: add `-f compose.dev.yaml` to `docker compose`, or
+  set `COMPOSE_FILE=compose.dev.yaml`. Both files use the same volume
+  names, so existing data stays where it is. If you built from source
+  before, keep using `compose.dev.yaml`: the published 0.4.4 image is
+  older than the development version and was not tested with data the
+  development version has written. The published image has no
+  `memanga watch`, so `compose.yaml` has no scheduler.
 - #395 Desktop text meets WCAG AA contrast (4.5:1) in both themes: the
   muted text colour of both themes and the light theme's accent,
   warning, danger and lilac colours are darker or lighter as needed,

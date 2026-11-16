@@ -415,7 +415,13 @@ docker run --rm \
 > host user differs). The Compose setup below uses named volumes and
 > sidesteps this.
 
-Use the included `compose.yaml` for repeated commands:
+> These Compose commands build the image from the source code. That setup
+> is now in `compose.dev.yaml`: run `export COMPOSE_FILE=compose.dev.yaml`
+> first, or put `-f compose.dev.yaml` after `docker compose` in each
+> command. The default `compose.yaml` runs the published image instead; see
+> [Run MeManga in Docker](https://meellm.github.io/MeManga/guide/docker).
+
+Use the included `compose.dev.yaml` for repeated commands:
 
 ```bash
 docker compose build

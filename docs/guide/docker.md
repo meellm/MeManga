@@ -187,6 +187,50 @@ without questions, for example
 terminal are in
 [Use MeManga in scripts](../reference/scripting#questions-and-running-without-a-terminal).
 
+## Use Docker Compose
+
+Compose saves you from typing the volumes each time. One file is enough;
+you do not need the source code.
+
+1. Make a new, empty folder and save this file in it as `compose.yaml`:
+
+<<< ../../compose.yaml
+
+2. Run commands from that folder:
+
+   ```sh
+   docker compose run --rm memanga list
+   docker compose run --rm memanga config
+   docker compose run --rm memanga check --dry-run
+   ```
+
+What the file does:
+
+- It runs the published image `meellm/memanga:0.4.4` and starts it with an
+  init process, so `--init` is not needed here.
+- `docker compose run` connects the command to your terminal, so commands
+  that ask questions work without `-it`.
+- It keeps your data in two named volumes. Compose puts the name of the
+  folder in front of the volume names, so the data belongs to that folder:
+  always run the commands from there. These are **not** the volumes of the
+  `docker run` examples above.
+- It has no service that keeps running, because the published image has no
+  `memanga watch`. For a schedule, see
+  [Check on a schedule](#check-on-a-schedule).
+
+Two settings are optional. Put them in a file named `.env` in the same
+folder, one per line:
+
+```sh
+TZ=Europe/Berlin
+MEMANGA_IMAGE=meellm/memanga:NEW-VERSION
+```
+
+- `TZ` sets the [time zone](#time-zone) in the container. Without it the
+  file uses UTC.
+- `MEMANGA_IMAGE` runs another image, for example a newer release. Without
+  it the file uses `0.4.4`.
+
 ## Send to a Kindle
 
 Email delivery works in a container as it does elsewhere:
@@ -226,31 +270,53 @@ like this checks every day at 06:00:
 
 The time is the time of your machine, because your machine starts the run.
 
+With the Compose file from above, the line is shorter. Replace
+`COMPOSE-DIR` with the folder that holds `compose.yaml`; `-T` tells Compose
+that there is no terminal:
+
+```sh
+0 6 * * * cd "COMPOSE-DIR" && docker compose run --rm -T memanga check --auto --quiet
+```
+
 ### Image built from source: `memanga watch`
 
 The development version has `memanga watch`. It stays running, checks
 once at the start and then again after each interval: every 6 hours unless
 you say otherwise, and not more often than every 15 minutes.
 
-The Compose file in the repository is set up for this. It **builds the
-image from the source code**, so you need a copy of the repository:
+The repository has a second Compose file for this, `compose.dev.yaml`. It
+**builds the image from the source code**, so you need a copy of the
+repository, and you name the file on every command:
 
 ```sh
-docker compose build
-docker compose run --rm memanga list
-docker compose up -d scheduler
+docker compose -f compose.dev.yaml build
+docker compose -f compose.dev.yaml run --rm memanga list
+docker compose -f compose.dev.yaml up -d scheduler
 ```
 
-- `memanga` is the service for single commands. `docker compose run`
-  connects it to your terminal, so commands that ask questions work.
+- `memanga` is the service for single commands.
 - `scheduler` runs `memanga watch` every 6 hours with a random delay of up
   to 30 minutes. Docker starts it again when it ends or the machine
   restarts, unless you stopped it yourself.
-- `docker compose logs scheduler` shows what it did, and
-  `docker compose stop scheduler` stops it.
+- `docker compose -f compose.dev.yaml logs scheduler` shows what it did,
+  and `docker compose -f compose.dev.yaml stop scheduler` stops it.
 
-The Compose file does not use the published image yet: see
-[Planned](#planned).
+To avoid typing the file name, set `COMPOSE_FILE=compose.dev.yaml` in your
+shell for that folder.
+
+::: warning If you used Compose from a copy of the repository before
+Until now `compose.yaml` itself built from the source code. That setup is
+now `compose.dev.yaml`, unchanged.
+
+- Keep using it with `-f compose.dev.yaml`, as shown above. It uses the
+  same volumes, so your settings, library and downloads stay as they are.
+- A plain `docker compose …` in that folder now runs the published
+  `0.4.4` image on the same volumes. That image is older than the
+  development version and was not tested with data the development version
+  has written. Do not mix the two on one set of data.
+- If the scheduler is running, it keeps running. Manage it with
+  `-f compose.dev.yaml`.
+:::
 
 ## Stopping and the init option
 
@@ -311,8 +377,13 @@ What this does and does not change:
 - `memanga watch` counts intervals and does not depend on the time of day.
 - Pass the same `TZ` on every run, so that saved times stay comparable.
 
-One zone was tried, on the `arm64` image. An image built from source and
-the Compose file were not checked for this: see [Planned](#planned).
+With Compose, put `TZ=Europe/Berlin` in the `.env` file instead: see
+[Use Docker Compose](#use-docker-compose). `compose.dev.yaml` has no such
+setting.
+
+One zone was tried, on the `arm64` image, by looking at the container's
+clock. MeManga's own times under a zone, and an image built from source,
+were not checked: see [Planned](#planned).
 
 ## When something does not work
 
@@ -338,11 +409,8 @@ the Compose file were not checked for this: see [Planned](#planned).
 
 These are not available yet:
 
-- A Compose file that uses the published image, so that no copy of the
-  repository is needed:
-  [issue 328](https://github.com/meellm/MeManga/issues/328).
 - A smaller image with fewer browsers:
   [issue 332](https://github.com/meellm/MeManga/issues/332).
-- A time zone setting in the Compose file, and a check of time zones in an
-  image built from source:
+- A check of time zones in an image built from source, and a time zone
+  setting for its Compose file:
   [issue 331](https://github.com/meellm/MeManga/issues/331).
