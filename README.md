@@ -2,7 +2,7 @@
 
 **Automatic manga downloader with a desktop app and a command-line interface.**
 
-Track manga across 224 scrapers / 319 domains, read downloaded chapters
+Track manga across <!-- source-count:start -->234 scrapers / 310 domains<!-- source-count:end -->, read downloaded chapters
 in the built-in reader, and optionally email them to your Kindle.
 Works offline once chapters are downloaded.
 

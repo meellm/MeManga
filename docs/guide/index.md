@@ -32,7 +32,7 @@ import { release } from '../.vitepress/release'
 | Topic | Where |
 |---|---|
 | Setup and everyday use | [Setup and usage guide](https://github.com/meellm/MeManga/blob/main/docs/Guide.md) |
-| Sources MeManga knows about | [Supported sources](https://github.com/meellm/MeManga/blob/main/docs/SUPPORTED_SOURCES.md) |
+| Sources MeManga knows about | [Sources](../reference/sources) |
 | Screen-reader checklist for the desktop app | [Accessibility](https://github.com/meellm/MeManga/blob/main/docs/ACCESSIBILITY.md) |
 | What changed in each version | [Changelog](https://github.com/meellm/MeManga/blob/main/CHANGELOG.md) |
 | Reporting a security problem | [Security policy](https://github.com/meellm/MeManga/blob/main/SECURITY.md) |

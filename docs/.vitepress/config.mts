@@ -19,9 +19,11 @@ export default defineConfig({
     'Guide.md',
     'SUPPORTED_SOURCES.md',
     'ACCESSIBILITY.md',
-    // Generated; shown as part of reference/cli.md and reference/config.md.
+    // Generated; shown as part of reference/cli.md, reference/config.md and
+    // reference/sources.md.
     'reference/cli-commands.md',
-    'reference/config-keys.md'
+    'reference/config-keys.md',
+    'reference/source-list.md'
   ],
 
   themeConfig: {
@@ -70,7 +72,8 @@ export default defineConfig({
         text: 'Reference',
         items: [
           { text: 'Settings reference', link: '/reference/config' },
-          { text: 'Data files and backups', link: '/reference/state' }
+          { text: 'Data files and backups', link: '/reference/state' },
+          { text: 'Sources', link: '/reference/sources' }
         ]
       }
     ],
