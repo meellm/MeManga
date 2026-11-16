@@ -2253,15 +2253,67 @@ class TestSourcesCommand:
         plain = self._json(run_cli, capsys)
         assert self._json(run_cli, capsys, "--coverage") == plain
 
-    def test_coverage_table(self, run_cli, capsys, seeded_health):
+    @staticmethod
+    def _blocks(out):
+        """{domain: {label: value}} from `sources --coverage` output."""
+        blocks, current = {}, None
+        for line in out.splitlines():
+            if not line.strip():
+                current = None
+            elif not line.startswith(" ") and current is None and "." in line \
+                    and " " not in line.strip():
+                current = blocks.setdefault(line.strip(), {})
+            elif current is not None and line.startswith("  "):
+                label, _, value = line.strip().partition(":")
+                current[label] = value.strip()
+        return blocks
+
+    def test_coverage_view(self, run_cli, capsys, seeded_health):
         assert run_cli("sources", "--coverage", "mangadex") == 0
         out = capsys.readouterr().out
-        assert "Parser tests" in out and "Live probe" in out
+        block = self._blocks(out)["mangadex.org"]
+        assert block["Search"] == "Included in search"
+        assert block["Health"].startswith("ok, checked ")
+        assert block["Parser tests"].startswith("own ")
+        assert block["Live probe"]
+        assert block["Notes"].startswith("default · ")
         assert "Engine" not in out
-        assert "own: search" in out
         assert "not a live test" in out
-        assert "being in it is not a result" in out
+        assert "being in it is not a result." in out
         assert "Showing 1 of" in out
+
+    def test_coverage_view_fits_80_columns_when_plain(self, run_cli, capsys,
+                                                      seeded_health):
+        from memanga.scrapers.catalog import source_catalog, source_coverage
+        from memanga.cli import _live_probe_text, _parser_tests_text
+        assert run_cli("sources", "--coverage") == 0
+        out = capsys.readouterr().out
+        assert max(len(line) for line in out.splitlines()) <= 80
+        blocks = self._blocks(out)
+        assert set(blocks) == {s.domain for s in source_catalog()}
+        for domain, block in blocks.items():
+            facts = source_coverage(domain)
+            assert block["Parser tests"] == _parser_tests_text(facts["parser_tests"])
+            assert block["Live probe"] == _live_probe_text(facts["live_probe"])
+            assert "Health" in block and "Search" in block
+
+    def test_coverage_view_in_an_80_column_terminal(self, run_cli, monkeypatch,
+                                                    seeded_health):
+        from rich.console import Console
+        from memanga import cli
+        buffer = io.StringIO()
+        terminal = Console(file=buffer, width=80, force_terminal=True,
+                           color_system=None, legacy_windows=False)
+        monkeypatch.setattr(cli, "console", terminal)
+        monkeypatch.setattr(cli, "stream_is_plain", lambda *a, **k: False)
+        assert run_cli("sources", "--coverage", "asura") == 0
+        out = buffer.getvalue()
+        assert max(len(line) for line in out.splitlines()) <= 80
+        block = self._blocks(out)["asurascans.com"]
+        # Each fact stays whole on its own labelled line.
+        assert block["Health"].startswith("error, checked ")
+        assert block["Parser tests"] == "own search, chapters, pages"
+        assert block["Live probe"] == "search, chapters, pages, image"
 
     def test_default_table_points_to_coverage(self, run_cli, capsys):
         assert run_cli("sources", "mangadex") == 0
@@ -2269,18 +2321,15 @@ class TestSourcesCommand:
         assert "Engine" in out and "Parser tests" not in out
         assert "--coverage" in out
 
-    def test_coverage_cells(self):
-        from memanga.cli import _source_coverage_cells
-        assert _source_coverage_cells({
-            "parser_tests": {"own": ["search"], "shared": ["chapters", "pages"]},
-            "live_probe": ["search", "chapters"],
-        }) == ("own: search\nshared: chapters, pages", "search, chapters")
-        assert _source_coverage_cells({
-            "parser_tests": {"own": [], "shared": []}, "live_probe": None,
-        }) == ("—", "—")
-        assert _source_coverage_cells({
-            "parser_tests": {"own": [], "shared": []}, "live_probe": [],
-        }) == ("—", "home page")
+    def test_coverage_texts(self):
+        from memanga.cli import _live_probe_text, _parser_tests_text
+        assert _parser_tests_text(
+            {"own": ["search"], "shared": ["chapters", "pages"]}) == \
+            "own search; shared chapters, pages"
+        assert _parser_tests_text({"own": [], "shared": []}) == "none"
+        assert _live_probe_text(["search", "chapters"]) == "search, chapters"
+        assert _live_probe_text([]) == "home page only"
+        assert _live_probe_text(None) == "not in the probe"
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -2925,41 +2925,38 @@ def cmd_sources(args):
         return
 
     coverage = getattr(args, "coverage", False)
-    table = _table(box=box.SIMPLE)
-    table.add_column("Source", style="cyan")
+    tally = dict.fromkeys(SOURCE_HEALTH_STATUSES, 0)
     if coverage:
-        table.add_column("Parser tests")
-        table.add_column("Live probe")
+        # Issue #266: one short block per source instead of a wide table,
+        # so it reads in an 80-column terminal and in plain output.
+        for source, health in rows:
+            status = health["status"] if health else "unknown"
+            tally[status] += 1
+            for line in _source_coverage_block(source, health,
+                                               source_coverage(source.domain)):
+                console.print(line, soft_wrap=True)
+            console.print()
     else:
+        table = _table(box=box.SIMPLE)
+        table.add_column("Source", style="cyan")
         table.add_column("Engine", style="dim")
         table.add_column("Language")
-    table.add_column("Search")
-    table.add_column("Health")
-    table.add_column("Notes")
-    tally = dict.fromkeys(SOURCE_HEALTH_STATUSES, 0)
-    for source, health in rows:
-        search_text = source.search_status
-        notes = source.note
-        if source.nsfw:
-            notes = "NSFW · " + notes
-        if source.default_enabled:
-            notes = "default · " + notes
-        status = health["status"] if health else "unknown"
-        tally[status] += 1
-        health_text = f"[{_HEALTH_STYLES[status]}]{status}[/]"
-        if health:
-            checked = max(str(health["last_success"] or ""),
-                          str(health["last_error"] or ""))
+        table.add_column("Search")
+        table.add_column("Health")
+        table.add_column("Notes")
+        for source, health in rows:
+            search_text = source.search_status
+            notes = _source_notes(source)
+            status = health["status"] if health else "unknown"
+            tally[status] += 1
+            health_text = f"[{_HEALTH_STYLES[status]}]{status}[/]"
+            checked = _health_checked(health)
             if checked:
-                health_text += f"\n[dim]{_esc(_local_time_text(checked))}[/dim]"
-        if coverage:
-            facts = _source_coverage_cells(source_coverage(source.domain))
-        else:
-            facts = (source.engine, source.language or "—")
-        table.add_row(source.domain, *facts, search_text, health_text,
-                      _esc(notes))
-
-    console.print(table)
+                health_text += f"\n[dim]{_esc(checked)}[/dim]"
+            table.add_row(source.domain, source.engine,
+                          source.language or "—", search_text, health_text,
+                          _esc(notes))
+        console.print(table)
     console.print()
     if len(rows) == len(catalog):
         console.print(f"[dim]Total: {len(catalog)} scrapers, "
@@ -2971,27 +2968,70 @@ def cmd_sources(args):
     console.print("[dim]Health is the last saved check result, not a live test.[/dim]")
     console.print("[dim]Unknown means the source was never checked.[/dim]")
     if coverage:
-        console.print("[dim]Parser tests: parts that offline tests run on saved "
-                      "site responses, for this scraper (own) or for code it "
-                      "shares with other sites (shared).[/dim]")
-        console.print("[dim]Live probe: steps the weekly health check runs after "
-                      "the home page; being in it is not a result.[/dim]")
+        for line in (
+                "Parser tests: parts that offline tests run on saved site",
+                "responses, for this scraper (own) or for code it shares",
+                "with other sites (shared).",
+                "Live probe: steps the weekly health check runs after the",
+                "home page; being in it is not a result."):
+            console.print(f"[dim]{line}[/dim]")
     else:
         console.print("[dim]Add --coverage to show parser tests and live probe "
                       "steps.[/dim]")
 
 
-def _source_coverage_cells(facts):
-    """Parser tests and live probe cells of the `sources --coverage` table."""
-    parts = facts["parser_tests"]
-    lines = [f"{kind}: {', '.join(parts[kind])}"
-             for kind in ("own", "shared") if parts[kind]]
-    steps = facts["live_probe"]
+def _source_notes(source) -> str:
+    notes = source.note
+    if source.nsfw:
+        notes = "NSFW · " + notes
+    if source.default_enabled:
+        notes = "default · " + notes
+    return notes
+
+
+def _health_checked(health) -> str:
+    """Local time of the newest saved check, or an empty string."""
+    if not health:
+        return ""
+    checked = max(str(health["last_success"] or ""),
+                  str(health["last_error"] or ""))
+    return _local_time_text(checked) if checked else ""
+
+
+def _parser_tests_text(parts) -> str:
+    text = "; ".join(f"{kind} {', '.join(parts[kind])}"
+                     for kind in ("own", "shared") if parts[kind])
+    return text or "none"
+
+
+def _live_probe_text(steps) -> str:
     if steps is None:
-        probe = "—"
-    else:
-        probe = ", ".join(steps) or "home page"
-    return ("\n".join(lines) or "—", probe)
+        return "not in the probe"
+    return ", ".join(steps) or "home page only"
+
+
+def _source_coverage_block(source, health, facts):
+    """Lines of one source in `memanga sources --coverage`.
+
+    Short labelled lines rather than table cells, so each fact stays on
+    one line in an 80-column terminal and in plain output.
+    """
+    status = health["status"] if health else "unknown"
+    checked = _health_checked(health)
+    health_text = f"[{_HEALTH_STYLES[status]}]{status}[/]"
+    if checked:
+        health_text += f", checked {_esc(checked)}"
+    lines = [
+        f"[cyan]{_esc(source.domain)}[/cyan]",
+        f"  Search:       {_esc(source.search_status)}",
+        f"  Health:       {health_text}",
+        f"  Parser tests: {_parser_tests_text(facts['parser_tests'])}",
+        f"  Live probe:   {_live_probe_text(facts['live_probe'])}",
+    ]
+    notes = _source_notes(source)
+    if notes:
+        lines.append(f"  Notes:        {_esc(notes)}")
+    return lines
 
 
 def _add_search_result(result, status=None):
@@ -4860,8 +4900,8 @@ Examples:
                            help="Only show sources with this saved health (repeat for several); "
                                 "unknown means never checked")
     p_sources.add_argument("--coverage", action="store_true",
-                           help="Show offline parser tests and live probe steps "
-                                "instead of engine and language")
+                           help="List each source with its offline parser tests, "
+                                "live probe steps and saved health")
     p_sources.set_defaults(func=cmd_sources)
 
     # search

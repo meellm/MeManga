@@ -23,8 +23,8 @@ are listed under **Other domains**.
   on answer.
 - **Command line:** `memanga sources` lists the sources with the result of
   the checks your own MeManga has made. It does not contact the sites.
-  `memanga sources --coverage` shows the **Parser tests** and **Live probe**
-  columns of this page next to that result. `memanga sources --json` has
+  `memanga sources --coverage` lists each source with that result and the
+  **Parser tests** and **Live probe** facts of this page. `memanga sources --json` has
   all of it, with the reason and the issue number for each domain that is
   left out of search; see [JSON output](./scripting#sources-json) and the
   [command reference](./cli#memanga-sources).
