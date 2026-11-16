@@ -152,6 +152,7 @@ also sent: see [Send chapters to a Kindle](./kindle).
 
 Without a terminal, for example in a scheduled job, `memanga check` cannot
 ask. It then downloads nothing unless you pass `--download`.
+[Check on a schedule](./schedule) sets up such a job.
 
 ### Series in manual mode
 
@@ -278,6 +279,6 @@ exception: it is being replaced by `edit`.
   output and running without a terminal.
 - [Run MeManga in Docker](./docker) covers containers and scheduled checks
   there.
-- Pages about running checks on a schedule outside Docker and about all
-  settings are planned as part of this site
-  ([issue 423](https://github.com/meellm/MeManga/issues/423)).
+- [Check on a schedule](./schedule) sets up a daily check or a check on an
+  interval.
+- The [settings reference](../reference/config) lists every setting.
