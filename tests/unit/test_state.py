@@ -15,6 +15,9 @@ from pathlib import Path
 import pytest
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Construction + persistence
 # ─────────────────────────────────────────────────────────────────────────
@@ -34,6 +37,32 @@ class TestStateLifecycle:
         for key in ("manga", "notifications", "check_history",
                     "download_history", "source_health"):
             assert key in state._data, f"missing default key: {key}"
+
+    def test_example_state_file_matches_real_structure(self, state):
+        # examples/state.example.json is shipped as a schema reference, so
+        # its keys must match what State actually writes (issue #407).
+        example = json.loads(
+            (REPO_ROOT / "examples" / "state.example.json").read_text(encoding="utf-8"))
+        example.pop("_comment", None)
+        assert set(example) == set(state._default_state())
+
+        state.add_downloaded_chapter("One Piece", "1132")
+        state.mark_chapter_read("One Piece", "1130")
+        state.set_reading_progress("One Piece", "1130")
+        state.update_last_check(new_chapters=2, downloaded=1)
+        state.add_notification("check", "Found 2 new chapter(s)")
+        state.add_download_history("One Piece", "1132", "pdf", "/tmp/x.pdf", 4.2)
+        state.update_source_health("mangadex.org", True, latency_ms=220)
+
+        entry = example["manga"]["One Piece"]
+        assert set(entry) == set(state.get_manga_state("One Piece"))
+        for chapter in entry["available_chapters"]:
+            assert {"number", "title", "source", "source_url", "is_backup"} <= set(chapter)
+        assert set(example["check_history"][0]) == set(state.get_check_history()[0])
+        assert set(example["notifications"][0]) == set(state.get_notifications()[0])
+        assert set(example["download_history"][0]) == set(state.get_download_history()[0])
+        assert set(example["source_health"]["mangadex.org"]) == set(
+            state.get_source_health("mangadex.org"))
 
     def test_flush_writes_json(self, state):
         state.add_notification("info", "hello")

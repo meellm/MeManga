@@ -3,14 +3,55 @@
 
   "manga": {
     "One Piece": {
-      "downloaded_chapters": ["1130", "1131", "1132"],
-      "read_chapters": ["1130"],
-      "available_chapters": ["1130", "1131", "1132"]
+      "downloaded": ["1130", "1131", "1132"],
+      "last_chapter": "1132",
+      "last_updated": "2026-05-27T12:01:30",
+      "created": "2026-05-20T09:15:00",
+      "reading_progress": {
+        "last_chapter": "1130",
+        "last_read": "2026-05-27T18:40:00"
+      },
+      "new_chapters_available": 0,
+      "available_chapters": [
+        {
+          "number": "1130",
+          "title": "Chapter 1130",
+          "source": "mangadex.org",
+          "source_url": "https://mangadex.org/title/00000000-0000-4000-8000-000000000001/one-piece",
+          "is_backup": false,
+          "url": "https://mangadex.org/chapter/00000000-0000-4000-8000-000000001130",
+          "group_ids": [],
+          "group_names": []
+        },
+        {
+          "number": "1131",
+          "title": "Chapter 1131",
+          "source": "mangadex.org",
+          "source_url": "https://mangadex.org/title/00000000-0000-4000-8000-000000000001/one-piece",
+          "is_backup": false,
+          "url": "https://mangadex.org/chapter/00000000-0000-4000-8000-000000001131",
+          "group_ids": [],
+          "group_names": []
+        },
+        {
+          "number": "1132",
+          "title": "Chapter 1132",
+          "source": "mangadex.org",
+          "source_url": "https://mangadex.org/title/00000000-0000-4000-8000-000000000001/one-piece",
+          "is_backup": false,
+          "url": "https://mangadex.org/chapter/00000000-0000-4000-8000-000000001132",
+          "group_ids": [],
+          "group_names": []
+        }
+      ],
+      "external_chapters": [],
+      "partial_chapters": {},
+      "read_chapters": ["1130"]
     }
   },
   "last_check": "2026-05-27T12:00:00",
   "check_history": [
-    { "timestamp": "2026-05-27T12:00:00", "new_chapters": 2 }
+    { "timestamp": "2026-05-27T12:00:00", "new_chapters": 2, "downloaded": 1 }
   ],
   "notifications": [
     {
@@ -25,8 +66,9 @@
       "title": "One Piece",
       "chapter": "1132",
       "format": "pdf",
-      "path": "/home/me/Downloads/MeManga/One Piece/Chapter 1132.pdf",
+      "path": "/home/me/Downloads/MeManga/One Piece/One Piece - Chapter 1132.pdf",
       "size_mb": 4.2,
+      "kindle_sent": false,
       "timestamp": "2026-05-27T12:01:30"
     }
   ],
