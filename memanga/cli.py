@@ -53,7 +53,7 @@ from .chapters import ChapterWithSource, chapter_order_key, chapter_sort_key, ch
 from .state import State
 from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
 from .scrapers import UnsupportedSourceError, get_scraper
-from .scrapers.catalog import source_catalog
+from .scrapers.catalog import source_catalog, source_coverage
 from .search import compute_search_sources, probe_chapter_counts, sweep
 from .email_settings import (EmailSettings, kindle_scope, manga_sends_to_kindle,
                              proposed_kindle_scope)
@@ -2909,8 +2909,12 @@ def cmd_sources(args):
             rows.append((source, health))
 
     if args.json:
+        # Issue #266: parser_tests and live_probe are added keys; the
+        # existing ones keep their names and types.
         _print_json({"schema_version": JSON_SCHEMA_VERSION,
-                     "sources": [dict(s.to_dict(), health=h) for s, h in rows]})
+                     "sources": [dict(s.to_dict(), health=h,
+                                      **source_coverage(s.domain))
+                                 for s, h in rows]})
         return
 
     console.print(_panel("[bold]🌐 Supported Sources[/bold]", border_style="cyan"))
@@ -2920,10 +2924,15 @@ def cmd_sources(args):
         console.print("[dim]No sources match these filters.[/dim]")
         return
 
+    coverage = getattr(args, "coverage", False)
     table = _table(box=box.SIMPLE)
     table.add_column("Source", style="cyan")
-    table.add_column("Engine", style="dim")
-    table.add_column("Language")
+    if coverage:
+        table.add_column("Parser tests")
+        table.add_column("Live probe")
+    else:
+        table.add_column("Engine", style="dim")
+        table.add_column("Language")
     table.add_column("Search")
     table.add_column("Health")
     table.add_column("Notes")
@@ -2943,8 +2952,11 @@ def cmd_sources(args):
                           str(health["last_error"] or ""))
             if checked:
                 health_text += f"\n[dim]{_esc(_local_time_text(checked))}[/dim]"
-        table.add_row(source.domain, source.engine,
-                      source.language or "—", search_text, health_text,
+        if coverage:
+            facts = _source_coverage_cells(source_coverage(source.domain))
+        else:
+            facts = (source.engine, source.language or "—")
+        table.add_row(source.domain, *facts, search_text, health_text,
                       _esc(notes))
 
     console.print(table)
@@ -2958,6 +2970,28 @@ def cmd_sources(args):
         f"{tally[s]} {s}" for s in SOURCE_HEALTH_STATUSES) + "[/dim]")
     console.print("[dim]Health is the last saved check result, not a live test.[/dim]")
     console.print("[dim]Unknown means the source was never checked.[/dim]")
+    if coverage:
+        console.print("[dim]Parser tests: parts that offline tests run on saved "
+                      "site responses, for this scraper (own) or for code it "
+                      "shares with other sites (shared).[/dim]")
+        console.print("[dim]Live probe: steps the weekly health check runs after "
+                      "the home page; being in it is not a result.[/dim]")
+    else:
+        console.print("[dim]Add --coverage to show parser tests and live probe "
+                      "steps.[/dim]")
+
+
+def _source_coverage_cells(facts):
+    """Parser tests and live probe cells of the `sources --coverage` table."""
+    parts = facts["parser_tests"]
+    lines = [f"{kind}: {', '.join(parts[kind])}"
+             for kind in ("own", "shared") if parts[kind]]
+    steps = facts["live_probe"]
+    if steps is None:
+        probe = "—"
+    else:
+        probe = ", ".join(steps) or "home page"
+    return ("\n".join(lines) or "—", probe)
 
 
 def _add_search_result(result, status=None):
@@ -4825,6 +4859,9 @@ Examples:
     p_sources.add_argument("--health", action="append", choices=SOURCE_HEALTH_STATUSES,
                            help="Only show sources with this saved health (repeat for several); "
                                 "unknown means never checked")
+    p_sources.add_argument("--coverage", action="store_true",
+                           help="Show offline parser tests and live probe steps "
+                                "instead of engine and language")
     p_sources.set_defaults(func=cmd_sources)
 
     # search

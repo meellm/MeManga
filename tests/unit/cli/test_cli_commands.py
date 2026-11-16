@@ -2212,6 +2212,76 @@ class TestSourcesCommand:
         assert health["domain"] == "asurascans.com"
         assert health["error_count"] == 0
 
+    # Issue #266: parser test and live probe facts.
+
+    OLD_KEYS = {"domain", "aliases", "scraper", "engine", "template",
+                "language", "nsfw", "note", "popularity", "default_enabled",
+                "searchable", "search_status", "search_skip",
+                "domain_search_skips", "health"}
+
+    def test_json_adds_coverage_and_keeps_the_contract(self, run_cli, capsys):
+        from memanga.scrapers.catalog import source_coverage
+        assert run_cli("sources", "--json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert set(payload) == {"schema_version", "sources"}
+        assert payload["schema_version"] == 1
+        for row in payload["sources"]:
+            assert set(row) == self.OLD_KEYS | {"parser_tests", "live_probe"}
+            tests = row["parser_tests"]
+            assert set(tests) == {"own", "shared"}
+            assert isinstance(tests["own"], list)
+            assert isinstance(tests["shared"], list)
+            assert row["live_probe"] is None or isinstance(row["live_probe"], list)
+            assert {k: row[k] for k in ("parser_tests", "live_probe")} == \
+                source_coverage(row["domain"])
+        rows = {row["domain"]: row for row in payload["sources"]}
+        assert rows["mangadex.org"]["parser_tests"]["own"]
+        assert rows["mangadex.org"]["live_probe"]
+
+    def test_json_for_a_source_without_coverage(self, run_cli, capsys):
+        from memanga.scrapers import coverage_data
+        from memanga.scrapers.catalog import source_catalog
+        bare = next(s.domain for s in source_catalog()
+                    if s.domain not in coverage_data.PARSER_TESTS
+                    and s.domain not in coverage_data.LIVE_PROBE)
+        row = self._json(run_cli, capsys, bare)[bare]
+        assert row["parser_tests"] == {"own": [], "shared": []}
+        assert row["live_probe"] is None
+        assert row["health"] is None
+
+    def test_coverage_flag_does_not_change_json(self, run_cli, capsys):
+        plain = self._json(run_cli, capsys)
+        assert self._json(run_cli, capsys, "--coverage") == plain
+
+    def test_coverage_table(self, run_cli, capsys, seeded_health):
+        assert run_cli("sources", "--coverage", "mangadex") == 0
+        out = capsys.readouterr().out
+        assert "Parser tests" in out and "Live probe" in out
+        assert "Engine" not in out
+        assert "own: search" in out
+        assert "not a live test" in out
+        assert "being in it is not a result" in out
+        assert "Showing 1 of" in out
+
+    def test_default_table_points_to_coverage(self, run_cli, capsys):
+        assert run_cli("sources", "mangadex") == 0
+        out = capsys.readouterr().out
+        assert "Engine" in out and "Parser tests" not in out
+        assert "--coverage" in out
+
+    def test_coverage_cells(self):
+        from memanga.cli import _source_coverage_cells
+        assert _source_coverage_cells({
+            "parser_tests": {"own": ["search"], "shared": ["chapters", "pages"]},
+            "live_probe": ["search", "chapters"],
+        }) == ("own: search\nshared: chapters, pages", "search, chapters")
+        assert _source_coverage_cells({
+            "parser_tests": {"own": [], "shared": []}, "live_probe": None,
+        }) == ("—", "—")
+        assert _source_coverage_cells({
+            "parser_tests": {"own": [], "shared": []}, "live_probe": [],
+        }) == ("—", "home page")
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # `export` / `import` — backup + restore

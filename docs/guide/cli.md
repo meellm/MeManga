@@ -257,7 +257,7 @@ commands and options.
 - **Not in {{ release.tag }}:** the commands `setup`, `doctor`, `edit`,
   `read`, `unread`, `path`, `open` and `send`; the spellings
   `failed retry`, `failed clear`, `check --download` and `check "TITLE"`;
-  and the option `--config-dir`.
+  the options of `sources`; and the option `--config-dir`.
 - **Use instead in {{ release.tag }}:**
   - `memanga check -t "TITLE"` to check one series
   - `memanga check --auto` to download without asking

@@ -44,6 +44,8 @@ COUNT_START = "<!-- source-count:start -->"
 COUNT_END = "<!-- source-count:end -->"
 
 SITE_LIST = "docs/reference/source-list.md"
+# Packaged copy of the coverage facts for `memanga sources`.
+COVERAGE_MODULE = "memanga/scrapers/coverage_data.py"
 
 INCLUDED = "Included in search"
 
@@ -556,6 +558,43 @@ def _with_counts(text):
                             COUNT_START + render_count() + COUNT_END)
 
 
+def render_coverage_module(root=None):
+    """The packaged data module `memanga sources` reads at runtime.
+
+    Plain literals only, so the installed program needs neither the
+    tests nor this generator.
+    """
+    sources = source_catalog()
+    probed = source_probe_steps(sources, pipeline_probe_steps(root))
+    tested = source_parser_tests(sources, parser_test_declarations(root))
+    lines = [
+        '"""Offline parser tests and live probe steps of each source.',
+        "",
+        "Written by python -m memanga.source_docs from the scraper tests; do",
+        "not edit. These describe the test suite, not whether a site works.",
+        '"""',
+        "",
+        "# {canonical domain: {\"own\": parts, \"shared\": parts}}: the parts of",
+        "# the scraper that offline tests run on saved site responses, for this",
+        "# scraper itself or for code it shares with other sites.",
+        "PARSER_TESTS = {",
+    ]
+    for domain in sorted(tested):
+        mine, shared = tested[domain]
+        lines.append(f"    {domain!r}: {{'own': {mine!r}, 'shared': {shared!r}}},")
+    lines.extend([
+        "}",
+        "",
+        "# {canonical domain: steps}: what the weekly live probe runs after",
+        "# opening the home page.",
+        "LIVE_PROBE = {",
+    ])
+    for domain in sorted(probed):
+        lines.append(f"    {domain!r}: {probed[domain]!r},")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
 def generated_files(root):
     readme = root / "README.md"
     guide = root / "docs/Guide.md"
@@ -563,6 +602,7 @@ def generated_files(root):
     return {
         root / "docs/SUPPORTED_SOURCES.md": render_supported_sources(root),
         root / SITE_LIST: render_site_list(root),
+        root / COVERAGE_MODULE: render_coverage_module(root),
         readme: _replace_regions(readme_text, START, END,
                                  render_readme_section()),
         guide: _with_counts(guide.read_text(encoding="utf-8")),

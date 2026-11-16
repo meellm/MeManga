@@ -266,7 +266,19 @@ Each entry in `chapters`:
 A `sources` list with one entry per source. Each entry has `domain`,
 `aliases`, `scraper`, `engine`, `template`, `language`, `nsfw`, `note`,
 `popularity`, `default_enabled`, `searchable`, `search_status`,
-`search_skip`, `domain_search_skips` and `health`.
+`search_skip`, `domain_search_skips`, `health`, `parser_tests` and
+`live_probe`.
+
+| Key | Content |
+|---|---|
+| `health` | The last saved check result for the source, or `null` if it was never checked |
+| `parser_tests` | `own` and `shared`: lists of the parts (`search`, `chapters`, `pages`) that offline tests run on saved site responses, for this scraper itself or for code it shares with other sites. Empty lists when there are none. |
+| `live_probe` | The steps the weekly live probe runs after opening the home page (`search`, `chapters`, `pages`, `image`), or `null` when the source is not in it |
+
+`parser_tests` and `live_probe` describe MeManga's tests, not whether a
+site works; they are the same in every installation of a version. Only
+`health` comes from your own checks. The [Sources](./sources) page explains
+them.
 
 ### `config show --json`
 

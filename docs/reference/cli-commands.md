@@ -467,6 +467,7 @@ memanga sources [options] [query]
 - `--json`: Machine-readable JSON output
 - `--search {included,not-searched}`: Only show sources the search sweep includes or skips
 - `--health {ok,warning,error,unknown}`: Only show sources with this saved health (repeat for several); unknown means never checked
+- `--coverage`: Show offline parser tests and live probe steps instead of engine and language
 
 ## memanga search
 
