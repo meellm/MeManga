@@ -4,7 +4,7 @@ MeManga registers 310 domains across 234 scrapers. Registration does not mean a 
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
-Parser tests: the parts of the scraper (search, chapters, pages) that offline tests run on saved or canned responses from the site; "shared parser" means the tests ran code this source shares with other sites, on another site's responses.
+Parser tests: the parts of the scraper (search, chapters, pages) that offline tests run on saved or canned responses from the site; "shared parser" means the tests ran code this source shares with other sites, on another site's responses; a source that replaces any of that code with its own is not credited with it.
 The [documentation site](https://meellm.github.io/MeManga/reference/sources) explains these columns.
 
 | Source | Aliases | Engine | Language | NSFW | Search status | Notes | Live probe | Parser tests |
@@ -33,7 +33,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | mangaeffect.com | — | http | — | No | Included in search | — | — | — |
 | mangafox.fun | — | http | — | No | Included in search | MangaHub network | — | — |
 | mangayy.org | likemanga.io (Included in search) | browser | — | No | Included in search | — | — | — |
-| 1piecemanga.com | w064.1piecemanga.com (Included in search) | http | — | No | Included in search | One Piece | — | Pages; shared parser: chapters |
+| 1piecemanga.com | w064.1piecemanga.com (Included in search) | http | — | No | Included in search | One Piece | — | Pages |
 | ajimenoippo.com | — | http | — | No | Included in search | Hajime no Ippo | — | Chapters, pages |
 | akiramanga.com | — | http | — | No | Not searched (template) | Akira | Chapters, pages, image | Shared parser: chapters, pages |
 | ao-ashi-manga.com | — | http | — | No | Not searched (template) | Ao Ashi | — | Shared parser: chapters, pages |
@@ -50,14 +50,14 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | berserk-manga.com | w3.berserk-manga.com (Not searched (template)), w4.berserk-manga.com (Not searched (template)) | http | — | No | Not searched (template) | Berserk | — | Shared parser: chapters, pages |
 | berserkmang.org | — | http | — | No | Included in search | Berserk | — | — |
 | blackclova.com | — | http | — | No | Not searched (template) | Black Clover | — | Shared parser: chapters, pages |
-| blame-manga.com | w9.blame-manga.com (Included in search) | http | — | No | Included in search | BLAME! | — | Pages; shared parser: chapters |
+| blame-manga.com | w9.blame-manga.com (Included in search) | http | — | No | Included in search | BLAME! | — | Pages |
 | bleach-read.com | w38.bleach-read.com (Not searched (template)) | http | — | No | Not searched (template) | Bleach | — | Shared parser: chapters, pages |
 | bleachmanga.org | — | http | — | No | Not searched (template) | Bleach | — | Shared parser: chapters, pages |
 | blue-box-manga.online | — | http | — | No | Not searched (template) | Blue Box | — | Shared parser: chapters, pages |
 | blue-exorcist.online | — | http | — | No | Not searched (template) | Blue Exorcist | — | Shared parser: chapters, pages |
 | blueexorcistmanga.com | — | http | — | No | Included in search | Blue Exorcist | — | Chapters, pages |
 | bluelock-read.com | — | http | — | No | Included in search | Blue Lock | — | — |
-| bluelockmanga.net | — | http | — | No | Included in search | Blue Lock | — | Chapters; shared parser: pages |
+| bluelockmanga.net | — | http | — | No | Included in search | Blue Lock | — | Chapters |
 | bluelockread.com | ww2.bluelockread.com (Included in search) | http | — | No | Included in search | Blue Lock | — | — |
 | bluelockread.online | — | http | — | No | Included in search | Blue Lock | — | Pages; shared parser: chapters |
 | bocchitherockmanga.com | w5.bocchitherockmanga.com (Included in search) | http | — | No | Included in search | Bocchi the Rock! | — | Chapters; shared parser: pages |
@@ -69,21 +69,21 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | d-grayman.online | — | http | — | No | Not searched (template) | D.Gray-man | — | Shared parser: chapters, pages |
 | dandadanmanga.net | ww2.dandadanmanga.net (Not searched (template)), w2.dandadanmanga.net (Not searched (template)) | http | — | No | Not searched (template) | Dandadan | — | Shared parser: search, chapters, pages |
 | dddmanga.com | — | http | — | No | Not searched (template) | Dandadan | Chapters, pages, image | Shared parser: chapters, pages |
-| death-note-manga.com | w13.death-note-manga.com (Included in search) | http | — | No | Included in search | Death Note | — | Pages; shared parser: chapters |
+| death-note-manga.com | w13.death-note-manga.com (Included in search) | http | — | No | Included in search | Death Note | — | Pages |
 | deathnotemangafree.com | — | http | — | No | Not searched (template) | Death Note | — | Shared parser: chapters, pages |
 | demon-slayer.online | w4.demon-slayer.online (Included in search) | http | — | No | Included in search | Demon Slayer | — | — |
 | demonslayermanga.com | ww9.demonslayermanga.com (Included in search) | http | — | No | Included in search | Demon Slayer | — | — |
 | detective-conan-manga.online | — | http | — | No | Not searched (template) | Detective Conan (Case Closed) | — | Shared parser: chapters, pages |
 | detective-conan.online | — | http | — | No | Not searched (template) | Detective Conan | — | Shared parser: chapters, pages |
 | dorohedoro.online | — | http | — | No | Not searched (template) | Dorohedoro | — | Shared parser: chapters, pages |
-| dragonballsuper.org | — | http | — | No | Included in search | Dragon Ball Super | — | Chapters; shared parser: pages |
+| dragonballsuper.org | — | http | — | No | Included in search | Dragon Ball Super | — | Chapters |
 | dragontranslation.org | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | drstonemanga.com | — | http | — | No | Included in search | Dr. Stone | — | Chapters; shared parser: pages |
 | e-hentai.org | exhentai.org (Included in search) | http | — | Yes | Included in search | Galleries | — | — |
 | elusive-samurai.com | w4.elusive-samurai.com (Included in search) | http | — | No | Included in search | The Elusive Samurai | — | Shared parser: chapters, pages |
 | en-thunderscans.com | — | http | en | No | Included in search | English manhwa scans | Search, chapters, pages, image | Search, chapters, pages |
-| fairytailmangafree.com | — | http | — | No | Included in search | Fairy Tail: 100 Years Quest | — | Pages; shared parser: chapters |
-| fireforcemanga.org | w1.fireforcemanga.org (Included in search) | http | — | No | Included in search | Fire Force | — | Pages; shared parser: chapters |
+| fairytailmangafree.com | — | http | — | No | Included in search | Fairy Tail: 100 Years Quest | — | Pages |
+| fireforcemanga.org | w1.fireforcemanga.org (Included in search) | http | — | No | Included in search | Fire Force | — | Pages |
 | flamecomics.xyz | — | browser | — | No | Not searched (needs-js) | Manhwa translations | — | — |
 | frieren-manga.com | — | http | — | No | Not searched (template) | Frieren: Beyond Journey's End | — | Shared parser: chapters, pages |
 | full-metal-alchemist.online | w9.full-metal-alchemist.online (Not searched (template)) | http | — | No | Not searched (template) | Fullmetal Alchemist | — | Shared parser: chapters, pages |
@@ -104,7 +104,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | hipercool.net | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | hiperdex.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | hivetoons.org | hivetoon.com (Not searched (needs-js)) | browser | — | No | Not searched (needs-js) | Void Scans network | — | — |
-| homunculusmanga.com | — | http | — | No | Included in search | Homunculus | — | Chapters; shared parser: pages |
+| homunculusmanga.com | — | http | — | No | Included in search | Homunculus | — | Chapters |
 | hxhmanga.com | — | http | — | No | Not searched (template) | Hunter x Hunter | Chapters, pages, image | Shared parser: chapters, pages |
 | hyoukamanga.com | — | http | — | No | Not searched (template) | Hyouka | — | Shared parser: chapters, pages |
 | ichithewitchread.com | — | http | — | No | Not searched (template) | Ichi the Witch | — | Shared parser: chapters, pages |
@@ -120,7 +120,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | kagurabachi-manga.com | — | http | — | No | Not searched (template) | Kagurabachi | — | Shared parser: chapters, pages |
 | kagurabachiread.com | — | http | — | No | Not searched (template) | Kagurabachi | — | Shared parser: chapters, pages |
 | kaijimanga.com | w9.kaijimanga.com (Not searched (template)) | http | — | No | Not searched (template) | Kaiji | — | Shared parser: chapters, pages |
-| kaijuno8-manga.com | — | http | — | No | Included in search | Kaiju No. 8 | — | Pages; shared parser: chapters |
+| kaijuno8-manga.com | — | http | — | No | Included in search | Kaiju No. 8 | — | Pages |
 | kenganashura.com | — | http | — | No | Included in search | Kengan Ashura / Omega | — | — |
 | kimetsu-yaiba.online | — | http | — | No | Not searched (template) | Demon Slayer: Kimetsu no Yaiba | — | Shared parser: chapters, pages |
 | kokounohito.com | — | http | — | No | Not searched (template) | The Climber (Kokou no Hito) | — | Shared parser: chapters, pages |
@@ -182,7 +182,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | rawjx.net | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | read-berserk-manga.com | — | http | — | No | Included in search | Berserk | — | — |
 | read-jjk.com | — | http | — | No | Included in search | Jujutsu Kaisen | — | — |
-| read-kengan-ashura.com | — | http | — | No | Included in search | Kengan Ashura | — | Chapters; shared parser: pages |
+| read-kengan-ashura.com | — | http | — | No | Included in search | Kengan Ashura | — | Chapters |
 | read-slamdunk.online | — | http | — | No | Included in search | Slam Dunk | — | Chapters, pages |
 | read-tokyorevengers.com | w20.read-tokyorevengers.com (Included in search), w23.read-tokyorevengers.com (Included in search) | http | — | No | Included in search | Tokyo Revengers | — | Chapters, pages |
 | readberserk.com | — | http | — | No | Included in search | Berserk | — | Shared parser: search, chapters, pages |
@@ -219,20 +219,20 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | skip-beat-manga.online | — | http | — | No | Not searched (template) | Skip Beat! | — | Shared parser: chapters, pages |
 | skip-beat.online | — | http | — | No | Not searched (template) | Skip Beat! | — | Shared parser: chapters, pages |
 | sousou-no-frieren.com | — | http | — | No | Included in search | Frieren | — | Chapters; shared parser: pages |
-| spyxfamilymanga.org | — | http | — | No | Included in search | Spy x Family | — | Chapters; shared parser: pages |
+| spyxfamilymanga.org | — | http | — | No | Included in search | Spy x Family | — | Chapters |
 | steel-ball-run.com | — | http | — | No | Not searched (template) | Steel Ball Run | — | Shared parser: chapters, pages |
 | stone-ocean-manga.com | — | http | — | No | Not searched (template) | JoJo's Bizarre Adventure Part 6: Stone Ocean | — | Shared parser: chapters, pages |
 | sxfmanga.net | ww2.sxfmanga.net (Not searched (template)) | http | — | No | Not searched (template) | Spy x Family | — | Shared parser: search, chapters, pages |
-| tgmanga.com | — | http | — | No | Included in search | Tokyo Ghoul | — | Pages; shared parser: chapters |
-| thedragonballsuper.online | — | http | — | No | Included in search | Dragon Ball Super | — | Chapters; shared parser: pages |
-| tokyoghoul.club | — | http | — | No | Included in search | Tokyo Ghoul | — | Shared parser: chapters, pages |
+| tgmanga.com | — | http | — | No | Included in search | Tokyo Ghoul | — | Pages |
+| thedragonballsuper.online | — | http | — | No | Included in search | Dragon Ball Super | — | Chapters |
+| tokyoghoul.club | — | http | — | No | Included in search | Tokyo Ghoul | — | — |
 | tomie-manga.com | w12.tomie-manga.com (Not searched (template)) | http | — | No | Not searched (template) | Tomie | — | Shared parser: chapters, pages |
 | toonily.me | — | browser | — | No | Included in search | Manhwa focused | — | — |
 | tortugaceviri.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | trigunmanga.com | — | http | — | No | Not searched (template) | Trigun | — | Shared parser: chapters, pages |
 | truemanga.com | mangamonk.com (Not searched (needs-js)) | http | — | No | Not searched (needs-js) | — | — | — |
 | unopiece.com | — | http | — | No | Not searched (template) | One Piece | — | Shared parser: chapters, pages |
-| vagabondmanga.org | — | http | — | No | Included in search | Vagabond | — | Chapters; shared parser: pages |
+| vagabondmanga.org | — | http | — | No | Included in search | Vagabond | — | Chapters |
 | vermanhwa.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | vinlandsagamanga.net | ww3.vinlandsagamanga.net (Not searched (template)), w3.vinlandsagamanga.net (Not searched (template)) | http | — | No | Not searched (template) | Vinland Saga | — | Shared parser: search, chapters, pages |
 | witch-hat-atelier.online | — | http | — | No | Not searched (template) | Witch Hat Atelier (Tongari Boushi no Atelier) | — | Shared parser: chapters, pages |

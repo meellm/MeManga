@@ -10,7 +10,7 @@
 | In the default selection | 15 |
 | Adult content | 10 |
 | With parser tests of their own | 50 |
-| With tests of a shared parser only | 112 |
+| With tests of a shared parser only | 111 |
 | In the weekly live probe | 27 |
 | Live probe through to an image download | 25 |
 
@@ -89,40 +89,40 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | mangaeffect.com | — | http | — | — | Included in search | — | — | — |
 | mangafox.fun | — | http | — | — | Included in search | — | — | MangaHub network |
 | mangayy.org | likemanga.io | browser | — | — | Included in search | — | — | — |
-| 1piecemanga.com | w064.1piecemanga.com | http | — | — | Included in search | Pages; shared parser: chapters | — | One Piece |
+| 1piecemanga.com | w064.1piecemanga.com | http | — | — | Included in search | Pages | — | One Piece |
 | ajimenoippo.com | — | http | — | — | Included in search | Chapters, pages | — | Hajime no Ippo |
 | atsu.moe | — | api | — | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | — |
 | bakirahen.com | — | http | — | — | Included in search | — | — | Baki Rahen |
 | beastarsmanga.com | — | http | — | — | Included in search | Chapters, pages | — | Beastars |
 | berserkmang.org | — | http | — | — | Included in search | — | — | Berserk |
-| blame-manga.com | w9.blame-manga.com | http | — | — | Included in search | Pages; shared parser: chapters | — | BLAME! |
+| blame-manga.com | w9.blame-manga.com | http | — | — | Included in search | Pages | — | BLAME! |
 | blueexorcistmanga.com | — | http | — | — | Included in search | Chapters, pages | — | Blue Exorcist |
 | bluelock-read.com | — | http | — | — | Included in search | — | — | Blue Lock |
-| bluelockmanga.net | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Blue Lock |
+| bluelockmanga.net | — | http | — | — | Included in search | Chapters | — | Blue Lock |
 | bluelockread.com | ww2.bluelockread.com | http | — | — | Included in search | — | — | Blue Lock |
 | bluelockread.online | — | http | — | — | Included in search | Pages; shared parser: chapters | — | Blue Lock |
 | bocchitherockmanga.com | w5.bocchitherockmanga.com | http | — | — | Included in search | Chapters; shared parser: pages | — | Bocchi the Rock! |
-| death-note-manga.com | w13.death-note-manga.com | http | — | — | Included in search | Pages; shared parser: chapters | — | Death Note |
+| death-note-manga.com | w13.death-note-manga.com | http | — | — | Included in search | Pages | — | Death Note |
 | demon-slayer.online | w4.demon-slayer.online | http | — | — | Included in search | — | — | Demon Slayer |
 | demonslayermanga.com | ww9.demonslayermanga.com | http | — | — | Included in search | — | — | Demon Slayer |
-| dragonballsuper.org | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Dragon Ball Super |
+| dragonballsuper.org | — | http | — | — | Included in search | Chapters | — | Dragon Ball Super |
 | drstonemanga.com | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Dr. Stone |
 | e-hentai.org | exhentai.org | http | — | Yes | Included in search | — | — | Galleries |
 | elusive-samurai.com | w4.elusive-samurai.com | http | — | — | Included in search | Shared parser: chapters, pages | — | The Elusive Samurai |
 | en-thunderscans.com | — | http | en | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | English manhwa scans |
-| fairytailmangafree.com | — | http | — | — | Included in search | Pages; shared parser: chapters | — | Fairy Tail: 100 Years Quest |
-| fireforcemanga.org | w1.fireforcemanga.org | http | — | — | Included in search | Pages; shared parser: chapters | — | Fire Force |
+| fairytailmangafree.com | — | http | — | — | Included in search | Pages | — | Fairy Tail: 100 Years Quest |
+| fireforcemanga.org | w1.fireforcemanga.org | http | — | — | Included in search | Pages | — | Fire Force |
 | hajime-no-ippo-manga.online | — | http | — | — | Included in search | Shared parser: chapters, pages | — | Hajime no Ippo |
 | hajime-noippo.com | w22.hajime-noippo.com | http | — | — | Included in search | Shared parser: chapters, pages | — | Hajime no Ippo |
 | hajimnoippo.com | — | http | — | — | Included in search | Shared parser: chapters, pages | — | Hajime no Ippo |
 | hentai20.io | — | http | — | Yes | Included in search | — | — | Adult content |
 | hentaifox.com | — | http | — | Yes | Included in search | — | — | Doujinshi |
 | hentairead.com | — | browser | — | Yes | Included in search | — | — | Doujinshi |
-| homunculusmanga.com | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Homunculus |
+| homunculusmanga.com | — | http | — | — | Included in search | Chapters | — | Homunculus |
 | imhentai.xxx | — | http | — | Yes | Included in search | — | — | Doujinshi |
 | jjkmanga.net | — | http | — | — | Included in search | — | — | Jujutsu Kaisen |
 | jojolionmanga.com | — | http | — | — | Included in search | — | — | JoJo Part 8: JoJolion |
-| kaijuno8-manga.com | — | http | — | — | Included in search | Pages; shared parser: chapters | — | Kaiju No. 8 |
+| kaijuno8-manga.com | — | http | — | — | Included in search | Pages | — | Kaiju No. 8 |
 | kenganashura.com | — | http | — | — | Included in search | — | — | Kengan Ashura / Omega |
 | lector-mangas.lat | lectormangass.net (not searched: alias, [issue 186](https://github.com/meellm/MeManga/issues/186)) | http | es | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Spanish manga/manhwa reader |
 | mangaball.net | — | http | — | — | Included in search | Search, chapters, pages | — | Multi-language |
@@ -146,7 +146,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | pururin.to | — | browser | — | Yes | Included in search | — | — | Doujinshi |
 | read-berserk-manga.com | — | http | — | — | Included in search | — | — | Berserk |
 | read-jjk.com | — | http | — | — | Included in search | — | — | Jujutsu Kaisen |
-| read-kengan-ashura.com | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Kengan Ashura |
+| read-kengan-ashura.com | — | http | — | — | Included in search | Chapters | — | Kengan Ashura |
 | read-slamdunk.online | — | http | — | — | Included in search | Chapters, pages | — | Slam Dunk |
 | read-tokyorevengers.com | w20.read-tokyorevengers.com, w23.read-tokyorevengers.com | http | — | — | Included in search | Chapters, pages | — | Tokyo Revengers |
 | readberserk.com | — | http | — | — | Included in search | Shared parser: search, chapters, pages | — | Berserk |
@@ -170,12 +170,12 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 | sakamoto-days.online | — | http | — | — | Included in search | — | — | Sakamoto Days |
 | sakamotomanga.com | — | http | — | — | Included in search | — | — | Sakamoto Days |
 | sousou-no-frieren.com | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Frieren |
-| spyxfamilymanga.org | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Spy x Family |
-| tgmanga.com | — | http | — | — | Included in search | Pages; shared parser: chapters | — | Tokyo Ghoul |
-| thedragonballsuper.online | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Dragon Ball Super |
-| tokyoghoul.club | — | http | — | — | Included in search | Shared parser: chapters, pages | — | Tokyo Ghoul |
+| spyxfamilymanga.org | — | http | — | — | Included in search | Chapters | — | Spy x Family |
+| tgmanga.com | — | http | — | — | Included in search | Pages | — | Tokyo Ghoul |
+| thedragonballsuper.online | — | http | — | — | Included in search | Chapters | — | Dragon Ball Super |
+| tokyoghoul.club | — | http | — | — | Included in search | — | — | Tokyo Ghoul |
 | toonily.me | — | browser | — | — | Included in search | — | — | Manhwa focused |
-| vagabondmanga.org | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Vagabond |
+| vagabondmanga.org | — | http | — | — | Included in search | Chapters | — | Vagabond |
 | wurmz.net | — | http | id | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Indonesian manga/manhwa/manhua reader |
 | zazamanga.com | deathnotemanga.com, death-note-online.com, fairytail100yearsquest.com, gintama.site, initialdmanga.com, inuyasha.net, onepunchmanmanga.org, readhellsing.com, readoverlord.com | browser | — | — | Included in search | — | — | Also serves several redirected series sites |
 | zonatmo.org | — | http | es | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Spanish manga/manhwa library |

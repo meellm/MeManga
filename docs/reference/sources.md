@@ -37,7 +37,7 @@ are listed under **Other domains**.
 | Language | The language of the translations, when the source has only one. |
 | Adult | **Yes** when the source serves adult content. |
 | Search | Whether a search across sources asks this one; see [why a source is not searched](#why-a-source-is-not-searched). A series from any listed source can be added with the address of its page. |
-| Parser tests | The parts of this source's scraper that offline tests run on saved or made-up copies of the site's pages or API replies: `search`, `chapters` (reading the chapter list) and `pages` (reading a chapter's page list). **Shared parser** means the tests ran code this source shares with other sites, a site template or a common base, on another site's pages; the source uses that code with its own settings. A dash means no such tests. |
+| Parser tests | The parts of this source's scraper that offline tests run on saved or made-up copies of the site's pages or API replies: `search`, `chapters` (reading the chapter list) and `pages` (reading a chapter's page list). **Shared parser** means the tests ran code this source shares with other sites, a site template or a common base, on another site's pages; the source uses that code with its own settings. A source that replaces any of that code with its own is not credited with it. A dash means no such tests. |
 | Live probe | The steps the weekly health check runs against this source after opening its home page: `search`, `chapters` (the chapter list), `pages` (the page list of one chapter) and `image` (downloading one page). A probe without `search`, as for single-series sites, starts from the address MeManga has for the site. A dash means only the home page is opened. |
 | Notes | What the source carries. |
 

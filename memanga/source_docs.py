@@ -7,6 +7,7 @@ Usage: python -m memanga.source_docs [--check]
 import argparse
 import ast
 import re
+import types
 from pathlib import Path
 
 from .scrapers.catalog import (DEFAULT_ENABLED_SOURCES, SOURCE_NOTES,
@@ -249,8 +250,24 @@ def _source_classes(sources):
     return classes
 
 
-def _method_owner(cls, name):
-    return next(k for k in cls.__mro__ if name in k.__dict__)
+_ROUTINES = (types.FunctionType, staticmethod, classmethod, property)
+
+
+def _shared_parts(cls, base, parts):
+    """Parts of ``base``'s tests that still describe ``cls``'s code.
+
+    Conservative: the entry methods (search, get_chapters, get_pages)
+    can call helpers, so a subclass that defines any other method
+    below ``base`` gets no shared credit at all. Otherwise a part counts
+    unless its entry method is replaced below ``base``.
+    """
+    below = [k for k in cls.__mro__ if k not in base.__mro__]
+    defined = {name for k in below for name, value in vars(k).items()
+               if isinstance(value, _ROUTINES)}
+    entries = set(PART_METHODS.values())
+    if defined - entries:
+        return set()
+    return {part for part in parts if PART_METHODS[part] not in defined}
 
 
 def source_parser_tests(sources, declarations):
@@ -258,8 +275,8 @@ def source_parser_tests(sources, declarations):
 
     A domain key, or the name of the class a source's scraper is, counts
     for that source itself. A base class name counts as a shared parser
-    for the sources built on it, for each part the source does not
-    implement itself.
+    for the sources built on it, unless the source changes that code;
+    see _shared_parts.
     """
     classes = _source_classes(sources)
     owner = {}
@@ -290,9 +307,7 @@ def source_parser_tests(sources, declarations):
             if cls is target:
                 own.setdefault(domain, set()).update(parts)
             elif issubclass(cls, target):
-                inherited = {part for part in parts
-                             if _method_owner(cls, PART_METHODS[part])
-                             in target.__mro__}
+                inherited = _shared_parts(cls, target, parts)
                 if inherited:
                     shared.setdefault(domain, set()).update(inherited)
 
@@ -346,7 +361,7 @@ def render_supported_sources(root=None):
         "Search status describes the default sweep; direct URLs remain available for registered sources.",
         "Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.",
         f"Live probe: the steps the weekly [scraper health check]({HEALTH_WORKFLOW}) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.",
-        "Parser tests: the parts of the scraper (search, chapters, pages) that offline tests run on saved or canned responses from the site; \"shared parser\" means the tests ran code this source shares with other sites, on another site's responses.",
+        "Parser tests: the parts of the scraper (search, chapters, pages) that offline tests run on saved or canned responses from the site; \"shared parser\" means the tests ran code this source shares with other sites, on another site's responses; a source that replaces any of that code with its own is not credited with it.",
         f"The [documentation site]({SITE_PAGE}) explains these columns.",
         "",
         "| Source | Aliases | Engine | Language | NSFW | Search status | Notes | Live probe | Parser tests |",

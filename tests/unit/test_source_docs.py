@@ -333,6 +333,72 @@ def test_parts_a_site_implements_itself_are_not_shared():
         assert tested[domain] == ((), ("pages",)), domain
 
 
+def test_shared_parts_follow_what_a_subclass_defines():
+    class Family:
+        def search(self, query): ...
+        def get_chapters(self, url): ...
+        def get_pages(self, url): ...
+        def _links(self, soup): ...
+
+    class ConfigOnly(Family):
+        base_url = "https://example.org"
+
+    class OwnPages(Family):
+        def get_pages(self, url): ...
+
+    class OwnHelper(Family):
+        def _links(self, soup): ...
+
+    class NewHelper(Family):
+        def _extra(self): ...
+
+    class OwnProperty(Family):
+        @property
+        def _links(self): ...
+
+    class InheritsHelper(OwnHelper):
+        base_url = "https://example.net"
+
+    parts = ("search", "chapters", "pages")
+    shared = source_docs._shared_parts
+    assert shared(ConfigOnly, Family, parts) == set(parts)
+    assert shared(OwnPages, Family, parts) == {"search", "chapters"}
+    for cls in (OwnHelper, NewHelper, OwnProperty, InheritsHelper):
+        assert shared(cls, Family, parts) == set(), cls.__name__
+
+
+@pytest.mark.parametrize("domain, own", [
+    ("homunculusmanga.com", ("chapters",)),      # its own _page_urls, _skip_chapter
+    ("dragonballsuper.org", ("chapters",)),      # its own page helpers
+    ("vagabondmanga.org", ("chapters",)),        # its own chapter-title helper
+    ("tokyoghoul.club", ()),                     # page helper of the site it extends
+])
+def test_sites_with_their_own_helpers_get_no_shared_credit(domain, own):
+    declarations = source_docs.parser_test_declarations(ROOT)
+    tested = source_docs.source_parser_tests(source_catalog(), declarations)
+    assert tested.get(domain, ((), ()))[1] == ()
+    assert tested.get(domain, ((), ()))[0] == own
+    site = {cells[0]: cells[6]
+            for cells in _site_rows(source_docs.render_site_list())}
+    assert site[domain] == (source_docs.parser_label((own, ())) if own
+                            else "—")
+
+
+def test_families_without_site_code_keep_shared_credit():
+    from memanga.scrapers.readmanga_base import ReadMangaBaseScraper
+    from memanga.scrapers.templates import NuxtSSRScraper
+    sources = source_catalog()
+    tested = source_docs.source_parser_tests(
+        sources, source_docs.parser_test_declarations(ROOT))
+    for base, parts in ((ReadMangaBaseScraper, ("search", "chapters", "pages")),
+                        (NuxtSSRScraper, ("chapters", "pages"))):
+        family = [s.domain for s in sources
+                  if issubclass(_source_class(s.domain), base)]
+        assert family
+        for domain in family:
+            assert tested[domain] == ((), parts), domain
+
+
 def test_own_parts_win_over_shared_ones():
     sources = source_catalog()
     tested = source_docs.source_parser_tests(sources, [
