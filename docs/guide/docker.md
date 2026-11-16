@@ -281,15 +281,33 @@ The development version has `memanga watch`. It stays running, checks
 once at the start and then again after each interval: every 6 hours unless
 you say otherwise, and not more often than every 15 minutes.
 
-The repository has a second Compose file for this, `compose.dev.yaml`. It
-**builds the image from the source code**, so you need a copy of the
-repository, and you name the file on every command:
+For this you **build the image from the source code** with a second
+Compose file, `compose.dev.yaml`. You need Git and Docker; Python is not
+needed.
 
-```sh
-docker compose -f compose.dev.yaml build
-docker compose -f compose.dev.yaml run --rm memanga list
-docker compose -f compose.dev.yaml up -d scheduler
-```
+1. Get a copy of the source code:
+
+   ```sh
+   git clone https://github.com/meellm/MeManga.git
+   cd MeManga
+   ```
+
+2. Save this file as `compose.dev.yaml` in that folder, next to
+   `Dockerfile`. If the folder already has a `compose.dev.yaml`, use that
+   one instead.
+
+<<< ../../compose.dev.yaml
+
+3. Build the image and run commands from that folder. Name the file on
+   every command:
+
+   ```sh
+   docker compose -f compose.dev.yaml build
+   docker compose -f compose.dev.yaml run --rm memanga list
+   docker compose -f compose.dev.yaml up -d scheduler
+   ```
+
+What the services do:
 
 - `memanga` is the service for single commands.
 - `scheduler` runs `memanga watch` every 6 hours with a random delay of up
@@ -301,17 +319,24 @@ docker compose -f compose.dev.yaml up -d scheduler
 To avoid typing the file name, set `COMPOSE_FILE=compose.dev.yaml` in your
 shell for that folder.
 
-::: warning If you used Compose from a copy of the repository before
-Until now `compose.yaml` itself built from the source code. That setup is
-now `compose.dev.yaml`, unchanged.
+To use newer source code, run `git pull` in that folder and then the
+`build` command again. If `git pull` stops because it would overwrite
+`compose.dev.yaml`, delete the file you saved and run `git pull` again:
+the source code then brings the file itself.
 
-- Keep using it with `-f compose.dev.yaml`, as shown above. It uses the
-  same volumes, so your settings, library and downloads stay as they are.
-- A plain `docker compose …` in that folder now runs the published
-  `0.4.4` image on the same volumes. That image is older than the
-  development version and may not be compatible with data the development
-  version has written. Keep using `-f compose.dev.yaml` for that data, and
-  do not mix the two on one set of data.
+::: warning If you already use Compose in a copy of the source code
+Look at `compose.yaml` in that folder. If it has a `build:` setting, it
+builds from the source code and uses the same volumes as
+`compose.dev.yaml`. Otherwise it runs the published image.
+
+- Use `-f compose.dev.yaml` from now on, as shown above. Your settings,
+  library and downloads stay as they are.
+- A `compose.yaml` that runs the published image opens the same volumes
+  with the `0.4.4` image when you leave out `-f compose.dev.yaml`. That
+  image is older than the development version and may not be compatible
+  with data the development version has written. Keep using
+  `-f compose.dev.yaml` for that data, and do not mix the two on one set of
+  data.
 - If the scheduler is running, it keeps running. Manage it with
   `-f compose.dev.yaml`.
 :::

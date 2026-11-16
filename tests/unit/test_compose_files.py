@@ -125,8 +125,9 @@ class TestBothFiles:
         assert "docker compose -f compose.dev.yaml" in dev
 
 
-def test_docker_guide_shows_the_real_file():
-    # The site page includes compose.yaml itself, so the file a reader
-    # copies cannot differ from the one that is tested here.
+def test_docker_guide_shows_the_real_files():
+    # The site page includes both files themselves, so the files a reader
+    # copies cannot differ from the ones that are tested here.
     guide = (ROOT / "docs/guide/docker.md").read_text(encoding="utf-8")
     assert "\n<<< ../../compose.yaml\n" in guide
+    assert "\n<<< ../../compose.dev.yaml\n" in guide

@@ -1,9 +1,10 @@
 name: Documentation site
 
 # Builds the documentation site in docs/ and publishes it to GitHub Pages
-# (issue #423). A push that changes the site or this workflow rebuilds and
-# redeploys it. docs/423-documentation-site is listed so the site can be
-# published while it is being written; remove it once that branch is merged.
+# (issue #423). A push that changes the site, a file the site shows from
+# outside docs/, or this workflow rebuilds and redeploys it.
+# docs/423-documentation-site is listed so the site can be published while
+# it is being written; remove it once that branch is merged.
 
 on:
   push:
@@ -12,6 +13,9 @@ on:
       - docs/423-documentation-site
     paths:
       - "docs/**"
+      # Shown in full on the Docker page.
+      - "compose.yaml"
+      - "compose.dev.yaml"
       - ".github/workflows/docs.yml"
 
 permissions:

@@ -3469,7 +3469,8 @@ class TestCronInContainer:
         err = " ".join(capsys.readouterr().err.split())
         assert "does not work inside a container" in err
         assert "memanga watch" in err
-        assert "Guide.md#scheduling-in-docker" in err
+        assert "compose.dev.yaml" in err
+        assert "MeManga/guide/docker#check-on-a-schedule" in err
 
     def test_install_refuses_without_touching_crontab(self, run_cli, config,
                                                       capsys):

@@ -631,6 +631,8 @@ class TestCronService:
         assert not result.windows
         assert result.detail == cron_mod.CONTAINER_SCHEDULING_TEXT
         assert "memanga watch" in result.detail
+        # The development Compose file has the scheduler service.
+        assert "'scheduler' service in compose.dev.yaml" in result.detail
         assert runner.calls == []
 
 
