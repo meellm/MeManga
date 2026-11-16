@@ -45,17 +45,20 @@ files.
 
 ## Back up and restore your library
 
-**Settings → Advanced → Import / Export** saves your library and its history
-to a JSON file and reads it back.
+**Settings → Advanced → Import / Export** saves your library to a JSON file
+and reads it back: each series with the chapters downloaded and read and
+where you stopped reading. Your settings and the app's history are not in
+the file.
 
 | Button | What it does |
 |---|---|
-| Export | Writes your series and their history to a file. |
+| Export | Writes your series and their state to a file. |
 | Import (Merge) | Adds what is in the file to your current library. |
 | Import (Replace) | Replaces your current library with the file. |
 
 The command line reads and writes the same file with `memanga export` and
-`memanga import`.
+`memanga import`. [Export and import](../reference/state#export-and-import)
+describes the file and how a merge combines it with your library.
 
 ## Kindle delivery
 

@@ -68,7 +68,10 @@ export default defineConfig({
       },
       {
         text: 'Reference',
-        items: [{ text: 'Settings reference', link: '/reference/config' }]
+        items: [
+          { text: 'Settings reference', link: '/reference/config' },
+          { text: 'Data files and backups', link: '/reference/state' }
+        ]
       }
     ],
 

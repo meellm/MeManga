@@ -163,8 +163,10 @@ tracked in [issue 218](https://github.com/meellm/MeManga/issues/218).
 
 ## Where MeManga keeps its files
 
-MeManga keeps its settings in `config.yaml` and its library in `state.json`,
-both in one config folder.
+MeManga keeps your settings and your library in `config.yaml`, and what it
+has downloaded, what you have read and its history in `state.json`, both in
+one config folder. [Data files and backups](../reference/state) explains
+both files and their safety copies.
 
 ### In release v0.4.4
 

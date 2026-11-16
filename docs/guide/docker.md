@@ -375,7 +375,8 @@ docker pull meellm/memanga:NEW-VERSION
 Replace `NEW-VERSION` with the version you want. Read the
 [release notes](https://github.com/meellm/MeManga/releases) first. Keep a
 copy of the config folder before a larger update; `memanga export` writes
-your library and history into one file.
+your library and the downloaded and read chapters of each series into one
+file (see [Data files and backups](../reference/state)).
 
 To remove an old image, use `docker image rm` with its name and tag.
 Removing an image does not touch the volumes.
