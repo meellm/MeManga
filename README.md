@@ -49,6 +49,8 @@ Release downloads are available for each platform.
 On Windows the download is a `.zip` — extract it and run `MeManga.exe` from the
 `MeManga-windows-x64` folder (keep the `_internal` folder next to it).
 On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double-click.
+If MeManga does not start, see
+[Troubleshooting](https://meellm.github.io/MeManga/guide/troubleshooting).
 
 > **First launch downloads Firefox** (about 80 MB, once).
 > Playwright uses it for sources that need a browser, such as MangaFire and WeebCentral.

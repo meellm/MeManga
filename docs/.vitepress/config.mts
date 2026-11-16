@@ -41,7 +41,8 @@ export default defineConfig({
         items: [
           { text: 'Docs overview', link: '/guide/' },
           { text: 'Download and install', link: '/guide/install' },
-          { text: 'First steps', link: '/guide/first-steps' }
+          { text: 'First steps', link: '/guide/first-steps' },
+          { text: 'Troubleshooting', link: '/guide/troubleshooting' }
         ]
       },
       {

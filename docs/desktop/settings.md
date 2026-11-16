@@ -41,7 +41,8 @@ name your template produces.
 Covers are stored on disk so the Library opens quickly.
 **Settings → Advanced → Clear cache** removes them; they are downloaded
 again when needed. **Open logs folder** opens the folder with MeManga's log
-files.
+files; [Troubleshooting](../guide/troubleshooting#log-files) says what is in
+them.
 
 ## Back up and restore your library
 

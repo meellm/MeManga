@@ -16,6 +16,8 @@ import { release } from '../.vitepress/release'
 - [Download and install](./install): the desktop download, the command line
   from source, and what is not available yet.
 - [First steps](./first-steps): start MeManga and check that it works.
+- [Troubleshooting](./troubleshooting): when MeManga does not start, log
+  files, the browser download, moving and uninstalling.
 - [Library and downloads](../desktop/library), [Reader](../desktop/reader)
   and [Settings](../desktop/settings): the desktop app in detail.
 - [Use the command line](./cli): search, add, check and download from a

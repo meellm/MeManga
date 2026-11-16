@@ -65,7 +65,8 @@ tar -xzf MeManga-linux-x64.tar.gz
 ::: warning macOS: the v0.4.4 builds are not signed
 The v0.4.4 macOS builds were published without Apple signing or
 notarization, so macOS may warn about the app or refuse to open it the first
-time.
+time. [Troubleshooting](./troubleshooting#macos-says-the-app-cannot-be-opened)
+shows how to open it.
 :::
 
 ### First start: browser components
