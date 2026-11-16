@@ -1,5 +1,6 @@
 """The committed source lists match the scraper registry."""
 
+import ast
 import re
 from pathlib import Path
 
@@ -175,7 +176,7 @@ def test_committed_probe_table_is_read():
     cells = {}
     for line in render_supported_sources().splitlines():
         parts = [part.strip() for part in re.split(r"(?<!\\)\|", line)[1:-1]]
-        if len(parts) == 8 and parts[0] not in ("Source", "---"):
+        if len(parts) == 9 and parts[0] not in ("Source", "---"):
             cells[parts[0]] = parts[7]
     for source in source_catalog():
         assert cells[source.domain] == source_docs.probe_label(
@@ -189,11 +190,11 @@ def test_committed_probe_table_is_read():
 
 
 def _site_rows(text):
-    """Cells of the rows of the eight-column source tables."""
+    """Cells of the rows of the nine-column source tables."""
     rows = []
     for line in text.splitlines():
         cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line)[1:-1]]
-        if len(cells) == 8 and cells[0] not in ("Source", "---"):
+        if len(cells) == 9 and cells[0] not in ("Source", "---"):
             rows.append(cells)
     return rows
 
@@ -251,3 +252,143 @@ def test_site_headings_are_plain_text():
                  source_docs.render_site_list()):
         for heading in re.findall(r"^#+ .*$", text, re.MULTILINE):
             assert not re.search(r"[`*<>{}\[\]]", heading), heading
+
+
+# ── Offline parser tests (issue #266) ──────────────────────────────────
+
+
+def _parser_module(tmp_path, body, name="test_example.py"):
+    path = tmp_path / source_docs.PARSER_TEST_DIRS[0] / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return tmp_path
+
+
+def _source_class(domain):
+    from memanga.scrapers import SCRAPERS
+    return SCRAPERS.get(domain) or SCRAPERS["www." + domain]
+
+
+def test_parser_declarations_are_read_from_test_modules(tmp_path):
+    root = _parser_module(tmp_path, (
+        "OTHER = {'x': ('search',)}\n"
+        "PARSER_TESTS = {\n"
+        "    'MangapillScraper': ('pages', 'search'),\n"
+        "    'mangadex.org': ('chapters',),\n"
+        "}\n"))
+    _parser_module(root, "def test_nothing():\n    pass\n", "test_plain.py")
+    assert source_docs.parser_test_declarations(root) == [
+        ("tests/scrapers/test_example.py", "MangapillScraper",
+         ("search", "pages")),
+        ("tests/scrapers/test_example.py", "mangadex.org", ("chapters",)),
+    ]
+
+
+@pytest.mark.parametrize("table", [
+    "PARSER_TESTS = {NAME: ('search',)}",
+    "PARSER_TESTS = {}",
+    "PARSER_TESTS = ['MangapillScraper']",
+    "PARSER_TESTS = {'MangapillScraper': 'search'}",
+    "PARSER_TESTS = {'MangapillScraper': ()}",
+    "PARSER_TESTS = {'MangapillScraper': ('search', 'images')}",
+    "PARSER_TESTS = {'MangapillScraper': ('search', 'search')}",
+])
+def test_parser_declarations_refuse_what_they_cannot_read(tmp_path, table):
+    root = _parser_module(tmp_path, table + "\n")
+    with pytest.raises(ValueError, match="PARSER_TESTS"):
+        source_docs.parser_test_declarations(root)
+
+
+def test_own_class_and_domain_count_for_the_source_itself():
+    sources = source_catalog()
+    tested = source_docs.source_parser_tests(sources, [
+        ("m", "MangapillScraper", ("search", "pages")),
+        ("m", "www.mangadex.org", ("chapters",)),
+    ])
+    assert tested == {"mangapill.com": (("search", "pages"), ()),
+                      "mangadex.org": (("chapters",), ())}
+
+
+def test_a_base_class_is_shared_parser_coverage_only():
+    from memanga.scrapers.templates import WordPressMadaraScraper
+    sources = source_catalog()
+    tested = source_docs.source_parser_tests(sources, [
+        ("m", "WordPressMadaraScraper", ("search", "chapters", "pages"))])
+    family = {s.domain for s in sources
+              if issubclass(_source_class(s.domain), WordPressMadaraScraper)}
+    assert family and set(tested) == family
+    for domain in family:
+        assert tested[domain][0] == ()
+
+
+def test_parts_a_site_implements_itself_are_not_shared():
+    from memanga.scrapers.single_title_base import NumberedChaptersScraper
+    sources = source_catalog()
+    tested = source_docs.source_parser_tests(sources, [
+        ("m", "SingleTitleScraper", ("chapters", "pages"))])
+    numbered = [s.domain for s in sources
+                if issubclass(_source_class(s.domain), NumberedChaptersScraper)]
+    assert numbered
+    for domain in numbered:
+        assert tested[domain] == ((), ("pages",)), domain
+
+
+def test_own_parts_win_over_shared_ones():
+    sources = source_catalog()
+    tested = source_docs.source_parser_tests(sources, [
+        ("m", "SingleTitleScraper", ("chapters", "pages")),
+        ("m", "beastarsmanga.com", ("chapters",)),
+    ])
+    assert tested["beastarsmanga.com"] == (("chapters",), ("pages",))
+    assert source_docs.parser_label(tested["beastarsmanga.com"]) == (
+        "Chapters; shared parser: pages")
+
+
+@pytest.mark.parametrize("key", [
+    "BaseScraper", "PlaywrightScraper", "NoSuchScraper",
+    "not-registered.example",
+])
+def test_parser_keys_must_name_a_site_parser(key):
+    with pytest.raises(ValueError, match=key):
+        source_docs.source_parser_tests(source_catalog(),
+                                        [("m", key, ("search",))])
+
+
+def test_parser_labels():
+    assert source_docs.parser_label(None) == "—"
+    assert source_docs.parser_label((("search", "chapters"), ())) == (
+        "Search, chapters")
+    assert source_docs.parser_label(((), ("chapters", "pages"))) == (
+        "Shared parser: chapters, pages")
+
+
+def test_committed_parser_declarations_match_their_modules():
+    declarations = source_docs.parser_test_declarations(ROOT)
+    assert declarations
+    for module, key, _parts in declarations:
+        text = (ROOT / module).read_text(encoding="utf-8")
+        table = next(
+            node for node in ast.parse(text).body
+            if isinstance(node, ast.Assign)
+            and any(getattr(t, "id", None) == "PARSER_TESTS"
+                    for t in node.targets))
+        rest = text.replace(ast.get_source_segment(text, table), "")
+        # The declared class or site is also used by the tests themselves.
+        assert key in rest, (module, key)
+
+
+def test_committed_parser_cells_match_the_declarations():
+    sources = source_catalog()
+    tested = source_docs.source_parser_tests(
+        sources, source_docs.parser_test_declarations(ROOT))
+    legacy = {}
+    for line in render_supported_sources().splitlines():
+        parts = [part.strip() for part in re.split(r"(?<!\\)\|", line)[1:-1]]
+        if len(parts) == 9 and parts[0] not in ("Source", "---"):
+            legacy[parts[0]] = parts[8]
+    site = {cells[0]: cells[6]
+            for cells in _site_rows(source_docs.render_site_list())}
+    for source in sources:
+        expected = source_docs.parser_label(tested.get(source.domain))
+        assert legacy[source.domain] == expected, source.domain
+        assert site[source.domain] == expected, source.domain

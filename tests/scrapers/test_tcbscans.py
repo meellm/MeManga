@@ -6,6 +6,10 @@ import pytest
 
 from memanga.scrapers.tcbscans import TCBScansScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"TCBScansScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def scraper():

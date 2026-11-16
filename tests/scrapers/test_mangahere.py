@@ -22,6 +22,10 @@ import pytest
 from memanga.scrapers import get_scraper
 from memanga.scrapers.mangahere import MangaHereScraper, _unpack
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaHereScraper": ("chapters", "pages")}
+
 
 MANGA_URL = "https://www.mangahere.cc/manga/one_piece_green/"
 CHAPTER_URL = "https://www.mangahere.cc/manga/one_piece_green/c001/1.html"

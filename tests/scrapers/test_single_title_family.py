@@ -15,6 +15,41 @@ from memanga.scrapers.single_title_base import (
     SingleTitleScraper,
 )
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs. The domains are
+# the sites run here; the bases count as shared-parser coverage for the
+# other sites built on them.
+PARSER_TESTS = {
+    "SingleTitleScraper": ("chapters", "pages"),
+    "NumberedChaptersScraper": ("chapters",),
+    "1piecemanga.com": ("pages",),
+    "ajimenoippo.com": ("chapters", "pages"),
+    "beastarsmanga.com": ("chapters", "pages"),
+    "blame-manga.com": ("pages",),
+    "blueexorcistmanga.com": ("chapters", "pages"),
+    "bluelockmanga.net": ("chapters",),
+    "bluelockread.online": ("pages",),
+    "bocchitherockmanga.com": ("chapters",),
+    "death-note-manga.com": ("pages",),
+    "dragonballsuper.org": ("chapters",),
+    "drstonemanga.com": ("chapters",),
+    "fairytailmangafree.com": ("pages",),
+    "fireforcemanga.org": ("pages",),
+    "homunculusmanga.com": ("chapters",),
+    "kaijuno8-manga.com": ("pages",),
+    "monstermanga.org": ("chapters",),
+    "read-kengan-ashura.com": ("chapters",),
+    "read-slamdunk.online": ("chapters", "pages"),
+    "read-tokyorevengers.com": ("chapters", "pages"),
+    "readbluelock.org": ("pages",),
+    "readichithewitch.com": ("chapters",),
+    "sousou-no-frieren.com": ("chapters",),
+    "spyxfamilymanga.org": ("chapters",),
+    "tgmanga.com": ("pages",),
+    "thedragonballsuper.online": ("chapters",),
+    "vagabondmanga.org": ("chapters",),
+}
+
 
 # domain -> (class name, name, base_url, search title, search url, cover url)
 SITES = {

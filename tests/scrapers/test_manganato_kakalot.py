@@ -11,6 +11,13 @@ import pytest
 from memanga.scrapers.manganato import ManganatoScraper
 from memanga.scrapers.mangakakalot import MangakakalotScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {
+    "ManganatoScraper": ("search", "chapters", "pages"),
+    "MangakakalotScraper": ("search", "chapters", "pages"),
+}
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Manganato

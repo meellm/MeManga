@@ -16,6 +16,10 @@ from memanga.scrapers.mangahereonl import (
     rows_from_payload,
 )
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaHereOnlScraper": ("search", "chapters")}
+
 
 # mh01's search currently fails upstream (missing FULLTEXT index): GraphQL
 # returns the error next to the other aliases' data.

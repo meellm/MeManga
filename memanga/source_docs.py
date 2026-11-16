@@ -25,6 +25,18 @@ PROBE_SPEC = "ProbeSpec"
 PROBE_STEPS = ("search", "chapters", "pages", "image")
 STEP_FLAGS = ("chapters", "pages", "image")
 
+# Offline parser tests: each scraper test module that runs a scraper on
+# saved or canned site responses declares what it covers in a literal
+# PARSER_TESTS dict, {registered domain or scraper class name: parts}.
+PARSER_TEST_DIRS = ("tests/scrapers", "tests/unit/scrapers")
+PARSER_TABLE = "PARSER_TESTS"
+PARSER_PARTS = ("search", "chapters", "pages")
+PART_METHODS = {"search": "search", "chapters": "get_chapters",
+                "pages": "get_pages"}
+# Bases that hold no site parser; declaring one would mark every
+# scraper built on it.
+GENERIC_BASES = ("BaseScraper", "PlaywrightScraper")
+
 START = "<!-- source-catalog:start -->"
 END = "<!-- source-catalog:end -->"
 COUNT_START = "<!-- source-count:start -->"
@@ -186,6 +198,128 @@ def source_probe_steps(sources, probe_steps):
     return steps
 
 
+def parser_test_declarations(root=None):
+    """``[(module, key, parts)]`` from every ``PARSER_TESTS`` dict.
+
+    Read from the test modules without importing them. A table that is
+    not a literal dict of tuples of known parts is refused.
+    """
+    root = root or _repo_root()
+    found = []
+    for folder in PARSER_TEST_DIRS:
+        for path in sorted((root / folder).glob("test_*.py")):
+            module = path.relative_to(root).as_posix()
+            tree = ast.parse(path.read_text(encoding="utf-8"),
+                             filename=module)
+            for node in tree.body:
+                if not (isinstance(node, ast.Assign)
+                        and any(isinstance(t, ast.Name)
+                                and t.id == PARSER_TABLE
+                                for t in node.targets)):
+                    continue
+                try:
+                    table = ast.literal_eval(node.value)
+                except ValueError:
+                    raise ValueError(f"{module}: {PARSER_TABLE} must be "
+                                     "written as a literal dict") from None
+                if not isinstance(table, dict) or not table:
+                    raise ValueError(f"{module}: {PARSER_TABLE} must be a "
+                                     "non-empty dict")
+                for key, parts in table.items():
+                    if (not isinstance(key, str) or not isinstance(parts, tuple)
+                            or not parts
+                            or len(set(parts)) != len(parts)
+                            or any(p not in PARSER_PARTS for p in parts)):
+                        raise ValueError(
+                            f"{module}: {PARSER_TABLE}[{key!r}] must be a "
+                            "tuple of " + ", ".join(PARSER_PARTS))
+                    found.append((module, key, tuple(
+                        p for p in PARSER_PARTS if p in parts)))
+    return found
+
+
+def _source_classes(sources):
+    from .scrapers import SCRAPERS
+    classes = {}
+    for source in sources:
+        cls = SCRAPERS.get(source.domain) or SCRAPERS.get("www." + source.domain)
+        if cls is None:
+            raise ValueError(f"no scraper class for {source.domain}")
+        classes[source.domain] = cls
+    return classes
+
+
+def _method_owner(cls, name):
+    return next(k for k in cls.__mro__ if name in k.__dict__)
+
+
+def source_parser_tests(sources, declarations):
+    """``{canonical domain: (own parts, shared parts)}``.
+
+    A domain key, or the name of the class a source's scraper is, counts
+    for that source itself. A base class name counts as a shared parser
+    for the sources built on it, for each part the source does not
+    implement itself.
+    """
+    classes = _source_classes(sources)
+    owner = {}
+    for source in sources:
+        for domain in (source.domain,) + source.aliases:
+            owner[domain] = source.domain
+    by_name = {}
+    for cls in classes.values():
+        for klass in cls.__mro__:
+            by_name.setdefault(klass.__name__, set()).add(klass)
+
+    own, shared = {}, {}
+    for module, key, parts in declarations:
+        if "." in key:
+            base = key[4:] if key.startswith("www.") else key
+            if base not in owner:
+                raise ValueError(
+                    f"{module}: {key} is not a registered source domain")
+            own.setdefault(owner[base], set()).update(parts)
+            continue
+        matches = by_name.get(key, set())
+        if key in GENERIC_BASES or len(matches) != 1:
+            raise ValueError(
+                f"{module}: {key} is not one scraper class or site parser "
+                "of a registered source")
+        target = next(iter(matches))
+        for domain, cls in classes.items():
+            if cls is target:
+                own.setdefault(domain, set()).update(parts)
+            elif issubclass(cls, target):
+                inherited = {part for part in parts
+                             if _method_owner(cls, PART_METHODS[part])
+                             in target.__mro__}
+                if inherited:
+                    shared.setdefault(domain, set()).update(inherited)
+
+    result = {}
+    for domain in set(own) | set(shared):
+        mine = own.get(domain, set())
+        result[domain] = (
+            tuple(p for p in PARSER_PARTS if p in mine),
+            tuple(p for p in PARSER_PARTS
+                  if p in shared.get(domain, set()) and p not in mine))
+    return result
+
+
+def parser_label(entry):
+    """Cell text for the parser test columns."""
+    if not entry:
+        return "—"
+    mine, shared = entry
+    cells = []
+    if mine:
+        cells.append(", ".join(mine))
+    if shared:
+        cells.append("shared parser: " + ", ".join(shared))
+    text = "; ".join(cells)
+    return text[0].upper() + text[1:]
+
+
 def probe_label(steps):
     """Cell text for the live probe columns."""
     if steps is None:
@@ -204,6 +338,7 @@ def probe_label(steps):
 def render_supported_sources(root=None):
     sources = source_catalog()
     probed = source_probe_steps(sources, pipeline_probe_steps(root))
+    tested = source_parser_tests(sources, parser_test_declarations(root))
     lines = [
         "# Supported Sources",
         "",
@@ -211,10 +346,11 @@ def render_supported_sources(root=None):
         "Search status describes the default sweep; direct URLs remain available for registered sources.",
         "Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.",
         f"Live probe: the steps the weekly [scraper health check]({HEALTH_WORKFLOW}) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.",
+        "Parser tests: the parts of the scraper (search, chapters, pages) that offline tests run on saved or canned responses from the site; \"shared parser\" means the tests ran code this source shares with other sites, on another site's responses.",
         f"The [documentation site]({SITE_PAGE}) explains these columns.",
         "",
-        "| Source | Aliases | Engine | Language | NSFW | Search status | Notes | Live probe |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Source | Aliases | Engine | Language | NSFW | Search status | Notes | Live probe | Parser tests |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for source in sources:
         aliases = ", ".join(
@@ -224,7 +360,8 @@ def render_supported_sources(root=None):
         lines.append(_row((
             source.domain, aliases, source.engine, source.language or "—",
             "Yes" if source.nsfw else "No", source.search_status,
-            source.note or "—", probe_label(probed.get(source.domain)))))
+            source.note or "—", probe_label(probed.get(source.domain)),
+            parser_label(tested.get(source.domain)))))
     return "\n".join(lines) + "\n"
 
 
@@ -279,17 +416,17 @@ def _site_aliases(source):
     return ", ".join(parts) or "—"
 
 
-def _site_table(sources, probed):
+def _site_table(sources, probed, tested):
     lines = [
-        "| Source | Other domains | Engine | Language | Adult | Search | Live probe | Notes |",
-        "|---|---|---|---|---|---|---|---|",
+        "| Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for source in sources:
         lines.append(_row((
             source.domain, _site_aliases(source), source.engine,
             source.language or "—", "Yes" if source.nsfw else "—",
-            _site_search(source), probe_label(probed.get(source.domain)),
-            source.note or "—")))
+            _site_search(source), parser_label(tested.get(source.domain)),
+            probe_label(probed.get(source.domain)), source.note or "—")))
     return lines
 
 
@@ -304,6 +441,7 @@ def _domain_list(domains):
 def render_site_list(root=None):
     sources = source_catalog()
     probed = source_probe_steps(sources, pipeline_probe_steps(root))
+    tested = source_parser_tests(sources, parser_test_declarations(root))
     searched = [s for s in sources if s.search_status == INCLUDED]
     templates = [s for s in sources if s.template]
     skipped = [s for s in sources if s.search_skip and not s.template]
@@ -323,6 +461,8 @@ def render_site_list(root=None):
         f"| Included in search | {len(searched)} |",
         f"| In the default selection | {len(DEFAULT_ENABLED_SOURCES)} |",
         f"| Adult content | {len(adult)} |",
+        f"| With parser tests of their own | {sum(bool(mine) for mine, _shared in tested.values())} |",
+        f"| With tests of a shared parser only | {sum(not mine for mine, _shared in tested.values())} |",
         f"| In the weekly live probe | {len(probed)} |",
         f"| Live probe through to an image download | {sum('image' in steps for steps in probed.values())} |",
         "",
@@ -367,19 +507,19 @@ def render_site_list(root=None):
         "",
         f"{len(searched)} sources, in search order.",
         "",
-        *_site_table(searched, probed),
+        *_site_table(searched, probed, tested),
         "",
         "## Sources left out of search",
         "",
         f"{len(skipped)} sources. Series you already follow from them are still checked, and you can add a series by its address.",
         "",
-        *_site_table(skipped, probed),
+        *_site_table(skipped, probed, tested),
         "",
         "## Template sites",
         "",
         f"{len(templates)} sites built on shared site templates.",
         "",
-        *_site_table(templates, probed),
+        *_site_table(templates, probed, tested),
     ])
     return "\n".join(lines) + "\n"
 

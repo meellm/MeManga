@@ -19,6 +19,10 @@ import pytest
 from memanga.scrapers import get_scraper
 from memanga.scrapers.mangataro import MangaTaroScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaTaroScraper": ("search", "chapters", "pages")}
+
 
 CHAPTER_URL = "https://mangataro.org/read/koi-to-yobu-ni-wa-kimochi-warui/ch1-547229"
 

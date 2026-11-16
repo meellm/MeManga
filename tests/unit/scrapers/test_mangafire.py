@@ -8,6 +8,10 @@ import types
 import pytest
 import requests
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaFireScraper": ("search", "chapters", "pages")}
+
 
 class _Response:
     """Just enough of ``requests.Response`` for the shared request policy

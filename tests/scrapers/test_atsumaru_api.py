@@ -12,6 +12,10 @@ import pytest
 from memanga.scrapers import get_scraper
 from memanga.scrapers.atsumaru import AtsumaruScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"AtsumaruScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def scraper():

@@ -14,6 +14,10 @@ import requests
 from memanga.scrapers import get_scraper
 from memanga.scrapers.thunderscans import ThunderScansScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"ThunderScansScraper": ("search", "chapters", "pages")}
+
 BASE = "https://en-thunderscans.com"
 
 

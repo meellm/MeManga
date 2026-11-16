@@ -29,6 +29,10 @@ from memanga.scrapers.playwright_base import PlaywrightScraper
 from memanga.scrapers.registry import TEMPLATE_SCRAPERS
 from memanga.search import BROKEN_SEARCH_SOURCES, compute_search_sources
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"AsuraScansScraper": ("search", "chapters", "pages")}
+
 
 def _iso(offset: timedelta) -> str:
     """API-shaped timestamp `offset` away from now (trailing "Z")."""

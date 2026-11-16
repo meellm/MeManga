@@ -12,6 +12,10 @@ import pytest
 from memanga.scrapers import get_scraper
 from memanga.scrapers.mangaball import MangaBallScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaBallScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def mb():
