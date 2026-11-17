@@ -259,10 +259,15 @@ on in the current Bash session:
 source <(memanga completion bash)
 ```
 
-To have it in every new Bash session, add that line to your `~/.bashrc`.
-The line runs `memanga` each time Bash starts, so `memanga` must be found
-then. If it is installed in a virtual environment, either activate the
-environment earlier in `~/.bashrc`, or save the script once and load the
+To keep it, add that line to your `~/.bashrc`. Bash reads that file when
+it starts as an interactive shell that is not a login shell; a login shell
+reads a profile file instead, such as `~/.bash_profile`, which may load
+`~/.bashrc` itself. The Bash manual describes this under
+[Bash Startup Files](https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html).
+
+The line runs `memanga` when it is executed, so `memanga` must be available
+at that point. If it is installed in a virtual environment, either activate
+the environment earlier in `~/.bashrc`, or save the script once and load the
 file instead:
 
 ```sh
