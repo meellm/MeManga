@@ -4,8 +4,8 @@ MeManga tracks manga series, checks their sources for new chapters and
 downloads them. It comes as a desktop app and as the `memanga` command-line
 tool.
 
-This site is new and is being filled in page by page. For topics that do not
-have a page here yet, the existing documents on GitHub are listed below.
+A few documents live in the repository instead; they are listed under
+[Documents on GitHub](#documents-on-github).
 
 <script setup>
 import { release } from '../.vitepress/release'
@@ -28,24 +28,16 @@ import { release } from '../.vitepress/release'
   scheduled checks.
 - [Send chapters to a Kindle](./kindle): email delivery from setup to
   troubleshooting.
+- [Sources](../reference/sources): the sites MeManga can read.
 
-## Where to read today
+## Documents on GitHub
 
 | Topic | Where |
 |---|---|
-| Setup and everyday use | [Setup and usage guide](https://github.com/meellm/MeManga/blob/main/docs/Guide.md) |
-| Sources MeManga knows about | [Sources](../reference/sources) |
 | Screen-reader checklist for the desktop app | [Accessibility](https://github.com/meellm/MeManga/blob/main/docs/ACCESSIBILITY.md) |
 | What changed in each version | [Changelog](https://github.com/meellm/MeManga/blob/main/CHANGELOG.md) |
 | Reporting a security problem | [Security policy](https://github.com/meellm/MeManga/blob/main/SECURITY.md) |
 | Working on MeManga | [Set up for development](../developer/contributing) and [Contributing](https://github.com/meellm/MeManga/blob/main/CONTRIBUTING.md) |
-
-::: warning These documents are being moved
-The documents linked above were written before this site existed. They are
-being checked against the current code and moved here section by section, and
-parts of them may be out of date. If something does not match what MeManga
-does, please [open an issue](https://github.com/meellm/MeManga/issues).
-:::
 
 ## Release and development versions
 
@@ -88,6 +80,3 @@ These are planned and not available yet:
 
 - **Installing from a package index** with pip, pipx or uv. Tracked in
   [issue 218](https://github.com/meellm/MeManga/issues/218).
-- **The rest of this site:** configuration and troubleshooting pages.
-  Tracked in
-  [issue 423](https://github.com/meellm/MeManga/issues/423).
