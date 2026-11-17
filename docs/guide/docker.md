@@ -248,7 +248,71 @@ MEMANGA_SMTP_PASSWORD=YOUR-APP-PASSWORD
 
 Then add `--env-file "ENV-FILE"` to the `docker run` command, with the path
 of that file. `MEMANGA_SMTP_PASSWORD_FILE` works too: it names a file
-inside the container that holds only the password.
+inside the container that holds only the password; with Compose, see below.
+Set only one of the two variables: when both are set, MeManga uses neither.
+
+### A password file with Compose
+
+This works with an image built from source, as described under
+[Image built from source](#image-built-from-source-memanga-watch). The
+0.4.4 image does not read `MEMANGA_SMTP_PASSWORD_FILE`.
+
+1. Save the app password in a file of its own, outside the source folder so
+   that it is never committed. Create it so that only you can read it, then
+   paste the password and press Enter and Ctrl-D:
+
+   ```sh
+   mkdir -p ~/memanga-secrets
+   ( umask 077; cat > ~/memanga-secrets/smtp_password )
+   ```
+
+2. MeManga runs as the user with UID 1000 inside the container, and Compose
+   mounts the file with the owner and permissions it has on your machine;
+   the `uid`, `gid` and `mode` options of a secret do not change that for a
+   file. If `id -u` shows 1000 for you, nothing else is needed. Otherwise
+   give this one file to UID 1000, without making it readable for others:
+
+   ```sh
+   sudo chown 1000 ~/memanga-secrets/smtp_password
+   ```
+
+3. Save this as `compose.secrets.yaml` next to `compose.dev.yaml`:
+
+   ```yaml
+   services:
+     memanga:
+       environment:
+         MEMANGA_SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+       secrets:
+         - smtp_password
+     scheduler:
+       environment:
+         MEMANGA_SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+       secrets:
+         - smtp_password
+
+   secrets:
+     smtp_password:
+       file: ${HOME}/memanga-secrets/smtp_password
+   ```
+
+4. Name both files on every command, so the second one is added to the
+   first:
+
+   ```sh
+   docker compose -f compose.dev.yaml -f compose.secrets.yaml run --rm memanga doctor
+   docker compose -f compose.dev.yaml -f compose.secrets.yaml up -d scheduler
+   ```
+
+   If you use `COMPOSE_FILE`, list both:
+   `COMPOSE_FILE=compose.dev.yaml:compose.secrets.yaml`, separated by `;`
+   instead of `:` on Windows.
+
+With email delivery set up, `doctor` then reports on its keyring line that
+the app password comes from `MEMANGA_SMTP_PASSWORD_FILE`; a password still
+saved in `config.yaml` is reported there first. If the file cannot be read,
+MeManga does not fall back to a password saved earlier: sending fails, and
+the email line of `doctor` names the problem.
 
 ## Check on a schedule
 
