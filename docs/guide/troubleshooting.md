@@ -256,9 +256,10 @@ Some records keep the full path a file was saved under, and still point to
 the old place:
 
 - <Badge type="info" :text="`Not in ${release.tag}`" /> **Chapters waiting
-  for Kindle delivery.** `memanga send --pending` says the saved file is no
-  longer there. `memanga send "TITLE" CHAPTER` sends such a chapter from
-  the current download folder instead.
+  for Kindle delivery.** `memanga send --pending` and `memanga send "TITLE"
+  CHAPTER` both use the path saved with such a chapter, so they say the
+  saved file is no longer there. Setting the new download folder does not
+  change that path.
 - **Partly downloaded chapters** and the **download history** keep the old
   path.
 
