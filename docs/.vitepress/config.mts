@@ -77,6 +77,10 @@ export default defineConfig({
           { text: 'Data files and backups', link: '/reference/state' },
           { text: 'Sources', link: '/reference/sources' }
         ]
+      },
+      {
+        text: 'Developers',
+        items: [{ text: 'Architecture', link: '/developer/architecture' }]
       }
     ],
 
