@@ -422,14 +422,17 @@ def test_cover_fallback_uses_versioned_api_identity(monkeypatch):
 
 
 def test_removal_docs_match_built_in_list():
-    """README and Guide must not claim removal IDs ship while none do."""
+    """The sources reference and the Guide must not claim removal IDs ship
+    while none do, and the reference must show how to block a group."""
     from pathlib import Path
     from memanga.scrapers.mangadex import REMOVED_GROUP_IDS
 
     root = Path(__file__).resolve().parents[2]
-    for doc in ("README.md", "docs/Guide.md"):
+    for doc in ("docs/reference/sources.md", "docs/Guide.md"):
         text = " ".join((root / doc).read_text(encoding="utf-8").split())
         assert "ship with MeManga" not in text
         assert "MeManga ships those" not in text
         if not REMOVED_GROUP_IDS:
             assert "none are built in yet" in text, doc
+    reference = (root / "docs/reference/sources.md").read_text(encoding="utf-8")
+    assert "memanga config --mangadex-remove-group GROUP_ID" in reference

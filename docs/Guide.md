@@ -9,7 +9,7 @@ them to your Kindle.
 > latest build from the
 > [GitHub releases page](https://github.com/meellm/MeManga/releases) —
 > double-click on Windows/macOS, or on Linux extract the `.tar.gz` and
-> run the binary. See the [README download section](../README.md#download)
+> run the binary. See [Download and install](https://meellm.github.io/MeManga/guide/install#desktop-app)
 > for the file to pick and how to launch it. Nothing to configure up front.
 
 ---
@@ -1432,7 +1432,7 @@ Remove:
 ./scripts/run.sh cron remove
 ```
 
-Output is logged to `memanga.log` in the MeManga config directory (the platform folder listed in [Where your data lives](../README.md#where-your-data-lives) by default, or the directory passed with `--config-dir`). Each run prints one summary line, and its warnings and errors (a source that failed or fell back to a backup, a partial or failed chapter) are logged with a timestamp and level (see [Output and logging](#output-and-logging)).
+Output is logged to `memanga.log` in the MeManga config directory (the platform folder listed in [Where MeManga keeps its files](https://meellm.github.io/MeManga/guide/install#where-memanga-keeps-its-files) by default, or the directory passed with `--config-dir`). Each run prints one summary line, and its warnings and errors (a source that failed or fell back to a backup, a partial or failed chapter) are logged with a timestamp and level (see [Output and logging](#output-and-logging)).
 
 ### Linux — Cron
 

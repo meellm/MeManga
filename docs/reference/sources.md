@@ -57,4 +57,24 @@ are listed under **Other domains**.
   report for 30 days. Being in
   the check is not a result: open the latest run to see how a source did.
 
+## MangaDex scanlation groups
+
+The leaders of an active scanlation group can ask for their group's
+chapters to be left out by opening an
+[issue](https://github.com/meellm/MeManga/issues) with the group's MangaDex
+link. Accepted group IDs are added in a future release; none are built in
+yet.
+
+<Badge type="info" :text="`Not in ${release.tag}`" /> To leave out a
+group's chapters yourself, use the ID from its MangaDex group page. Run
+this while the desktop app is closed:
+
+```sh
+memanga config --mangadex-remove-group GROUP_ID
+```
+
+MeManga then skips that group's chapters on MangaDex. Chapters you already
+downloaded, and copies sent to an e-reader, are not deleted. The setting is
+[`mangadex.removed_group_ids`](./config#mangadex-removed-group-ids).
+
 <!--@include: ./source-list.md-->

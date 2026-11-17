@@ -49,6 +49,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC = REPO_ROOT / "packaging" / "memanga-release.spec"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 README = REPO_ROOT / "README.md"
+# The download and launch instructions live on the documentation site;
+# the README links there.
+INSTALL_PAGE = REPO_ROOT / "docs" / "guide" / "install.md"
+TROUBLESHOOTING_PAGE = REPO_ROOT / "docs" / "guide" / "troubleshooting.md"
+RELEASE_DATA = REPO_ROOT / "docs" / ".vitepress" / "release.ts"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 MACOS_APP = REPO_ROOT / "packaging" / "macos_app.py"
 
@@ -289,17 +294,23 @@ def test_targz_roundtrip_preserves_executable_bit(tmp_path):
         "extracted binary is not owner-executable"
 
 
-def test_readme_documents_linux_targz_launch_path():
-    """README must point Linux users at the tarball and show how to run
-    it, so the download has a clear launch path (issue #167)."""
-    text = README.read_text(encoding="utf-8")
-    # Download table links to the archive, not the bare binary.
-    assert "MeManga-linux-x64.tar.gz" in text
-    # Concrete extract + run instructions.
-    assert "tar xzf MeManga-linux-x64.tar.gz" in text
-    assert "./MeManga-linux-x64/MeManga" in text
-    # The chmod fallback for file managers that still strip the bit.
-    assert "chmod +x MeManga-linux-x64/MeManga" in text
+def test_install_page_documents_linux_targz_launch_path():
+    """The install page must point Linux users at the tarball and show how
+    to run it, so the download has a clear launch path (issue #167): the
+    released single file, and the folder the workflow now packs."""
+    assets = RELEASE_DATA.read_text(encoding="utf-8")
+    text = INSTALL_PAGE.read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    # The release's Linux download is the archive, not a bare binary.
+    assert "'MeManga-linux-x64.tar.gz'" in assets
+    # Concrete extract + run instructions for the released single file.
+    assert "tar -xzf MeManga-linux-x64.tar.gz" in text
+    assert "./MeManga-linux-x64\n" in text
+    # The chmod fallback for tools that strip the bit.
+    assert "chmod +x MeManga-linux-x64`" in flat
+    # The development build's archive holds a folder with the program.
+    assert 'tar -czf "${base}.tar.gz" "$base"' in WORKFLOW.read_text(encoding="utf-8")
+    assert "`MeManga-linux-x64` with `MeManga`" in flat
 
 # ── issue #163: macOS assets ship as launchable .app packages ───────────
 def test_workflow_packages_macos_app_bundle():
@@ -837,19 +848,25 @@ def test_workflow_removes_signing_keychain():
     assert _step_index("Remove macOS signing keychain") > _step_index("Upload artifact")
 
 
-def test_readme_describes_unsigned_mac_app_workaround():
+def test_docs_describe_unsigned_mac_app_and_apples_route():
     """Notarization is optional and the published app may be unsigned, so
-    the README must not promise a notarized app and must keep the fix for
-    the "damaged" dialog."""
-    text = README.read_text(encoding="utf-8")
-    assert "not code-signed or notarized" in text
-    assert "paid Apple Developer account" in text
-    assert "starting with the next release" not in text
-    assert "The Mac app is signed with a Developer ID" not in text
-    assert "is damaged and can't be opened" in text
-    assert "xattr -dr com.apple.quarantine" in text
-    # The old Gatekeeper bypass doesn't clear the "damaged" dialog.
-    assert "right-click → Open the first time" not in text
+    the docs must not promise a notarized app. The install page says the
+    release is unsigned and links troubleshooting, which gives Apple's own
+    Open Anyway route rather than clearing the quarantine flag."""
+    install = " ".join(INSTALL_PAGE.read_text(encoding="utf-8").split())
+    trouble = " ".join(TROUBLESHOOTING_PAGE.read_text(encoding="utf-8").split())
+    readme = README.read_text(encoding="utf-8")
+    assert "without Apple signing or notarization" in install
+    assert "./troubleshooting#macos-says-the-app-cannot-be-opened" in install
+    assert "not signed or notarized" in trouble
+    assert "Open Anyway" in trouble
+    assert "https://support.apple.com/en-us/102445" in trouble
+    for text in (install, trouble, readme):
+        assert "starting with the next release" not in text
+        assert "The Mac app is signed with a Developer ID" not in text
+        assert "xattr" not in text
+        # The old Gatekeeper bypass doesn't clear the "damaged" dialog.
+        assert "right-click → Open the first time" not in text
 
 
 def test_changelog_163_entry_describes_optional_notarization():

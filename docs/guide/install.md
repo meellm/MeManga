@@ -62,6 +62,10 @@ tar -xzf MeManga-linux-x64.tar.gz
 
 :::
 
+On Linux, if the program does not start because the tool you extracted it
+with dropped its permission to run, restore it with
+`chmod +x MeManga-linux-x64`.
+
 ::: warning macOS: the v0.4.4 builds are not signed
 The v0.4.4 macOS builds were published without Apple signing or
 notarization, so macOS may warn about the app or refuse to open it the first
@@ -87,7 +91,9 @@ The development version already works differently. These changes are not in
 the v0.4.4 download:
 
 - The Windows download becomes a `.zip` and the Linux archive holds a folder
-  instead of a single file.
+  instead of a single file: `MeManga-windows-x64` with `MeManga.exe`, and
+  `MeManga-linux-x64` with `MeManga`. Keep the `_internal` folder next to
+  the program.
 - The browser download can be skipped at first start and done later from
   **Settings → Advanced**.
 - A new library asks once where downloads should go.
@@ -161,6 +167,30 @@ image, where your data is kept, and how to check on a schedule.
 Installing MeManga with `pip`, `pipx` or `uv` from a package index is planned
 and **not available yet**. There is no package to install today. Progress is
 tracked in [issue 218](https://github.com/meellm/MeManga/issues/218).
+
+## Third-party licenses
+
+MeManga's own code is under the MIT license. The desktop downloads and the
+Docker image also contain third-party software under its own licenses.
+Among them, Qt, PySide6, Shiboken6 and img2pdf are used under the GNU LGPL.
+
+<Badge type="info" :text="`Not in ${release.tag}`" /> Downloads and images
+built from the development version come with a `THIRD_PARTY_NOTICES.txt`
+that reproduces those licenses, links the source code of the LGPL
+components, and explains how to use a modified version of them:
+
+- on the release page, next to each download;
+- inside the download: at the top of the Windows and Linux folders, and in
+  `MeManga.app/Contents/Resources` on macOS;
+- in the Docker image, in `/usr/share/doc/memanga/`.
+
+On Windows and Linux the app is a folder, so the LGPL components are
+separate files under `_internal` that you can replace. On macOS the app is
+a single program file; to use a modified component you build the app from
+source, as the notices file describes.
+
+The {{ release.tag }} downloads and image came out before these notices
+files.
 
 ## Where MeManga keeps its files
 
