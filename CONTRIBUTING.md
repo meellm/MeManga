@@ -1,8 +1,9 @@
 # Contributing to MeManga
 
-Thanks for taking the time to contribute! This guide covers everything
-you need to set up the project locally, run the tests, and get a pull
-request landed.
+Thanks for taking the time to contribute! This guide covers setting up
+the project locally, running the tests and getting a pull request landed.
+The [developer pages](https://meellm.github.io/MeManga/developer/contributing)
+on the documentation site go into more detail.
 
 ## Code of Conduct
 
@@ -11,29 +12,24 @@ Disagreements are fine; personal attacks aren't.
 
 ## Quick start
 
+[Set up for development](https://meellm.github.io/MeManga/developer/contributing) is the full guide:
+system libraries, running MeManga from the clone, browser components,
+tests, what CI runs and the generated files. The short version, as CI
+installs it:
+
 ```bash
 git clone https://github.com/meellm/MeManga.git
 cd MeManga
-
-# Create a venv and install everything (deps + dev deps)
-python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements/dev.txt   # pinned: gui extra + test tools
-pip install --no-deps -e .            # the package itself, editable
-python -m playwright install chromium firefox   # browsers for the scrapers
-
-# Or run the one-step setup instead (venv, deps, browsers, config folder):
-# python scripts/bootstrap.py
-
-# Run the GUI
-python -m memanga.gui
-
-# Run the CLI
-python -m memanga --help
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
+python -m pip install --require-hashes -r requirements/dev.txt   # pinned: gui extra + test tools
+python -m pip install --no-deps -e .                             # the package itself, editable
+python -m pytest                                                 # the default test run
 ```
 
-The GUI launches in offscreen mode in CI (`QT_QPA_PLATFORM=offscreen`);
-locally it opens the real Qt window.
+`memanga setup` or `python -m playwright install firefox chromium`
+installs the browser components. Only sources that use a browser and the
+live probes need them.
 
 ### Package extras
 
@@ -55,57 +51,23 @@ Code outside `memanga/gui/` must not import Qt at import time;
 
 ## Project layout
 
-```
-memanga/
-├── cli.py              # CLI entry point (memanga.cli:main)
-├── config.py           # YAML config persistence
-├── state.py            # State journal (downloaded chapters, etc.)
-├── downloader.py       # Chapter download + format conversion
-├── emailer.py          # Kindle/SMTP delivery
-├── scrapers/           # 200+ site scrapers
-│   ├── base.py         # BaseScraper / Chapter / Manga dataclasses
-│   ├── playwright_base.py
-│   ├── templates/      # NuxtSSR, OGImageMeta, WordPressMadara, …
-│   └── *.py            # Per-site scrapers
-└── gui/
-    ├── app.py          # MeMangaApp QMainWindow
-    ├── pages/          # Library / Detail / Reader / Settings / Sources
-    ├── components/     # Reusable widgets
-    ├── workers.py      # Background thread pool + EventBus dispatch
-    └── theme/          # tokens + QSS builder
-
-tests/                  # Unit + integration tests
-docs/                   # User-facing documentation
-examples/               # Sample config + state
-packaging/              # PyInstaller specs (dev + release)
-scripts/                # Setup (bootstrap.py) and launcher scripts
-```
+[Architecture](https://meellm.github.io/MeManga/developer/architecture#where-to-change-what) maps
+the modules and says where to change what.
 
 ## Running the tests
 
 ```bash
-# Full suite (fast — uses fixtures, no real network)
-pytest
-
-# Only unit
-pytest tests/unit
-
-# Only GUI
-pytest tests/unit/gui
-
-# Live scraper health checks (hits real sites — slow, opt-in)
-pytest -m live tests/scrapers/live/
-
-# Curated end-to-end probes only — each walks search → chapters →
-# pages → image and a failure names the first broken stage
-pytest -m live tests/scrapers/live/test_live_parsing.py -v
-
-# Machine-readable report (per-stage details + failures_by_stage)
-pytest -m live tests/scrapers/live/ --health-report=health.json
+python -m pytest                          # the default run: everything but the live probes
+python -m pytest tests/unit/test_api.py   # one file while you work
+python -m pytest -n auto                  # the default run in parallel
+python -m pytest -m live tests/scrapers/live/   # live probes against the real sites, opt-in
 ```
 
-All checked-in tests should pass before you push. CI runs `pytest` on
-every push.
+[Run the tests](https://meellm.github.io/MeManga/developer/contributing#run-the-tests) explains the
+defaults and markers, and [Write a scraper](https://meellm.github.io/MeManga/developer/scrapers#live-probe)
+the live probes. Pushes and pull requests to `main` run the CI workflow;
+[What CI runs](https://meellm.github.io/MeManga/developer/contributing#what-ci-runs) lists every
+workflow and when it runs.
 
 ## Adding a scraper
 
@@ -149,12 +111,15 @@ docs: clarify Playwright first-launch download
 
 ## Pull request checklist
 
-- [ ] Tests pass locally (`pytest`)
-- [ ] New behaviour has tests
+The pull request template has the same list.
+
+- [ ] `pytest` passes locally
+- [ ] New behaviour has tests (or notes saying why not)
 - [ ] No `print()` debug noise left in production code
 - [ ] Commit messages follow the style above
 - [ ] No secrets, `.env`, or personal config in the diff
-- [ ] If you touched a scraper, you noted whether you tested it live
+- [ ] Generated files are regenerated when their inputs changed
+- [ ] If you touched a scraper, you ran the live probe at least once
 
 ## Building executables
 

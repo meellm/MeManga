@@ -38,7 +38,7 @@ import { release } from '../.vitepress/release'
 | Screen-reader checklist for the desktop app | [Accessibility](https://github.com/meellm/MeManga/blob/main/docs/ACCESSIBILITY.md) |
 | What changed in each version | [Changelog](https://github.com/meellm/MeManga/blob/main/CHANGELOG.md) |
 | Reporting a security problem | [Security policy](https://github.com/meellm/MeManga/blob/main/SECURITY.md) |
-| Working on MeManga | [Contributing](https://github.com/meellm/MeManga/blob/main/CONTRIBUTING.md) |
+| Working on MeManga | [Set up for development](../developer/contributing) and [Contributing](https://github.com/meellm/MeManga/blob/main/CONTRIBUTING.md) |
 
 ::: warning These documents are being moved
 The documents linked above were written before this site existed. They are
