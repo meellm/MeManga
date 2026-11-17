@@ -18,6 +18,7 @@ tomllib = pytest.importorskip("tomllib")
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO_URL = "https://github.com/meellm/MeManga"
+DOCS_URL = "https://meellm.github.io/MeManga/"
 
 
 @pytest.fixture(scope="module")
@@ -111,15 +112,16 @@ def test_classifiers_are_unique(pyproject):
     assert len(classifiers) == len(set(classifiers))
 
 
-def test_project_urls_point_at_the_repository(pyproject):
+def test_project_urls_point_at_the_repository_and_the_docs_site(pyproject):
     urls = pyproject["project"]["urls"]
-    for label in ("Homepage", "Documentation", "Repository", "Issues", "Changelog"):
+    for label in ("Homepage", "Repository", "Issues", "Changelog"):
         assert urls[label].startswith(REPO_URL)
     assert urls["Issues"] == f"{REPO_URL}/issues"
-    # Linked files exist on the default branch.
-    for label in ("Documentation", "Changelog"):
-        path = urls[label].removeprefix(f"{REPO_URL}/blob/main/")
-        assert (ROOT / path).is_file(), label
+    # The documentation is the published site.
+    assert urls["Documentation"] == DOCS_URL
+    # The linked changelog exists on the default branch.
+    path = urls["Changelog"].removeprefix(f"{REPO_URL}/blob/main/")
+    assert (ROOT / path).is_file(), "Changelog"
 
 
 def test_docker_image_installs_the_package_unmodified():
