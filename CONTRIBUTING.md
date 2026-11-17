@@ -109,6 +109,9 @@ every push.
 
 ## Adding a scraper
 
+[Write a scraper](https://meellm.github.io/MeManga/developer/scrapers)
+explains each step, the fixtures, the tests and the live probe in detail.
+
 1. Drop `memanga/scrapers/newsite.py` (or pick a template under
    `memanga/scrapers/templates/` and add an entry to
    `memanga/scrapers/registry.py`).

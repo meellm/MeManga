@@ -80,7 +80,10 @@ export default defineConfig({
       },
       {
         text: 'Developers',
-        items: [{ text: 'Architecture', link: '/developer/architecture' }]
+        items: [
+          { text: 'Architecture', link: '/developer/architecture' },
+          { text: 'Write a scraper', link: '/developer/scrapers' }
+        ]
       }
     ],
 

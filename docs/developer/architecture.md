@@ -296,7 +296,7 @@ and JSON output.
 | How a chapter is downloaded, recovered, delivered or recorded | `memanga/chapter_pipeline.py`, `memanga/downloader/chapter.py` |
 | An output format | `memanga/downloader/formats/` |
 | Kindle email | `memanga/emailer.py`, `memanga/email_settings.py` |
-| A source | `memanga/scrapers/`: a site with its own module is registered in `memanga/scrapers/__init__.py`; a site built on a template family (`memanga/scrapers/templates/`) is listed in `memanga/scrapers/registry.py` |
+| A source | `memanga/scrapers/`: a site with its own module is registered in `memanga/scrapers/__init__.py`; a site built on a template family (`memanga/scrapers/templates/`) is listed in `memanga/scrapers/registry.py`; see [Write a scraper](./scrapers) |
 | Facts about a source | `memanga/scrapers/catalog.py`; then regenerate the lists with `python -m memanga.source_docs` |
 | Search | `memanga/search.py` |
 | The desktop app | `memanga/gui/app.py` (window, events), `memanga/gui/workers.py` (background work), `memanga/gui/pages/` and `memanga/gui/components/` |
