@@ -78,6 +78,7 @@ export default defineConfig({
           { text: 'Settings reference', link: '/reference/config' },
           { text: 'Data files and backups', link: '/reference/state' },
           { text: 'Sources', link: '/reference/sources' },
+          { text: 'Network connections', link: '/reference/network' },
           { text: 'Python API', link: '/reference/python-api' }
         ]
       },

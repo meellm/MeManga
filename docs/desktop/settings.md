@@ -66,6 +66,13 @@ describes the file and how a merge combines it with your library.
 Sending chapters to a Kindle is set up under **Settings → Kindle / Email**.
 [Send chapters to a Kindle](../guide/kindle) explains it step by step.
 
+## Network and privacy
+
+**Settings → Advanced → Network & Privacy** turns the connection check, the
+MangaDex cover search and the chapter counts in search on or off.
+[Network connections](../reference/network) lists every connection the
+app makes and what each setting changes.
+
 ## Reader and partial chapters
 
 Two groups of settings are described where they are used:
@@ -80,4 +87,5 @@ Two groups of settings are described where they are used:
 These are not in {{ release.tag }}:
 
 - The cover cache has a size limit that you can change.
+- The **Network & Privacy** settings.
 - **Settings → About** can copy version details for a bug report.
