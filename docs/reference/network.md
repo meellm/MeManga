@@ -63,9 +63,11 @@ when a matching title is found.
 
 **Control:** **Find missing covers on MangaDex**
 (`gui.mangadex_cover_fallback`), on by default. While it is off, or while
-MangaDex is switched off in **Sources**, MeManga looks up no new titles on
-MangaDex. Covers it found there earlier are still loaded from their saved
-address, and series that use MangaDex as a source still download from it.
+MangaDex is switched off in **Sources**, MeManga makes no new cover lookups
+on MangaDex. This setting does not change search: a search still asks
+MangaDex while it is switched on in **Sources**. Covers it found there
+earlier are still loaded from their saved address, and series that use
+MangaDex as a source still download from it.
 
 ## Chapter counts in search results
 
