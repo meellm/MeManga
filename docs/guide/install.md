@@ -144,6 +144,29 @@ memanga setup
 
 The `memanga` command is available while the virtual environment is active.
 
+### Set up without questions
+
+For a server or a script, `memanga setup` can run without asking anything:
+
+```sh
+memanga --config-dir /srv/memanga setup --install-browsers
+```
+
+- `--config-dir`, given before the command, puts the config file and the
+  library data in that folder. Later commands use it only when they name it
+  the same way, or when `MEMANGA_CONFIG_DIR` is set to it.
+- The download folder is the one in that config file, `Downloads/MeManga`
+  in the home folder by default. To use another, run
+  `memanga --config-dir /srv/memanga config set delivery.download_dir PATH`
+  and then run setup again.
+- `--install-browsers` downloads missing browser components without asking.
+  With `--no-install-browsers`, or without a terminal and without either
+  option, nothing is downloaded and setup reports what is missing.
+- When all browser components are present, setup starts each one once on
+  an empty page to check that it runs, also with `--no-install-browsers`.
+- It exits with `0` when everything is ready and `1` when a step still needs
+  you; each step prints a line that says what to do.
+
 ### Desktop app from source
 
 The default install is the command line only. To run the desktop app from
