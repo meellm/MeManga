@@ -1,122 +1,98 @@
-# MeManga test suite
+# MeManga tests
 
-Run the whole suite:
+The automated tests of MeManga. How to install the test tools, what the
+defaults are and what CI runs are on the documentation site:
 
-The GUI tests need Qt, which is the package's `gui` extra. The `dev`
-extra has it and the test tools; install them at the pinned versions,
-then the project:
+- [Install for development](https://meellm.github.io/MeManga/developer/contributing#install-for-development)
+- [Run the tests](https://meellm.github.io/MeManga/developer/contributing#run-the-tests)
+- [What CI runs](https://meellm.github.io/MeManga/developer/contributing#what-ci-runs)
 
-```bash
-pip install -r requirements/dev.txt
-pip install --no-deps -e .
-pytest                          # full suite
-pytest -x                       # stop on first failure
-pytest -k state                 # only tests with "state" in the name
-pytest tests/unit/              # only unit tests
-pytest tests/integration/       # only integration
-pytest --cov=memanga --cov-report=html   # HTML coverage report
+## Run tests
+
+From the root of the clone, with the development environment active:
+
+```sh
+python -m pytest tests/unit/test_api.py             # one file
+python -m pytest tests/unit/test_api.py -k reload   # tests in it by name
+python -m pytest tests/unit --ignore=tests/unit/gui # the non-GUI unit tests
+python -m pytest -n auto                            # the default run, in parallel
 ```
 
 ## Layout
 
-| Folder | What's in it |
+| Folder | What it holds |
 |---|---|
-| `unit/test_state.py` | Every `State` method — chapter tracking, notifications, search history, source health, reset, JSON persistence. |
-| `unit/test_state_stores.py` | Domain stores behind `State` — compatibility wrappers, shared file/lock, `state.json` schema compatibility, common CLI and GUI state flows. |
-| `unit/test_config.py` | `Config` load/save, dotted-key get/set, manga list mutations, keyring app-password helpers. |
-| `unit/test_downloader.py` | `check_for_updates`, `download_chapter`, `_sanitize_filename`, format conversion paths, fallback delay logic. |
-| `unit/test_downloader_modules.py` | `memanga.downloader` package layout — re-exported import surface, submodule dependency direction, browser cleanup registration. |
-| `unit/test_emailer.py` | SMTP send wrapping, attachment building, error paths. |
-| `unit/scrapers/` | `BaseScraper` interface conformance + per-scraper smoke tests (mocked HTTP). |
-| `unit/gui/theme/` | Token table, flat() helper, QSS builder substitution. |
-| `unit/gui/components/` | One file per widget — instantiation, theme reactivity, signal emission. |
-| `unit/gui/pages/` | One file per page — header rendering, event subscription, `on_show`, refresh on event. |
-| `unit/gui/pages/test_page_modules.py` | Settings and Reader page layout — tab and reader mixins, import direction, Qt class names, reader input dispatch, reader view-mode resolution. |
-| `unit/gui/test_workers.py` | BackgroundWorker pool, pause/resume, ping_sources, cancel_download. |
-| `unit/gui/test_events.py` | EventBus pub/sub, polling, thread safety. |
-| `unit/gui/test_cache.py` | CoverCache disk/memory LRU, placeholders. |
-| `unit/gui/test_keyboard_navigation.py` | Keyboard activation of cards and drop-downs, keyboard-only focus rings, focus following page changes and quick actions, no scroll-area Tab stops, dialog Tab order, page shortcuts, reader keys. |
-| `unit/cli/` | `argparse` wiring, each subcommand's handler. |
-| `integration/` | End-to-end flows that span multiple components. |
+| `unit/` | Tests of one module or area each: config, state and its stores, the downloader and chapter pipeline, email, search, scheduling, the docs generators, packaging and the workflow files |
+| `unit/cli/` | The command-line commands and their output |
+| `unit/gui/` | The desktop app: `components/`, `pages/` and `theme/`, plus the window, background workers, events, caches, keyboard use and accessible names |
+| `unit/scrapers/` | The scraper base class, the browser worker, the source catalog and registry, and a few scrapers in depth |
+| `unit/fixtures/` | Data files for unit tests, such as config and state files in older layouts |
+| `scrapers/` | Parser tests that run each scraper on saved pages and responses in `scrapers/fixtures/`, one file per site or template family |
+| `scrapers/live/` | Live probes against the real sites, only run when selected (see below) |
+| `integration/` | Flows across several parts, mostly through the desktop window |
 
-## Conventions
+## Shared fixtures
 
-- **Fixtures** in `conftest.py` are reusable across files. The big ones:
-  - `qapp` – shared QApplication (offscreen)
-  - `isolated_home` – per-test tmp HOME so config/state never leak
-  - `theme` – theme module with `_current` reset
-  - `state` / `config` – clean instances pointed at tmp HOME
-  - `sample_manga` – canonical manga dict
-  - `patch_get_scraper` – inject `MockScraper` so no real network calls
-  - `app_window` – fully-built MeMangaApp (slow, use sparingly)
-  - `make_cbz` – factory for synthetic chapter files
+`conftest.py` provides these to every test:
 
-- **Markers** (declared in `pytest.ini`):
-  - `@pytest.mark.integration` – multi-component flow
-  - `@pytest.mark.slow` – >1s
-  - `@pytest.mark.network` – needs real network (skipped by default)
-  - `@pytest.mark.gui` – requires QApplication
+- `isolated_home` points `HOME`, `USERPROFILE`, `APPDATA` and
+  `XDG_CONFIG_HOME` at the test's temporary folder, pins the default
+  config folder there, and removes `MEMANGA_CONFIG_DIR` and a few other
+  variables a developer may have set. It is not automatic: a test that
+  reads or writes config, state or the home folder must request it,
+  directly or through one of the fixtures below.
+- `config` and `state` are fresh `Config` and `State` objects in the
+  isolated home.
+- `qapp` is the one `QApplication` of the run, with the isolated home and a
+  stand-in for the system trash. `theme` and `fresh_settings` reset the
+  theme and Qt settings. `app_window` builds the whole main window, which
+  is slow.
+- `mock_scraper` and `patch_get_scraper` make `get_scraper()` return a
+  scraper that answers from memory.
+- `sample_manga`, `sample_manga_with_backup`, `make_cbz`, `declared_png`,
+  `event_bus` and `lock_holder` build common inputs.
 
-- **No real network**: tests must mock or patch HTTP. The `MockScraper`
-  fixture is a drop-in for any real scraper.
+Three fixtures run for every test without being requested: they undo the
+logging and console setup a command-line run leaves behind, drop the cached
+scrapers, and make the code believe it is not running in a container.
 
-## What's covered
+`scrapers/conftest.py` adds `load_fixture`, `load_json_fixture`,
+`patch_html`, `patch_json`, `patch_request` and `fake_response` for the
+parser tests; see
+[Write a scraper](https://meellm.github.io/MeManga/developer/scrapers#fixtures).
 
-- ✓ Every `State` public method
-- ✓ Every `Config` public method
-- ✓ Theme tokens + QSS builder
-- ✓ Every component widget (instantiation + theme switch)
-- ✓ Every page (constructor + on_show + event reaction)
-- ✓ Worker pool semantics (queue, cancel, pause/resume, ping)
-- ✓ EventBus thread safety
-- ✓ CoverCache disk persistence
-- ✓ CLI subcommand parsing
-- ✓ End-to-end download flow
-- ✓ Modal flow (Add Manga, Download From Chapter)
-- ✓ Theme switch end-to-end
+## Markers
 
-## What's NOT covered (deliberately)
+`pytest.ini` registers the markers, and `--strict-markers` turns an
+unregistered one into an error.
 
-- Live scraper HTTP (mocked instead — see `MockScraper`)
-- PyInstaller packaging (separate `python build.py`)
-- macOS-specific frame chrome (`launch_gui` ensure-browsers flow)
-- How a real screen reader speaks the GUI (accessible names are unit-tested;
-  see `docs/ACCESSIBILITY.md` for the manual pass)
-- How focus rings look and the full Tab order of each page (the rules and
-  focus handling are unit-tested; see the keyboard checklist in
-  `docs/ACCESSIBILITY.md`)
+- `live` and `health` mark the probes in `scrapers/live/`. The default run
+  leaves them out; `-m live` selects them. See
+  [Live probe](https://meellm.github.io/MeManga/developer/scrapers#live-probe).
+- `integration`, `slow`, `network` and `gui` are labels. The default run
+  includes them; select or skip them with `-m`, for example
+  `-m "not integration"`.
+
+Outside the live probes the tests use saved responses and mocks, but
+nothing in the setup blocks network access.
+
+## What the tests show
+
+Each test checks the behaviour its assertions cover, mostly with saved
+pages, mocks and Qt's offscreen platform. A passing run does not show that
+a site works today, or how the desktop app looks and sounds to a person.
+Those are checked by the live probes and by hand: the
+[accessibility checklist](../docs/ACCESSIBILITY.md) covers a screen
+reader and keyboard pass.
 
 ## Adding a test
 
-1. Pick the right folder (`unit/` for one class, `integration/` for flows).
-2. Add `test_<thing>.py`.
-3. Pull in fixtures from `conftest.py` — never instantiate `QApplication`
-   yourself.
-4. Mark slow / network / integration tests with the matching marker.
-
-## In CI
-
-`.github/workflows/ci.yml` runs on pushes and pull requests to `main`
-and before every release. The whole default suite runs once, on Linux
-with Python 3.12, in four parts that run at the same time:
-
-```bash
-pytest -n auto --dist loadfile tests/unit --ignore=tests/unit/gui tests/scrapers
-pytest -n auto --dist worksteal tests/unit/gui/pages
-pytest -n auto --dist worksteal tests/unit/gui --ignore=tests/unit/gui/pages
-pytest -n auto --dist worksteal tests/integration
-```
-
-Most GUI and integration tests build the main window, which is what
-makes them slow, so those parts hand out single tests to the workers
-rather than whole files. The non-GUI unit tests also run on Python 3.11
-and 3.13, on Windows and, except for pull requests, on macOS. Every test
-file must run in exactly one part (`tests/unit/test_ci_workflows.py`
-checks this). The live probes run weekly in
-`.github/workflows/scraper-health.yml`.
-
-## Known failures
-
-Some tests will fail today — that's intentional. The user asked for
-exhaustive coverage first, then fix-as-we-go. Failures point at real
-bugs or API drift. Each red test is a TODO.
+- Put it in the folder of its area, in a file named `test_*.py`.
+- Use the fixtures above; never create a `QApplication` yourself, and use
+  `isolated_home` for anything that touches config, state or the home
+  folder.
+- Use saved responses instead of real sites. A parser test declares what
+  it covers in `PARSER_TESTS`; see
+  [Offline parser tests](https://meellm.github.io/MeManga/developer/scrapers#offline-parser-tests).
+- Every test file must fall in one CI test shard;
+  `tests/unit/test_ci_workflows.py` checks this.
