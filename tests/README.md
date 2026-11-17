@@ -43,7 +43,8 @@ python -m pytest -n auto                            # the default run, in parall
   directly or through one of the fixtures below.
 - `config` and `state` are fresh `Config` and `State` objects in the
   isolated home.
-- `qapp` is the one `QApplication` of the run, with the isolated home and a
+- `qapp` is the one `QApplication` of the test process (each pytest-xdist
+  worker has its own), with the isolated home and a
   stand-in for the system trash. `theme` and `fresh_settings` reset the
   theme and Qt settings. `app_window` builds the whole main window, which
   is slow.
