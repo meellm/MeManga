@@ -17,12 +17,13 @@ Where they differ, the page says so. Steps for the command line need the
 ## Find MeManga's files
 
 MeManga keeps its files in four places. Keep them apart when you clean up:
-only the config folder and the program belong to MeManga alone.
+the browser components can be shared with other programs, and the download
+folder can be inside one of the other folders.
 
 | What | Where | What is in it |
 |---|---|---|
 | Config folder | {{ release.tag }}: `.config/memanga` in your user folder. Development version: see [where MeManga keeps its files](./install#where-memanga-keeps-its-files). | Settings and library (`config.yaml`), downloads and reading history (`state.json`), log files, the cover cache (`covers`) |
-| Download folder | `Downloads/MeManga` in your user folder, unless you chose another | The chapters you downloaded |
+| Download folder | Shown in **Settings → General → Download Directory**. It starts as `Downloads/MeManga` in your user folder. If `config.yaml` names no download folder, it is `downloads` inside the config folder. | The chapters you downloaded |
 | Browser components | Windows: `%LOCALAPPDATA%\ms-playwright`. macOS: `~/Library/Caches/ms-playwright`. Linux: `ms-playwright` in `$XDG_CACHE_HOME`, or `~/.cache/ms-playwright` | Firefox and Chromium for MeManga, and possibly for other programs that use Playwright |
 | The program | Where you saved or unpacked it | The desktop app, or the folder you installed the command line in |
 
@@ -144,20 +145,43 @@ again. Check the internet connection first.
 
 When the download was cut off or the files were damaged, sources that need
 a browser fail, often with a message that an executable does not exist or
-that the browser could not start. Download them again:
+that the browser could not start.
+
+The browser folder is shared. Every program on the computer that uses
+Playwright, such as tools for testing websites, keeps its browsers in the
+same `ms-playwright` folder, and can use the very same `firefox-1234` or
+`chromium-1234` folder in it as MeManga. Renaming or deleting such a folder
+can break those programs too. Choose the way that fits your computer.
+
+**Only if MeManga is the only program that uses Playwright**, download the
+broken browser again:
 
 1. Close MeManga.
 2. Open the browser folder. The error message usually names the folder
    MeManga expects, for example `firefox-1234` or `chromium-1234`. On the
    command line, `memanga doctor --check browsers --json` shows the paths
    of both browsers.
-3. Rename that folder, for example to `firefox-1234.old`.
+3. Rename only that folder, for example to `firefox-1234.old`. Leave the
+   rest of `ms-playwright` as it is.
 4. Start MeManga. It finds the browser missing and offers the download; in
    the development version you can also use **Install browser components**.
-5. When sources work again, delete the renamed folder.
+5. Keep the renamed folder until sources that need the browser work again.
+   Delete it only then.
 
-Do not delete the whole `ms-playwright` folder: other programs that use
-Playwright keep their browsers there too.
+**If other programs use Playwright, or you are not sure**, leave the shared
+folder as it is and give MeManga a browser folder of its own:
+
+1. Close MeManga and create an empty folder for its browsers.
+2. Set the environment variable `PLAYWRIGHT_BROWSERS_PATH` to that folder
+   in the environment MeManga starts from, for example in the terminal you
+   start it from.
+3. Start MeManga from there. It finds no browsers in the new folder and
+   downloads them into it, without changing the shared folder.
+
+The variable must be set every time MeManga starts; without it, MeManga
+uses the shared folder again. On the command line,
+`memanga doctor --check browsers --json` shows the variable as
+`browsers_path`, or `null` when it is not set.
 
 On Linux, a browser can also fail because system libraries are missing.
 `memanga doctor --launch-browsers` tells you, and `memanga setup` shows the
@@ -205,39 +229,74 @@ describes.
 
 ## Move to another computer
 
-1. Close MeManga on both computers, including any `memanga watch`.
-2. Copy the config folder and the download folder to the new computer.
-3. Put the config folder where MeManga looks for it on the new computer:
+1. Note where the download folder is: **Settings → General → Download
+   Directory**, or `memanga config get delivery.download_dir`
+   <Badge type="info" :text="`Not in ${release.tag}`" />.
+2. Close MeManga on both computers, including any `memanga watch`.
+3. Copy the config folder and the download folder to the new computer. If
+   the download folder is inside the config folder, it comes along with it.
+4. Put the config folder where MeManga looks for it on the new computer:
    see [where MeManga keeps its files](./install#where-memanga-keeps-its-files).
-4. Start MeManga. If the download folder is in a different place now, set it
-   in **Settings → General** or with `memanga config set
-   delivery.download_dir PATH`.
-5. Enter the email app password again: it stays in the old computer's
+5. Start MeManga. If the download folder is in a different place now, set it
+   in **Settings → General → Download Directory** or with `memanga config
+   set delivery.download_dir PATH`.
+6. Enter the email app password again: it stays in the old computer's
    keyring. If MeManga had to save it in `config.yaml`, it came along with
    the file.
-6. Let MeManga download the browser components on the new computer, and set
+7. Let MeManga download the browser components on the new computer, and set
    up a [scheduled check](./schedule) again if you used one.
 
-To take only your library and the state of each series, without settings,
-use [export and import](../reference/state#export-and-import) instead.
+### What the new download folder changes
+
+The library and the reader look for each series in a folder with its title
+inside the download folder, so they find the copied chapters once the new
+download folder is set.
+
+Some records keep the full path a file was saved under, and still point to
+the old place:
+
+- <Badge type="info" :text="`Not in ${release.tag}`" /> **Chapters waiting
+  for Kindle delivery.** `memanga send --pending` says the saved file is no
+  longer there. `memanga send "TITLE" CHAPTER` sends such a chapter from
+  the current download folder instead.
+- **Partly downloaded chapters** and the **download history** keep the old
+  path.
+
+MeManga has no command to change these paths. Leave `state.json` as it is
+rather than editing them by hand.
+
+### Export and import
+
+[Export and import](../reference/state#export-and-import) do not move a
+whole installation. An export holds only the series list of your library
+and the state of each series. It does not hold your settings, the history
+of checks and downloads, or the downloaded chapters, and file paths in the
+state of a series stay as they are. Use it to take only your library to
+another computer.
 
 ## Uninstall
 
-These steps remove MeManga and leave your downloaded chapters where they
-are.
+These steps remove MeManga. They keep your downloaded chapters only if the
+download folder is outside the folders you remove, so check that first.
 
 1. **Remove the scheduled check first**, while MeManga is still installed:
    `memanga cron remove`, or **Settings → Advanced → Scheduled Checks →
    Remove**. Stop any `memanga watch`.
-2. Close MeManga.
-3. **Delete the program**: the file or folder of the desktop app, or the
+2. **Find the download folder**: **Settings → General → Download
+   Directory**, or `memanga config get delivery.download_dir`
+   <Badge type="info" :text="`Not in ${release.tag}`" />.
+3. Close MeManga. **If the download folder is inside the config folder or
+   inside the program's folder**, move it somewhere else, or copy it to a
+   safe place, before you go on. This is the case, for example, for a
+   `downloads` folder in the config folder.
+4. **Delete the program**: the file or folder of the desktop app, or the
    folder of the command line from source with its virtual environment. For
    Docker, see [Docker](./docker).
-4. **Rename the config folder**, for example to `memanga-removed`, and
-   delete it once you are sure you do not need it. It holds your settings,
+5. **Rename the config folder**, for example to `memanga-removed`, and
+   delete it once you are sure you do not need it, and only after step 3. It holds your settings,
    library, reading history and logs. If you might use MeManga again, keep
    it, or export your library first.
-5. **Delete the app password from the keyring**, if you set up email
+6. **Delete the app password from the keyring**, if you set up email
    delivery. The entry belongs to the service `memanga` and the account
    `app_password`:
    - Windows: **Credential Manager → Windows Credentials**, the entry
@@ -245,14 +304,14 @@ are.
    - macOS: **Keychain Access**, search for `memanga`.
    - Linux: the passwords app of your desktop, search for `memanga`, or
      `secret-tool clear service memanga username app_password`.
-6. **Delete the remembered theme** of the desktop app, if you like: on
-   Windows the registry key `HKEY_CURRENT_USER\Software\MeManga`, on Linux
-   the folder `~/.config/MeManga` (with capital letters; it is not the config
-   folder), on macOS the file with `MeManga` in its name in
-   `~/Library/Preferences`.
-7. **The browser components** take about 250 MB. Delete the `ms-playwright`
-   folder only if no other program on the computer uses Playwright, such as
-   tools for testing websites. If you are not sure, leave it.
+7. **The browser components** take about 250 MB. If you gave MeManga a
+   browser folder of its own with `PLAYWRIGHT_BROWSERS_PATH`, delete that
+   folder. Delete the shared `ms-playwright` folder only if no other
+   program on the computer uses Playwright, such as tools for testing
+   websites. If you are not sure, leave it.
 
-Your downloaded chapters stay in the download folder. Delete that folder
-yourself only if you no longer want the chapters.
+The desktop app also remembers the theme you chose, in a small settings
+entry outside the config folder. These steps leave that entry in place.
+
+A download folder outside the folders you removed stays where it is, with
+your chapters. Delete it yourself only if you no longer want them.
