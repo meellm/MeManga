@@ -47,8 +47,7 @@ python -m pip install --no-deps -e .
   ([pip: local project installs](https://pip.pypa.io/en/stable/topics/local-project-installs/)).
 - After a change to the dependencies, install `requirements/dev.txt`
   again. How the files in `requirements/` are made is described under
-  [Dependency locks](https://github.com/meellm/MeManga/blob/main/CONTRIBUTING.md#dependency-locks)
-  in CONTRIBUTING.
+  [Dependency locks](./build-release#dependency-locks).
 
 **Linux system libraries.** The desktop app and its tests need Qt's
 system libraries. A desktop Linux usually has them. On a bare Ubuntu
@@ -206,4 +205,6 @@ npm run build    # the build CI runs
 - [Architecture](./architecture): how the parts fit together and where to
   change what.
 - [Write a scraper](./scrapers): adding or fixing a source.
+- [Build and release](./build-release): desktop builds, dependency locks
+  and releases.
 - [Python API](../reference/python-api): the supported Python interface.

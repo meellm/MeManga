@@ -886,15 +886,28 @@ def test_changelog_163_entry_describes_optional_notarization():
     assert "self-test" in entry
 
 
-def test_contributing_documents_optional_notarization():
-    text = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    section = text.split("### macOS signing and notarization", 1)[1]
-    section = section.split("\n### ", 1)[0]
-    assert "optional" in section and "paid Apple Developer" in section
+def test_docs_document_optional_notarization():
+    """The build and release guide lists every signing secret and says
+    notarization is optional; CONTRIBUTING says the same in short and
+    links there."""
+    def section(path, heading):
+        text = (REPO_ROOT / path).read_text(encoding="utf-8")
+        body = text.split(heading, 1)[1]
+        body = body.split("\n## ", 1)[0].split("\n### ", 1)[0]
+        return " ".join(body.split())
+
+    guide = section("docs/developer/build-release.md",
+                    "## macOS signing and notarization")
+    assert "optional" in guide and "paid Apple Developer" in guide
     for name in SIGNING_SECRETS:
-        assert f"`{name}`" in section
-    assert "still\npublishes unsigned" in section
-    assert "fails if any of these repository secrets is\nmissing" not in section
+        assert f"`{name}`" in guide
+    assert "still publishes unsigned" in guide
+    assert "fails if any of these repository secrets is missing" not in guide
+
+    contributing = section("CONTRIBUTING.md", "### macOS signing and notarization")
+    assert "optional" in contributing and "paid Apple Developer" in contributing
+    assert "still publishes unsigned" in contributing
+    assert "developer/build-release#macos-signing-and-notarization" in contributing
 
 
 # ── issue #163: signed / stapled shape checks in macos_app.py ───────────

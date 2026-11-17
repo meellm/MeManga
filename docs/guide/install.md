@@ -154,6 +154,9 @@ python -m pip install ".[gui]"
 memanga --gui
 ```
 
+To build the desktop app yourself, see
+[Build and release](../developer/build-release#build-the-desktop-app).
+
 ## Docker
 
 A published image runs the command line in a container. It does not

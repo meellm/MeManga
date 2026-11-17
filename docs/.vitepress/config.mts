@@ -84,7 +84,8 @@ export default defineConfig({
         items: [
           { text: 'Set up for development', link: '/developer/contributing' },
           { text: 'Architecture', link: '/developer/architecture' },
-          { text: 'Write a scraper', link: '/developer/scrapers' }
+          { text: 'Write a scraper', link: '/developer/scrapers' },
+          { text: 'Build and release', link: '/developer/build-release' }
         ]
       }
     ],

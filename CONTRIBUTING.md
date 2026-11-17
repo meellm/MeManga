@@ -125,76 +125,32 @@ and the generated files, which are listed only here.
 ## Building executables
 
 ```bash
-python build.py        # Single-file dev exe with console (MeManga-Dev.exe)
-python build_app.py    # Release app, no console (release/MeManga/)
+python build.py        # dev build with a console: MeManga-Dev[.exe] in the repo root
+python build_app.py    # release build, no console: release/MeManga and release/THIRD_PARTY_NOTICES.txt
 ```
 
-`build.py` moves the dev exe to the repo root. `build_app.py` puts the
-release app under `release/`: a one-folder app (`MeManga[.exe]` plus
-`_internal/`) on Windows and Linux, a one-file binary on macOS. Both
-sweep the `build/` + `dist/` scratch directories.
+Both install `requirements/build.txt` into the current environment first,
+so run them in a virtual environment made for building, and both delete
+the `build/` and `dist/` scratch folders when they succeed.
+`python build_app.py --no-install` builds from the packages already
+installed. [Build and release](https://meellm.github.io/MeManga/developer/build-release#build-the-desktop-app) describes
+the outputs on each system and how a version is released.
 
 ### macOS signing and notarization
 
-Signing and notarization are optional and need a paid Apple Developer
-Program membership. When all of these repository secrets are set, tag
-builds sign the macOS apps with a Developer ID Application certificate,
-notarize them with Apple and staple the ticket before upload, and the
-release job fails if any of those steps or the Gatekeeper check fails:
-
-| Secret | Value |
-|---|---|
-| `MACOS_CERTIFICATE_BASE64` | Base64 of the Developer ID Application `.p12` export |
-| `MACOS_CERTIFICATE_PASSWORD` | Password of that `.p12` |
-| `MACOS_CODESIGN_IDENTITY` | Identity name, e.g. `Developer ID Application: Name (TEAMID)` |
-| `APPLE_ID` | Apple ID used for notarization |
-| `APPLE_TEAM_ID` | Ten-character Apple Developer Team ID |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for that Apple ID |
-
-If any secret is missing the release workflow logs a warning and still
-publishes unsigned, unnotarized `MeManga.app` zips. They pass the same
-bundle, architecture and Playwright checks, but Gatekeeper may report
-them as damaged or from an unidentified developer until the user clears
-the quarantine flag (see the README).
-
-Local `python build_app.py` runs on a Mac stay unsigned (ad-hoc) unless
-`MEMANGA_CODESIGN_IDENTITY` is set; hardened-runtime entitlements live in
-`packaging/macos-entitlements.plist`.
+Signing and notarization of the macOS downloads are optional and need a
+paid Apple Developer Program membership. The release workflow uses them
+only when all six repository secrets are set; without them it still
+publishes unsigned, unnotarized `MeManga.app` zips. The secrets and what
+the workflow checks are listed under
+[macOS signing and notarization](https://meellm.github.io/MeManga/developer/build-release#macos-signing-and-notarization).
 
 ### Dependency locks
 
-`pyproject.toml` declares every dependency: `dependencies` for the CLI
-and the `gui`, `dev` and `build` extras. Nothing else lists them. The
-files in `requirements/` are generated from it, one per kind of install:
-
-| File | Installs | Used by |
-|---|---|---|
-| `requirements/cli.txt` | `dependencies` | The Docker image, the source docs check |
-| `requirements/gui.txt` | `dependencies` + `gui` | `scripts/bootstrap.py`, `scripts/linux/setup.sh` |
-| `requirements/dev.txt` | `dependencies` + `dev` | Contributors and the test suite |
-| `requirements/build.txt` | `dependencies` + `build` | `build.py`, `build_app.py` and the release workflow |
-
-Each file pins every direct **and transitive** dependency to an exact
-version, with hashes, for every platform and Python version MeManga
-supports (environment markers select the rows that apply). pip then
-installs the same versions everywhere and refuses a download whose hash
-does not match. This is what makes the binary on every GitHub release
-rebuildable from the same git tag with the same package versions, and
-what keeps the Docker image on the release builds' versions.
-
-**Which versions:** `[tool.lock-dependencies]` in `pyproject.toml`
-decides that too. Each package is pinned at its newest release that fits
-the declared bounds, as PyPI was at `resolve-at` (UTC), or at the time
-listed for it under `resolve-package-at` (uv's `--exclude-newer` and
-`--exclude-newer-package`). Files uploaded to PyPI after that time are
-ignored as well, so the locks are a function of `pyproject.toml` alone
-and come out the same whenever they are generated.
-
-**When to refresh:** after any change to the dependencies or to
-`[tool.lock-dependencies]` in `pyproject.toml`. To update a package (for
-example for a security fix), move its time under `resolve-package-at`,
-or move `resolve-at` to update all the others, then regenerate.
-Generating needs [uv](https://docs.astral.sh/uv/) 0.13.1 and the network:
+`pyproject.toml` is the only place dependencies are declared; the files in
+`requirements/` are generated from it, pinned with hashes. After changing
+the dependencies or `[tool.lock-dependencies]`, regenerate them (needs
+uv 0.13.1 and the network) and commit both:
 
 ```bash
 python -m pip install "uv==0.13.1"
@@ -202,39 +158,9 @@ python scripts/lock_dependencies.py
 git add pyproject.toml requirements/
 ```
 
-Never edit the files by hand.
-
-`python scripts/lock_dependencies.py --check` first checks, without uv
-or the network, that every file in `requirements/` was generated from the
-current `pyproject.toml` and that none is missing or extra. It then
-generates each file again from `pyproject.toml` alone, never from the
-committed files, and compares the two, so any hand edit fails: a pin
-moved to another version, even one that fits the bounds and carries that
-version's valid hashes, a hash, marker or comment changed, a row removed
-or added. It writes no file. The *Dependency locks* workflow runs it on
-every pull request. `--check --offline` does only the first part;
-`tests/unit/test_dependency_locks.py` runs that with the tests.
-
-The dev build (`build.py`) and the release build (`build_app.py`) both
-install `requirements/build.txt`, which includes PyInstaller. The release
-build and the release workflow install it with `--require-hashes`,
-`--only-binary :all:` and `--force-reinstall`: wheels only, so no package
-is built from source with build tools the lock does not pin, and every
-row is downloaded and hash-checked even when that version is already
-installed. The release workflow first runs the full
-`python scripts/lock_dependencies.py --check` on the tagged tree in a
-job of its own, with uv installed from its hashed wheel, keeps the
-runner's own pip rather than upgrading it, and before building runs
-`python scripts/lock_dependencies.py --check-installed build`, which
-fails unless the build Python holds exactly the rows of
-`requirements/build.txt` for its platform, once each, at their pinned
-versions and from the package index, and nothing else besides pip. That
-check compares names and versions; the file contents are the ones the
-install just hash-checked. The release then builds with
-`python build_app.py --no-install`, without installing again. The Docker
-image installs `requirements/cli.txt` with `--require-hashes`, then the
-package itself with `--no-deps`; `pip check` fails the build if
-`pyproject.toml` needs anything the lock does not provide.
+Never edit the files by hand. `python scripts/lock_dependencies.py --check`
+verifies them; [Dependency locks](https://meellm.github.io/MeManga/developer/build-release#dependency-locks) explains the
+files, `--check`, `--check --offline` and `--check-installed build`.
 
 ## Reporting issues
 
