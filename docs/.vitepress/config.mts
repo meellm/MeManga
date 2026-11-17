@@ -70,7 +70,10 @@ export default defineConfig({
       },
       {
         text: 'Delivery',
-        items: [{ text: 'Send to a Kindle', link: '/guide/kindle' }]
+        items: [
+          { text: 'Send to a Kindle', link: '/guide/kindle' },
+          { text: 'Run a command after each download', link: '/guide/post-processing' }
+        ]
       },
       {
         text: 'Reference',

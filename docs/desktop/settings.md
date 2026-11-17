@@ -66,6 +66,12 @@ describes the file and how a merge combines it with your library.
 Sending chapters to a Kindle is set up under **Settings → Kindle / Email**.
 [Send chapters to a Kindle](../guide/kindle) explains it step by step.
 
+## Run a command after each download
+
+**Settings → Advanced → Post-Processing** runs a command of your own after
+each chapter is saved. [Run a command after each download](../guide/post-processing)
+explains it with an example.
+
 ## Network and privacy
 
 **Settings → Advanced → Network & Privacy** turns the connection check, the
