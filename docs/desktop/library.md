@@ -28,8 +28,8 @@ The add dialog asks for:
 | Source URL | The series page on the source. The title is detected from it; you can type your own instead. |
 | I'm currently on chapter | Optional. See [chapters you read elsewhere](#chapters-you-read-elsewhere). |
 | Reading status | Reading, Plan to read, On hold, Completed or Dropped. |
-| Add backup source | Optional second source to fall back on when the primary one cannot be reached. |
-| Fallback delay (days) | How long MeManga waits before it turns to the backup source. |
+| Add backup source | Optional second site with the same series. See [Use a backup source](../guide/backup-sources). |
+| Fallback delay (days) | How many days a new chapter found only on the backup waits for the main source before it is taken from the backup. |
 
 ### Which series are checked
 

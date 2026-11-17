@@ -42,6 +42,7 @@ export default defineConfig({
           { text: 'Docs overview', link: '/guide/' },
           { text: 'Download and install', link: '/guide/install' },
           { text: 'First steps', link: '/guide/first-steps' },
+          { text: 'Use a backup source', link: '/guide/backup-sources' },
           { text: 'Troubleshooting', link: '/guide/troubleshooting' }
         ]
       },
