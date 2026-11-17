@@ -123,7 +123,9 @@ The tracked series in library order, the order of `config.yaml`.
 
 **`status`** keeps only the series whose `status` is equal to it: one
 string, or an iterable of strings for several. With `None`, every series is
-returned. The comparison is exact; an unknown status returns an empty list.
+returned. The comparison is exact and uses each series' `status` field
+(see [Series](#series)); when no series has a matching status, the list is
+empty.
 
 Each call returns a new list, so changing the list does not change the
 library.

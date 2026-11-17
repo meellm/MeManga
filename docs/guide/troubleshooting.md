@@ -23,7 +23,7 @@ folder can be inside one of the other folders.
 | What | Where | What is in it |
 |---|---|---|
 | Config folder | {{ release.tag }}: `.config/memanga` in your user folder. Development version: see [where MeManga keeps its files](./install#where-memanga-keeps-its-files). | Settings and library (`config.yaml`), downloads and reading history (`state.json`), log files, the cover cache (`covers`) |
-| Download folder | Shown in **Settings → General → Download Directory**. It starts as `Downloads/MeManga` in your user folder. If `config.yaml` names no download folder, it is `downloads` inside the config folder. | The chapters you downloaded |
+| Download folder | Shown in **Settings → General → Download Directory**. It starts as `Downloads/MeManga` in your user folder, and it is that folder too when `config.yaml` has no `delivery.download_dir` setting. Only when the setting is there without a value (`download_dir:` or `null`) is it `downloads` inside the config folder. | The chapters you downloaded |
 | Browser components | Windows: `%LOCALAPPDATA%\ms-playwright`. macOS: `~/Library/Caches/ms-playwright`. Linux: `ms-playwright` in `$XDG_CACHE_HOME`, or `~/.cache/ms-playwright` | Firefox and Chromium for MeManga, and possibly for other programs that use Playwright |
 | The program | Where you saved or unpacked it | The desktop app, or the folder you installed the command line in |
 
