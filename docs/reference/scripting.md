@@ -11,6 +11,7 @@ and what the JSON output contains.
 
 For the commands themselves see [Use the command line](../guide/cli) and the
 [command reference](./cli).
+To read a library from Python instead, see the [Python API](./python-api).
 
 ::: info What this page covers
 - It describes the **development version** as it behaves now.

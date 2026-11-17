@@ -278,7 +278,8 @@ go on.
 `memanga.api` and `memanga.__version__` are the only supported Python
 interface. `memanga.api.Library` reads a library: it never writes either
 file, never repairs state and never takes the lock, so it works while a
-check or the desktop app runs. Every other module, including those named
+check or the desktop app runs; the [Python API reference](../reference/python-api)
+describes it. Every other module, including those named
 on this page, is internal and may change in any release. To change a
 library from a script, use the command line;
 [Use MeManga in scripts](../reference/scripting) describes its exit codes
