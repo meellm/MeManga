@@ -87,16 +87,16 @@ memanga setup
 ```
 
 or directly with `python -m playwright install firefox chromium`. On
-Linux, when system libraries the browsers need are missing, `memanga setup`
-prints the command that installs them.
+Linux, when `memanga setup` finds that system libraries the browsers need
+are missing, follow its instructions for your system.
 
 ## Run the tests
 
 `pytest.ini` sets the defaults:
 
 - The tests in `tests/` run, except those marked `live` or `health`. Those
-  use real sites and run only when selected with `-m live`; see
-  [Write a scraper](./scrapers#live-probe).
+  use real sites; a marker expression given with `-m`, such as `-m live`,
+  selects them. See [Write a scraper](./scrapers#live-probe).
 - Qt runs on its offscreen platform, so no window opens.
 - The ten slowest tests are listed after the run.
 
@@ -139,7 +139,7 @@ The workflows in `.github/workflows/` run on GitHub:
 | Source docs (`source-docs.yml`) | Pushes and pull requests to `main` | `--check` of `source_docs`, `cli_docs` and `config_docs` (see [Generated files](#generated-files)) |
 | Dependency locks (`dependency-locks.yml`) | Pushes and pull requests to `main` | `python scripts/lock_dependencies.py --check` |
 | Dependency audit (`dependency-audit.yml`) | Changes to `requirements/`, `pyproject.toml` or the audit settings on `main` and its pull requests; weekly; by hand; before a release | Known vulnerabilities in the pinned packages |
-| Documentation site (`docs.yml`) | Pushes to `main` that change `docs/` or a file the site shows | Builds and publishes this site |
+| Documentation site (`docs.yml`) | Pushes to `main` that change `docs/`, a file the site shows or the workflow itself ([full list](https://github.com/meellm/MeManga/blob/main/.github/workflows/docs.yml)) | Builds and publishes this site |
 | Scraper health (`scraper-health.yml`) | Weekly; by hand | The live probes; never on pushes or pull requests |
 | Build & Release, Docker Image | Version tags; the image also by hand | Release builds and the Docker image |
 

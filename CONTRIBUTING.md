@@ -111,7 +111,8 @@ docs: clarify Playwright first-launch download
 
 ## Pull request checklist
 
-The pull request template has the same list.
+The pull request template has the same items, except the commit style
+and the generated files, which are listed only here.
 
 - [ ] `pytest` passes locally
 - [ ] New behaviour has tests (or notes saying why not)
