@@ -121,7 +121,8 @@ explains each step, the fixtures, the tests and the live probe in detail.
    profile such as `CLOUDSCRAPER_CHROME_DESKTOP`) instead of importing
    `cloudscraper` yourself. cloudscraper is best-effort: it stops working
    when a site raises its protection, so a source that needs a real
-   browser should use `PlaywrightScraper`.
+   browser should use `PlaywrightScraper`. When a block or challenge page
+   still comes back, raise a clear error instead of parsing it as content.
 3. Implement `search()`, `get_chapters()`, `get_pages()`.
 4. Register the domain in `_SCRAPER_PATHS` in `memanga/scrapers/__init__.py`
    as `"newsite:NewSiteScraper"` (module and class; it is imported on first

@@ -16,9 +16,11 @@ and the live probe stages described here are not in the latest release.
 - Look the site up in the [list of sources](../reference/sources). It may
   already be registered under another domain, or be left out of search
   for a recorded reason.
-- A scraper reads what the site shows to any visitor, without an account.
-  Don't add ways around logins, paywalls, blocks, challenges or region
-  limits. A site that only works with one of them is not a source to add.
+- A scraper reads pages a visitor can open without an account; MeManga has
+  no support for site accounts. When a site answers with a block page, a
+  challenge or a region limit, the scraper fails with a clear error (see
+  [when a site is dead, blocked or limited by region](#when-a-site-is-dead-blocked-or-limited-by-region))
+  rather than returning that page as content.
 
 ## Choose a starting point
 
@@ -41,11 +43,14 @@ builds a class from it.
 
 How each choice is searched:
 
-- Template sites are left out of the default search, because their
-  `search()` only matches their own series. A template site in the user's
-  library is still searched.
-- Sites on `SingleTitleScraper` are included. Their `search()` returns
+- Template sites are left out of the list of sources a search starts
+  from, because their `search()` only matches their own series. A template
+  site in the user's library is added to that list.
+- Sites on `SingleTitleScraper` are in the list. Their `search()` returns
   their one series without a request.
+- Either way, a domain switched off on the Sources page
+  (`sources.disabled`) or listed in the catalog's search skips is removed
+  from the list (`compute_search_sources` in `memanga/search.py`).
 
 Prefer a browser only when the content is really missing from the HTML
 and from any API the site calls. A browser is slower and needs the
@@ -91,8 +96,11 @@ working defaults.
   recognise. An empty chapter list looks like "no new chapters", while an
   exception is reported and lets MeManga try a backup source.
 
-**Images.** The default `download_image` refuses bytes that are not an
-image, so a block page is never saved as a page. If the image server needs
+**Images.** The default `download_image` saves a response only when its
+first bytes identify an image format, so an HTML block page or an empty
+body counts as a failed page instead. It checks the start of the file, not
+the whole image; the downloader then decodes each saved page before using
+it (`is_image_file`). If the image server needs
 a header such as a `Referer`, override `download_image`, keep that check,
 and pass the header to `self._request(url, headers=...)`. That keeps the
 request spacing and the retries.
@@ -103,16 +111,20 @@ without a MangaHere `Referer` with an HTML block page.
 ## Requests, threads and browsers
 
 **Requests.** Send them through `self._request`, `self._get_html` or
-`self._get_json`. These:
+`self._get_json`. These base helpers:
 
-- wait 30 seconds at most for each request;
+- pass `timeout=30` to Requests, which limits connecting and each wait for
+  data, not the whole response
+  ([Requests: timeouts](https://requests.readthedocs.io/en/latest/user/quickstart/#timeouts));
 - keep at least `self._rate_limit` seconds (1 by default) between requests
   of the same scraper class, in every thread;
-- try again up to three times, only after connection errors, timeouts,
-  HTTP 429 and 5xx responses;
+- make up to three attempts in all, and send a request again only after a
+  connection error, a timeout, a broken response (`ChunkedEncodingError`),
+  HTTP 429 or a 5xx answer;
 - honour a `Retry-After` of up to 60 seconds, and give up on a longer one.
 
-Other HTTP errors, such as 403 or 404, are not retried. Don't add retry
+Other HTTP errors, such as 403 or 404, are not retried. Code that calls
+`self.session` directly, as some overrides do, gets none of this. Don't add retry
 loops of your own and don't lower the spacing: more requests to a site
 that refuses them do not make it work, and they can get the user blocked.
 
@@ -286,12 +298,15 @@ fails:
 2. **Search:** at least one result with a URL.
 3. **Chapters:** at least one chapter with a URL.
 4. **Pages:** at least one absolute page URL.
-5. **Image:** the scraper's own `download_image` saves the first page, and
-   the bytes are a real image of at least 1 KB.
+5. **Image:** the scraper's own `download_image` saves the first page of
+   that chapter, and the file is at least 1 KB and starts with a known
+   image signature. Only that one page is checked, and it is not decoded.
 
 An answer with HTTP 200 is not proof that a source works: a block page or
-a changed layout also answers with 200. Only a probe that reaches the image
-stage shows that a chapter can be downloaded.
+a changed layout also answers with 200. A probe that passes the image
+stage shows that search, the chapter list and the page list work and that
+the first page arrives as an image; it does not prove that every page or
+every chapter downloads.
 
 **Adding a probe.** An aggregator, or a new template family, gets an entry
 in `PARSING_PROBES` in `tests/scrapers/live/test_live_parsing.py`. A
@@ -367,11 +382,15 @@ reason:
 Give a note and the issue number. Remove the skip only after a live probe
 of the site passes again.
 
-**What not to add.** No extra retries, other identities, proxies or
-challenge solving. Some existing scrapers route requests through
-`_use_cloudscraper()`. It is best effort and stops working when a site
-raises its protection; the `challenge` entries record where that has
-happened.
+**The existing helper for Cloudflare's check.** For a site behind
+Cloudflare's JavaScript check, existing scrapers call
+`self._use_cloudscraper()` in `__init__`, optionally with a profile such as
+`CLOUDSCRAPER_CHROME_DESKTOP`, instead of importing `cloudscraper`
+themselves; a site that needs a real browser uses `PlaywrightScraper`. The
+helper is best effort and stops working when a site raises its
+protection; the `challenge` entries record where that has happened. When
+it does not get through, the scraper raises a clear error as above, and
+does not retry or treat the challenge page as content.
 
 ## Checklist
 
@@ -386,6 +405,5 @@ A source change is done when:
 - `PARSER_TESTS` declares that coverage, and
   `python -m memanga.source_docs` has been run.
 - The local checks above pass.
-- A live probe of the source reached the image stage. When it cannot,
-  the change says which stage was checked, and why the rest could not
-  be.
+- A live probe of the source passed the image stage. When it cannot,
+  the change says which stages passed, and why the rest could not run.
