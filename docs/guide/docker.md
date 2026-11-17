@@ -257,24 +257,38 @@ This works with an image built from source, as described under
 [Image built from source](#image-built-from-source-memanga-watch). The
 0.4.4 image does not read `MEMANGA_SMTP_PASSWORD_FILE`.
 
-1. Save the app password in a file of its own, outside the source folder so
-   that it is never committed. Create it so that only you can read it, then
-   paste the password and press Enter and Ctrl-D:
+1. Save the app password in a new file of its own, outside the source folder
+   so that it is never committed. These commands stop if the file, or a link
+   with that name, already exists. Otherwise they create it readable only by
+   you and wait for the password: paste it, press Enter and then Ctrl-D.
 
    ```sh
    mkdir -p ~/memanga-secrets
-   ( umask 077; cat > ~/memanga-secrets/smtp_password )
+   f=~/memanga-secrets/smtp_password
+   if [ -e "$f" ] || [ -L "$f" ]; then
+     echo "$f already exists; remove it or choose another name" >&2
+   else
+     ( umask 077; set -C; cat > "$f" )
+   fi
    ```
 
-2. MeManga runs as the user with UID 1000 inside the container, and Compose
-   mounts the file with the owner and permissions it has on your machine;
-   the `uid`, `gid` and `mode` options of a secret do not change that for a
-   file. If `id -u` shows 1000 for you, nothing else is needed. Otherwise
-   give this one file to UID 1000, without making it readable for others:
+2. Compose mounts the file with the owner and permissions it has on your
+   machine; the `uid`, `gid` and `mode` options of a secret do not change
+   that for a file. MeManga reads it as the user with ID 1000 in the
+   container. With Docker on Linux running as root, without user-namespace
+   remapping, that is ID 1000 on your machine too, as under
+   [Folders on your machine](#folders-on-your-machine). If `id -u` shows
+   1000 for you, nothing else is needed. Otherwise give this one file to ID
+   1000:
 
    ```sh
    sudo chown 1000 ~/memanga-secrets/smtp_password
    ```
+
+   With rootless Docker or user-namespace remapping, the container's ID 1000
+   is a different ID on your machine; Docker's
+   [UID/GID mapping](https://docs.docker.com/engine/security/rootless/uid-gid-mapping/)
+   page explains how to find it.
 
 3. Save this as `compose.secrets.yaml` next to `compose.dev.yaml`:
 
