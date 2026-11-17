@@ -9,8 +9,10 @@ controls. The reader has keys of its own; they are listed under
 [Keyboard](./reader#keyboard) on the Reader page.
 
 ::: info Which version
-{{ release.tag }} has only the **Ctrl+K** shortcut. Everything else on this
-page is in the development version.
+In {{ release.tag }}, **Ctrl+K** and the usual keys of buttons, text fields
+and dialogs already work. The other shortcuts, the keys for Library cards,
+rows and theme cards, the keyboard-only focus ring and the rules for where
+focus goes are in the development version.
 :::
 
 ## Shortcuts
@@ -50,8 +52,5 @@ not leave one.
 - Choosing a page in the sidebar keeps focus in the sidebar.
 - After a card's quick action, focus returns to that card.
 
-These are the keys the app sets up for its own controls. They do not mean
-that every control can be reached, or that the app works with every screen
-reader. The manual
-[accessibility checklist](https://github.com/meellm/MeManga/blob/main/docs/ACCESSIBILITY.md)
-is how those are checked.
+For a step-by-step pass with the keyboard and a screen reader, see the
+[accessibility checklist](https://github.com/meellm/MeManga/blob/main/docs/ACCESSIBILITY.md).
