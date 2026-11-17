@@ -75,8 +75,9 @@ downloaded chapter.
 # Keyboard checklist
 
 A manual pass without touching the mouse, in both the dark and the light
-theme. Start the same way as above. The reader's keys are listed under
-[Keyboard](https://meellm.github.io/MeManga/desktop/reader#keyboard) on the Reader page.
+theme. Start the same way as above. The app's shortcuts and how focus moves
+are on the [Keyboard](https://meellm.github.io/MeManga/desktop/keyboard) page; the reader's keys are
+under [Keyboard](https://meellm.github.io/MeManga/desktop/reader#keyboard) on the Reader page.
 
 ## Focus ring
 

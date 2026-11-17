@@ -32,6 +32,9 @@ page is wider than the window, drag it with the mouse to move around.
 
 ## Keyboard
 
+These keys work in the reader. The app's other shortcuts are on the
+[Keyboard](./keyboard) page.
+
 | Key | Continuous scroll | Single page and two-page spread |
 |---|---|---|
 | Up, Down | Scroll half a screen | Scroll half a screen |

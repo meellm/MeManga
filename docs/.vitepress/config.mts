@@ -50,6 +50,7 @@ export default defineConfig({
         items: [
           { text: 'Library and downloads', link: '/desktop/library' },
           { text: 'Reader', link: '/desktop/reader' },
+          { text: 'Keyboard', link: '/desktop/keyboard' },
           { text: 'Settings', link: '/desktop/settings' }
         ]
       },
