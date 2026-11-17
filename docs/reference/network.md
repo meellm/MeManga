@@ -38,16 +38,18 @@ components.
 
 <Badge type="info" :text="`Not in ${release.tag}`" />
 
-**When:** while chapter images are downloaded from MangaDex, for each image
-that comes from a MangaDex@Home server rather than from mangadex.org.
+**When:** while chapter images are downloaded from MangaDex, including
+chapters the reader downloads ahead of time, for images that come from a
+MangaDex@Home server rather than from mangadex.org. Each attempt to fetch
+an image is reported, so an image that is tried again is reported again.
 
 **What:** a short report to `api.mangadex.network` with the image address,
 whether it loaded, whether it was cached, its size and how long it took.
 The MangaDex API asks clients to send these reports. MeManga's requests to
 MangaDex name MeManga and its version in their User-Agent.
 
-**Control:** none of its own. It happens only while you download from
-MangaDex.
+**Control:** none of its own. It happens only while chapter images are
+downloaded from MangaDex.
 
 ## MangaDex cover search
 
@@ -60,8 +62,10 @@ app starts, and when the app is back online.
 when a matching title is found.
 
 **Control:** **Find missing covers on MangaDex**
-(`gui.mangadex_cover_fallback`), on by default. It is also never used while
-MangaDex is switched off in **Sources**.
+(`gui.mangadex_cover_fallback`), on by default. While it is off, or while
+MangaDex is switched off in **Sources**, MeManga looks up no new titles on
+MangaDex. Covers it found there earlier are still loaded from their saved
+address, and series that use MangaDex as a source still download from it.
 
 ## Chapter counts in search results
 
@@ -80,9 +84,9 @@ request, more for long lists, and failed requests are tried again.
 **When:** while the desktop app runs: every 30 seconds while it is online,
 and every 5 seconds while it is offline.
 
-**What:** it opens a network connection and closes it again, without
-sending anything over it, to the first of these that answers within 3
-seconds:
+**What:** it opens a TCP connection and closes it again. Opening it sends
+the usual connection handshake; no request or other data follows. The hosts
+are tried in this order, with 3 seconds each:
 
 | Host | Port |
 |---|---|
@@ -90,8 +94,12 @@ seconds:
 | `cloudflare.com` | 443 |
 | `github.com` | 443 |
 
-Looking up the two host names uses your system's usual name resolution.
-While the app is offline it pauses searches, checks and downloads.
+The first host that answers ends the check: a connection that opens, or
+one that is refused or blocked by a local rule, counts as online. Only when
+every host times out, cannot be reached or cannot be looked up does the app
+count as offline. Looking up the two host names uses your system's usual
+name resolution. While the app is offline it pauses searches, checks and
+downloads.
 
 **Control:**
 - **Check the internet connection** (`gui.network_check`), on by default.
@@ -116,9 +124,13 @@ memanga config set gui.auto_check false
 
 ## Browser components
 
-**When:** when the desktop app offers to download them at its first start,
-when you choose **Install browser components** in **Settings → Advanced**,
-or when you run `memanga setup` and agree.
+**When:**
+- when you agree to the download the desktop app offers at its first start;
+- when you choose **Install browser components** in **Settings → Advanced**;
+- when `memanga setup` asks on a terminal and you agree, or when you run
+  `memanga setup --install-browsers`, which downloads them without asking.
+  Without a terminal and without that option, `memanga setup` downloads
+  nothing.
 
 **What:** Firefox and Chromium builds for Playwright, downloaded from
 Playwright's servers.
@@ -128,12 +140,19 @@ Playwright's servers.
 
 ## Email to a Kindle
 
-**When:** only when email delivery is set up: after a chapter is
-downloaded, when a chapter is sent again, and when you test the email
-settings. `memanga doctor --smtp` signs in to the mail server too.
+**When and what:**
+- **Sending a chapter:** when email delivery is set up, after a chapter is
+  downloaded and when a chapter is sent again. MeManga signs in to the mail
+  server you entered and sends the chapter file to your Kindle address.
+- **Check Login** in **Settings → Kindle / Email**: signs in to the mail
+  server and sends nothing.
+- **Send Test PDF** in **Settings → Kindle / Email**: signs in and sends a
+  small test document to your Kindle address.
+- `memanga doctor --smtp`: signs in to the mail server and sends nothing,
+  when a sender address and password are set.
 
-**What:** MeManga signs in to the mail server you entered and sends the
-chapter file to your Kindle address.
+In {{ release.tag }}, **Settings** has one **Test Connection** button, which
+signs in only.
 
 **Control:** the delivery mode and the per-series Kindle switch. See
 [Send chapters to a Kindle](../guide/kindle).
