@@ -99,8 +99,10 @@ working defaults.
 **Images.** The default `download_image` saves a response only when its
 first bytes identify an image format, so an HTML block page or an empty
 body counts as a failed page instead. It checks the start of the file, not
-the whole image; the downloader then decodes each saved page before using
-it (`is_image_file`). If the image server needs
+the whole image. Before a saved page is used, the downloader checks it again
+with `is_image_file`, which decodes it where this Pillow build can and
+otherwise accepts a recognised WebP, AVIF or HEIC signature. If the image
+server needs
 a header such as a `Referer`, override `download_image`, keep that check,
 and pass the header to `self._request(url, headers=...)`. That keeps the
 request spacing and the retries.
@@ -120,7 +122,7 @@ without a MangaHere `Referer` with an HTML block page.
   of the same scraper class, in every thread;
 - make up to three attempts in all, and send a request again only after a
   connection error, a timeout, a broken response (`ChunkedEncodingError`),
-  HTTP 429 or a 5xx answer;
+  HTTP 429, a 5xx answer, or an HTTP error that carries no response;
 - honour a `Retry-After` of up to 60 seconds, and give up on a longer one.
 
 Other HTTP errors, such as 403 or 404, are not retried. Code that calls
@@ -304,9 +306,9 @@ fails:
 
 An answer with HTTP 200 is not proof that a source works: a block page or
 a changed layout also answers with 200. A probe that passes the image
-stage shows that search, the chapter list and the page list work and that
-the first page arrives as an image; it does not prove that every page or
-every chapter downloads.
+stage shows only what its stages checked: the first search result (or the
+base URL of a single-series site), its first listed chapter and that
+chapter's first page. It says nothing about the other pages and chapters.
 
 **Adding a probe.** An aggregator, or a new template family, gets an entry
 in `PARSING_PROBES` in `tests/scrapers/live/test_live_parsing.py`. A
