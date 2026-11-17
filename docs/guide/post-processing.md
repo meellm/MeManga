@@ -77,9 +77,9 @@ To turn it off, untick the box, or run
 
 The command runs after the chapter's file or folder has been written, and
 before the chapter is sent to a Kindle or recorded as downloaded. It may
-run for up to 10 minutes; after that, MeManga stops it and anything it
-started, and counts it as a failure. Its output is kept only to explain a
-failure.
+run for up to 10 minutes; after that, MeManga tries to stop it together
+with the processes it started, and counts it as a failure. Its output is
+kept only to explain a failure.
 
 What happens when it fails, with **Mark download failed if the command
 exits with an error** (`delivery.post_processing.fail_on_error`):
@@ -87,7 +87,7 @@ exits with an error** (`delivery.post_processing.fail_on_error`):
 | Setting | Result |
 |---|---|
 | Off (the default) | MeManga logs a warning. The chapter counts as downloaded and is sent to the Kindle as usual. |
-| On | The download of the chapter counts as failed. As for any failed download, MeManga tries a [backup source](./backup-sources#a-download-that-fails) and, if allowed, a partial copy; when none of them works, it records the chapter as [failed](./cli#when-chapters-fail) and does not send it. The file that was already written stays in the download folder. |
+| On | The download of the chapter counts as failed. As for any failed download, MeManga tries a [backup source](./backup-sources#a-download-that-fails) and, if allowed, a partial copy; when none of them works, it records the chapter as [failed](./cli#when-chapters-fail) and does not send it. A failed command's changes are not undone, and a new download attempt can replace the chapter's file. |
 
 `memanga failed retry` downloads a failed chapter again, and runs the
 command again.
