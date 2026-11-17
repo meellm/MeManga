@@ -978,8 +978,8 @@ MangaDex. Saved chapters also carry that credit in their metadata, or in
 `Source.txt` for ZIP, CBZ and image folders.
 
 Group leaders who want their chapters removed can open an issue with the
-group's MangaDex link. Accepted group IDs are added to a future release; none
-are built in yet. To block a group yourself,
+group's MangaDex link to ask for this; none are built in yet. To block a
+group yourself,
 copy the UUID from its MangaDex group page and run
 `run config --mangadex-remove-group GROUP_ID`. Checks, downloads and the
 built-in reader then skip that group's chapters. Delete chapters already

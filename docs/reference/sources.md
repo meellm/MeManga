@@ -59,14 +59,14 @@ are listed under **Other domains**.
 
 ## MangaDex scanlation groups
 
-The leaders of an active scanlation group can ask for their group's
-chapters to be left out by opening an
-[issue](https://github.com/meellm/MeManga/issues) with the group's MangaDex
-link. Accepted group IDs are added in a future release; none are built in
-yet.
+<Badge type="info" :text="`Not in ${release.tag}`" />
 
-<Badge type="info" :text="`Not in ${release.tag}`" /> To leave out a
-group's chapters yourself, use the ID from its MangaDex group page. Run
+MeManga can leave out the MangaDex chapters of scanlation groups whose
+active leaders asked for it; none are built in yet. Group leaders can ask
+for this by opening an [issue](https://github.com/meellm/MeManga/issues)
+with the group's MangaDex link.
+
+To leave out a group's chapters yourself, use the ID from its MangaDex group page. Run
 this while the desktop app is closed:
 
 ```sh

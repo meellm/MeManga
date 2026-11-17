@@ -73,8 +73,8 @@ translations. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 MeManga's source code is under the [MIT license](LICENSE).
 
 The desktop downloads and the Docker image also contain third-party
-software under its own licenses, including Qt and PySide6, which are used
-under the GNU LGPL.
+software under its own licenses. The desktop downloads include Qt and
+PySide6, which are used under the GNU LGPL.
 [Third-party licenses](https://meellm.github.io/MeManga/guide/install#third-party-licenses)
 says where the notices and the LGPL source and replacement information are
 found.
