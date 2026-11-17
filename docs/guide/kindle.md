@@ -208,9 +208,9 @@ Switching does not delete anything:
   Send to Kindle choice stays too. They apply again when you choose **Email
   (send to Kindle)** later.
 - In the development version, chapters that were not sent stay listed.
-  While delivery is local, `memanga send` and `memanga send --pending`
-  stop with "Kindle delivery is not set up", and the desktop app's **Send**
-  button asks you to turn on Kindle email delivery first.
+  While delivery is local they are not sent again: trying to send one with
+  `memanga send --pending`, `memanga send "TITLE" CHAPTER` or the desktop
+  app's **Send** button stops with a message, and nothing is emailed.
   `memanga send --pending --clear` forgets these chapters; the files stay on
   disk.
 
