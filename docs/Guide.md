@@ -129,7 +129,7 @@ and [`memanga read`](https://meellm.github.io/MeManga/reference/cli#memanga-read
 - <a name="email-size-limit"></a>Size limit:
   [Large chapters are split](https://meellm.github.io/MeManga/guide/kindle#large-chapters-are-split)
 - <a name="switch-back-to-local-downloads"></a>Back to local downloads:
-  [`delivery.mode`](https://meellm.github.io/MeManga/reference/config#delivery-mode)
+  [Switch back to local downloads](https://meellm.github.io/MeManga/guide/kindle#switch-back-to-local-downloads)
 - <a name="note-on-formats-and-email"></a>Formats:
   [What you need](https://meellm.github.io/MeManga/guide/kindle#what-you-need)
 

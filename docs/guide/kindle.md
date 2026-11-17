@@ -181,6 +181,42 @@ MB at the default.
 Amazon's own limit for one email to a Send to Kindle address is 50 MB in
 total, according to its help page linked above.
 
+## Switch back to local downloads
+
+To stop sending chapters and only save them to your download folder:
+
+- **In the desktop app:** open **Settings → General**, set
+  **Delivery Mode** to **Local (save to disk)** and choose
+  **Save settings**.
+- **On the command line:** run `memanga config`, answer `1` (local) to the
+  delivery mode question and confirm the download folder.
+  <Badge type="info" :text="`Not in ${release.tag}`" /> You can also run:
+
+  ```sh
+  memanga config set delivery.mode local
+  ```
+
+From then on, chapters are saved to the download folder and are not
+emailed, whatever the switch of their series says. Chapters already waiting
+in the desktop app's download queue, and a check that is already running on
+the command line, keep the setting they started with.
+
+Switching does not delete anything:
+
+- The email settings and the saved app password stay as they are.
+- Each series keeps its **Send to Kindle after download** switch, and the
+  Send to Kindle choice stays too. They apply again when you choose **Email
+  (send to Kindle)** later.
+- In the development version, chapters that were not sent stay listed.
+  While delivery is local, `memanga send` and `memanga send --pending`
+  stop with "Kindle delivery is not set up", and the desktop app's **Send**
+  button asks you to turn on Kindle email delivery first.
+  `memanga send --pending --clear` forgets these chapters; the files stay on
+  disk.
+
+The tests in [step 3](#step-3-test-it) still sign in, and send a test
+document, with the saved settings.
+
 ## Where the password is stored
 
 MeManga stores the password in your system's keyring when one is available,
