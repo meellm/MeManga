@@ -250,13 +250,57 @@ memanga remove "TITLE"
 `memanga remove "TITLE" --delete-files` also deletes the folder with the
 downloaded chapters of that series. This cannot be undone.
 
+## Complete commands with Tab
+
+In Bash, MeManga can complete its commands when you press Tab. To turn it
+on in the current Bash session:
+
+```sh
+source <(memanga completion bash)
+```
+
+To have it in every new Bash session, add that line to your `~/.bashrc`.
+The line runs `memanga` each time Bash starts, so `memanga` must be found
+then. If it is installed in a virtual environment, either activate the
+environment earlier in `~/.bashrc`, or save the script once and load the
+file instead:
+
+```sh
+memanga completion bash > ~/.memanga-completion.bash
+```
+
+```sh
+# In ~/.bashrc
+source ~/.memanga-completion.bash
+```
+
+A saved script does not change when MeManga does: write it again after you
+update MeManga.
+
+What Tab completes:
+
+- commands and their other names, and the actions of commands such as
+  `config` and `failed`;
+- options, and the values of options that have a fixed list, such as
+  `--status` and `--mode`; `search --source` offers every supported source;
+- folders after `--config-dir`.
+
+Where it has nothing to offer, Bash falls back to file names. The titles of
+your series are not completed; `#N` from `memanga list` is the short way to
+name one. The completion is set up for the `memanga` command, not for
+`python -m memanga`, and only Bash is supported. The command is listed in
+the [command reference](../reference/cli#memanga-completion).
+
+To turn it off in the current session, run `complete -r memanga`. To stop
+loading it, remove the line from `~/.bashrc`.
+
 ## Differences in the latest release
 
 The command line of {{ release.tag }} has the same journey with fewer
 commands and options.
 
 - **Not in {{ release.tag }}:** the commands `setup`, `doctor`, `edit`,
-  `read`, `unread`, `path`, `open` and `send`; the spellings
+  `read`, `unread`, `path`, `open`, `send` and `completion`; the spellings
   `failed retry`, `failed clear`, `check --download` and `check "TITLE"`;
   the options of `sources`; and the option `--config-dir`.
 - **Use instead in {{ release.tag }}:**
