@@ -67,6 +67,7 @@ translations. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 - Questions and ideas: [Discussions](https://github.com/meellm/MeManga/discussions)
 - Bugs and broken sources: [Issues](https://github.com/meellm/MeManga/issues)
 - Security problems: [SECURITY.md](SECURITY.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## License
 

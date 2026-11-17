@@ -10,6 +10,10 @@ on the documentation site go into more detail.
 Be kind. Treat other contributors the way you'd want to be treated.
 Disagreements are fine; personal attacks aren't.
 
+MeManga's [Code of Conduct](CODE_OF_CONDUCT.md) is the Contributor
+Covenant 2.1. Report conduct problems privately by email to
+`info.meellm@gmail.com`, not in a public issue or discussion.
+
 ## Quick start
 
 [Set up for development](https://meellm.github.io/MeManga/developer/contributing) is the full guide:
