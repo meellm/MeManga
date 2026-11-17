@@ -264,10 +264,14 @@ go on.
   closes. On closing, it first saves the reader position, then the state,
   and then shuts the pools down without waiting. Downloads still in its own
   queue are not started; work a pool has already started is not stopped.
-- The command line saves state after every chapter (`_process_chapter`). If
-  that save fails, the command stops, so no chapter is downloaded or sent
-  that cannot be recorded. On Ctrl-C or SIGTERM it saves what is left and
-  exits.
+- The command line saves state after every chapter (`_process_chapter`):
+  the pipeline first downloads the chapter, sends it if Kindle delivery is
+  on and records it in memory, and only then is `state.json` written. If
+  that save fails, the command stops before the next chapter. The chapter just processed may
+  already be on disk or on the Kindle while `state.json` still holds the
+  previous copy, so a later run can download and send it again; nothing
+  ties delivery and the state file together. On Ctrl-C or SIGTERM the
+  command saves what is left and exits.
 
 ## The Python interface
 
