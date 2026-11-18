@@ -22,6 +22,7 @@ from cloudscraper.exceptions import CloudflareException
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from memanga.scrapers.mangafire import MangaFireError
+from memanga.scrapers.mangapark import MangaParkSourceError
 from memanga.scrapers.weebcentral import WeebCentralError
 
 
@@ -200,6 +201,7 @@ SOURCE_ERRORS = (
     PlaywrightTimeoutError,
     CloudflareException,
     MangaFireError,
+    MangaParkSourceError,
     WeebCentralError,
 )
 

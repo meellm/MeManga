@@ -289,6 +289,7 @@ def _expected_errors():
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
     from memanga.scrapers.mangafire import MangaFireError
+    from memanga.scrapers.mangapark import MangaParkSourceError
     from memanga.scrapers.playwright_base import BrowserTimeoutError
     from memanga.scrapers.weebcentral import (WeebCentralChallengeError,
                                               WeebCentralError)
@@ -303,6 +304,10 @@ def _expected_errors():
         "not-json": (json.JSONDecodeError("Expecting value", "<html>", 0), stale),
         "redirects": (requests.exceptions.TooManyRedirects("too many"), stale),
         "cloudflare": (CloudflareChallengeError("challenge"), stale),
+        "mangapark-http": (MangaParkSourceError("HTTP 503 for https://mangapark1.com/x"), stale),
+        "mangapark-no-response": (MangaParkSourceError("No response for https://mangapark1.com/x"), stale),
+        "mangapark-challenge": (MangaParkSourceError(
+            "Cloudflare challenge not cleared for https://mangapark1.com/x"), stale),
         "wrapped-timeout": (_wrapped(WeebCentralError("search failed"),
                                      PlaywrightTimeoutError("Timeout 20000ms")), stale),
         # Network and HTTP failures, as requests raises them (over
@@ -343,6 +348,9 @@ def _unexpected_errors():
         "type-error": TypeError("unsupported operand"),
         "attribute-error": AttributeError("'NoneType' object has no attribute 'text'"),
         "runtime-error": RuntimeError("Playwright not available"),
+        "mangapark-no-chromium": RuntimeError(
+            "MangaPark needs a Chromium-based browser (its Cloudflare check "
+            "blocks Firefox)."),
         "value-error": ValueError("too many values to unpack"),
         "browser-closed": TargetClosedError(),
         "browser-error": PlaywrightError("Browser.new_context: crashed"),
@@ -415,3 +423,86 @@ def test_an_escaped_error_fails_the_run(check, live, tmp_path):
         (SUMMARY_TEST, None, "passed"),
     ])
     assert check.problems(report, 1) == []
+
+
+# ─── A MangaPark source failing after search, end to end ────────────────
+
+MANGAPARK = ROOT / "tests" / "scrapers" / "fixtures" / "mangapark"
+
+
+def _mangapark(monkeypatch, routes):
+    """The real MangaPark scraper fetching through its own
+    _fetch_in_thread, on fake Chromium pages (tests/scrapers/test_mangapark.py)."""
+    from memanga.scrapers.mangapark import MangaParkScraper
+    fakes = _load("memanga_mangapark_fakes", ROOT / "tests" / "scrapers" / "test_mangapark.py")
+    scraper = MangaParkScraper()
+    found = {"/filter": fakes.FakeResponse(
+        200, (MANGAPARK / "search.html").read_text(encoding="utf-8"))}
+    found.update({part: fakes.FakeResponse(*answer) if answer else None
+                  for part, answer in routes.items()})
+    fakes.fake_browser(monkeypatch, scraper, found)
+    return scraper
+
+
+def _walk(helpers, scraper):
+    pipe = helpers.ScraperPipeline(scraper, "mangapark1.com")
+    results = pipe.search("one piece")
+    chapters = pipe.chapters(results[0].url)
+    pipe.pages(chapters[0])
+
+
+@pytest.mark.parametrize("routes, stage, detail", [
+    # The chapter list loads; the reader page answers 503.
+    ({"/get-chapter-list": (200, (MANGAPARK / "chapter_list.json").read_text(
+        encoding="utf-8")), "/read/": (503,)},
+     "pages", "HTTP 503 for https://mangapark1.com/read/one-piece/"),
+    # The chapter-list endpoint fails, and so does the manga page it
+    # falls back to.
+    ({"/get-chapter-list": (503,), "/manga/": None},
+     "chapters", "No response for https://mangapark1.com/manga/one-piece"),
+], ids=["pages", "chapters"])
+def test_a_later_mangapark_source_failure_is_a_failing_source(
+        check, live, helpers, tmp_path, monkeypatch, routes, stage, detail):
+    scraper = _mangapark(monkeypatch, routes)
+    with pytest.raises(helpers.StageFailure) as caught:
+        _walk(helpers, scraper)
+    failed = caught.value.failed
+    assert (failed.stage, failed.status) == (stage, helpers.STATUS_STALE)
+    assert detail in failed.detail
+    assert [s.status for s in caught.value.stages[:-1]] == [helpers.STATUS_OK] * (
+        len(caught.value.stages) - 1)
+    # The probe records that row, then fails: the run passes with it
+    # listed as a failing source.
+    report = _run(live, tmp_path, [
+        (_test(0), ("mangapark1.com", failed.status, failed.stage, failed.detail),
+         "failed"),
+        (SUMMARY_TEST, None, "passed"),
+    ])
+    assert check.problems(report, 1) == []
+    assert check.failing_sources(report) == [f"mangapark1.com: STALE at {stage}"]
+
+
+def test_a_mangapark_runner_failure_still_fails_the_run(
+        check, live, helpers, tmp_path, monkeypatch):
+    # Search and chapters load; then the runner has no Chromium for the
+    # reader page: a plain RuntimeError, not the source. (MangaPark's
+    # search swallows its own fetch errors, so the failure comes later.)
+    scraper = _mangapark(monkeypatch, {
+        "/get-chapter-list": (200, (MANGAPARK / "chapter_list.json").read_text(
+            encoding="utf-8"))})
+    fetch = scraper._get_html
+
+    def no_browser_for_pages(url):
+        if "/read/" in url:
+            raise RuntimeError("MangaPark needs a Chromium-based browser")
+        return fetch(url)
+    monkeypatch.setattr(scraper, "_get_html", no_browser_for_pages)
+    with pytest.raises(RuntimeError, match="Chromium-based browser") as caught:
+        _walk(helpers, scraper)
+    assert type(caught.value) is RuntimeError
+    report = _run(live, tmp_path, [
+        (_test(0), None, "failed"),
+        (SUMMARY_TEST, None, "passed"),
+    ])
+    assert any("failed without recording a source failure" in p
+               for p in check.problems(report, 1))
