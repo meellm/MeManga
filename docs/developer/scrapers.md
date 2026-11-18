@@ -16,6 +16,10 @@ and the live probe stages described here are not in the latest release.
 - Look the site up in the [list of sources](../reference/sources). It may
   already be registered under another domain, or be left out of search
   for a recorded reason.
+- A source you add appears in that list, which is not an endorsement of
+  the site. Read
+  [Using sources responsibly](../reference/sources#using-sources-responsibly)
+  first.
 - A scraper reads pages a visitor can open without an account; MeManga has
   no support for site accounts. When a site answers with a block page, a
   challenge or a region limit, the scraper fails with a clear error (see

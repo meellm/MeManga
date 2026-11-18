@@ -55,8 +55,10 @@ sites change or go offline without notice. Some sources serve adult
 content; the list marks them.
 
 MeManga is a tool you run yourself. It does not host any manga and is not
-affiliated with the sites it reads. Use it in line with the terms of those
-sites and the rights of the people who make the manga.
+affiliated with the sites it reads; listing a site is not an endorsement.
+Use it in line with the terms of those sites, the law where you live and
+the rights of the people who make the manga. See
+[Using sources responsibly](https://meellm.github.io/MeManga/reference/sources#using-sources-responsibly).
 
 ## Project status and contributing
 

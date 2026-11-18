@@ -16,6 +16,19 @@ are listed under **Other domains**.
   time.
 :::
 
+## Using sources responsibly
+
+MeManga is a tool you run yourself. It does not host any manga: it reads
+these sites from wherever you run it and saves chapters in the download
+folder you choose. It is not affiliated with any of these sites.
+
+A site being listed here, included in search or turned on in the
+[default selection](#default-selection) is not a recommendation or an
+endorsement of that site.
+
+Use each source in line with its terms, the law where you live and the
+rights of the people who make the manga.
+
 ## Find out whether a source works now
 
 - **Desktop app:** the **Sources** page shows the saved result for each
