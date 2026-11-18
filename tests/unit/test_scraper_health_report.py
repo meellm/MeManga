@@ -256,3 +256,106 @@ def test_live_report_is_written_without_results(check, live, tmp_path):
     assert report["results"] == []
     assert report["pytest"]["failed"] == 1
     assert check.problems(report, 1)
+
+
+# ─── Which scraper errors count as a failing source ─────────────────────
+
+def _wrapped(outer, cause):
+    try:
+        raise outer from cause
+    except type(outer) as e:
+        return e
+
+
+def _expected_errors():
+    import requests
+    from cloudscraper.exceptions import CloudflareChallengeError
+    from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+    from memanga.scrapers.mangafire import MangaFireError
+    from memanga.scrapers.playwright_base import BrowserTimeoutError
+    from memanga.scrapers.weebcentral import (WeebCentralChallengeError,
+                                              WeebCentralError)
+    return {
+        # What the probes have seen from real sources.
+        "mangafire": MangaFireError("MangaFire returned HTTP 403"),
+        "weebcentral": WeebCentralChallengeError("page list failed"),
+        "page-wait": PlaywrightTimeoutError("Page.wait_for_selector: Timeout"),
+        "budget": BrowserTimeoutError("too little time left"),
+        "not-json": json.JSONDecodeError("Expecting value", "<html>", 0),
+        "redirects": requests.exceptions.TooManyRedirects("too many"),
+        "cloudflare": CloudflareChallengeError("challenge"),
+        "wrapped-timeout": _wrapped(WeebCentralError("search failed"),
+                                    PlaywrightTimeoutError("Timeout 20000ms")),
+    }
+
+
+def _unexpected_errors():
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright._impl._errors import TargetClosedError
+
+    from memanga.first_run import BrowserSetupError
+    from memanga.scrapers.weebcentral import WeebCentralError
+    return {
+        "type-error": TypeError("unsupported operand"),
+        "attribute-error": AttributeError("'NoneType' object has no attribute 'text'"),
+        "runtime-error": RuntimeError("Playwright not available"),
+        "value-error": ValueError("too many values to unpack"),
+        "browser-closed": TargetClosedError(),
+        "browser-error": PlaywrightError("Browser.new_context: crashed"),
+        "browser-setup": BrowserSetupError("A browser MeManga needs is not installed"),
+        "wrapped-crash": _wrapped(WeebCentralError("search failed"), TargetClosedError()),
+        "wrapped-bug": _wrapped(WeebCentralError("search failed"), TypeError("bad")),
+    }
+
+
+@pytest.fixture(scope="module")
+def helpers():
+    return _load("memanga_live_helpers", LIVE / "_helpers.py")
+
+
+class _Scraper:
+    def __init__(self, error):
+        self.error = error
+
+    def search(self, query):
+        raise self.error
+
+
+@pytest.mark.parametrize("name", sorted(_expected_errors()))
+def test_a_source_error_is_a_stale_source(helpers, name):
+    error = _expected_errors()[name]
+    pipe = helpers.ScraperPipeline(_Scraper(error), "site.test")
+    with pytest.raises(helpers.StageFailure) as caught:
+        pipe.search("one piece")
+    assert caught.value.failed.status == helpers.STATUS_STALE
+    assert caught.value.failed.stage == helpers.STAGE_SEARCH
+
+
+@pytest.mark.parametrize("name", sorted(_unexpected_errors()))
+def test_any_other_error_escapes_the_probe(helpers, name):
+    # Not a source row: the test fails without one, which
+    # check_health_report.py rejects as a broken run (below).
+    error = _unexpected_errors()[name]
+    pipe = helpers.ScraperPipeline(_Scraper(error), "site.test")
+    with pytest.raises(type(error)) as caught:
+        pipe.search("one piece")
+    assert caught.value is error
+    assert pipe.stages == []
+
+
+def test_an_escaped_error_fails_the_run(check, live, tmp_path):
+    # The probe that raised records no row and fails in its call phase.
+    report = _run(live, tmp_path, [
+        (_test(0), ("a.test", "STALE", "search"), "failed"),
+        (_test(1), None, "failed"),
+        (SUMMARY_TEST, None, "passed"),
+    ])
+    assert any(f"{_test(1)} failed without recording a source failure" in p
+               for p in check.problems(report, 1))
+    # Without it, the same run is only a failing source.
+    report = _run(live, tmp_path, [
+        (_test(0), ("a.test", "STALE", "search"), "failed"),
+        (SUMMARY_TEST, None, "passed"),
+    ])
+    assert check.problems(report, 1) == []
