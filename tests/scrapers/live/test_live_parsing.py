@@ -74,11 +74,11 @@ PARSING_PROBES = {
     # scheme again — without a valid token every stage 403s at once.
     "mangafire.to": ProbeSpec("MangaFire (vrf-signed JSON API)",
                                 query="one piece"),
-    # Fully browser-rendered: search is the /search/data fragment, the
-    # chapter list needs the "Show All Chapters" swap, and pages come
-    # from the reader's section#chapter-images. Saved excerpts of each
-    # page live in fixtures/playwright_html/weebcentral_*.html; this
-    # probe catches the live markup drifting away from them.
+    # Loaded in the browser as HTMX fragments: search is /search/data,
+    # the chapter list /series/{id}/full-chapter-list, and pages the
+    # reader's /chapters/{id}/images. Saved excerpts of each page live
+    # in fixtures/playwright_html/weebcentral_*.html; this probe catches
+    # the live markup drifting away from them.
     "weebcentral.com": ProbeSpec("WeebCentral (browser-rendered HTML)",
                                   query="blue lock"),
     "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),

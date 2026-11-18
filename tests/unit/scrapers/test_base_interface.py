@@ -435,50 +435,57 @@ class TestWeebCentralCloudflareDetection:
         assert results and results[0].title == "Blue Lock"
 
 
-class TestWeebCentralChapterListStability:
+class TestWeebCentralChapterListIsComplete:
     """Regression for the "only 9 of 349 chapters returned" bug. The
-    HTMX swap that lands the full chapter list arrives in batches; the
-    scraper must wait for the count to stabilise rather than returning
-    after the first batch crosses some threshold.
+    series page renders just the newest and oldest few chapters and
+    fetches the rest over XHR on "Show All Chapters"; when that request
+    failed, the short list was returned as the whole series. The list
+    must come from the full-chapter-list fragment itself.
     """
 
-    def test_waits_until_link_count_stops_growing(self):
-        from memanga.scrapers.weebcentral import WeebCentralScraper
+    def test_reads_the_full_list_fragment_not_the_series_page(
+            self, monkeypatch):
+        from memanga.scrapers import weebcentral as wc
 
-        # Simulate the HTMX swap by returning a growing count from
-        # `page.evaluate(...)` until it plateaus.
-        sequence = iter([5, 12, 80, 200, 340, 349, 349, 349])
+        series = "https://weebcentral.com/series/01ABC/Blue-Lock"
+        full_list = "https://weebcentral.com/series/01ABC/full-chapter-list"
 
-        class _FakePage:
-            def evaluate(self, _expr):
-                return next(sequence, 349)
-            def wait_for_timeout(self, _ms):
-                pass
-
-        scraper = WeebCentralScraper()
-        final = scraper._wait_for_chapter_list_stable(
-            _FakePage(), max_passes=20, interval_ms=0,
-        )
-        assert final == 349, f"expected 349, got {final}"
-
-    def test_returns_when_count_never_grows_past_zero(self):
-        """A page with no chapter links at all must still terminate
-        (don't sit on max_passes × interval just because the count is
-        stuck at zero)."""
-        from memanga.scrapers.weebcentral import WeebCentralScraper
+        class _Link:
+            def __init__(self, n):
+                self.n = n
+            def get_attribute(self, _name):
+                return f"/chapters/C{self.n}"
+            def inner_text(self):
+                return f"Chapter {self.n}"
 
         class _FakePage:
-            def evaluate(self, _expr):
-                return 0
+            def __init__(self):
+                self.url = ""
+                self.visits = []
+            def goto(self, url, **kwargs):
+                self.url = url
+                self.visits.append((url, kwargs.get("referer")))
             def wait_for_timeout(self, _ms):
                 pass
+            def content(self):
+                return "<html><body></body></html>"
+            def title(self):
+                return "Blue Lock | Weeb Central"
+            def query_selector_all(self, _selector):
+                # The series page's first render vs the full fragment.
+                count = 349 if self.url == full_list else 9
+                return [_Link(n) for n in range(1, count + 1)]
+            def close(self):
+                pass
 
-        scraper = WeebCentralScraper()
-        # Bound the call so a regression wouldn't hang the suite.
-        final = scraper._wait_for_chapter_list_stable(
-            _FakePage(), max_passes=5, interval_ms=0,
-        )
-        assert final == 0
+        page = _FakePage()
+        monkeypatch.setattr(wc.WeebCentralScraper, "_new_page",
+                            lambda self: (None, None, page))
+
+        chapters = wc.WeebCentralScraper().get_chapters(series)
+
+        assert len(chapters) == 349
+        assert page.visits == [(full_list, series)]
 
 
 class TestWeebCentralChapterUrlSelfHeal:
