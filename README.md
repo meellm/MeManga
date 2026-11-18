@@ -60,15 +60,24 @@ sites and the rights of the people who make the manga.
 
 ## Project status and contributing
 
-MeManga is developed in public, with no fixed release or support schedule.
-Contributions are welcome, from bug reports and fixes to new sources and
-[translations](https://meellm.github.io/MeManga/developer/contributing#translations).
+MeManga is developed in public. There is no fixed release schedule and no
+guaranteed response time for issues, questions or pull requests.
+Contributions are welcome: bug reports and fixes, new and repaired sources,
+and [translations](https://meellm.github.io/MeManga/developer/contributing#translations).
 Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - Questions and ideas: [Discussions](https://github.com/meellm/MeManga/discussions)
 - Bugs and broken sources: [Issues](https://github.com/meellm/MeManga/issues)
 - Security problems: [SECURITY.md](SECURITY.md)
 - Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
+
+You can also maintain a copy of your own. The source code is under the
+[MIT license](LICENSE), which lets you use, copy, change and share it as
+long as the copyright and permission notice are included.
+[Write a scraper](https://meellm.github.io/MeManga/developer/scrapers)
+explains how to add or repair a source, and
+[Set up for development](https://meellm.github.io/MeManga/developer/contributing)
+how to run a copy from source and test it.
 
 ## License
 
