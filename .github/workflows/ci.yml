@@ -97,7 +97,9 @@ jobs:
     # worker.
     name: tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # gui-pages took 21 to 53 minutes in November 2026 runs; the other
+    # shards finish within 6.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

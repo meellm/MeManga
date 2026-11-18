@@ -135,7 +135,7 @@ pytest-env = "2026-11-02T00:00:00Z"
 pytest-mock = "2026-11-02T00:00:00Z"
 python-dotenv = "2026-11-02T00:00:00Z"
 setuptools = "2026-11-02T00:00:00Z"
-soupsieve = "2026-11-02T00:00:00Z"
+soupsieve = "2026-11-16T00:00:00Z"
 urllib3 = "2026-11-02T00:00:00Z"
 zipp = "2026-11-02T00:00:00Z"
 

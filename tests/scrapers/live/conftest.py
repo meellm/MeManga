@@ -91,8 +91,10 @@ def _count_failures_by_stage() -> dict:
 
 
 def pytest_sessionfinish(session, exitstatus):
+    # Written even with no rows, so a run that probed nothing still says
+    # what pytest saw (scripts/check_health_report.py).
     path = session.config.getoption("--health-report")
-    if not path or not _RESULTS:
+    if not path:
         return
     from _helpers import (
         STATUS_OK, STATUS_DEAD, STATUS_PROTECTED, STATUS_HTTP_ERROR,
@@ -111,6 +113,15 @@ def pytest_sessionfinish(session, exitstatus):
         # Which pipeline stage failures happened at (curated probes
         # only — broad reachability rows always say "reachability").
         "failures_by_stage": _count_failures_by_stage(),
+        # What pytest itself counted. A test that fails for its source
+        # records one DEAD, HTTP_ERROR or STALE row first, so a `failed`
+        # count other than the number of those rows means some test
+        # broke for another reason.
+        "pytest": {
+            "exitstatus": int(exitstatus),
+            "collected": session.testscollected,
+            "failed": session.testsfailed,
+        },
         "results": [asdict(r) for r in _RESULTS],
     }
     Path(path).write_text(json.dumps(out, indent=2), encoding="utf-8")

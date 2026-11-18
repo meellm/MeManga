@@ -829,9 +829,11 @@ All notable changes are recorded here. Format loosely follows
   stderr so stdout only carries results.
 
 ### Security
-- #385 Pillow 13.0.0, certifi 2026.10.23 and soupsieve 3.0.4 (2.10 on
-  Python 3.11.0 to 3.11.4) replace releases with known vulnerabilities
-  in every pinned install, the Docker image and the release downloads.
+- #385 Pillow 13.0.0, certifi 2026.10.23 and soupsieve 4.1.1 replace
+  releases with known vulnerabilities in every pinned install, the
+  Docker image and the release downloads. Python 3.11.0 to 3.11.4 keep
+  soupsieve 2.10, as no fixed release supports them: there, a source
+  serving deeply nested pages can slow its own checks.
 
 ## [0.4.4] - 2026-10-03
 
