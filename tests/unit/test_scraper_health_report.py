@@ -267,8 +267,24 @@ def _wrapped(outer, cause):
         return e
 
 
+def _while_handling(outer, context):
+    """`outer` raised inside `except` of `context`, without `from`: the
+    implicit context, as requests raises its errors over urllib3's."""
+    try:
+        try:
+            raise context
+        except type(context):
+            raise outer
+    except type(outer) as e:
+        return e
+
+
 def _expected_errors():
+    """name -> (error, the status its source row gets)."""
+    import socket
+
     import requests
+    import urllib3
     from cloudscraper.exceptions import CloudflareChallengeError
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -276,23 +292,50 @@ def _expected_errors():
     from memanga.scrapers.playwright_base import BrowserTimeoutError
     from memanga.scrapers.weebcentral import (WeebCentralChallengeError,
                                               WeebCentralError)
+    dead, http, stale = "STATUS_DEAD", "STATUS_HTTP_ERROR", "STATUS_STALE"
+    pool = urllib3.HTTPConnectionPool("site.test")
     return {
         # What the probes have seen from real sources.
-        "mangafire": MangaFireError("MangaFire returned HTTP 403"),
-        "weebcentral": WeebCentralChallengeError("page list failed"),
-        "page-wait": PlaywrightTimeoutError("Page.wait_for_selector: Timeout"),
-        "budget": BrowserTimeoutError("too little time left"),
-        "not-json": json.JSONDecodeError("Expecting value", "<html>", 0),
-        "redirects": requests.exceptions.TooManyRedirects("too many"),
-        "cloudflare": CloudflareChallengeError("challenge"),
-        "wrapped-timeout": _wrapped(WeebCentralError("search failed"),
-                                    PlaywrightTimeoutError("Timeout 20000ms")),
+        "mangafire": (MangaFireError("MangaFire returned HTTP 403"), stale),
+        "weebcentral": (WeebCentralChallengeError("page list failed"), stale),
+        "page-wait": (PlaywrightTimeoutError("Page.wait_for_selector: Timeout"), stale),
+        "budget": (BrowserTimeoutError("too little time left"), stale),
+        "not-json": (json.JSONDecodeError("Expecting value", "<html>", 0), stale),
+        "redirects": (requests.exceptions.TooManyRedirects("too many"), stale),
+        "cloudflare": (CloudflareChallengeError("challenge"), stale),
+        "wrapped-timeout": (_wrapped(WeebCentralError("search failed"),
+                                     PlaywrightTimeoutError("Timeout 20000ms")), stale),
+        # Network and HTTP failures, as requests raises them (over
+        # urllib3's error, implicitly) and as a wrapper naming the
+        # network error it came from would.
+        "dns": (socket.gaierror(-2, "Name or service not known"), dead),
+        "refused": (_while_handling(
+            requests.exceptions.ConnectionError("Max retries exceeded"),
+            urllib3.exceptions.NewConnectionError(pool, "refused")), dead),
+        "read-timeout": (_while_handling(
+            requests.exceptions.ReadTimeout("Read timed out"),
+            urllib3.exceptions.ReadTimeoutError(pool, "/", "Read timed out")), dead),
+        "http-403": (requests.exceptions.HTTPError("403 Client Error"), http),
+        "from-dns": (_wrapped(requests.exceptions.ConnectionError("lookup failed"),
+                              socket.gaierror(-2, "Name or service not known")), dead),
+        "from-reset": (_wrapped(requests.exceptions.ConnectionError("reset"),
+                                ConnectionResetError(104, "reset by peer")), dead),
+        "from-urllib3": (_wrapped(requests.exceptions.ConnectionError("pool"),
+                                  urllib3.exceptions.ProtocolError("aborted")), dead),
+        # Only an explicit cause is followed; requests' implicit context
+        # (here even a bug's) is not.
+        "context-not-followed": (_while_handling(
+            requests.exceptions.ConnectionError("reset"), TypeError("bad")), dead),
     }
 
 
 def _unexpected_errors():
     from playwright.sync_api import Error as PlaywrightError
     from playwright._impl._errors import TargetClosedError
+
+    import socket
+
+    import requests
 
     from memanga.first_run import BrowserSetupError
     from memanga.scrapers.weebcentral import WeebCentralError
@@ -306,6 +349,19 @@ def _unexpected_errors():
         "browser-setup": BrowserSetupError("A browser MeManga needs is not installed"),
         "wrapped-crash": _wrapped(WeebCentralError("search failed"), TargetClosedError()),
         "wrapped-bug": _wrapped(WeebCentralError("search failed"), TypeError("bad")),
+        # A network or HTTP error explicitly raised from a bug or a crash
+        # is no more a source failure than a scraper error is.
+        "connection-from-bug": _wrapped(
+            requests.exceptions.ConnectionError("failed"), TypeError("bad")),
+        "timeout-from-crash": _wrapped(
+            requests.exceptions.Timeout("timed out"), TargetClosedError()),
+        "http-from-bug": _wrapped(
+            requests.exceptions.HTTPError("500"), AttributeError("no .status")),
+        "dns-from-bug": _wrapped(
+            socket.gaierror(-2, "unknown"), ValueError("bad host")),
+        "deep-bug": _wrapped(
+            WeebCentralError("search failed"),
+            _wrapped(requests.exceptions.ConnectionError("failed"), TypeError("bad"))),
     }
 
 
@@ -323,12 +379,12 @@ class _Scraper:
 
 
 @pytest.mark.parametrize("name", sorted(_expected_errors()))
-def test_a_source_error_is_a_stale_source(helpers, name):
-    error = _expected_errors()[name]
+def test_a_source_error_is_a_failing_source(helpers, name):
+    error, status = _expected_errors()[name]
     pipe = helpers.ScraperPipeline(_Scraper(error), "site.test")
     with pytest.raises(helpers.StageFailure) as caught:
         pipe.search("one piece")
-    assert caught.value.failed.status == helpers.STATUS_STALE
+    assert caught.value.failed.status == getattr(helpers, status)
     assert caught.value.failed.stage == helpers.STAGE_SEARCH
 
 
