@@ -62,7 +62,8 @@ sites and the rights of the people who make the manga.
 
 MeManga is developed in public, with no fixed release or support schedule.
 Contributions are welcome, from bug reports and fixes to new sources and
-translations. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
+[translations](https://meellm.github.io/MeManga/developer/contributing#translations).
+Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - Questions and ideas: [Discussions](https://github.com/meellm/MeManga/discussions)
 - Bugs and broken sources: [Issues](https://github.com/meellm/MeManga/issues)

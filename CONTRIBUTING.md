@@ -166,6 +166,14 @@ Never edit the files by hand. `python scripts/lock_dependencies.py --check`
 verifies them; [Dependency locks](https://meellm.github.io/MeManga/developer/build-release#dependency-locks) explains the
 files, `--check`, `--check --offline` and `--check-installed build`.
 
+## Translations
+
+The desktop app, the command line and the documentation are in English
+only today, and translations are welcome.
+[Translations](https://meellm.github.io/MeManga/developer/contributing#translations)
+explains how to start: with an issue that names the language and a small
+first part to translate.
+
 ## Reporting issues
 
 See [SECURITY.md](SECURITY.md) for vulnerability reports. For

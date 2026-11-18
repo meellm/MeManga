@@ -1,8 +1,8 @@
 # Set up for development
 
 How to install MeManga from a clone for development, run it and its tests,
-and what the checks on GitHub run. To use MeManga rather than work on it,
-see [Download and install](../guide/install).
+what the checks on GitHub run, and how to start a translation. To use
+MeManga rather than work on it, see [Download and install](../guide/install).
 
 ## Install for development
 
@@ -186,6 +186,54 @@ npm ci
 npm run dev      # local preview while you write
 npm run build    # the build CI runs
 ```
+
+## Translations
+
+Translations are welcome. Today MeManga is in English only:
+
+- The desktop app and the command line show their text in English. The
+  text is written directly in the code: there is no translation catalogue
+  and nothing that loads translations yet.
+- This site has one language, English.
+
+This is about the language of MeManga itself. The language of the manga
+you read comes from the source: the
+[Language column](../reference/sources#the-columns) of the source list
+shows it for a source that has only one, and MangaDex chapters are
+requested in English. Translating MeManga does not change what a source
+offers.
+
+### Start with an issue
+
+Because there is nothing to add a translation to yet, a translation starts
+with a plan rather than a file:
+
+1. Open an issue with the **Feature request** template. Name the language
+   and say what you would translate first: the desktop app, the command
+   line or pages of this site. A small first part, such as one page of the
+   desktop app, is easier to agree on and review.
+2. Agree in the issue on how it will work before translating a whole app
+   or many pages. For the desktop app that means how text is marked for
+   translation and how translations are loaded; for this site, how a second
+   language is laid out.
+3. Then open a pull request for the part you agreed on.
+
+### Background
+
+The libraries MeManga is built on have translation support. MeManga does
+not use it yet; these pages explain how it works.
+
+- **Desktop app:** Qt for Python's
+  [Translating Applications](https://doc.qt.io/qtforpython-6/tutorials/basictutorial/translations.html)
+  marks text with `tr()` and loads translations with `QTranslator`. Qt's
+  [Writing Source Code for Translation](https://doc.qt.io/qt-6/i18n-source-translation.html)
+  explains why text put together from pieces or from template strings
+  cannot be translated as it is. Some of MeManga's text is put together
+  with Python f-strings, so that text needs changing first.
+- **This site:** VitePress, which builds it, supports more than one
+  language with its `locales` setting. See
+  [Internationalization](https://vuejs.github.io/vitepress/v1/guide/i18n)
+  for the VitePress version this site uses.
 
 ## Commits and pull requests
 
