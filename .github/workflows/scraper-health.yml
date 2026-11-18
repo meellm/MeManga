@@ -5,7 +5,7 @@ name: Scraper health
 # source that is down, blocks the runner or changed its pages, and the
 # stage that broke. Such sources do not fail the run, which is listed in
 # its summary instead; the run fails when the probes could not run or
-# report, or a test failed without recording a source failure.
+# report, or a test failed other than by its source failing.
 
 on:
   schedule:

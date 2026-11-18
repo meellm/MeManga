@@ -69,14 +69,30 @@ def pytest_addoption(parser):
 # Session-scoped accumulator. Tests append via the `health_recorder`
 # fixture; the session-finish hook writes it to disk.
 _RESULTS: list = []
+# The test that recorded each row of _RESULTS, by pytest node id.
+_RESULT_TESTS: list = []
+# Every test pytest ran, and each failed setup, call or teardown phase
+# (scripts/check_health_report.py tells source failures from others).
+_TESTS: set = set()
+_FAILURES: list = []
+
+
+def _record(test: str, result) -> None:
+    _RESULTS.append(result)
+    _RESULT_TESTS.append(test)
 
 
 @pytest.fixture
-def health_recorder():
+def health_recorder(request):
     """Append-only accumulator for HealthResult rows."""
-    def _record(r):
-        _RESULTS.append(r)
-    return _record
+    return lambda r: _record(request.node.nodeid, r)
+
+
+def pytest_runtest_logreport(report):
+    _TESTS.add(report.nodeid)
+    # What pytest counts as a failure (Session.testsfailed).
+    if report.failed and not hasattr(report, "wasxfail"):
+        _FAILURES.append({"test": report.nodeid, "when": report.when})
 
 
 def _count_failures_by_stage() -> dict:
@@ -113,15 +129,17 @@ def pytest_sessionfinish(session, exitstatus):
         # Which pipeline stage failures happened at (curated probes
         # only — broad reachability rows always say "reachability").
         "failures_by_stage": _count_failures_by_stage(),
-        # What pytest itself counted. A test that fails for its source
-        # records one DEAD, HTTP_ERROR or STALE row first, so a `failed`
-        # count other than the number of those rows means some test
-        # broke for another reason.
+        # What pytest itself saw. A test that fails for its source
+        # records one DEAD, HTTP_ERROR or STALE row, then fails in its
+        # call phase; any other failure means the run itself broke.
         "pytest": {
             "exitstatus": int(exitstatus),
             "collected": session.testscollected,
+            "ran": len(_TESTS),
             "failed": session.testsfailed,
+            "failures": _FAILURES,
         },
-        "results": [asdict(r) for r in _RESULTS],
+        "results": [{**asdict(r), "test": test}
+                    for r, test in zip(_RESULTS, _RESULT_TESTS)],
     }
     Path(path).write_text(json.dumps(out, indent=2), encoding="utf-8")

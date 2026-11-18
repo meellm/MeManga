@@ -13,6 +13,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "check_health_report.py"
 LIVE = ROOT / "tests" / "scrapers" / "live"
+SUMMARY_TEST = "tests/scrapers/live/test_live_parsing.py::test_zzz_health_summary_report"
 
 
 def _load(name, path):
@@ -34,67 +35,136 @@ def live():
     return _load("memanga_live_conftest", LIVE / "conftest.py")
 
 
-def _report(statuses, failed, exitstatus=None):
+def _test(i):
+    return f"tests/scrapers/live/test_live_reachability.py::test_probe[site{i}.test]"
+
+
+def _report(check, statuses, extra_failures=(), exitstatus=None):
+    """A report as the probes write it: one row per probe test, a failed
+    call phase for each failing source, plus the summary test."""
     results = [{"domain": f"site{i}.test", "status": s,
                 "stage": "" if s == "OK" else "reachability",
-                "detail": "", "elapsed_ms": 0.0, "extra": {}}
+                "detail": "", "elapsed_ms": 0.0, "extra": {}, "test": _test(i)}
                for i, s in enumerate(statuses)]
-    if exitstatus is None:
-        exitstatus = 1 if failed else 0
-    return {"summary": {"total": len(results)}, "failures_by_stage": {},
-            "pytest": {"exitstatus": exitstatus, "collected": len(results),
-                       "failed": failed},
+    failures = [{"test": r["test"], "when": "call"}
+                for r in results if r["status"] in check.FAILING]
+    failures += list(extra_failures)
+    summary = {"total": len(results)}
+    for status, key in check.STATUSES.items():
+        summary[key] = statuses.count(status)
+    ran = len(results) + 1
+    return {"summary": summary, "failures_by_stage": {},
+            "pytest": {"exitstatus": (1 if failures else 0) if exitstatus is None
+                       else exitstatus,
+                       "collected": ran, "ran": ran, "failed": len(failures),
+                       "failures": failures},
             "results": results}
 
 
-def test_failing_statuses_are_the_probe_failures(check):
+def test_statuses_are_the_probe_statuses(check):
     helpers = _load("memanga_live_helpers", LIVE / "_helpers.py")
-    not_failing = {helpers.STATUS_OK, helpers.STATUS_SKIP, helpers.STATUS_PROTECTED}
     statuses = {v for k, v in vars(helpers).items() if k.startswith("STATUS_")}
+    assert set(check.STATUSES) == statuses
+    not_failing = {helpers.STATUS_OK, helpers.STATUS_SKIP, helpers.STATUS_PROTECTED}
     assert set(check.FAILING) == statuses - not_failing
 
 
 def test_failing_sources_are_not_a_broken_run(check):
-    report = _report(["OK", "DEAD", "HTTP_ERROR", "STALE", "PROTECTED"], failed=3)
+    report = _report(check, ["OK", "DEAD", "HTTP_ERROR", "STALE", "PROTECTED"])
     assert check.problems(report, 1) == []
-    assert check.problems(_report(["OK", "PROTECTED"], failed=0), 0) == []
+    assert check.problems(_report(check, ["OK", "PROTECTED", "SKIP"]), 0) == []
 
 
 @pytest.mark.parametrize("code", [2, 3, 4, 5])
 def test_pytest_errors_fail_the_run(check, code):
     # Interrupted / collection errors, internal error, usage error, no tests.
-    report = _report(["OK"], failed=0, exitstatus=code)
+    report = _report(check, ["OK"], exitstatus=code)
     assert "did not complete" in check.problems(report, code)[0]
 
 
-def test_a_test_failing_without_a_source_row_fails_the_run(check):
-    # A fixture error or a crash before the row was recorded.
-    found = check.problems(_report(["OK", "DEAD"], failed=2), 1)
-    assert any("another reason than its source" in p for p in found)
-    # A failing source row while pytest reports no failure.
-    assert check.problems(_report(["DEAD"], failed=0, exitstatus=0), 0)
+def _broken(check, report, code, fragment):
+    found = check.problems(report, code)
+    assert any(fragment in p for p in found), found
 
 
-@pytest.mark.parametrize("report", [
-    [],
-    {},
-    {"summary": {"total": 0}, "pytest": {"exitstatus": 0, "failed": 0},
-     "results": []},
-])
-def test_an_empty_or_malformed_report_fails_the_run(check, report):
+def test_a_test_failing_without_its_source_row_fails_the_run(check):
+    # A crash before the row was recorded.
+    report = _report(check, ["OK"], [{"test": _test(7), "when": "call"}])
+    _broken(check, report, 1, "failed without recording a source failure")
+
+
+@pytest.mark.parametrize("when", ["setup", "teardown"])
+def test_a_fixture_error_fails_the_run_even_when_counts_match(check, when):
+    # The failing source's row and call failure are there; a fixture of
+    # another test broke. Counting failures alone would not tell.
+    report = _report(check, ["DEAD", "OK"], [{"test": _test(1), "when": when}])
+    _broken(check, report, 1, f"failed in {when}")
+    # The same error right after the failing source's own row.
+    report = _report(check, ["DEAD"], [{"test": _test(0), "when": when}])
+    _broken(check, report, 1, f"failed in {when}")
+
+
+def test_a_failing_row_whose_test_passed_fails_the_run(check):
+    report = _report(check, ["STALE"])
+    report["pytest"].update(failures=[], failed=0, exitstatus=0)
+    _broken(check, report, 0, "recorded a source failure but did not fail")
+
+
+def test_one_test_records_one_row(check):
+    report = _report(check, ["OK", "OK"])
+    report["results"][1]["test"] = report["results"][0]["test"]
+    _broken(check, report, 0, "recorded 2 results")
+
+
+@pytest.mark.parametrize("change, fragment", [
+    (lambda r: r["results"][0].update(status="invented"), "unknown status"),
+    (lambda r: r["results"][0].pop("domain"), "names no domain"),
+    (lambda r: r["results"][0].update(domain=" "), "names no domain"),
+    (lambda r: r["results"][0].pop("test"), "names no domain or test"),
+    (lambda r: r["results"].append("row"), "is not an object"),
+    (lambda r: r["pytest"].pop("collected"), "pytest.collected"),
+    (lambda r: r["pytest"].update(ran="3"), "pytest.ran"),
+    (lambda r: r["pytest"].update(failed=True), "pytest.failed"),
+    (lambda r: r["pytest"].update(failures=[{"test": "x", "when": "later"}]),
+     "pytest.failures"),
+    (lambda r: r["summary"].pop("stale"), "summary.stale"),
+], ids=["status", "no-domain", "blank-domain", "no-test", "row-type",
+        "collected", "ran-type", "failed-bool", "phase", "summary-key"])
+def test_a_malformed_report_fails_the_run(check, change, fragment):
+    report = _report(check, ["OK", "DEAD"])
+    change(report)
+    _broken(check, report, 1, fragment)
+
+
+@pytest.mark.parametrize("report", [[], {}, None])
+def test_a_report_that_is_not_one_fails_the_run(check, report):
     assert check.problems(report, 0)
 
 
-def test_report_must_agree_with_pytest(check):
-    report = _report(["OK"], failed=0)
-    report["summary"]["total"] = 2
-    assert check.problems(report, 0)
-    assert check.problems(_report(["OK"], failed=0, exitstatus=1), 0)
+def test_an_empty_report_fails_the_run(check):
+    report = _report(check, [])
+    _broken(check, report, 0, "no results")
+
+
+@pytest.mark.parametrize("change, code, fragment", [
+    (lambda r: r["summary"].update(total=3), 0, "counts 3 results"),
+    (lambda r: r["summary"].update(ok=0, dead=1), 0, "counts 0 OK"),
+    (lambda r: r["pytest"].update(exitstatus=1), 0, "the report says 1"),
+    (lambda r: r["pytest"].update(ran=1), 0, "collected 3 tests and ran 1"),
+    (lambda r: r["pytest"].update(collected=0, ran=0), 0, "collected 0"),
+    (lambda r: r["pytest"].update(failed=1), 0, "counted 1 failures"),
+    (lambda r: r["pytest"].update(exitstatus=1), 1, "exited 1 with 0 failures"),
+], ids=["total", "per-status", "exitstatus", "not-all-ran", "none-collected",
+        "failed-count", "exit-without-failures"])
+def test_report_must_agree_with_itself_and_pytest(check, change, code, fragment):
+    report = _report(check, ["OK", "OK"])
+    change(report)
+    _broken(check, report, code, fragment)
 
 
 def test_main_lists_failing_sources_and_passes(check, tmp_path, monkeypatch, capsys):
     path = tmp_path / "health.json"
-    path.write_text(json.dumps(_report(["OK", "STALE"], failed=1)), encoding="utf-8")
+    path.write_text(json.dumps(_report(check, ["OK", "STALE"])), encoding="utf-8")
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
     assert check.main([str(path), "1"]) == 0
@@ -104,6 +174,16 @@ def test_main_lists_failing_sources_and_passes(check, tmp_path, monkeypatch, cap
     assert "site1.test: STALE" in summary.read_text(encoding="utf-8")
 
 
+def test_main_reports_every_problem_as_an_error(check, tmp_path, capsys):
+    path = tmp_path / "health.json"
+    report = _report(check, ["OK"])
+    report["results"][0]["status"] = "invented"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    assert check.main([str(path), "0"]) == 1
+    assert "::error::result 0 (site0.test) has an unknown status" in (
+        capsys.readouterr().out)
+
+
 @pytest.mark.parametrize("args", [["missing.json", "0"], ["missing.json", "3"]])
 def test_main_fails_without_a_report(check, tmp_path, monkeypatch, capsys, args):
     monkeypatch.chdir(tmp_path)
@@ -111,35 +191,68 @@ def test_main_fails_without_a_report(check, tmp_path, monkeypatch, capsys, args)
     assert "::error::cannot read the health report" in capsys.readouterr().out
 
 
-def test_main_rejects_a_missing_exit_code(check):
-    assert check.main(["health.json", ""]) == 2
+@pytest.mark.parametrize("code", ["", "-1", "one"])
+def test_main_rejects_a_missing_exit_code(check, code):
+    assert check.main(["health.json", code]) == 2
 
 
-def _finish(live, tmp_path, rows, failed, exitstatus):
+# ─── The report the live probes' conftest writes ────────────────────────
+
+def _run(live, tmp_path, probes, phases=(), exitstatus=1):
+    """Feed the conftest what pytest would: each probe records its row in
+    its call phase, then every phase is reported; finish the session."""
+    from _helpers import HealthResult
     path = tmp_path / "health.json"
-    session = SimpleNamespace(
-        config=SimpleNamespace(getoption=lambda name: str(path)),
-        testscollected=len(rows) + 1, testsfailed=failed)
-    live._RESULTS[:] = rows
+    for store in (live._RESULTS, live._RESULT_TESTS, live._FAILURES):
+        store.clear()
+    live._TESTS.clear()
     try:
+        for test, row, outcome in probes:
+            if row is not None:
+                live._record(test, HealthResult(*row))
+            for when in ("setup", "call", "teardown"):
+                failed = (when == "call" and outcome == "failed") or (
+                    (test, when) in phases)
+                live.pytest_runtest_logreport(SimpleNamespace(
+                    nodeid=test, when=when, failed=failed,
+                    outcome="failed" if failed else "passed"))
+        session = SimpleNamespace(
+            config=SimpleNamespace(getoption=lambda name: str(path)),
+            testscollected=len(probes), testsfailed=len(live._FAILURES))
         live.pytest_sessionfinish(session, exitstatus)
     finally:
-        live._RESULTS.clear()
+        for store in (live._RESULTS, live._RESULT_TESTS, live._FAILURES):
+            store.clear()
+        live._TESTS.clear()
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_live_report_carries_what_pytest_counted(check, live, tmp_path):
-    from _helpers import HealthResult
-    rows = [HealthResult("a.test", "OK"),
-            HealthResult("b.test", "DEAD", "reachability", "timed out")]
-    report = _finish(live, tmp_path, rows, failed=1, exitstatus=1)
-    assert report["pytest"] == {"exitstatus": 1, "collected": 3, "failed": 1}
+def test_live_report_names_each_row_test_and_failed_phase(check, live, tmp_path):
+    report = _run(live, tmp_path, [
+        (_test(0), ("a.test", "OK"), "passed"),
+        (_test(1), ("b.test", "DEAD", "reachability", "timed out"), "failed"),
+        (SUMMARY_TEST, None, "passed"),
+    ])
+    assert report["pytest"] == {
+        "exitstatus": 1, "collected": 3, "ran": 3, "failed": 1,
+        "failures": [{"test": _test(1), "when": "call"}]}
+    assert [r["test"] for r in report["results"]] == [_test(0), _test(1)]
     assert report["summary"]["dead"] == 1
     assert check.problems(report, 1) == []
 
 
+def test_live_report_shows_a_teardown_error_after_a_source_row(check, live, tmp_path):
+    report = _run(live, tmp_path, [
+        (_test(0), ("a.test", "STALE", "search"), "failed"),
+        (SUMMARY_TEST, None, "passed"),
+    ], phases={(_test(0), "teardown")})
+    assert report["pytest"]["failures"] == [
+        {"test": _test(0), "when": "call"}, {"test": _test(0), "when": "teardown"}]
+    assert any("failed in teardown" in p for p in check.problems(report, 1))
+
+
 def test_live_report_is_written_without_results(check, live, tmp_path):
-    report = _finish(live, tmp_path, [], failed=2, exitstatus=1)
+    report = _run(live, tmp_path, [(_test(0), None, "failed")])
     assert report["results"] == []
-    assert report["pytest"]["failed"] == 2
+    assert report["pytest"]["failed"] == 1
     assert check.problems(report, 1)
