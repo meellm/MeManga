@@ -134,8 +134,14 @@ def test_shared_packages_have_one_version_across_locks(env):
 
 
 def test_lock_python_floor_is_requires_python(locks, project):
-    assert project["requires-python"] == ">=3.11"
-    assert locks.python_floor(project) == "3.11"
+    assert project["requires-python"] == ">=3.11.5"
+    assert locks.python_floor(project) == "3.11.5"
+    # Python 3.11.0 to 3.11.4 are left out, so no lock keeps a row for
+    # them (soupsieve 2.10 had known vulnerabilities, #385).
+    for target in TARGETS:
+        text = (ROOT / "requirements" / f"{target}.txt").read_text(encoding="utf-8")
+        assert "python_full_version < '3.11.5'" not in text, target
+        assert "soupsieve==2." not in text, target
 
 
 def test_lock_policy_times_are_utc(locks):

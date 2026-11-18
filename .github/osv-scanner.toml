@@ -1,22 +1,9 @@
 # Advisories the dependency audit (.github/workflows/dependency-audit.yml)
 # does not fail on. Prefer updating the package; list an advisory here
-# only when it does not affect MeManga, or when no fixed release installs
-# where the pin applies, with the reason, and an expiry date when a fix
-# is expected or the decision is due for review:
+# only when it does not affect MeManga, with the reason, and an expiry
+# date when a fix is expected:
 #
 # [[IgnoredVulns]]
 # id = "GHSA-xxxx-xxxx-xxxx"
 # effectiveUntil = 2027-01-31
 # reason = "Only affects the server side of the package, which MeManga does not use."
-
-# soupsieve 2.10 is pinned only for Python 3.11.0 to 3.11.4: every
-# release with the fixes (3.0.2 and later) requires Python 3.11.5. The
-# other rows pin a fixed release. The override matches this exact
-# version only.
-[[PackageOverrides]]
-name = "soupsieve"
-version = "2.10"
-ecosystem = "PyPI"
-vulnerability.ignore = true
-effectiveUntil = 2027-02-28
-reason = "No fixed soupsieve installs on Python 3.11.0-3.11.4. GHSA-6655-6qjp-jx7x and GHSA-7g44-g9rc-x53w need an untrusted selector; MeManga's are fixed. GHSA-mmhr-3c5m-f64f applies: a source serving deeply nested HTML can slow its own scrape. Remove by raising requires-python to 3.11.5."

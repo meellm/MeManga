@@ -2,7 +2,7 @@
 # pinned with hashes. Made from pyproject.toml; to change it,
 # edit pyproject.toml and run:
 #    python scripts/lock_dependencies.py
-# input-digest: sha256:335db31d4db320a6c575a005e25122bec516b506c940a5403a3d00a95abae315
+# input-digest: sha256:a7dd2a87c373f9083a3bcc783c46f62bece0fd007b5683ed78be45f9a83b7e18
 # Do not edit by hand.
 altgraph==0.17.5 \
     --hash=sha256:c87b395dd12fabde9c99573a9749d67da8d29ef9de0125c7f536699b4a9bc9e7 \
@@ -918,11 +918,7 @@ shiboken6==6.11.1 \
     #   pyside6
     #   pyside6-addons
     #   pyside6-essentials
-soupsieve==2.10 ; python_full_version < '3.11.5' \
-    --hash=sha256:49e9380d7d2905463583bafe285e818c7366a9ed7b3aee221c1ac79c905d8bc0 \
-    --hash=sha256:8596eb8967d744174820280fa62b4542a2e955bfaccca73ed8a13c6eb8e9b502
-    # via beautifulsoup4
-soupsieve==4.1.1 ; python_full_version >= '3.11.5' \
+soupsieve==4.1.1 \
     --hash=sha256:8ff3422dab0b720fb667ee79864d80531a0e57994a13eb701697719ffcb751f6 \
     --hash=sha256:b296bd2d2f65b1a78149f3d7bf6736a147d2c9e2dfbde0e4404639d748a02e03
     # via beautifulsoup4

@@ -901,7 +901,7 @@ browser are affected.
   the scraper is fixed.
 
 **Can I use this on headless devices?**
-Yes. The CLI runs anywhere Python 3.11+ runs, and its browsers start
+Yes. The CLI runs anywhere Python 3.11.5+ runs, and its browsers start
 headless, so no display is needed. Use `memanga cron install` or
 `memanga watch` for scheduled checks (see
 [Schedule daily checks](#schedule-daily-checks) and [Docker](#docker)).

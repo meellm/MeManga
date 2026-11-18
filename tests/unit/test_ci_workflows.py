@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import re
 import shlex
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -132,7 +131,9 @@ def test_ci_keeps_the_default_marker_selection(ci):
 
 def test_core_tests_cover_the_supported_python_range(ci):
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    floor = re.search(r'requires-python = ">=(\d+\.\d+)"', pyproject).group(1)
+    # The minor version of the floor: setup-python's "3.11" is its newest
+    # patch release.
+    floor = re.search(r'requires-python = ">=(\d+\.\d+)(?:\.\d+)?"', pyproject).group(1)
     newest = max(re.findall(r'Python :: (3\.\d+)"', pyproject),
                  key=lambda v: int(v.split(".")[1]))
     cells = ci["jobs"]["compat"]["strategy"]["matrix"]["include"]
@@ -285,27 +286,6 @@ def test_audit_scans_every_lock(audit):
     assert locks and scanned == locks
     assert "--config=.github/osv-scanner.toml" in run
     assert (ROOT / ".github" / "osv-scanner.toml").is_file()
-
-
-def test_audit_exceptions_are_narrow_and_expire():
-    # An exception names one exact pinned version, says why and expires;
-    # it may only cover a row limited to some Pythons or platforms, so the
-    # unconditional pins are always checked.
-    config = tomllib.loads((ROOT / ".github" / "osv-scanner.toml").read_text(
-        encoding="utf-8"))
-    locks = [p.read_text(encoding="utf-8")
-             for p in (ROOT / "requirements").glob("*.txt")]
-    for entry in config.get("PackageOverrides", []):
-        assert entry["ecosystem"] == "PyPI"
-        assert entry["name"] and entry["version"] and not entry.get("nameIsRegex")
-        assert entry["reason"] and entry["effectiveUntil"]
-        assert not entry.get("ignore"), "ignores licenses too"
-        rows = [line for text in locks for line in text.splitlines()
-                if line.startswith(f"{entry['name']}=={entry['version']} ")]
-        assert rows, f"{entry['name']} {entry['version']} is no longer pinned"
-        assert all(" ; " in row for row in rows), rows
-    for entry in config.get("IgnoredVulns", []):
-        assert entry["id"] and entry["reason"]
 
 
 def test_audit_scanner_is_checksum_pinned(audit):

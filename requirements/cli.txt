@@ -2,7 +2,7 @@
 # pinned with hashes. Made from pyproject.toml; to change it,
 # edit pyproject.toml and run:
 #    python scripts/lock_dependencies.py
-# input-digest: sha256:fe9b4c45f13e916ed3beef06a6d1eb7476ba1f3340e60d665d8c41d74c25f607
+# input-digest: sha256:d30613215719df30073b0ec23477d81f1ef977a3378a04935eecf42736a01812
 # Do not edit by hand.
 backports-tarfile==1.2.0 ; python_full_version < '3.12' \
     --hash=sha256:77e284d754527b01fb1e6fa8a1afe577858ebe4e9dad8919e34c862cb399bc34 \
@@ -841,11 +841,7 @@ secretstorage==3.5.0 ; sys_platform == 'linux' \
     --hash=sha256:0ce65888c0725fcb2c5bc0fdb8e5438eece02c523557ea40ce0703c266248137 \
     --hash=sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be
     # via keyring
-soupsieve==2.10 ; python_full_version < '3.11.5' \
-    --hash=sha256:49e9380d7d2905463583bafe285e818c7366a9ed7b3aee221c1ac79c905d8bc0 \
-    --hash=sha256:8596eb8967d744174820280fa62b4542a2e955bfaccca73ed8a13c6eb8e9b502
-    # via beautifulsoup4
-soupsieve==4.1.1 ; python_full_version >= '3.11.5' \
+soupsieve==4.1.1 \
     --hash=sha256:8ff3422dab0b720fb667ee79864d80531a0e57994a13eb701697719ffcb751f6 \
     --hash=sha256:b296bd2d2f65b1a78149f3d7bf6736a147d2c9e2dfbde0e4404639d748a02e03
     # via beautifulsoup4

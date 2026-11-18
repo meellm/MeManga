@@ -13,7 +13,9 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "meellm"}]
-requires-python = ">=3.11"
+# 3.11.5: the soupsieve releases with fixes for known vulnerabilities
+# need it (#385).
+requires-python = ">=3.11.5"
 keywords = [
     "manga",
     "manga-downloader",

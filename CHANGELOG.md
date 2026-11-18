@@ -495,11 +495,12 @@ All notable changes are recorded here. Format loosely follows
   module imports it.
 
 ### Removed
-- Python 3.10 is no longer supported: MeManga needs Python 3.11 or
-  newer. Python 3.10 reached its end of life in October 2026, and the
-  Pillow releases that fix its known vulnerabilities need Python 3.11
-  (#385). Installing on Python 3.10 now stops with pip's
-  `requires-python` error.
+- Python 3.10 and 3.11.0 to 3.11.4 are no longer supported: MeManga
+  needs Python 3.11.5 or newer. Python 3.10 reached its end of life in
+  October 2026, the Pillow releases that fix its known vulnerabilities
+  need Python 3.11, and the soupsieve releases that fix theirs need
+  Python 3.11.5 (#385). Installing on an older Python now stops with
+  pip's `requires-python` error.
 
 ### Fixed
 - Toasts and the list view's NEW badge had white text on the theme's
@@ -831,9 +832,7 @@ All notable changes are recorded here. Format loosely follows
 ### Security
 - #385 Pillow 13.0.0, certifi 2026.10.23 and soupsieve 4.1.1 replace
   releases with known vulnerabilities in every pinned install, the
-  Docker image and the release downloads. Python 3.11.0 to 3.11.4 keep
-  soupsieve 2.10, as no fixed release supports them: there, a source
-  serving deeply nested pages can slow its own checks.
+  Docker image and the release downloads.
 
 ## [0.4.4] - 2026-10-03
 
