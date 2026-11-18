@@ -35,6 +35,11 @@ _SYSTEM_CHROMIUM = ("chromium", "chromium-browser", "google-chrome")
 _CHALLENGE_TIMEOUT = 20
 
 
+class MangaParkSourceError(RuntimeError):
+    """mangapark1.com did not serve a page: an HTTP error status, no
+    response, or a Cloudflare challenge that did not clear."""
+
+
 def _on_challenge(page) -> bool:
     """True while the page shows Cloudflare's interstitial."""
     try:
@@ -104,12 +109,13 @@ class MangaParkScraper(PlaywrightScraper):
                 while time.monotonic() < deadline and _on_challenge(page):
                     page.wait_for_timeout(500)
                 if _on_challenge(page):
-                    raise RuntimeError(f"Cloudflare challenge not cleared for {url}")
+                    raise MangaParkSourceError(
+                        f"Cloudflare challenge not cleared for {url}")
                 response = page.goto(url, wait_until="domcontentloaded", timeout=45000)
             if response is None:
-                raise RuntimeError(f"No response for {url}")
+                raise MangaParkSourceError(f"No response for {url}")
             if response.status >= 400:
-                raise RuntimeError(f"HTTP {response.status} for {url}")
+                raise MangaParkSourceError(f"HTTP {response.status} for {url}")
             return response.text()
         finally:
             page.close()

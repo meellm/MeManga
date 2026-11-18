@@ -131,7 +131,9 @@ def test_ci_keeps_the_default_marker_selection(ci):
 
 def test_core_tests_cover_the_supported_python_range(ci):
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    floor = re.search(r'requires-python = ">=(\d+\.\d+)"', pyproject).group(1)
+    # The minor version of the floor: setup-python's "3.11" is its newest
+    # patch release.
+    floor = re.search(r'requires-python = ">=(\d+\.\d+)(?:\.\d+)?"', pyproject).group(1)
     newest = max(re.findall(r'Python :: (3\.\d+)"', pyproject),
                  key=lambda v: int(v.split(".")[1]))
     cells = ci["jobs"]["compat"]["strategy"]["matrix"]["include"]
@@ -327,23 +329,53 @@ def test_scraper_health_runs_the_live_probes_on_a_schedule_only():
     assert upload["with"]["path"] == "health.json"
 
 
-def _apt_packages(step):
-    words = step["run"].split("install -y", 1)[1].split()
-    return {w for w in words if w != "\\"}
+def test_scraper_health_runs_without_qt():
+    # pytest-qt imports Qt in every pytest run it loads in, and Qt needs
+    # system libraries (libEGL first); the probes use no Qt, so the
+    # health run does not load the plugin nor install those libraries.
+    job = _load("scraper-health.yml")["jobs"]["live"]
+    (line,) = _pytest_runs(job)
+    assert "-p no:pytest-qt" in line
+    assert not [r for r in _runs(job) if "apt-get" in r]
 
 
-def test_scraper_health_installs_the_qt_libraries_before_the_probes(ci):
-    # pytest-qt imports Qt in every pytest run; without libEGL the health
-    # run stopped before any probe and wrote no health.json.
-    steps = _load("scraper-health.yml")["jobs"]["live"]["steps"]
+def test_scraper_health_runs_where_the_pinned_playwright_installs():
+    # Playwright 1.60 cannot install its browsers on Ubuntu 26.04, which
+    # ubuntu-latest became; the job stays on the newest image it supports.
+    job = _load("scraper-health.yml")["jobs"]["live"]
+    assert job["runs-on"] == "ubuntu-24.04"
+    lock = (ROOT / "requirements" / "dev.txt").read_text(encoding="utf-8")
+    assert re.search(r"^playwright==1\.60\.", lock, re.M), (
+        "Playwright moved: check its supported Ubuntu releases and runs-on")
+
+
+def test_scraper_health_fails_only_on_a_broken_run():
+    # Failing sources are reported; the run fails when the browsers do not
+    # start, the probes do not run, or health.json does not account for
+    # every failed test (scripts/check_health_report.py).
+    job = _load("scraper-health.yml")["jobs"]["live"]
+    steps = job["steps"]
     names = [s.get("name") for s in steps]
-    (qt_libs,) = [s for s in steps if "apt-get" in s.get("run", "")]
-    assert names.index(qt_libs["name"]) < names.index("Run live probes")
-    (ci_libs,) = [s for s in ci["jobs"]["tests"]["steps"]
-                  if "apt-get" in s.get("run", "")]
-    assert _apt_packages(qt_libs) == _apt_packages(ci_libs)
-    assert "libegl1" in _apt_packages(qt_libs)
-    assert qt_libs["timeout-minutes"] <= 10
-    for line in qt_libs["run"].splitlines():
-        if "apt-get" in line:
-            assert "$apt_options" in line, line
+    assert all("continue-on-error" not in s for s in steps)
+    assert all("|| true" not in r for r in _runs(job))
+    browsers, probes, check = (names.index(n) for n in (
+        "Check that the browsers start", "Run live probes",
+        "Check the health report"))
+    assert browsers < probes < check
+    assert steps[browsers]["run"] == (
+        "memanga doctor --check browsers --launch-browsers")
+    assert "if" not in steps[browsers]
+    run = steps[probes]["run"].splitlines()
+    assert run[0] == "set +e" and "-m pytest" in run[1]
+    assert run[2] == 'echo "exit-code=$?" >> "$GITHUB_OUTPUT"'
+    assert steps[check]["run"] == (
+        "python scripts/check_health_report.py health.json "
+        '"${{ steps.%s.outputs.exit-code }}"' % steps[probes]["id"])
+    assert "if" not in steps[check]
+
+
+def test_branch_checks_can_run_by_hand():
+    # The read-only checks run on a branch without a pull request.
+    for name in ("ci.yml", "dependency-audit.yml", "dependency-locks.yml",
+                 "source-docs.yml", "scraper-health.yml"):
+        assert "workflow_dispatch" in _triggers(_load(name)), name

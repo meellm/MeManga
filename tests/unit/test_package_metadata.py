@@ -99,10 +99,13 @@ def test_python_classifiers_match_requires_python(pyproject):
     versions = [c.rsplit(" :: ", 1)[1] for c in project["classifiers"]
                 if re.fullmatch(r"Programming Language :: Python :: 3\.\d+", c)]
     assert versions
-    assert all(supported.contains(f"{v}.0") for v in versions)
-    # The lowest listed version is the requires-python floor.
-    floor = min(Version(v) for v in versions)
-    assert not supported.contains(f"{floor.major}.{floor.minor - 1}.0")
+    (spec,) = supported
+    assert spec.operator == ">="
+    floor = Version(spec.version)
+    # Classifiers name minor versions: the floor's minor version (3.11 for
+    # a patch floor such as 3.11.5) is the lowest listed one.
+    assert min(Version(v) for v in versions) == Version(f"{floor.major}.{floor.minor}")
+    assert all(supported.contains(f"{v}.99") for v in versions)
     assert "Programming Language :: Python :: 3 :: Only" in project["classifiers"]
 
 
