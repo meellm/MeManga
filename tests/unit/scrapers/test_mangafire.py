@@ -49,39 +49,6 @@ class _Session:
         return item
 
 
-class _StubVRF:
-    """Stand-in for the Playwright-backed token generator.
-
-    Issue #142: every MangaFire API call is signed now, so a scraper test
-    that didn't stub this would launch a real Firefox.
-    """
-
-    def __init__(self, token="TOKEN", error=None):
-        self._token = token
-        self._error = error
-        self.minted = []
-        self.invalidations = 0
-
-    def get_token(self, api_path, params=()):
-        self.minted.append((api_path, tuple(params)))
-        if self._error:
-            raise self._error
-        return self._token
-
-    def invalidate(self):
-        self.invalidations += 1
-
-
-@pytest.fixture(autouse=True)
-def stub_vrf(monkeypatch):
-    """Keep every test in this module off the real browser."""
-    from memanga.scrapers import mangafire as mf
-
-    stub = _StubVRF()
-    monkeypatch.setattr(mf, "get_vrf_generator", lambda: stub)
-    return stub
-
-
 @pytest.fixture(autouse=True)
 def request_sleeps(monkeypatch):
     """Record the shared request policy's waits instead of sleeping.
@@ -168,11 +135,9 @@ class TestMangaFireGetChapters:
         assert "/api/titles/abc/chapters" in message
         assert scraper.session.calls == 3
 
-    def test_request_errors_raise_instead_of_empty_list(self, monkeypatch):
+    def test_request_errors_raise_instead_of_empty_list(self):
         import requests
         from memanga.scrapers import mangafire as mf
-
-        monkeypatch.setattr(mf.time, "sleep", lambda _seconds: None)
 
         scraper = mf.MangaFireScraper()
         # Timeouts are transient: retried by the shared policy, then the
@@ -313,26 +278,65 @@ class TestMangaFireSearch:
             scraper.search("one piece")
 
 
-class TestMangaFireVRFToken:
+# Tokens the signing scheme gives for these canonical requests, so a
+# change to its tables, keys, seeds or encoding fails loudly here.
+_SEARCH_TOKEN = "8sK3xtqdFZfetBhus6bRApNr5zMeEWBTZw"
+_CHAPTERS_TOKEN = (
+    "8sK3xtqdFds7XfqT-1YDqH36A9zjenscWl3AfdeVpDbD6pwmhDtBEKbAFS8YeLzIjA"
+)
+_PAGES_TOKEN = "8vPRXa1JjvVTxq_RmQ"
+
+
+class TestMangaFireRequestSigning:
     """Issue #142: MangaFire's JSON API answers tokenless calls with HTTP
-    403 {"message": "Missing token."}. Every API call must carry a `vrf`
-    parameter minted for that exact path + params - a token issued for one
-    query is rejected ("Invalid token.") on any other.
+    403 {"message": "Missing token."}. Every API call carries a `vrf`
+    parameter signed over that exact path + params, computed locally
+    instead of asked of a page in a browser.
     """
 
-    def test_search_signs_the_decoded_keyword(self, stub_vrf):
+    @pytest.mark.parametrize("api_path, params, token", [
+        ("/titles", [("keyword", "one piece")], _SEARCH_TOKEN),
+        ("/titles/dkw/chapters",
+         [("language", "en"), ("limit", "100"), ("page", "1")],
+         _CHAPTERS_TOKEN),
+        ("/chapters/123", [], _PAGES_TOKEN),
+    ])
+    def test_known_tokens(self, api_path, params, token):
+        from memanga.scrapers.mangafire import sign_api_request
+
+        assert sign_api_request(api_path, params) == token
+
+    def test_canonical_request_sorts_keys_and_numbers_array_keys(self):
+        from memanga.scrapers.mangafire import _canonical_api_request
+
+        assert _canonical_api_request("/titles", [
+            ("page", "1"), ("languages[]", "en"), ("keyword", "one piece"),
+            ("languages[]", "fr"), ("genres[]", "action"),
+        ]) == ("/titles?genres[0]=action&keyword=one piece"
+               "&languages[0]=en&languages[1]=fr&page=1")
+        assert _canonical_api_request("/chapters/123", []) == "/chapters/123"
+
+    def test_param_order_does_not_change_the_token(self):
+        from memanga.scrapers.mangafire import sign_api_request
+
+        assert (sign_api_request("/titles", [("page", "2"), ("keyword", "x")])
+                == sign_api_request("/titles", [("keyword", "x"), ("page", "2")]))
+
+    def test_search_sends_the_trimmed_keyword_signed_decoded(self):
+        """A keyword with a stray space is refused by the site, and the
+        signature covers the decoded keyword, not its URL encoding."""
         from memanga.scrapers.mangafire import MangaFireScraper
 
         scraper = MangaFireScraper()
         scraper.session = _Session([_Response(payload={"items": []})])
 
-        scraper.search("one piece")
+        scraper.search("  one piece ")
 
-        # Signed over the API-relative path and the decoded keyword.
-        assert stub_vrf.minted == [("/titles", (("keyword", "one piece"),))]
-        assert "vrf=TOKEN" in scraper.session.urls[0]
+        assert scraper.session.urls == [
+            f"https://mangafire.to/api/titles?keyword=one+piece&vrf={_SEARCH_TOKEN}",
+        ]
 
-    def test_chapter_list_signs_language_limit_and_page(self, stub_vrf):
+    def test_chapter_list_signs_language_limit_and_page(self):
         from memanga.scrapers.mangafire import MangaFireScraper
 
         scraper = MangaFireScraper()
@@ -343,40 +347,18 @@ class TestMangaFireVRFToken:
             }),
         ])
 
-        scraper.get_chapters("https://mangafire.to/title/abc-demo")
+        scraper.get_chapters("https://mangafire.to/title/dkw-one-piece")
 
-        assert stub_vrf.minted == [(
-            "/titles/abc/chapters",
-            (("language", "en"), ("limit", "100"), ("page", "1")),
-        )]
-        # The full URL sent must carry exactly the signed params plus the
-        # token - a mismatch between what was signed and what was sent is
-        # what MangaFire rejects with "Invalid token.".
-        assert scraper.session.urls[0] == (
-            "https://mangafire.to/api/titles/abc/chapters"
-            "?language=en&limit=100&page=1&vrf=TOKEN"
-        )
+        # Exactly the signed params plus the token: a mismatch between
+        # what was signed and what was sent is what MangaFire rejects.
+        assert scraper.session.urls == [
+            "https://mangafire.to/api/titles/dkw/chapters"
+            f"?language=en&limit=100&page=1&vrf={_CHAPTERS_TOKEN}",
+        ]
 
-    def test_pages_sign_the_chapter_endpoint(self, stub_vrf):
-        from memanga.scrapers.mangafire import MangaFireScraper
-
-        scraper = MangaFireScraper()
-        scraper.session = _Session([
-            _Response(payload={"data": {"pages": [{"url": "https://cdn/1.jpg"}]}}),
-        ])
-
-        scraper.get_pages("https://mangafire.to/api/chapters/123")
-
-        assert stub_vrf.minted == [("/chapters/123", ())]
-        assert scraper.session.urls[0] == (
-            "https://mangafire.to/api/chapters/123?vrf=TOKEN"
-        )
-
-    def test_stale_token_on_a_saved_url_is_replaced_not_signed_over(
-            self, stub_vrf):
+    def test_stale_token_on_a_saved_url_is_replaced_not_signed_over(self):
         """A vrf carried on a saved URL must not become part of the
-        plaintext - the token covers the request's *other* params, so
-        signing over an old one could never validate."""
+        plaintext - the token covers the request's *other* params."""
         from memanga.scrapers.mangafire import MangaFireScraper
 
         scraper = MangaFireScraper()
@@ -386,697 +368,106 @@ class TestMangaFireVRFToken:
 
         scraper.get_pages("https://mangafire.to/api/chapters/123?vrf=EXPIRED")
 
-        assert stub_vrf.minted == [("/chapters/123", ())]
-        assert "EXPIRED" not in scraper.session.urls[0]
-        assert "vrf=TOKEN" in scraper.session.urls[0]
+        assert scraper.session.urls == [
+            f"https://mangafire.to/api/chapters/123?vrf={_PAGES_TOKEN}",
+        ]
 
-    def test_unprotected_endpoint_is_sent_unsigned(self, monkeypatch):
-        """MangaFire's generator returns null for endpoints it doesn't
-        protect; those must go out without an empty vrf tacked on."""
-        from memanga.scrapers import mangafire as mf
+    def test_url_carries_the_params_in_signed_order(self):
+        from memanga.scrapers.mangafire import (
+            MangaFireScraper, sign_api_request,
+        )
 
-        monkeypatch.setattr(mf, "get_vrf_generator", lambda: _StubVRF(token=None))
+        url = MangaFireScraper()._signed_api_url(
+            "/titles", [("page", "2"), ("keyword", "a b")])
 
-        scraper = mf.MangaFireScraper()
-        scraper.session = _Session([
-            _Response(payload={"data": {"pages": [{"url": "https://cdn/1.jpg"}]}}),
-        ])
+        token = sign_api_request("/titles", [("keyword", "a b"), ("page", "2")])
+        assert url == f"https://mangafire.to/api/titles?keyword=a+b&page=2&vrf={token}"
 
-        scraper.get_pages("https://mangafire.to/api/chapters/123")
-
-        assert scraper.session.urls[0] == "https://mangafire.to/api/chapters/123"
-
-    def test_rejected_token_reloads_the_generator_and_retries_once(
-            self, stub_vrf):
-        from memanga.scrapers.mangafire import MangaFireScraper
+    def test_rejected_signature_is_a_token_error_and_not_retried(self):
+        """The token is a pure function of the request: re-signing would
+        send the same one, so a rejection is reported at once."""
+        from memanga.scrapers.mangafire import (
+            MangaFireChallengeError, MangaFireScraper, MangaFireTokenError,
+        )
 
         scraper = MangaFireScraper()
         scraper.session = _Session([
             _Response(status_code=403, payload={"message": "Invalid token."}),
-            _Response(payload={"data": {"pages": [{"url": "https://cdn/1.jpg"}]}}),
         ])
 
-        pages = scraper.get_pages("https://mangafire.to/api/chapters/123")
-
-        assert pages == ["https://cdn/1.jpg"]
-        assert stub_vrf.invalidations == 1
-        assert scraper.session.calls == 2
-
-    def test_persistent_403_raises_after_a_single_retry(self, stub_vrf):
-        from memanga.scrapers.mangafire import MangaFireError, MangaFireScraper
-
-        scraper = MangaFireScraper()
-        scraper.session = _Session([
-            _Response(status_code=403, payload={"message": "Invalid token."}),
-            _Response(status_code=403, payload={"message": "Invalid token."}),
-        ])
-
-        with pytest.raises(MangaFireError, match="rejected the VRF token"):
+        with pytest.raises(MangaFireTokenError) as exc:
             scraper.search("one piece")
 
-        assert scraper.session.calls == 2
+        message = str(exc.value)
+        assert "HTTP 403" in message
+        assert "rejected the request's vrf signature" in message
+        assert "Invalid token." in message
+        assert not isinstance(exc.value, MangaFireChallengeError)
+        assert scraper.session.calls == 1
 
-    def test_non_token_403_is_not_retried(self, stub_vrf):
-        """A 403 whose body doesn't blame the token (a plain block, a
-        rate limit) can't be fixed by reloading the generator, so it must
-        fail fast instead of spending a browser round-trip on it."""
-        from memanga.scrapers.mangafire import MangaFireError, MangaFireScraper
+    @pytest.mark.parametrize("response, kind", [
+        (_Response(status_code=403, payload={"error": "captcha_required"}),
+         "captcha"),
+        (_Response(status_code=403, json_error=ValueError("Expecting value"),
+                   headers={"cf-mitigated": "challenge"},
+                   content=b"<html>Just a moment...</html>"),
+         "Cloudflare challenge"),
+        (_Response(status_code=403, json_error=ValueError("Expecting value"),
+                   content=b"<script>window._cf_chl_opt={}</script>"),
+         "Cloudflare challenge"),
+        # A challenge page served with 200 is still not data.
+        (_Response(status_code=200, json_error=ValueError("Expecting value"),
+                   content=b"<script>window._cf_chl_opt={}</script>"),
+         "Cloudflare challenge"),
+    ])
+    def test_challenges_are_reported_as_challenges(self, response, kind):
+        from memanga.scrapers.mangafire import (
+            MangaFireChallengeError, MangaFireScraper, MangaFireTokenError,
+        )
+
+        scraper = MangaFireScraper()
+        scraper.session = _Session([response])
+
+        with pytest.raises(MangaFireChallengeError) as exc:
+            scraper.search("one piece")
+
+        assert kind in str(exc.value)
+        assert "instead of data" in str(exc.value)
+        assert not isinstance(exc.value, MangaFireTokenError)
+        assert scraper.session.calls == 1
+
+    def test_other_403_names_the_server_message(self):
+        from memanga.scrapers.mangafire import (
+            MangaFireChallengeError, MangaFireError, MangaFireScraper,
+            MangaFireTokenError,
+        )
 
         scraper = MangaFireScraper()
         scraper.session = _Session([
             _Response(status_code=403, payload={"message": "Forbidden"}),
         ])
 
-        with pytest.raises(MangaFireError, match="HTTP 403"):
+        with pytest.raises(MangaFireError, match=r"HTTP 403 .*\(Forbidden\)") as exc:
             scraper.search("one piece")
 
-        assert scraper.session.calls == 1
-        assert stub_vrf.invalidations == 0
-
-    def test_stale_null_token_recovers_after_a_reload(self, monkeypatch):
-        """A generator whose config went stale can wrongly report an
-        endpoint as unprotected (null token). The tokenless call 403s with
-        a token message, so one reload must still get a chance to mint a
-        real token and recover."""
-        from memanga.scrapers import mangafire as mf
-
-        class _SequenceVRF:
-            def __init__(self, tokens):
-                self._tokens = list(tokens)
-                self.invalidations = 0
-
-            def get_token(self, api_path, params=()):
-                return self._tokens.pop(0)
-
-            def invalidate(self):
-                self.invalidations += 1
-
-        stub = _SequenceVRF([None, "FRESH"])
-        monkeypatch.setattr(mf, "get_vrf_generator", lambda: stub)
-
-        scraper = mf.MangaFireScraper()
-        scraper.session = _Session([
-            _Response(status_code=403, payload={"message": "Missing token."}),
-            _Response(payload={"data": {"pages": [{"url": "https://cdn/1.jpg"}]}}),
-        ])
-
-        pages = scraper.get_pages("https://mangafire.to/api/chapters/123")
-
-        assert pages == ["https://cdn/1.jpg"]
-        assert stub.invalidations == 1
-        assert scraper.session.calls == 2
-        assert "vrf=FRESH" in scraper.session.urls[1]
-
-    def test_403_names_token_generation_as_the_cause_when_it_failed(
-            self, monkeypatch):
-        """Without this the user just sees a bare 403 and has no way to
-        tell that the browser step, not the site, is what broke."""
-        from memanga.scrapers import mangafire as mf
-
-        monkeypatch.setattr(
-            mf, "get_vrf_generator",
-            lambda: _StubVRF(error=RuntimeError("Playwright not available")))
-
-        scraper = mf.MangaFireScraper()
-        scraper.session = _Session([
-            _Response(status_code=403, payload={"message": "Missing token."}),
-        ])
-
-        with pytest.raises(mf.MangaFireError) as exc:
-            scraper.search("one piece")
-
-        message = str(exc.value)
-        assert "HTTP 403" in message
-        assert "Playwright not available" in message
-        # No token was ever issued, so the retry would be pointless.
+        assert not isinstance(exc.value,
+                              (MangaFireTokenError, MangaFireChallengeError))
         assert scraper.session.calls == 1
 
-
-class TestVRFGeneratorTokens:
-    """Token minting itself, with the browser round-trip stubbed out."""
-
-    def _generator(self, monkeypatch, mint):
-        from memanga.scrapers import mangafire as mf
-
-        gen = mf.VRFGenerator()
-        gen._token_cache.clear()
-        # Run whatever the caller hands the executor, in this thread. A
-        # stub that ignored `fn` and always minted would let a
-        # wrong-signature dispatch pass unnoticed - invalidate() swallows
-        # every exception, so the resulting TypeError would look like a
-        # successful reload.
-        monkeypatch.setattr(
-            mf.VRFGenerator, "_run_serialized",
-            classmethod(lambda cls, fn, *a, timeout, **kw: fn(*a, **kw)))
-        monkeypatch.setattr(
-            mf.VRFGenerator, "_mint_token_in_thread",
-            lambda self, api_path, params: mint(api_path, params))
-        return gen
-
-    def test_tokens_are_cached_per_path_and_params(self, monkeypatch):
-        """A library refresh re-checks the same endpoints repeatedly; each
-        distinct call should cost one browser round-trip, not one per
-        request."""
-        calls = []
-
-        def mint(api_path, params):
-            calls.append((api_path, tuple(params)))
-            return f"tok-{len(calls)}"
-
-        gen = self._generator(monkeypatch, mint)
-
-        first = gen.get_token("/titles", [("keyword", "one piece")])
-        again = gen.get_token("/titles", [("keyword", "one piece")])
-        other = gen.get_token("/titles", [("keyword", "naruto")])
-
-        assert first == again == "tok-1"
-        assert other == "tok-2"
-        assert len(calls) == 2
-
-    def test_invalidate_drops_cached_tokens(self, monkeypatch):
-        counter = {"n": 0}
-
-        def mint(api_path, params):
-            counter["n"] += 1
-            return f"tok-{counter['n']}"
-
-        gen = self._generator(monkeypatch, mint)
-
-        assert gen.get_token("/titles", [("keyword", "x")]) == "tok-1"
-        gen.invalidate()
-        assert gen.get_token("/titles", [("keyword", "x")]) == "tok-2"
-
-    def test_invalidate_dispatches_reset_and_forces_a_page_reload(
-            self, monkeypatch):
-        """invalidate() must both drop cached tokens and run the reset in
-        the executor thread so the next mint reloads MangaFire's config.
-
-        Guards against the reset silently not running: the earlier test
-        only proved the cache cleared, and because invalidate() swallows
-        every exception a misdispatched reset would look like success.
-        Here `_run_serialized` actually invokes what it's handed, so the
-        real `_reset_token_page_in_thread` runs and must clear the
-        `token_page_ready` flag that gates the reload.
-        """
-        from memanga.scrapers import mangafire as mf
-
-        gen = mf.VRFGenerator()
-        gen._token_cache[("/titles", (("keyword", "x"),))] = "stale"
-
-        dispatched = []
-        real_reset = mf.VRFGenerator._reset_token_page_in_thread
-
-        def spy_reset(self):
-            dispatched.append(True)
-            return real_reset(self)
-
-        monkeypatch.setattr(
-            mf.VRFGenerator, "_run_serialized",
-            classmethod(lambda cls, fn, *a, timeout, **kw: fn(*a, **kw)))
-        monkeypatch.setattr(
-            mf.VRFGenerator, "_reset_token_page_in_thread", spy_reset)
-
-        # Simulate a page that has already loaded the generator, and make
-        # sure the flag doesn't leak to sibling tests regardless of path.
-        mf._vrf_thread_local.token_page_ready = True
-        try:
-            gen.invalidate()
-
-            assert dispatched == [True], "reset must run in the executor thread"
-            assert gen._token_cache == {}, "cached tokens must be dropped"
-            assert not hasattr(mf._vrf_thread_local, "token_page_ready"), \
-                "next mint must be forced to reload the generator page"
-        finally:
-            if hasattr(mf._vrf_thread_local, "token_page_ready"):
-                del mf._vrf_thread_local.token_page_ready
-
-    def test_generator_error_surfaces_as_scraper_error(self, monkeypatch):
-        from memanga.scrapers import mangafire as mf
-
-        class _Page:
-            def evaluate(self, script, arg):
-                return {"error": "TypeError: bad argument"}
-
-        gen = mf.VRFGenerator()
-        monkeypatch.setattr(mf.VRFGenerator, "_ensure_token_page_in_thread",
-                            lambda self: _Page())
-
-        with pytest.raises(mf.MangaFireError, match="TypeError: bad argument"):
-            gen._mint_token_in_thread("/titles", [("keyword", "x")])
-
-    def test_null_token_means_the_endpoint_is_unprotected(self, monkeypatch):
-        from memanga.scrapers import mangafire as mf
-
-        class _Page:
-            def evaluate(self, script, arg):
-                return {"token": None}
-
-        gen = mf.VRFGenerator()
-        monkeypatch.setattr(mf.VRFGenerator, "_ensure_token_page_in_thread",
-                            lambda self: _Page())
-
-        assert gen._mint_token_in_thread("/me", []) is None
-
-
-class TestVRFBrowserInitAtomicity:
-    """Issue #28: a failed firefox.launch() must surface the real error,
-    not a masking AttributeError on a half-initialised thread-local.
-
-    The frozen release exe could not launch Firefox; the original
-    non-atomic init left `_vrf_thread_local.playwright` set, so the retry
-    skipped init and raised `'thread_local' object has no attribute
-    'page'` — hiding the actual launch failure and making the bug
-    undiagnosable.
-    """
-
-    class _FakeFirefox:
-        def launch(self, **kwargs):
-            raise RuntimeError("Executable doesn't exist: firefox")
-
-    class _FakePlaywright:
-        def __init__(self):
-            self.firefox = TestVRFBrowserInitAtomicity._FakeFirefox()
-            self.stopped = False
-
-        def stop(self):
-            self.stopped = True
-
-    class _FakeContextManager:
-        def __init__(self, started):
-            self._started = started
-
-        def start(self):
-            return self._started
-
-    def _patch(self, monkeypatch):
-        from memanga.scrapers import mangafire as mf
-        # Clear any thread-local state from earlier tests in this thread.
-        mf.VRFGenerator().close()
-        for attr in ("playwright", "browser", "context", "page"):
-            if hasattr(mf._vrf_thread_local, attr):
-                delattr(mf._vrf_thread_local, attr)
-        started = self._FakePlaywright()
-        monkeypatch.setattr(mf, "PLAYWRIGHT_AVAILABLE", True)
-        monkeypatch.setattr(
-            mf, "sync_playwright",
-            lambda: self._FakeContextManager(started),
+    def test_non_json_200_is_an_error_not_data(self):
+        from memanga.scrapers.mangafire import (
+            MangaFireChallengeError, MangaFireError, MangaFireScraper,
         )
-        return mf, started
 
-    def test_launch_failure_surfaces_real_error(self, monkeypatch):
-        mf, started = self._patch(monkeypatch)
-        gen = mf.VRFGenerator()
-        with pytest.raises(RuntimeError, match="Executable doesn't exist"):
-            gen._ensure_browser_in_thread()
-        # Issue #217: the error says how to install the browser.
-        with pytest.raises(RuntimeError, match="memanga setup"):
-            gen._ensure_browser_in_thread()
-        # Playwright start was rolled back; no half-initialised state left.
-        assert started.stopped is True
-        assert not hasattr(mf._vrf_thread_local, "playwright")
-        assert not hasattr(mf._vrf_thread_local, "page")
-
-    def test_retry_still_surfaces_real_error_not_attribute_error(self,
-                                                                 monkeypatch):
-        mf, _ = self._patch(monkeypatch)
-        gen = mf.VRFGenerator()
-        # First attempt fails…
-        with pytest.raises(RuntimeError, match="Executable doesn't exist"):
-            gen._ensure_browser_in_thread()
-        # …and so does the retry, with the SAME real error — never an
-        # AttributeError about a missing 'page' on the thread-local.
-        with pytest.raises(RuntimeError, match="Executable doesn't exist"):
-            gen._ensure_browser_in_thread()
-
-
-class TestVRFTimeouts:
-    """A token mint that times out, or fails with an exception that has
-    no text, must read as a token generation failure, never as a
-    generator that legitimately issued no token."""
-
-    def _search_403(self, monkeypatch, error):
-        from memanga.scrapers import mangafire as mf
-
-        stub = _StubVRF(error=error)
-        monkeypatch.setattr(mf, "get_vrf_generator", lambda: stub)
-        scraper = mf.MangaFireScraper()
+        scraper = MangaFireScraper()
         scraper.session = _Session([
-            _Response(status_code=403, payload={"message": "Missing token."}),
-        ])
-        with pytest.raises(mf.MangaFireError) as exc:
-            scraper.search("one piece")
-        return exc.value, scraper, stub
-
-    def test_mint_timeout_is_a_generation_failure(self, monkeypatch):
-        from memanga.scrapers.playwright_base import BrowserTimeoutError
-
-        timeout = BrowserTimeoutError(
-            "mangafire token generator mint_token timed out after 120s")
-        error, scraper, stub = self._search_403(monkeypatch, timeout)
-
-        assert ("VRF token generation failed: mangafire token generator "
-                "mint_token timed out after 120s") in str(error)
-        assert error.__cause__ is timeout
-        # A broken generator gets no reload-and-retry.
-        assert scraper.session.calls == 1
-        assert stub.invalidations == 0
-
-    @pytest.mark.parametrize("bare", [TimeoutError(), RuntimeError("  ")])
-    def test_textless_error_is_not_mistaken_for_a_missing_token(
-            self, monkeypatch, bare):
-        error, scraper, _ = self._search_403(monkeypatch, bare)
-
-        message = str(error)
-        assert (f"VRF token generation failed: {type(bare).__name__}"
-                in message)
-        assert "issued no VRF token" not in message
-        assert error.__cause__ is bare
-        assert scraper.session.calls == 1
-
-
-class TestVRFWorker:
-    """The generator's own browser worker, run for real with a short
-    budget on a private worker so the shared one is never wedged."""
-
-    @pytest.fixture
-    def worker(self, monkeypatch):
-        import threading
-        from memanga.scrapers import mangafire as mf
-        from memanga.scrapers.playwright_base import BrowserWorker
-
-        w = BrowserWorker(thread_name_prefix="test-vrf")
-        monkeypatch.setattr(mf.VRFGenerator, "_worker", w)
-        gate = threading.Event()
-        yield w, gate
-        gate.set()
-        w.shutdown(wait=True)
-
-    def test_timeout_names_the_generator_and_recovers(self, worker):
-        from memanga.scrapers import mangafire as mf
-        from memanga.scrapers.playwright_base import BrowserTimeoutError
-
-        _, gate = worker
-
-        def _mint_token_in_thread():
-            assert gate.wait(10)
-
-        with pytest.raises(BrowserTimeoutError) as exc:
-            mf.VRFGenerator._run_serialized(_mint_token_in_thread, timeout=0.2)
-        assert str(exc.value).startswith(
-            "mangafire token generator mint_token timed out after 0.2s")
-
-        # While the abandoned mint runs, cleanup does not queue behind it.
-        with pytest.raises(BrowserTimeoutError, match="still busy"):
-            mf.VRFGenerator._run_serialized(lambda: None, timeout=0.2)
-
-        gate.set()
-        assert mf.VRFGenerator._run_serialized(lambda: "tok", timeout=10) == "tok"
-
-    def test_close_without_a_started_browser_does_nothing(self, worker,
-                                                          monkeypatch):
-        """Issue #235: closing or restarting a generator that never
-        minted must not start the worker thread or log a restart."""
-        from memanga.scrapers import mangafire as mf
-
-        w, _ = worker
-        closed = []
-        monkeypatch.setattr(mf.VRFGenerator, "_close_in_thread",
-                            lambda self: closed.append("vrf"))
-        logged = []
-        monkeypatch.setattr(mf.logger, "info",
-                            lambda *a, **k: logged.append(a))
-
-        mf.VRFGenerator().restart()
-
-        assert closed == []
-        assert logged == []
-        assert not w.started
-
-    def test_token_startup_steps_fit_the_mint_budget(self, worker,
-                                                     monkeypatch):
-        """Launch, page load and generator wait each used to allow up to
-        60-180s inside a 120s mint; they are now cut to what is left."""
-        from memanga.scrapers import mangafire as mf
-        from memanga.scrapers.playwright_base import STEP_RESERVE_S
-
-        seen = {}
-
-        class _Page:
-            def goto(self, url, **kw):
-                seen["goto"] = kw["timeout"]
-
-            def wait_for_function(self, script, **kw):
-                seen["wait_for_function"] = kw["timeout"]
-
-        class _Browser:
-            def new_context(self, **kw):
-                return type("_C", (), {"new_page": lambda self: _Page()})()
-
-        class _Firefox:
-            def launch(self, **kw):
-                seen["launch"] = kw["timeout"]
-                return _Browser()
-
-        class _PW:
-            firefox = _Firefox()
-
-            def stop(self):
-                pass
-
-        monkeypatch.setattr(mf, "PLAYWRIGHT_AVAILABLE", True)
-        monkeypatch.setattr(
-            mf, "sync_playwright",
-            lambda: type("_S", (), {"start": lambda self: _PW()})())
-
-        gen = mf.VRFGenerator()
-        mf.VRFGenerator._run_serialized(gen._ensure_token_page_in_thread,
-                                        timeout=30)
-
-        assert set(seen) == {"launch", "goto", "wait_for_function"}
-        budget_ms = (30 - STEP_RESERVE_S) * 1000
-        for step, limit in seen.items():
-            # Up to float rounding of the deadline sum when the clock
-            # has not moved (15.6 ms steps on Windows before 3.13).
-            assert (0 < limit <= budget_ms
-                    or limit == pytest.approx(budget_ms)), step
-
-    def test_token_browser_is_replaced_after_its_mint_limit(
-            self, worker, monkeypatch, caplog):
-        """#402: the token browser lives for the whole run, so after a
-        bounded number of mints it is closed between two mints and a
-        fresh one, with the generator reloaded, serves the next. Only
-        the first start is announced at INFO; a replacement is quiet."""
-        import logging
-        from memanga.scrapers import mangafire as mf
-
-        caplog.set_level(logging.DEBUG, logger=mf.logger.name)
-
-        launched = []
-
-        class _Page:
-            closed = False
-
-            def goto(self, url, **kw):
-                pass
-
-            def wait_for_function(self, script, **kw):
-                pass
-
-            def close(self):
-                self.closed = True
-
-        class _Browser:
-            closed = False
-
-            def new_context(self, **kw):
-                return type("_C", (), {"new_page": lambda self: _Page(),
-                                       "close": lambda self: None})()
-
-            def close(self):
-                self.closed = True
-
-        class _Firefox:
-            def launch(self, **kw):
-                launched.append(_Browser())
-                return launched[-1]
-
-        class _PW:
-            firefox = _Firefox()
-
-            def stop(self):
-                pass
-
-        monkeypatch.setattr(mf, "PLAYWRIGHT_AVAILABLE", True)
-        monkeypatch.setattr(
-            mf, "sync_playwright",
-            lambda: type("_S", (), {"start": lambda self: _PW()})())
-        monkeypatch.setattr(mf.VRFGenerator, "_RECYCLE_AFTER_MINTS", 2)
-
-        gen = mf.VRFGenerator()
-
-        def _mint_token_in_thread():
-            # Asking twice in one mint counts once.
-            gen._ensure_token_page_in_thread()
-            return gen._ensure_token_page_in_thread()
-
-        pages = [mf.VRFGenerator._run_serialized(_mint_token_in_thread,
-                                                 timeout=30)
-                 for _ in range(3)]
-        try:
-            assert len(launched) == 2
-            assert pages[0] is pages[1]
-            assert pages[2] is not pages[1]
-            assert pages[1].closed and launched[0].closed
-            assert not pages[2].closed and not launched[1].closed
-            info = [r.getMessage() for r in caplog.records
-                    if r.name == mf.logger.name and r.levelno >= logging.INFO]
-            assert info == ["Starting the browser for mangafire.to..."]
-            assert any("Restarting the token browser after 2 mints"
-                       in r.getMessage() for r in caplog.records
-                       if r.levelno == logging.DEBUG)
-        finally:
-            mf.VRFGenerator._run_serialized(gen._close_in_thread, timeout=10)
-
-
-class TestVRFPendingPromiseInBrowser:
-    """A generator promise that never settles, run in a real headless
-    Firefox on the generator's own worker thread. The page is local
-    content (no network); only the generator function is the test's.
-
-    Needs Playwright's Firefox installed locally; if it cannot be
-    launched the test is skipped with the launch error as the reason.
-    """
-
-    # Function bodies, not bare assignments: evaluate() invokes a value
-    # that is a function, which would run the generator itself here.
-    NEVER_SETTLES = ("() => { window.getProtectionToken = "
-                     "() => new Promise(() => {}); }")
-    SIGNS = ("() => { window.getProtectionToken = "
-             "(path, params) => 'tok-' + params.keyword; }")
-
-    @pytest.fixture
-    def browser(self, monkeypatch):
-        from memanga.scrapers import mangafire as mf
-        from memanga.scrapers.playwright_base import BrowserWorker
-
-        if not mf.PLAYWRIGHT_AVAILABLE:
-            pytest.skip("Playwright is not installed")
-        worker = BrowserWorker(thread_name_prefix="test-vrf-browser")
-        monkeypatch.setattr(mf.VRFGenerator, "_worker", worker)
-
-        def _open_local_page():
-            pw = mf.sync_playwright().start()
-            try:
-                browser = pw.firefox.launch(headless=True, timeout=30000)
-            except Exception:
-                pw.stop()
-                raise
-            context = browser.new_context()
-            page = context.new_page()
-            page.set_content("<html><body>token page</body></html>")
-            mf._vrf_thread_local.playwright = pw
-            mf._vrf_thread_local.browser = browser
-            mf._vrf_thread_local.context = context
-            mf._vrf_thread_local.page = page
-
-        try:
-            worker.call("test", 60, _open_local_page)
-        except Exception as e:
-            worker.shutdown(wait=True)
-            pytest.skip(f"local headless Firefox could not be launched: {e}")
-
-        def install(script):
-            """Swap the page's generator, on the worker thread."""
-            def _install_generator():
-                mf._vrf_thread_local.page.evaluate(script)
-                mf._vrf_thread_local.token_page_ready = True
-            worker.call("test", 10, _install_generator)
-
-        def page_ready():
-            return worker.call(
-                "test", 10, lambda: getattr(
-                    mf._vrf_thread_local, "token_page_ready", False))
-
-        gen = mf.VRFGenerator()
-        gen._token_cache.clear()
-        try:
-            yield mf, worker, install, page_ready
-        finally:
-            gen._token_cache.clear()
-            try:
-                worker.call("test", 30, gen._close_in_thread)
-            finally:
-                worker.shutdown(wait=True)
-
-    def test_never_settling_generator_fails_in_budget_then_recovers(
-            self, browser, monkeypatch):
-        import time
-        from memanga.scrapers.playwright_base import STEP_RESERVE_S
-
-        mf, worker, install, page_ready = browser
-        budget = STEP_RESERVE_S + 2.0
-        monkeypatch.setattr(mf.VRFGenerator, "_MINT_BUDGET_S", budget)
-        monkeypatch.setattr(mf, "get_vrf_generator", mf.VRFGenerator)
-
-        install(self.NEVER_SETTLES)
-        scraper = mf.MangaFireScraper()
-        scraper.session = _Session([
-            _Response(status_code=403, payload={"message": "Missing token."}),
+            _Response(json_error=ValueError("Expecting value"),
+                      content=b"<html><div id=app></div></html>"),
         ])
 
-        began = time.monotonic()
-        with pytest.raises(mf.MangaFireError) as exc:
+        with pytest.raises(MangaFireError, match="non-JSON response") as exc:
             scraper.search("one piece")
-        elapsed = time.monotonic() - began
-
-        # Answered by the in-page timer, inside the mint budget, so the
-        # worker is not left running an abandoned task.
-        assert elapsed < budget
-        message = str(exc.value)
-        assert ("VRF token generation failed: MangaFire token generation "
-                "timed out for /titles: the generator did not answer "
-                "within") in message
-        assert "issued no VRF token" not in message
-        assert isinstance(exc.value.__cause__, mf.MangaFireTokenTimeout)
-        # A broken generator gets no reload-and-retry round.
-        assert scraper.session.calls == 1
-        # ...but the next mint reloads the generator page.
-        assert page_ready() is False
-
-        # The same worker serves the next mint normally.
-        install(self.SIGNS)
-        scraper.session = _Session([_Response(payload={"items": []})])
-        assert scraper.search("naruto") == []
-        assert "vrf=tok-naruto" in scraper.session.urls[0]
-
-
-def test_expired_generator_raises_token_timeout_and_forces_reload(monkeypatch):
-    """Browser-free companion to the test above (which needs Firefox):
-    an expired race is a token timeout, never a null (unprotected) token,
-    and the generator page is reloaded before the next mint."""
-    from memanga.scrapers import mangafire as mf
-
-    seen = []
-
-    class _Page:
-        def evaluate(self, script, arg):
-            seen.append(arg)
-            return {"expired": True}
-
-    gen = mf.VRFGenerator()
-    monkeypatch.setattr(mf.VRFGenerator, "_ensure_token_page_in_thread",
-                        lambda self: _Page())
-    mf._vrf_thread_local.token_page_ready = True
-    try:
-        with pytest.raises(mf.MangaFireTokenTimeout,
-                           match="timed out for /titles"):
-            gen._mint_token_in_thread("/titles", [("keyword", "x")])
-        assert not hasattr(mf._vrf_thread_local, "token_page_ready")
-        # The in-page timer gets the step limit (outside a worker task).
-        assert seen == [["/titles", [["keyword", "x"]], mf._MINT_STEP_MS]]
-    finally:
-        if hasattr(mf._vrf_thread_local, "token_page_ready"):
-            del mf._vrf_thread_local.token_page_ready
+        assert not isinstance(exc.value, MangaFireChallengeError)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -1109,7 +500,7 @@ class TestMangaFireRequestPolicy:
         return scraper
 
     def test_api_429_waits_for_retry_after_then_succeeds(
-            self, stub_vrf, request_sleeps):
+            self, request_sleeps):
         scraper = self._scraper([
             _rate_limited("7"),
             _Response(payload={"items": []}),
@@ -1119,9 +510,9 @@ class TestMangaFireRequestPolicy:
 
         assert scraper.session.calls == 2
         assert 7.0 in request_sleeps
-        # One signed request, retried as-is: no second mint, no reload.
-        assert len(stub_vrf.minted) == 1
-        assert stub_vrf.invalidations == 0
+        # One signed request, retried as-is.
+        assert scraper.session.urls[0] == scraper.session.urls[1]
+        assert "&vrf=" in scraper.session.urls[0]
 
     def test_api_server_error_is_retried(self):
         scraper = self._scraper([
@@ -1146,17 +537,19 @@ class TestMangaFireRequestPolicy:
         assert scraper.session.calls == 1
         assert request_sleeps == []
 
-    def test_api_persistent_429_fails_after_the_shared_attempts(
-            self, stub_vrf):
-        from memanga.scrapers.mangafire import MangaFireError
+    def test_api_persistent_429_fails_after_the_shared_attempts(self):
+        from memanga.scrapers.mangafire import (
+            MangaFireChallengeError, MangaFireError, MangaFireTokenError,
+        )
 
         scraper = self._scraper([_rate_limited("1")] * 3)
 
-        with pytest.raises(MangaFireError, match="HTTP 429"):
+        with pytest.raises(MangaFireError, match="HTTP 429") as exc:
             scraper.search("one piece")
         assert scraper.session.calls == 3
-        # A rate limit is not a token problem.
-        assert stub_vrf.invalidations == 0
+        # A rate limit is neither a token problem nor a challenge.
+        assert not isinstance(exc.value,
+                              (MangaFireTokenError, MangaFireChallengeError))
 
     @pytest.mark.parametrize("status", [404, 410])
     def test_api_permanent_error_is_not_retried(self, status):
@@ -1167,21 +560,6 @@ class TestMangaFireRequestPolicy:
         with pytest.raises(MangaFireError, match=f"HTTP {status}"):
             scraper.search("one piece")
         assert scraper.session.calls == 1
-
-    def test_token_403_gets_one_reload_and_transport_retries_inside_it(
-            self, stub_vrf):
-        """The VRF reload stays a single extra round; a transient error on
-        the re-signed request is the shared policy's to retry."""
-        scraper = self._scraper([
-            _Response(status_code=403, payload={"message": "Invalid token."}),
-            _Response(status_code=503, payload={}),
-            _Response(payload={"items": []}),
-        ])
-
-        assert scraper.search("one piece") == []
-        assert stub_vrf.invalidations == 1
-        assert len(stub_vrf.minted) == 2
-        assert scraper.session.calls == 3
 
     def test_api_calls_wait_for_the_sources_shared_pacing(
             self, request_sleeps):

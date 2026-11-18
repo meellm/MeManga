@@ -66,7 +66,7 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # MangaReader.to
     "mangareader.to": "mangareader:MangaReaderScraper",
 
-    # MangaFire.to (Firefox + VRF bypass + descrambling)
+    # MangaFire.to (signed JSON API + descrambling)
     "mangafire.to": "mangafire:MangaFireScraper",
 
     # MangaSee123

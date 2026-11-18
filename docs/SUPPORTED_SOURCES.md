@@ -9,7 +9,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangadex.org | api.mangadex.org (Included in search) | api | en | No | Included in search | Fan-translation library |
 | mangapill.com | — | http | — | No | Included in search | General library |
 | mangapark1.com | — | browser | — | No | Included in search | General library |
-| mangafire.to | — | browser | — | No | Included in search | General library |
+| mangafire.to | — | http | — | No | Included in search | General library |
 | mangabuddy.com | — | browser | — | No | Included in search | General library |
 | weebcentral.com | — | browser | — | No | Included in search | General library |
 | mangakatana.com | — | browser | — | No | Included in search | General library |
