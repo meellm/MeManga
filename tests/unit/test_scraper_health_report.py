@@ -500,9 +500,12 @@ def test_a_mangapark_runner_failure_still_fails_the_run(
     with pytest.raises(RuntimeError, match="Chromium-based browser") as caught:
         _walk(helpers, scraper)
     assert type(caught.value) is RuntimeError
+    # That probe fails without a row, next to one that recorded its
+    # source, so the check gets past "no results" to the probe itself.
     report = _run(live, tmp_path, [
+        (_test(1), ("a.test", "OK"), "passed"),
         (_test(0), None, "failed"),
         (SUMMARY_TEST, None, "passed"),
     ])
-    assert any("failed without recording a source failure" in p
-               for p in check.problems(report, 1))
+    assert (f"{_test(0)} failed without recording a source failure"
+            in check.problems(report, 1))
