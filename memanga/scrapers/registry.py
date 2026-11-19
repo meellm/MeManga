@@ -115,13 +115,6 @@ _cfg_gachiakutayo = {
     "SEARCH_KEYWORDS": ["gachiakuta"],
 }
 
-_cfg_galaxxias = {
-    "BASE_URL": "https://galaxxias.com",
-    "ASSETS_URL": "https://assets.galaxxias.com/galaxias",
-    "MANGA_TITLE": "Galaxias",
-    "SEARCH_KEYWORDS": ["galaxias"],
-}
-
 _cfg_ichithewitchread = {
     "BASE_URL": "https://ichithewitchread.com",
     "ASSETS_URL": "https://assets.ichithewitchread.com/ichithewitch",
@@ -668,7 +661,6 @@ TEMPLATE_SCRAPERS = {
     "kagurabachiread.com": (NuxtSSRScraper, _cfg_kagurabachiread),
     "grandbluemanga.com": (NuxtSSRScraper, _cfg_grandbluemanga),
     "gachiakutayo.com": (NuxtSSRScraper, _cfg_gachiakutayo),
-    "galaxxias.com": (NuxtSSRScraper, _cfg_galaxxias),
     "ichithewitchread.com": (NuxtSSRScraper, _cfg_ichithewitchread),
     "jujutsumodulo.com": (NuxtSSRScraper, _cfg_jujutsumodulo_nuxt),
 
