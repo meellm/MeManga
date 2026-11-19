@@ -369,10 +369,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # SousouNoFrieren - Frieren dedicated (WordPress + cdn.mangaclash.com)
     "sousou-no-frieren.com": "single_title_sites:SousouNoFrierenScraper",
 
-    # DemonSlayerOnline - Demon Slayer dedicated (WordPress Ifenzi + cdn.readkakegurui.com)
-    "demon-slayer.online": "demonslayeronline:DemonSlayerOnlineScraper",
-    "w4.demon-slayer.online": "demonslayeronline:DemonSlayerOnlineScraper",
-
     # MangOasis - Multilingual manga aggregator (WordPress MangaVerse + cdn.mangoasis.com)
     "mangoasis.com": "mangoasis:MangOasisScraper",
     "www.mangoasis.com": "mangoasis:MangOasisScraper",
