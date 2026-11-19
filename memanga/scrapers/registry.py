@@ -52,13 +52,6 @@ _cfg_punpunmanga = {
     "SEARCH_KEYWORDS": ["punpun", "oyasumi"],
 }
 
-_cfg_furieren = {
-    "BASE_URL": "https://furieren.com",
-    "ASSETS_URL": "https://assets.furieren.com/frieren",
-    "MANGA_TITLE": "Frieren: Beyond Journey's End",
-    "SEARCH_KEYWORDS": ["frieren", "journey's end"],
-}
-
 _cfg_kokounohito = {
     "BASE_URL": "https://kokounohito.com",
     "ASSETS_URL": "https://assets.kokounohito.com/kokounohito",
@@ -629,7 +622,6 @@ TEMPLATE_SCRAPERS = {
     "jjkaisen.com": (NuxtSSRScraper, _cfg_jjkaisen),
     "oshinokoyo.com": (NuxtSSRScraper, _cfg_oshinokoyo),
     "punpunmanga.com": (NuxtSSRScraper, _cfg_punpunmanga),
-    "furieren.com": (NuxtSSRScraper, _cfg_furieren),
     "kokounohito.com": (NuxtSSRScraper, _cfg_kokounohito),
     "madeabyss.com": (NuxtSSRScraper, _cfg_madeabyss),
     "unopiece.com": (NuxtSSRScraper, _cfg_unopiece),

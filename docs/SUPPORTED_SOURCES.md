@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 279 domains across 211 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 278 domains across 210 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -75,7 +75,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | flamecomics.xyz | — | browser | — | No | Not searched (needs-js) | Manhwa translations |
 | frieren-manga.com | — | http | — | No | Not searched (template) | Frieren: Beyond Journey's End |
 | full-metal-alchemist.online | w9.full-metal-alchemist.online (Not searched (template)) | http | — | No | Not searched (template) | Fullmetal Alchemist |
-| furieren.com | — | http | — | No | Not searched (template) | Frieren: Beyond Journey's End |
 | gachiakutayo.com | — | http | — | No | Not searched (template) | Gachiakuta |
 | gantzmangafree.com | — | http | — | No | Not searched (template) | Gantz |
 | goblin-slayer-manga.online | — | http | — | No | Not searched (template) | Goblin Slayer |
