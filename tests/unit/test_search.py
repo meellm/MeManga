@@ -214,7 +214,7 @@ class TestComputeSearchSources:
         assert "mangadex.org" in sources
         assert "mangapill.com" in sources
         # Known-dead sites never make the sweep list.
-        assert "mangasee123.com" not in sources
+        assert "mangareader.to" not in sources
 
     def test_region_blocked_mangago_excluded(self):
         # mangago.me is reachable globally but DNS/SNI-blocked in some

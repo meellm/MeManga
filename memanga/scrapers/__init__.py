@@ -72,9 +72,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # MangaFire.to (signed JSON API + descrambling)
     "mangafire.to": "mangafire:MangaFireScraper",
 
-    # MangaSee123
-    "mangasee123.com": "mangasee:MangaSeeScraper",
-
     # MangaBuddy
     "mangabuddy.com": "mangabuddy:MangaBuddyScraper",
 

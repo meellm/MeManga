@@ -218,10 +218,10 @@ class TestBashCompletion:
         # and a single-manga template site are all valid --source values.
         swept = compute_search_sources(_NoConfig())
         assert "mangadex.org" in swept
-        assert "mangasee123.com" in BROKEN_SEARCH_SOURCES
+        assert "mangareader.to" in BROKEN_SEARCH_SOURCES
         template = sorted(TEMPLATE_SCRAPERS)[0].removeprefix("www.")
         assert template not in swept
-        for source in ("mangadex.org", "mangasee123.com", template):
+        for source in ("mangadex.org", "mangareader.to", template):
             assert source in _complete(script, "search", "q", "--source",
                                        source[:-1]), source
 

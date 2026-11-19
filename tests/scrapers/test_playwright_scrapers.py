@@ -223,7 +223,6 @@ class TestComixChapters:
 PLAYWRIGHT_DOMAINS = [
     "weebcentral.com",
     "mangakatana.com",
-    "mangasee123.com",
     "mangabuddy.com",
     "mangataro.org",
     "flamecomics.xyz",

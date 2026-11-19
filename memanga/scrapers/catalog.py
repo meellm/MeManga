@@ -87,8 +87,6 @@ def _skips(reason: SkipReason, note: str, *domains: str,
 
 
 SEARCH_SKIPS: Dict[str, SearchSkip] = {
-    **_skips(SkipReason.SHUTDOWN, "Serves a shutdown image.",
-             "mangasee123.com"),
     **_skips(SkipReason.UNREACHABLE, "",
              "mangareader.to"),
     **_skips(SkipReason.UNREACHABLE,

@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 304 domains across 232 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 303 domains across 231 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -139,7 +139,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangapark1.com | — | browser | — | No | Not searched (challenge) | General library |
 | mangaread.org | — | http | — | No | Not searched (template) | — |
 | mangareader.to | — | http | — | No | Not searched (unreachable) | General library |
-| mangasee123.com | — | http | — | No | Not searched (shutdown) | — |
 | mangasehri.com | — | http | — | No | Not searched (template) | — |
 | mangatown.com | — | http | — | No | Not searched (unreliable) | — |
 | mangavyvy.net | vymanga.net (Included in search), vyvymanga.net (Included in search) | http | — | No | Included in search | — |

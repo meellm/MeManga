@@ -72,7 +72,6 @@ QUERY_CASES = [
     ("mangapanda", "MangaPandaScraper", "/search", "q", {}),
     ("mangapill", "MangapillScraper", "/search", "q", {}),
     ("mangareader", "MangaReaderScraper", "/search", "keyword", {}),
-    ("mangasee", "MangaSeeScraper", "/search/", "name", {}),
     ("mangataro", "MangaTaroScraper", "/api/manga", "q", {}),
     ("mangatown", "MangaTownScraper", "/search", "name", {}),
     ("mangayy", "MangaYYScraper", "/", "s", {"post_type": "wp-manga"}),
