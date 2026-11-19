@@ -467,11 +467,6 @@ _cfg_dragontranslation = {
     "uses_ajax": True,
 }
 
-_cfg_hipercool = {
-    "base_url": "https://hipercool.net",
-    "uses_ajax": True,
-}
-
 _cfg_mangawow = {
     "base_url": "https://mangawow.com",
     "uses_ajax": True,
@@ -761,7 +756,6 @@ TEMPLATE_SCRAPERS = {
     "apollcomics.es": (WordPressMadaraScraper, _cfg_apollcomics),
     "bokugents.com": (WordPressMadaraScraper, _cfg_bokugents),
     "dragontranslation.org": (WordPressMadaraScraper, _cfg_dragontranslation),
-    "hipercool.net": (WordPressMadaraScraper, _cfg_hipercool),
     "mangawow.com": (WordPressMadaraScraper, _cfg_mangawow),
     "pawmanga.com": (WordPressMadaraScraper, _cfg_pawmanga),
     "rawjx.net": (WordPressMadaraScraper, _cfg_rawxz),

@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 297 domains across 225 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 296 domains across 224 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -97,7 +97,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | hentai20.io | — | http | — | Yes | Included in search | Adult content |
 | hentaifox.com | — | http | — | Yes | Included in search | Doujinshi |
 | hentairead.com | — | browser | — | Yes | Included in search | Doujinshi |
-| hipercool.net | — | http | — | No | Not searched (template) | — |
 | hiperdex.com | — | http | — | No | Not searched (template) | — |
 | hivetoons.org | hivetoon.com (Not searched (needs-js)) | browser | — | No | Not searched (needs-js) | Void Scans network |
 | homunculusmanga.com | — | http | — | No | Included in search | Homunculus |
