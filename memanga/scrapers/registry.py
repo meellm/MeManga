@@ -408,11 +408,6 @@ _cfg_mangaread = {
     "uses_ajax": True,
 }
 
-_cfg_s2manga = {
-    "base_url": "https://s2manga.com",
-    "uses_ajax": True,
-}
-
 _cfg_manhwatop = {
     "base_url": "https://manhwatop.com",
     "uses_ajax": True,
@@ -723,8 +718,6 @@ TEMPLATE_SCRAPERS = {
     "hiperdex.com": (WordPressMadaraScraper, _cfg_hiperdex),
     "mangaread.org": (WordPressMadaraScraper, _cfg_mangaread),
     "www.mangaread.org": (WordPressMadaraScraper, _cfg_mangaread),
-    "s2manga.com": (WordPressMadaraScraper, _cfg_s2manga),
-    "s2manga.io": (WordPressMadaraScraper, _cfg_s2manga),
     "manhwatop.com": (WordPressMadaraScraper, _cfg_manhwatop),
     "mangadistrict.com": (WordPressMadaraScraper, _cfg_mangadistrict),
     "manga18fx.com": (WordPressMadaraScraper, _cfg_manga18fx),
