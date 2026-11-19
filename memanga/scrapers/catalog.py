@@ -276,7 +276,6 @@ SOURCE_NOTES: Dict[str, str] = {
     "bocchitherockmanga.com": "Bocchi the Rock!",
     "spyxfamilymanga.org": "Spy x Family",
     "blueexorcistmanga.com": "Blue Exorcist",
-    "ajimenoippo.com": "Hajime no Ippo",
     "hajime-no-ippo-manga.online": "Hajime no Ippo",
     "hajimnoippo.com": "Hajime no Ippo",
     "hajime-noippo.com": "Hajime no Ippo",

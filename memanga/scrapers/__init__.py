@@ -327,10 +327,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # BlueExorcistManga - Blue Exorcist / Ao no Exorcist dedicated (cdn.readkakegurui.com)
     "blueexorcistmanga.com": "single_title_sites:BlueExorcistMangaScraper",
 
-    # AjimeNoIppo - Hajime no Ippo dedicated (WordPress + cdn.mangaclash.com)
-    "ajimenoippo.com": "single_title_sites:AjimeNoIppoScraper",
-    "www.ajimenoippo.com": "single_title_sites:AjimeNoIppoScraper",
-
     # HajimeNoIppoOnline - Hajime no Ippo dedicated (WordPress + laiond.com)
     "hajime-no-ippo-manga.online": "single_title_sites:HajimeNoIppoOnlineScraper",
 
@@ -570,7 +566,7 @@ def __dir__():
 # module carrying the same names; the package itself never uses them.
 _MOVED_MODULES: Dict[str, str] = {
     **dict.fromkeys((
-        "beastarsmanga", "monstermanga", "readichithewitch", "ajimenoippo",
+        "beastarsmanga", "monstermanga", "readichithewitch",
         "hajimenoippoonline", "hajimnoippo", "hajimenoippoblogger",
         "bluelockreadonline", "vagabondmanga", "sousnofrierenga",
         "spyxfamilymanga", "tgmanga", "blueexorcistmanga", "blamemanga",

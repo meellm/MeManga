@@ -858,7 +858,7 @@ class TestCheckUpdates:
 class TestSearchRelevanceFilter:
     """Regression for the 'searching Blue Lock returns Beastars, Tokyo
     Ghoul, …' bug. Single-manga aggregators (TGManga, BeastarsManga,
-    AjimeNoIppo, …) blindly return their one hardcoded manga regardless
+    HajimNoIppo, …) blindly return their one hardcoded manga regardless
     of the query string. The worker's _result_matches_query() drops
     those obvious mismatches before publishing."""
 

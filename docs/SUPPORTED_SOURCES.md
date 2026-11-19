@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 286 domains across 216 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 285 domains across 215 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -30,7 +30,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangaeffect.com | — | http | — | No | Included in search | — |
 | mangafox.fun | — | http | — | No | Included in search | MangaHub network |
 | 1piecemanga.com | w064.1piecemanga.com (Included in search) | http | — | No | Included in search | One Piece |
-| ajimenoippo.com | — | http | — | No | Included in search | Hajime no Ippo |
 | akiramanga.com | — | http | — | No | Not searched (template) | Akira |
 | ao-ashi-manga.com | — | http | — | No | Not searched (template) | Ao Ashi |
 | apollcomics.es | — | http | — | No | Not searched (template) | — |

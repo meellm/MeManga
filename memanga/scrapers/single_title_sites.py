@@ -249,15 +249,6 @@ class _EntryContentScraper(SingleTitleScraper):
     image_attrs = ("data-src", "src")
 
 
-class AjimeNoIppoScraper(_EntryContentScraper):
-    """Scraper for ajimenoippo.com - Hajime no Ippo (images on cdn.mangaclash.com)."""
-
-    name = "ajimenoippo"
-    base_url = "https://www.ajimenoippo.com"
-    manga_title = "Hajime no Ippo"
-    image_cdn_filters = ("cdn.mangaclash.com",)
-
-
 class HajimeNoIppoOnlineScraper(_EntryContentScraper):
     """Scraper for hajime-no-ippo-manga.online - Hajime no Ippo (images on laiond.com)."""
 

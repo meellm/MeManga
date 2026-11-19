@@ -23,7 +23,6 @@ MOVED = {
     "beastarsmanga": ("BeastarsMangaScraper", "beastarsmanga.com"),
     "monstermanga": ("MonsterMangaScraper", "monstermanga.org"),
     "readichithewitch": ("ReadIchiTheWitchScraper", "readichithewitch.com"),
-    "ajimenoippo": ("AjimeNoIppoScraper", "ajimenoippo.com"),
     "hajimenoippoonline": ("HajimeNoIppoOnlineScraper", "hajime-no-ippo-manga.online"),
     "hajimnoippo": ("HajimNoIppoScraper", "hajimnoippo.com"),
     "hajimenoippoblogger": ("HajimeNoIppoBloggerScraper", "hajime-noippo.com"),

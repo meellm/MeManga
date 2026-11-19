@@ -21,7 +21,7 @@ from .scrapers import POPULAR_SOURCES, get_scraper
 
 # ─────────────────────────────────────────────────────────────────────
 # Relevance filter — many "single-manga" scrapers in the registry
-# (BeastarsManga, TGManga, AjimeNoIppo, …) hard-code `search()` to
+# (BeastarsManga, TGManga, HajimNoIppo, …) hard-code `search()` to
 # return their one manga regardless of the query string. Without this
 # filter, searching "Blue Lock" returns Beastars, Tokyo Ghoul, Hajime
 # no Ippo, etc. We compare the returned title against the query tokens
