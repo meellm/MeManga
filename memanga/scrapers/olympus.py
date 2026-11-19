@@ -27,16 +27,30 @@ Page images are served directly (no Referer/token needed), so the base-class
 ``download_image`` handles the actual downloads.
 """
 
+import logging
 import re
 import unicodedata
 from typing import List, Optional, Tuple
 from urllib.parse import urljoin
 
-from .base import BaseScraper, Chapter, Manga
+import requests
+
+from .base import BaseScraper, Chapter, Manga, CLOUDSCRAPER_CHROME_DESKTOP
+
+logger = logging.getLogger(__name__)
 
 
 class OlympusSourceError(RuntimeError):
     """olympusxyz.com did not deliver a complete, well-formed chapter list."""
+
+
+def _cloudflare_refusal(response) -> bool:
+    """True for an HTTP 403 that Cloudflare's edge sent or passed on."""
+    if response is None or response.status_code != 403:
+        return False
+    headers = response.headers or {}
+    return (str(headers.get("server") or "").lower() == "cloudflare"
+            or "cf-ray" in headers or "cf-mitigated" in headers)
 
 
 class OlympusScraper(BaseScraper):
@@ -55,13 +69,60 @@ class OlympusScraper(BaseScraper):
     # still reports more rows is an error, not a shorter list.
     _MAX_CHAPTER_PAGES = 100
 
+    _HEADERS = {
+        "Accept": "application/json, text/plain, */*",
+        "Referer": base_url + "/",
+    }
+
     def __init__(self):
         super().__init__()
-        self.session.headers.update({
-            "Accept": "application/json, text/plain, */*",
-            "Referer": self.base_url + "/",
-        })
+        self.session.headers.update(self._HEADERS)
         self._catalogue: Optional[list] = None
+        # Set once the plain session was refused and cloudscraper's took over.
+        self._cloudflare_session = False
+
+    # Transport
+
+    def _switch_to_cloudflare_session(self) -> None:
+        """Send this scraper's requests through cloudscraper from now on.
+
+        Cloudflare refuses the plain ``requests`` client outright on some
+        networks (HTTP 403 even on the catalogue) while it lets a
+        browser-like client through. cloudscraper keeps its own
+        User-Agent, which matches its TLS profile; only the site's Accept
+        and Referer are put back.
+        """
+        self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
+        self.session.headers.update(self._HEADERS)
+        self._cloudflare_session = True
+
+    def _request(self, url: str, **kwargs) -> requests.Response:
+        """The shared request policy, falling back to cloudscraper once.
+
+        A request refused with Cloudflare's 403 is sent again through a
+        cloudscraper session, which this scraper then keeps. Any other
+        error, and a refusal of the cloudscraper session as well, is
+        raised as before.
+        """
+        try:
+            return super()._request(url, **kwargs)
+        except requests.HTTPError as error:
+            if self._cloudflare_session or not _cloudflare_refusal(error.response):
+                raise
+        logger.info("olympusxyz.com refused the plain HTTP client (Cloudflare "
+                    "403); retrying through cloudscraper")
+        self._switch_to_cloudflare_session()
+        return super()._request(url, **kwargs)
+
+    def worker_copy(self) -> "OlympusScraper":
+        """A copy for another thread; it keeps the cloudscraper session if
+        this scraper had to switch to it (the base copy rebuilds a plain
+        one)."""
+        clone = super().worker_copy()
+        if self._cloudflare_session:
+            clone._switch_to_cloudflare_session()
+            clone.session.cookies.update(self.session.cookies)
+        return clone
 
     # URL helpers
 

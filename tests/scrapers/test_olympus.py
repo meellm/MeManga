@@ -385,3 +385,130 @@ def test_get_cover_url_uses_series_api(monkeypatch, ol):
     assert ol.get_cover_url("https://olympusxyz.com/series/comic-solo-swordmaster") == \
         "https://media.imagesolymp.xyz/comics/covers/1777/c-xl.webp"
     assert seen["url"] == "https://olympusxyz.com/api/series/solo-swordmaster"
+
+
+# Transport: Cloudflare refusal of the plain client
+
+
+class _Response:
+    def __init__(self, status, payload=None, headers=None):
+        self.status_code = status
+        self._payload = payload
+        self.headers = dict(headers or {})
+        self.url = "https://olympusxyz.com/api/series/list"
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        import requests
+
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error",
+                                     response=self)
+
+
+class _Session:
+    def __init__(self, *responses):
+        import requests
+
+        self.responses = list(responses)
+        self.calls = []
+        self.headers = {}
+        self.cookies = requests.cookies.RequestsCookieJar()
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        return self.responses.pop(0)
+
+
+_CF_403 = {"server": "cloudflare", "cf-ray": "8f0000000000-IAD"}
+
+
+class TestCloudflareFallback:
+    @pytest.fixture(autouse=True)
+    def no_sleep(self, monkeypatch):
+        import time
+        import types
+        from memanga.scrapers import base
+
+        monkeypatch.setattr(base, "time", types.SimpleNamespace(
+            time=time.time, monotonic=time.monotonic, sleep=lambda _s: None))
+
+    @pytest.fixture
+    def cloudscraper(self, monkeypatch):
+        """Stand in for _use_cloudscraper: each call gives the scraper the
+        next prepared session and records the browser profile."""
+        made = {"profiles": [], "sessions": []}
+
+        def fake(self, browser=None):
+            made["profiles"].append(browser)
+            self.session = made["sessions"].pop(0)
+            return self.session
+
+        monkeypatch.setattr(OlympusScraper, "_use_cloudscraper", fake)
+        return made
+
+    def test_cloudflare_403_switches_to_cloudscraper_once(self, ol, cloudscraper):
+        from memanga.scrapers.base import CLOUDSCRAPER_CHROME_DESKTOP
+
+        plain = _Session(_Response(403, headers=_CF_403))
+        cf = _Session(_Response(200, {"data": CATALOGUE}),
+                      _Response(200, {"data": []}))
+        ol.session = plain
+        cloudscraper["sessions"].append(cf)
+
+        assert [m.title for m in ol.search("solo swordmaster")] == ["Solo Swordmaster"]
+        # Later calls go straight to the cloudscraper session.
+        ol._get_json("https://olympusxyz.com/api/series/x/chapters?page=1")
+
+        assert plain.calls == ["https://olympusxyz.com/api/series/list"]
+        assert cf.calls == ["https://olympusxyz.com/api/series/list",
+                            "https://olympusxyz.com/api/series/x/chapters?page=1"]
+        assert cloudscraper["profiles"] == [CLOUDSCRAPER_CHROME_DESKTOP]
+        assert cf.headers["Referer"] == "https://olympusxyz.com/"
+        assert cf.headers["Accept"].startswith("application/json")
+
+    def test_plain_client_that_works_never_switches(self, ol, cloudscraper):
+        ol.session = _Session(_Response(200, {"data": CATALOGUE}))
+
+        assert len(ol.search("solo swordmaster")) == 1
+        assert cloudscraper["profiles"] == []
+
+    def test_403_without_cloudflare_markers_is_raised(self, ol, cloudscraper):
+        import requests
+
+        ol.session = _Session(_Response(403, headers={"server": "nginx"}))
+
+        with pytest.raises(requests.HTTPError):
+            ol.search("solo swordmaster")
+        assert cloudscraper["profiles"] == []
+
+    def test_refusal_of_cloudscraper_too_is_raised_not_looped(
+            self, ol, cloudscraper):
+        import requests
+
+        plain = _Session(_Response(403, headers=_CF_403))
+        cf = _Session(_Response(403, headers=_CF_403))
+        ol.session = plain
+        cloudscraper["sessions"].append(cf)
+
+        with pytest.raises(requests.HTTPError):
+            ol.search("solo swordmaster")
+        assert len(plain.calls) == 1 and len(cf.calls) == 1
+        assert len(cloudscraper["profiles"]) == 1
+
+    def test_worker_copy_of_a_switched_scraper_keeps_cloudscraper(
+            self, ol, cloudscraper):
+        first = _Session()
+        first.cookies.set("cf_clearance", "x", domain="olympusxyz.com")
+        cloudscraper["sessions"].extend([first, _Session()])
+        ol._switch_to_cloudflare_session()
+
+        copy = ol.worker_copy()
+
+        assert copy.session is not ol.session
+        assert copy._cloudflare_session is True
+        assert copy.session.headers["Referer"] == "https://olympusxyz.com/"
+        assert copy.session.cookies.get("cf_clearance") == "x"
+        assert len(cloudscraper["profiles"]) == 2
