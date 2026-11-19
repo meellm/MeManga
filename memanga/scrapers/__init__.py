@@ -60,8 +60,11 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Mangapill - Large library (no Cloudflare, simple requests)
     "mangapill.com": "mangapill:MangapillScraper",
 
-    # MangaPark - current working domain
+    # MangaPark (mangapark1.com, behind a Cloudflare challenge)
     "mangapark1.com": "mangapark:MangaParkScraper",
+
+    # MangaPark (mangapark.cc) - a separate site; old hosts are not aliased
+    "mangapark.cc": "mangapark_cc:MangaParkCCScraper",
 
     # MangaReader.to
     "mangareader.to": "mangareader:MangaReaderScraper",

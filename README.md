@@ -712,7 +712,7 @@ Their availability can change; check the Sources page for current health.
 |---|---|
 | mangadex.org | Fan-translation library |
 | mangapill.com | General library |
-| mangapark1.com | General library |
+| mangapark.cc | General library |
 | mangafire.to | General library |
 | mangabuddy.com | General library |
 | weebcentral.com | General library |

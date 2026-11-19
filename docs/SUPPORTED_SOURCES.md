@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 305 domains across 232 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 306 domains across 233 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -8,7 +8,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 |---|---|---|---|---|---|---|
 | mangadex.org | api.mangadex.org (Included in search) | api | en | No | Included in search | Fan-translation library |
 | mangapill.com | — | http | — | No | Included in search | General library |
-| mangapark1.com | — | browser | — | No | Included in search | General library |
+| mangapark.cc | — | http | en | No | Included in search | General library |
 | mangafire.to | — | http | — | No | Included in search | General library |
 | mangabuddy.com | — | browser | — | No | Included in search | General library |
 | weebcentral.com | — | browser | — | No | Included in search | General library |
@@ -137,6 +137,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangago.me | — | http | — | No | Not searched (region-blocked) | Yaoi/Shoujo collection |
 | mangahub.us | — | http | — | No | Not searched (needs-js) | MangaHub network |
 | manganato.gg | — | browser | — | No | Not searched (challenge) | — |
+| mangapark1.com | — | browser | — | No | Not searched (challenge) | General library |
 | mangaread.org | — | http | — | No | Not searched (template) | — |
 | mangareader.to | — | http | — | No | Not searched (unreachable) | General library |
 | mangasee123.com | — | http | — | No | Not searched (shutdown) | — |

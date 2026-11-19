@@ -129,6 +129,10 @@ SEARCH_SKIPS: Dict[str, SearchSkip] = {
              "Its browser scraper times out waiting out the challenge.",
              "manganato.gg"),
     **_skips(SkipReason.CHALLENGE,
+             "Plain requests, cloudscraper and headless Chromium all get "
+             "the challenge.",
+             "mangapark1.com", issue=172),
+    **_skips(SkipReason.CHALLENGE,
              "The site and its search API challenge plain requests, "
              "cloudscraper and headless Firefox; images need a per-session "
              "token.",
@@ -153,7 +157,7 @@ SEARCH_SKIPS: Dict[str, SearchSkip] = {
 POPULAR_SOURCES: List[str] = [
     "mangadex.org",
     "mangapill.com",
-    "mangapark1.com",
+    "mangapark.cc",
     "mangafire.to",
     "mangabuddy.com",
     "weebcentral.com",
@@ -192,6 +196,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "mangadex.org": "Fan-translation library",
     "mangapill.com": "General library",
     "mangapark1.com": "General library",
+    "mangapark.cc": "General library",
     "mangafire.to": "General library",
     "mangabuddy.com": "General library",
     "weebcentral.com": "General library",

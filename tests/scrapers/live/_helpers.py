@@ -24,6 +24,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from memanga.scrapers.atsumaru import AtsumaruSourceError
 from memanga.scrapers.mangafire import MangaFireError
 from memanga.scrapers.mangapark import MangaParkSourceError
+from memanga.scrapers.mangapark_cc import MangaParkCCSourceError
 from memanga.scrapers.olympus import OlympusSourceError
 from memanga.scrapers.weebcentral import WeebCentralError
 from memanga.scrapers.zonatmo import ZonaTMOSourceError
@@ -206,6 +207,7 @@ SOURCE_ERRORS = (
     AtsumaruSourceError,
     MangaFireError,
     MangaParkSourceError,
+    MangaParkCCSourceError,
     OlympusSourceError,
     WeebCentralError,
     ZonaTMOSourceError,

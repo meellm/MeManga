@@ -291,6 +291,7 @@ def _expected_errors():
     from memanga.scrapers.atsumaru import AtsumaruSourceError
     from memanga.scrapers.mangafire import MangaFireError
     from memanga.scrapers.mangapark import MangaParkSourceError
+    from memanga.scrapers.mangapark_cc import MangaParkCCSourceError
     from memanga.scrapers.olympus import OlympusSourceError
     from memanga.scrapers.playwright_base import BrowserTimeoutError
     from memanga.scrapers.zonatmo import ZonaTMOSourceError
@@ -311,6 +312,8 @@ def _expected_errors():
         "mangapark-no-response": (MangaParkSourceError("No response for https://mangapark1.com/x"), stale),
         "mangapark-challenge": (MangaParkSourceError(
             "Cloudflare challenge not cleared for https://mangapark1.com/x"), stale),
+        "mangapark-cc-incomplete": (MangaParkCCSourceError(
+            "mangapark.cc chapter list for x has 400 of the 1204 chapters it reports"), stale),
         "olympus-incomplete": (OlympusSourceError(
             "Olympus chapter list for https://olympusxyz.com/series/comic-x has 40 of the 45 chapters it reports"), stale),
         "atsumaru-shape": (AtsumaruSourceError(

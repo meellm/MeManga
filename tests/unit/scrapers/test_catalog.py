@@ -19,7 +19,7 @@ def test_search_skips_preserve_legacy_set_and_registered_domains():
         "hivetoons.org", "hivetoon.com", "isekaiscan.com",
         "zinmanga.com", "kunmanga.com", "flamecomics.xyz",
         "manhuafast.com", "manhuaus.org", "manganato.gg",
-        "kagane.org", "www.kagane.org", "kagane.to",
+        "kagane.org", "www.kagane.org", "kagane.to", "mangapark1.com",
     }
     assert BROKEN_SEARCH_SOURCES == set(SEARCH_SKIPS)
     assert BROKEN_SEARCH_SOURCES == legacy

@@ -81,7 +81,7 @@ PARSING_PROBES = {
     # the live markup drifting away from them.
     "weebcentral.com": ProbeSpec("WeebCentral (browser-rendered HTML)",
                                   query="blue lock"),
-    "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),
+    "mangapark.cc": ProbeSpec("MangaPark", query="one piece"),
     "tcbonepiecechapters.com": ProbeSpec("TCB Scans (project list)",
                                            query="one piece"),
     "mangahub.io": ProbeSpec("MangaHub", query="one piece"),

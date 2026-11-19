@@ -310,7 +310,7 @@ class TestComputeSearchSources:
         # (#179) did not promote luminousscans.com into the defaults.
         from memanga.scrapers import DEFAULT_ENABLED_SOURCES
         assert DEFAULT_ENABLED_SOURCES == [
-            "mangadex.org", "mangapill.com", "mangapark1.com",
+            "mangadex.org", "mangapill.com", "mangapark.cc",
             "mangafire.to", "mangabuddy.com", "weebcentral.com",
             "mangakatana.com", "asurascans.com", "comix.to",
             "comick.io", "mangahub.io", "mangahere.cc",
