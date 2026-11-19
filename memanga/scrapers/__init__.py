@@ -307,9 +307,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "demonslayermanga.com": "demonslayermanga:DemonSlayerMangaScraper",
     "ww9.demonslayermanga.com": "demonslayermanga:DemonSlayerMangaScraper",
 
-    # DrStoneManga - Dr. Stone dedicated (assets.drstonemanga.com)
-    "drstonemanga.com": "single_title_sites:DrStoneMangaScraper",
-
     # SakamotoManga - Sakamoto Days dedicated (cdn3.mangaclash.com)
     "sakamotomanga.com": "sakamotomanga:SakamotoMangaScraper",
 
@@ -566,7 +563,7 @@ _MOVED_MODULES: Dict[str, str] = {
         "bluelockmangaorg", "kaijuno8manga", "dragonballsuperonline",
         "onepiecemanga1", "readslamdunkonline",
         "readtokyorevengers", "fairytailmangafree", "readkenganashura",
-        "bocchitherockmanga", "elusivesamurai", "drstonemanga",
+        "bocchitherockmanga", "elusivesamurai",
     ), "single_title_sites"),
     "mangaeffect": "coffeemanga",
     "mangafoxfun": "mangapanda",

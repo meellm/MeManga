@@ -457,14 +457,3 @@ class ElusiveSamuraiScraper(NumberedChaptersScraper):
     chapter_url_base = "https://w4.elusive-samurai.com"
     manga_title = "The Elusive Samurai"
     image_cdn_filters = ("readkakegurui.com",)
-
-
-class DrStoneMangaScraper(NumberedChaptersScraper):
-    """Scraper for drstonemanga.com - Dr. Stone (images on assets.drstonemanga.com)."""
-
-    name = "drstonemanga"
-    base_url = "https://drstonemanga.com"
-    manga_title = "Dr. Stone"
-    chapter_href_markers = ("/chapter/",)
-    chapter_number_pattern = r'/chapter/(\d+)'
-    image_cdn_filters = ("assets.drstonemanga.com",)

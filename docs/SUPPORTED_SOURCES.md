@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 280 domains across 212 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 279 domains across 211 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -67,7 +67,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | detective-conan.online | — | http | — | No | Not searched (template) | Detective Conan |
 | dorohedoro.online | — | http | — | No | Not searched (template) | Dorohedoro |
 | dragontranslation.org | — | http | — | No | Not searched (template) | — |
-| drstonemanga.com | — | http | — | No | Included in search | Dr. Stone |
 | e-hentai.org | exhentai.org (Included in search) | http | — | Yes | Included in search | Galleries |
 | elusive-samurai.com | w4.elusive-samurai.com (Included in search) | http | — | No | Included in search | The Elusive Samurai |
 | en-thunderscans.com | — | http | en | No | Included in search | English manhwa scans |

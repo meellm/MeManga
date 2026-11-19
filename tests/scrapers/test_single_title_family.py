@@ -122,9 +122,6 @@ SITES = {
     "elusive-samurai.com": (
         "ElusiveSamuraiScraper", "elusivesamurai", "https://elusive-samurai.com",
         "The Elusive Samurai", "https://elusive-samurai.com/", None),
-    "drstonemanga.com": (
-        "DrStoneMangaScraper", "drstonemanga", "https://drstonemanga.com",
-        "Dr. Stone", "https://drstonemanga.com/", None),
 }
 
 ALIASES = {
@@ -529,14 +526,6 @@ class TestNumberedLayout:
         assert _chapters(s, patch_html, html) == [
             ("2", "Chapter 2", "https://w5.bocchitherockmanga.com/read/manga/bocchi-chapter-2/"),
             ("10", "Chapter 10", "https://w5.bocchitherockmanga.com/manga/bocchi-chapter-10/"),
-        ]
-
-    def test_dr_stone_chapter_paths(self, patch_html):
-        s = get_scraper("drstonemanga.com")
-        html = '<a href="/chapter/232">x</a><a href="/chapter/2">y</a><a href="/manga/z">z</a>'
-        assert _chapters(s, patch_html, html) == [
-            ("2", "Chapter 2", "https://drstonemanga.com/chapter/2"),
-            ("232", "Chapter 232", "https://drstonemanga.com/chapter/232"),
         ]
 
 
