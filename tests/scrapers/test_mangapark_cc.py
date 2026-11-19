@@ -364,3 +364,180 @@ class TestRegistry:
     def test_old_hosts_are_not_aliased(self, domain):
         from memanga.scrapers import SCRAPERS
         assert domain not in SCRAPERS
+
+
+# Transport: Cloudflare refusal of the plain client
+
+
+class _Response:
+    def __init__(self, status, text="", headers=None):
+        self.status_code = status
+        self.text = text
+        self.content = text.encode("utf-8")
+        self.headers = dict(headers or {})
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error",
+                                     response=self)
+
+
+class _Session:
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.calls = []
+        self.headers = {}
+        self.cookies = requests.cookies.RequestsCookieJar()
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs.get("headers")))
+        return self.responses.pop(0)
+
+
+_CF_403 = {"server": "cloudflare", "cf-ray": "8f0000000000-IAD",
+           "content-type": "text/html; charset=UTF-8"}
+
+
+class TestCloudflareFallback:
+    @pytest.fixture(autouse=True)
+    def no_sleep(self, monkeypatch):
+        import time
+        import types
+        from memanga.scrapers import base
+
+        monkeypatch.setattr(base, "time", types.SimpleNamespace(
+            time=time.time, monotonic=time.monotonic, sleep=lambda _s: None))
+
+    @pytest.fixture
+    def cloudscraper(self, monkeypatch):
+        """Stand in for _use_cloudscraper: each call gives the scraper the
+        next prepared session and records the browser profile."""
+        made = {"profiles": [], "sessions": []}
+
+        def fake(self, browser=None):
+            made["profiles"].append(browser)
+            self.session = made["sessions"].pop(0)
+            return self.session
+
+        monkeypatch.setattr(MangaParkCCScraper, "_use_cloudscraper", fake)
+        return made
+
+    def test_cloudflare_403_switches_to_cloudscraper_once(
+            self, scraper, cloudscraper):
+        from memanga.scrapers.base import CLOUDSCRAPER_CHROME_DESKTOP
+
+        plain = _Session(_Response(403, "<html>cloudflare</html>", _CF_403))
+        cf = _Session(_Response(200, SEARCH), _Response(200, READER))
+        scraper.session = plain
+        cloudscraper["sessions"].append(cf)
+
+        assert len(scraper.search("one piece")) == 3
+        assert len(scraper.get_pages(CHAPTER)) == 3
+
+        assert [u for u, _ in plain.calls] == [
+            "https://mangapark.cc/search?q=one+piece"]
+        assert [u for u, _ in cf.calls] == [
+            "https://mangapark.cc/search?q=one+piece", CHAPTER]
+        assert cloudscraper["profiles"] == [CLOUDSCRAPER_CHROME_DESKTOP]
+
+    def test_image_download_retries_with_its_referer(self, scraper, cloudscraper,
+                                                     tmp_path):
+        jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+        plain = _Session(_Response(403, headers=_CF_403))
+        image = _Response(200)
+        image.content = jpeg
+        cf = _Session(image)
+        scraper.session = plain
+        cloudscraper["sessions"].append(cf)
+
+        assert scraper.download_image("https://img.example/1.jpg",
+                                      tmp_path / "p.jpg") is True
+        assert (tmp_path / "p.jpg").read_bytes() == jpeg
+        assert cf.calls[0][1] == {"Referer": "https://mangapark.cc/"}
+
+    def test_plain_client_that_works_never_switches(self, scraper, cloudscraper):
+        scraper.session = _Session(_Response(200, SEARCH))
+
+        assert len(scraper.search("one piece")) == 3
+        assert cloudscraper["profiles"] == []
+
+    def test_403_without_cloudflare_markers_is_raised(self, scraper, cloudscraper):
+        scraper.session = _Session(_Response(403, headers={"server": "nginx"}))
+
+        with pytest.raises(requests.HTTPError) as exc:
+            scraper.search("one piece")
+        assert cloudscraper["profiles"] == []
+        assert "403 without Cloudflare markers; no cloudscraper retry" in str(exc.value)
+        assert "server=nginx, cf-ray=no" in str(exc.value)
+        assert exc.value.response.status_code == 403
+
+    def test_other_http_errors_are_not_retried(self, scraper, cloudscraper):
+        scraper.session = _Session(_Response(404, headers=_CF_403))
+
+        with pytest.raises(requests.HTTPError) as exc:
+            scraper.search("one piece")
+        assert cloudscraper["profiles"] == []
+        assert exc.value.response.status_code == 404
+
+    @pytest.mark.parametrize("second, kind", [
+        (_CF_403, "403 with Cloudflare markers, no challenge header"),
+        ({**_CF_403, "cf-mitigated": "challenge"}, "Cloudflare challenge"),
+        ({"server": "nginx"}, "403 without Cloudflare markers"),
+    ])
+    def test_refusal_of_cloudscraper_too_is_raised_not_looped(
+            self, scraper, cloudscraper, second, kind):
+        plain = _Session(_Response(403, headers=_CF_403))
+        cf = _Session(_Response(403, headers=second))
+        scraper.session = plain
+        cloudscraper["sessions"].append(cf)
+
+        with pytest.raises(requests.HTTPError) as exc:
+            scraper.search("one piece")
+        assert len(plain.calls) == 1 and len(cf.calls) == 1
+        assert len(cloudscraper["profiles"]) == 1
+        message = str(exc.value)
+        assert f"refused through the plain and cloudscraper clients; {kind};" in message
+        assert exc.value.response.status_code == 403
+        assert isinstance(exc.value.__cause__, requests.HTTPError)
+
+    def test_a_switched_scraper_does_not_switch_again(self, scraper, cloudscraper):
+        cf = _Session(_Response(403, headers=_CF_403))
+        cloudscraper["sessions"].append(cf)
+        scraper._switch_to_cloudflare_session()
+
+        with pytest.raises(requests.HTTPError):
+            scraper.search("one piece")
+        assert len(cloudscraper["profiles"]) == 1
+
+    def test_worker_copy_keeps_the_parents_user_agent_headers_and_cookies(
+            self, scraper, monkeypatch):
+        import itertools
+
+        generated = itertools.count(1)
+        profiles = []
+
+        def fake(self, browser=None):
+            profiles.append(dict(browser))
+            self.session = _Session()
+            self.session.headers = {
+                "User-Agent": browser.get("custom") or f"Chrome/UA-{next(generated)}",
+                "Accept-Language": f"en-US;variant={len(profiles)}",
+            }
+            return self.session
+
+        monkeypatch.setattr(MangaParkCCScraper, "_use_cloudscraper", fake)
+        scraper._switch_to_cloudflare_session()
+        scraper.session.cookies.set("cf_clearance", "x", domain="mangapark.cc")
+
+        copy = scraper.worker_copy()
+
+        assert copy._cloudflare_session is True
+        assert copy.session is not scraper.session
+        assert dict(copy.session.headers) == dict(scraper.session.headers)
+        assert profiles[1]["custom"] == "Chrome/UA-1"
+        assert copy.session.cookies.get("cf_clearance") == "x"
+
+    def test_worker_copy_of_a_plain_scraper_stays_plain(self, scraper, cloudscraper):
+        copy = scraper.worker_copy()
+        assert copy._cloudflare_session is False
+        assert cloudscraper["profiles"] == []

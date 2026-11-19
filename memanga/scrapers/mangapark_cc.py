@@ -17,6 +17,11 @@ The site serves plain HTML:
   these batches until data-has-more is "false".
 - reader: /read/<slug>/<lang>/<chapter> with the pages as
   section.chapter-reader img on an external image host.
+
+Requests use the plain session. Some networks get Cloudflare's 403 for
+it where others are served, so a Cloudflare-marked 403 is retried once
+through cloudscraper, which the scraper then keeps; a refusal of both
+says so, with the refusal's headers.
 """
 
 import logging
@@ -25,7 +30,10 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import quote_plus, urlsplit
 
-from .base import BaseScraper, Chapter, Manga, _identifies_as_image
+import requests
+
+from .base import (BaseScraper, Chapter, Manga, CLOUDSCRAPER_CHROME_DESKTOP,
+                   _identifies_as_image)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +53,31 @@ class MangaParkCCSourceError(RuntimeError):
     chapter list the scraper expects."""
 
 
+def _cloudflare_refusal(response) -> bool:
+    """True for an HTTP 403 that Cloudflare's edge sent or passed on."""
+    if response is None or response.status_code != 403:
+        return False
+    headers = response.headers or {}
+    return (str(headers.get("server") or "").lower() == "cloudflare"
+            or "cf-ray" in headers or "cf-mitigated" in headers)
+
+
+def _refusal_facts(response) -> str:
+    """What a 403 says about itself, from its headers only. Cloudflare
+    marks a challenge response with ``cf-mitigated: challenge``."""
+    headers = (response.headers if response is not None else None) or {}
+    return (f"server={headers.get('server') or '-'}, "
+            f"cf-ray={'yes' if 'cf-ray' in headers else 'no'}, "
+            f"cf-mitigated={headers.get('cf-mitigated') or '-'}, "
+            f"content-type={headers.get('content-type') or '-'}")
+
+
+def _with_detail(error: requests.HTTPError, detail: str) -> requests.HTTPError:
+    """``error`` again, with ``detail`` appended; same type and response."""
+    return requests.HTTPError(f"{error} ({detail})", response=error.response,
+                              request=error.request)
+
+
 class MangaParkCCScraper(BaseScraper):
     """Scraper for MangaPark (mangapark.cc)."""
 
@@ -52,6 +85,82 @@ class MangaParkCCScraper(BaseScraper):
     base_url = "https://mangapark.cc"
     # Chapters are requested with lang=EN and only /en/ reader links kept.
     content_language = "en"
+
+    def __init__(self):
+        super().__init__()
+        # Set once the plain session was refused and cloudscraper's took over.
+        self._cloudflare_session = False
+
+    # ── transport ────────────────────────────────────────────────────
+
+    def _switch_to_cloudflare_session(self, user_agent: Optional[str] = None) -> None:
+        """Send this scraper's requests through cloudscraper from now on.
+
+        Some networks get Cloudflare's 403 for the plain ``requests``
+        client where others are served. cloudscraper keeps its own
+        User-Agent, which matches its TLS profile. Given ``user_agent``,
+        the session is built for that exact User-Agent (cloudscraper's
+        ``custom`` profile key) instead of a randomly picked one.
+        """
+        profile = dict(CLOUDSCRAPER_CHROME_DESKTOP)
+        if user_agent:
+            profile["custom"] = user_agent
+        self._use_cloudscraper(profile)
+        self._cloudflare_session = True
+
+    def _request(self, url: str, **kwargs) -> requests.Response:
+        """The shared request policy, falling back to cloudscraper once.
+
+        A request refused with Cloudflare's 403 is sent again through a
+        cloudscraper session, which this scraper then keeps. Any other
+        error, and a refusal of the cloudscraper session as well, is
+        raised as before (an HTTPError with the same response). A 403
+        that ends the request says which clients were refused and what
+        the refusal's headers show.
+        """
+        try:
+            return super()._request(url, **kwargs)
+        except requests.HTTPError as error:
+            if self._cloudflare_session:
+                raise
+            if not _cloudflare_refusal(error.response):
+                if error.response is not None and error.response.status_code == 403:
+                    raise _with_detail(error, (
+                        f"403 without Cloudflare markers; no cloudscraper retry; "
+                        f"{_refusal_facts(error.response)}")) from error
+                raise
+        logger.info("mangapark.cc refused the plain HTTP client (Cloudflare 403); "
+                    "retrying through cloudscraper")
+        self._switch_to_cloudflare_session()
+        try:
+            return super()._request(url, **kwargs)
+        except requests.HTTPError as error:
+            if error.response is None or error.response.status_code != 403:
+                raise
+            headers = error.response.headers or {}
+            kind = ("Cloudflare challenge"
+                    if str(headers.get("cf-mitigated") or "").lower() == "challenge"
+                    else "403 with Cloudflare markers, no challenge header"
+                    if _cloudflare_refusal(error.response)
+                    else "403 without Cloudflare markers")
+            raise _with_detail(error, (
+                f"refused through the plain and cloudscraper clients; {kind}; "
+                f"{_refusal_facts(error.response)}")) from error
+
+    def worker_copy(self) -> "MangaParkCCScraper":
+        """A copy for another thread; it keeps the cloudscraper session if
+        this scraper had to switch to it (the base copy rebuilds a plain
+        one), built for this session's User-Agent and given its exact
+        headers and cookies, since Cloudflare pairs a clearance cookie
+        with the client that earned it."""
+        clone = super().worker_copy()
+        if self._cloudflare_session:
+            parent = self.session
+            clone._switch_to_cloudflare_session(
+                user_agent=parent.headers.get("User-Agent"))
+            clone.session.headers = parent.headers.copy()
+            clone.session.cookies.update(parent.cookies)
+        return clone
 
     # ── URL helpers ──────────────────────────────────────────────────
 
