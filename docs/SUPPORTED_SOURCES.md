@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 298 domains across 226 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 297 domains across 225 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -37,7 +37,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | apollcomics.es | — | http | — | No | Not searched (template) | — |
 | aquareader.net | — | http | — | No | Not searched (template) | — |
 | atsu.moe | — | api | — | No | Included in search | — |
-| azmanga.com | — | http | — | No | Not searched (template) | — |
 | bakidou.com | — | http | — | No | Not searched (template) | Baki (All Series) |
 | bakirahen.com | — | http | — | No | Included in search | Baki Rahen |
 | bananafishmanga.com | — | http | — | No | Not searched (template) | Banana Fish |

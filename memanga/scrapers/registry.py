@@ -364,11 +364,6 @@ _cfg_deathnotefree = {
 # WordPress Madara configs
 # ═══════════════════════════════════════════════════════════════════
 
-_cfg_azmanga = {
-    "base_url": "https://azmanga.com",
-    "uses_ajax": True,
-}
-
 _cfg_mangaforfree = {
     "base_url": "https://mangaforfree.net",
     "uses_ajax": True,
@@ -738,7 +733,6 @@ TEMPLATE_SCRAPERS = {
     "www.deathnotemangafree.com": (OGImageMetaScraper, _cfg_deathnotefree),
 
     # ── WordPress Madara ──
-    "azmanga.com": (WordPressMadaraScraper, _cfg_azmanga),
     "mangaforfree.net": (WordPressMadaraScraper, _cfg_mangaforfree),
     "sxfmanga.net": (WordPressMadaraScraper, _cfg_sxfmanga),
     "ww2.sxfmanga.net": (WordPressMadaraScraper, _cfg_sxfmanga),
