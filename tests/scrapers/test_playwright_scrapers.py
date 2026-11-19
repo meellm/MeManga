@@ -241,7 +241,6 @@ PLAYWRIGHT_DOMAINS = [
     "omegascans.org",
     "hivetoons.org",
     "mangayy.org",
-    "manga4life.com",
     "isekaiscan.com",
     "zinmanga.com",
     "zazamanga.com",

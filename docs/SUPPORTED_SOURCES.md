@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 306 domains across 233 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 304 domains across 232 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -125,7 +125,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | lector-mangas.lat | lectormangass.net (Not searched (alias)) | http | es | No | Included in search | Spanish manga/manhwa reader |
 | madeabyss.com | — | http | — | No | Not searched (template) | Made in Abyss |
 | manga18fx.com | — | http | — | Yes | Not searched (template) | Adult manga |
-| manga4life.com | mangalife.us (Not searched (unreachable)) | browser | — | No | Not searched (unreachable) | — |
 | mangaball.net | — | http | — | No | Included in search | Multi-language |
 | mangabolt.com | — | http | — | No | Not searched (needs-js) | — |
 | mangaclash.com | — | browser | — | No | Not searched (unreachable) | — |

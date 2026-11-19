@@ -91,8 +91,6 @@ SEARCH_SKIPS: Dict[str, SearchSkip] = {
              "mangasee123.com"),
     **_skips(SkipReason.UNREACHABLE, "",
              "mangareader.to"),
-    **_skips(SkipReason.UNREACHABLE, "Former MangaSee mirror.",
-             "manga4life.com", "mangalife.us"),
     **_skips(SkipReason.UNREACHABLE,
              "Fails TLS verification and plain HTTP no longer serves "
              "MangaClash; www. has no DNS. No verified replacement domain.",

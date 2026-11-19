@@ -254,10 +254,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "mangayy.org": "mangayy:MangaYYScraper",
     "likemanga.io": "mangayy:MangaYYScraper",
 
-    # Manga4Life / MangaLife - Large library (Playwright + JS)
-    "manga4life.com": "manga4life:Manga4LifeScraper",
-    "mangalife.us": "manga4life:Manga4LifeScraper",
-
     # IsekaiScan - Isekai manga/manhwa (Playwright + Madara)
     "isekaiscan.com": "isekaiscan:IsekaiScanScraper",
 
