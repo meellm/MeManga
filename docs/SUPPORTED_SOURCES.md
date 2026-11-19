@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 276 domains across 208 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 275 domains across 207 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -93,7 +93,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | hyoukamanga.com | — | http | — | No | Not searched (template) | Hyouka |
 | imhentai.xxx | — | http | — | Yes | Included in search | Doujinshi |
 | jjkaisen.com | — | http | — | No | Not searched (template) | Jujutsu Kaisen |
-| jjkmanga.net | — | http | — | No | Included in search | Jujutsu Kaisen |
 | jojolandsmanga.com | w9.jojolandsmanga.com (Not searched (template)) | http | — | No | Not searched (template) | JoJo's Bizarre Adventure Part 9: The JOJOLands |
 | jojolionmanga.com | — | http | — | No | Included in search | JoJo Part 8: JoJolion |
 | jujutsukaisenmodulo.org | — | http | — | No | Not searched (template) | Jujutsu Kaisen Modulo |

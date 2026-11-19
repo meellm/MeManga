@@ -460,9 +460,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "blame-manga.com": "single_title_sites:BlameMangaScraper",
     "w9.blame-manga.com": "single_title_sites:BlameMangaScraper",
 
-    # JJKManga - Jujutsu Kaisen dedicated (cloudscraper + pic.readkakegurui.com CDN)
-    "jjkmanga.net": "jjkmanga:JJKMangaScraper",
-
     # Kagane - Multi-manga REST API + Playwright for DRM-protected images.
     # kagane.org now redirects to kagane.to; both sit behind a Cloudflare
     # challenge, so Kagane is skipped by search (see BROKEN_SEARCH_SOURCES).

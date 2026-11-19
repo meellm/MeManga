@@ -246,7 +246,6 @@ SOURCE_NOTES: Dict[str, str] = {
     "readjujutsukaisen.com": "Jujutsu Kaisen",
     "readjujutsukaisenmanga.com": "Jujutsu Kaisen + Modulo",
     "read-jjk.com": "Jujutsu Kaisen",
-    "jjkmanga.net": "Jujutsu Kaisen",
     "readchainsawman.com": "Chainsaw Man",
     "readonepiece.com": "One Piece",
     "onepieceread.com": "One Piece",
