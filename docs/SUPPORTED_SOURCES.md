@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 277 domains across 209 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 276 domains across 208 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -91,7 +91,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | homunculusmanga.com | — | http | — | No | Included in search | Homunculus |
 | hxhmanga.com | — | http | — | No | Not searched (template) | Hunter x Hunter |
 | hyoukamanga.com | — | http | — | No | Not searched (template) | Hyouka |
-| ichithewitchread.com | — | http | — | No | Not searched (template) | Ichi the Witch |
 | imhentai.xxx | — | http | — | Yes | Included in search | Doujinshi |
 | jjkaisen.com | — | http | — | No | Not searched (template) | Jujutsu Kaisen |
 | jjkmanga.net | — | http | — | No | Included in search | Jujutsu Kaisen |

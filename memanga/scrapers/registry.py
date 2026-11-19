@@ -101,13 +101,6 @@ _cfg_gachiakutayo = {
     "SEARCH_KEYWORDS": ["gachiakuta"],
 }
 
-_cfg_ichithewitchread = {
-    "BASE_URL": "https://ichithewitchread.com",
-    "ASSETS_URL": "https://assets.ichithewitchread.com/ichithewitch",
-    "MANGA_TITLE": "Ichi the Witch",
-    "SEARCH_KEYWORDS": ["ichi"],
-}
-
 _cfg_jujutsumodulo_nuxt = {
     "BASE_URL": "https://jujutsumodulo.com",
     "ASSETS_URL": "https://assets.jujutsumodulo.com/jujutsumodulo",
@@ -622,7 +615,6 @@ TEMPLATE_SCRAPERS = {
     "blackclova.com": (NuxtSSRScraper, _cfg_blackclova),
     "kagurabachiread.com": (NuxtSSRScraper, _cfg_kagurabachiread),
     "gachiakutayo.com": (NuxtSSRScraper, _cfg_gachiakutayo),
-    "ichithewitchread.com": (NuxtSSRScraper, _cfg_ichithewitchread),
     "jujutsumodulo.com": (NuxtSSRScraper, _cfg_jujutsumodulo_nuxt),
 
     # ── OG Image Meta ──
