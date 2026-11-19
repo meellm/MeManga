@@ -9,15 +9,15 @@ over plain HTTP JSON without a browser:
               ``{id, name, slug, cover, type}`` rows. The site's own search
               modal fetches this list once and filters it client-side, so
               search does the same.
-* chapters -> GET panel.olympusxyz.com/api/series/<slug>/chapters is a
-              paginated (40 per page) chapter list. The same path on the
-              main host is a Nuxt 404, and the panel host rejects the other
-              endpoints without signature headers, so only this one call
-              goes to the panel.
+* chapters -> GET /api/series/<slug>/chapters?page=N&direction=desc&type=comic
+              is a paginated chapter list whose ``meta.total`` gives the
+              number of rows. It used to live on a panel subdomain that no
+              longer resolves.
 * pages    -> GET /api/capitulo/<slug>/<chapter_id> returns ``chapter.pages``,
               an ordered list of absolute media.imagesolymp.xyz image URLs.
-              The reader page also SSR-renders the same ``<img>`` tags, which
-              serves as a fallback if the JSON shape changes.
+              The reader page SSR-renders the pages as
+              ``main.strip div.panel > img``, which is the fallback when the
+              JSON is unavailable or its shape changes.
 
 The catalogue mixes comics and text-only novels (``type == "novel"``).
 MeManga downloads page images, so novels are left out of search results
@@ -30,8 +30,13 @@ Page images are served directly (no Referer/token needed), so the base-class
 import re
 import unicodedata
 from typing import List, Optional, Tuple
+from urllib.parse import urljoin
 
 from .base import BaseScraper, Chapter, Manga
+
+
+class OlympusSourceError(RuntimeError):
+    """olympusxyz.com did not deliver a complete, well-formed chapter list."""
 
 
 class OlympusScraper(BaseScraper):
@@ -40,14 +45,14 @@ class OlympusScraper(BaseScraper):
     name = "olympus"
     base_url = "https://olympusxyz.com"
     content_language = "es"  # Spanish-language site
-    panel_api = "https://panel.olympusxyz.com/api"
 
     # Series pages are /series/comic-<slug> (or novela-<slug>); reader pages
     # are /capitulo/<chapter_id>/comic-<slug>.
     _SERIES_RE = re.compile(r"/series/(comic|novela)-([a-z0-9-]+)")
     _CHAPTER_RE = re.compile(r"/capitulo/(\d+)/(comic|novela)-([a-z0-9-]+)")
 
-    # Safety cap on chapter-list pagination (40 chapters per page).
+    # Safety cap on chapter-list pagination; reaching it while the list
+    # still reports more rows is an error, not a shorter list.
     _MAX_CHAPTER_PAGES = 100
 
     def __init__(self):
@@ -150,30 +155,58 @@ class OlympusScraper(BaseScraper):
     # Chapters
 
     def get_chapters(self, manga_url: str) -> List[Chapter]:
-        """Get all chapters for a comic via the paginated panel API."""
+        """Get all chapters for a comic via the paginated chapter API.
+
+        The list is read until it holds the ``meta.total`` rows it
+        reports (or, without a total, up to ``meta.last_page``). A list
+        that ends early, or a payload of the wrong shape, raises
+        ``OlympusSourceError`` instead of passing as a shorter list.
+        """
         kind, slug = self._parse_series_url(manga_url)
         if not slug or kind != "comic":
             # Novels have no image pages, so there is nothing to download.
             return []
 
         entries = []
-        page = 1
-        while page <= self._MAX_CHAPTER_PAGES:
-            data = self._get_json(
-                f"{self.panel_api}/series/{slug}/chapters"
-                f"?page={page}&direction=asc"
-            ) or {}
-            rows = data.get("data") or []
+        total = None
+        for page in range(1, self._MAX_CHAPTER_PAGES + 1):
+            url = (f"{self.base_url}/api/series/{slug}/chapters"
+                   f"?page={page}&direction=desc&type=comic")
+            data = self._get_json(url)
+            rows = data.get("data") if isinstance(data, dict) else None
+            if not isinstance(rows, list):
+                raise OlympusSourceError(
+                    f"Olympus returned an invalid chapter list for {url}")
             entries.extend(rows)
-            last_page = (data.get("meta") or {}).get("last_page") or 1
-            if not rows or page >= last_page:
-                break
-            page += 1
 
-        return self._parse_chapters(entries, slug)
+            meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+            if isinstance(meta.get("total"), int) and not isinstance(
+                    meta.get("total"), bool):
+                total = meta["total"]
+            if total is not None:
+                if len(entries) >= total:
+                    break
+                if not rows:
+                    raise OlympusSourceError(
+                        f"Olympus chapter list for {manga_url} has "
+                        f"{len(entries)} of the {total} chapters it reports; "
+                        f"refusing an incomplete list")
+                continue
+            last_page = meta.get("last_page")
+            if not rows or (isinstance(last_page, int) and page >= last_page):
+                break
+        else:
+            raise OlympusSourceError(
+                f"Olympus chapter list for {manga_url} still had more pages "
+                f"after {self._MAX_CHAPTER_PAGES} pages; refusing an "
+                f"incomplete list")
+
+        # Rows come newest first; parse them oldest first so a number
+        # released by several teams keeps its earliest listed release.
+        return self._parse_chapters(list(reversed(entries)), slug)
 
     def _parse_chapters(self, entries, slug: str) -> List[Chapter]:
-        """Parse panel chapter rows into Chapter objects, sorted ascending.
+        """Parse chapter-list rows into Chapter objects, sorted ascending.
 
         A number can be released by more than one team; keep the first
         release listed so the downloader gets one row per chapter.
@@ -231,11 +264,10 @@ class OlympusScraper(BaseScraper):
         if pages:
             return pages
 
-        # Fallback: the SSR reader page renders the same images as <img> tags.
-        try:
-            html = self._get_html(self._chapter_url(slug, chapter_id))
-        except Exception:
-            return []
+        # Fallback: the SSR reader page renders the same images as <img>
+        # tags. A failure to load it is a failure, not a chapter without
+        # pages.
+        html = self._get_html(self._chapter_url(slug, chapter_id))
         return self._parse_pages_html(html, chapter_id)
 
     @staticmethod
@@ -250,19 +282,32 @@ class OlympusScraper(BaseScraper):
                 pages.append(url.strip())
         return pages
 
-    @staticmethod
-    def _parse_pages_html(html: str, chapter_id) -> List[str]:
+    @classmethod
+    def _parse_pages_html(cls, html: str, chapter_id) -> List[str]:
         """Extract this chapter's page images from the SSR reader HTML.
 
-        Only images whose path carries the chapter id are kept, which skips
+        The reader strip holds one ``div.panel`` per page
+        (``main.strip div.panel > img``), in page order. Without it, only
+        images whose path carries the chapter id are kept, which skips
         covers, avatars and site chrome.
         """
         from bs4 import BeautifulSoup
 
         soup = BeautifulSoup(html or "", "html.parser")
-        marker = f"/{chapter_id}/"
         pages = []
         seen = set()
+        for img in soup.select("main.strip div.panel > img"):
+            src = (img.get("src") or img.get("data-src") or "").strip()
+            if not src:
+                continue
+            src = urljoin(cls.base_url + "/", src)
+            if src.startswith("http") and src not in seen:
+                seen.add(src)
+                pages.append(src)
+        if pages:
+            return pages
+
+        marker = f"/{chapter_id}/"
         for img in soup.find_all("img"):
             src = (img.get("src") or img.get("data-src") or "").strip()
             if not src.startswith("http") or marker not in src or src in seen:

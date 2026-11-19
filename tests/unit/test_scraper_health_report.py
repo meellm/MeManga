@@ -290,6 +290,7 @@ def _expected_errors():
 
     from memanga.scrapers.mangafire import MangaFireError
     from memanga.scrapers.mangapark import MangaParkSourceError
+    from memanga.scrapers.olympus import OlympusSourceError
     from memanga.scrapers.playwright_base import BrowserTimeoutError
     from memanga.scrapers.weebcentral import (WeebCentralChallengeError,
                                               WeebCentralError)
@@ -308,6 +309,8 @@ def _expected_errors():
         "mangapark-no-response": (MangaParkSourceError("No response for https://mangapark1.com/x"), stale),
         "mangapark-challenge": (MangaParkSourceError(
             "Cloudflare challenge not cleared for https://mangapark1.com/x"), stale),
+        "olympus-incomplete": (OlympusSourceError(
+            "Olympus chapter list for https://olympusxyz.com/series/comic-x has 40 of the 45 chapters it reports"), stale),
         "wrapped-timeout": (_wrapped(WeebCentralError("search failed"),
                                      PlaywrightTimeoutError("Timeout 20000ms")), stale),
         # Network and HTTP failures, as requests raises them (over

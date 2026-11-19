@@ -115,7 +115,7 @@ PARSING_PROBES = {
     # site actually carries.
     "mgeko.cc": ProbeSpec("MGeko (plain HTML)", query="solo leveling"),
     # Search filters the /api/series/list catalogue client-side, chapters
-    # come from the panel host's paginated list, and pages from the
+    # come from the main host's paginated chapter list, and pages from the
     # /api/capitulo reader payload (issue #183).
     "olympusxyz.com": ProbeSpec("Olympus Scanlation (Nuxt JSON API)",
                                  query="solo swordmaster"),

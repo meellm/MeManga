@@ -3,7 +3,7 @@
 The network-facing helpers (``_get_json`` / ``_get_html``) are replaced with
 fakes here - these tests exercise only the parsing, URL handling and
 pagination logic, using payloads shaped after the live ``olympusxyz.com``
-catalogue, panel chapter-list and reader responses.
+catalogue, chapter-list and reader responses.
 """
 
 from __future__ import annotations
@@ -141,9 +141,27 @@ def _row(cid, name, published="2026-09-30T17:20:46.000000Z"):
             "team": {"id": 1, "name": "Olympus "}, "read_by_auth": False}
 
 
-def _chapter_page(rows, page, last_page):
-    return {"data": rows, "meta": {"current_page": page, "last_page": last_page,
-                                   "per_page": 40}}
+def _chapter_page(rows, page, last_page, total=None):
+    meta = {"current_page": page, "last_page": last_page, "per_page": 40}
+    if total is not None:
+        meta["total"] = total
+    return {"data": rows, "meta": meta}
+
+
+def _serve_pages(monkeypatch, ol, pages):
+    """Answer chapter-list requests from ``pages[n]`` and record URLs."""
+    calls = []
+
+    def fake_get_json(url, *a, **k):
+        calls.append(url)
+        return pages[int(url.split("page=")[1].split("&")[0])]
+
+    monkeypatch.setattr(ol, "_get_json", fake_get_json)
+    return calls
+
+
+def _newest_first(first, last):
+    return [_row(i, str(i)) for i in range(last, first - 1, -1)]
 
 
 class TestChapters:
@@ -167,25 +185,79 @@ class TestChapters:
         assert OlympusScraper._chapter_number("Extra") == "Extra"
         assert OlympusScraper._chapter_number(None) == "0"
 
-    def test_walks_every_panel_page(self, monkeypatch, ol):
-        pages = {
-            1: _chapter_page([_row(i, str(i)) for i in range(1, 41)], 1, 2),
-            2: _chapter_page([_row(i, str(i)) for i in range(41, 46)], 2, 2),
-        }
-        calls = []
+    def test_reads_the_main_host_list_until_its_total(self, monkeypatch, ol):
+        """The panel subdomain no longer resolves; the list now comes from
+        the main host, newest first, with ``meta.total`` rows."""
+        calls = _serve_pages(monkeypatch, ol, {
+            1: _chapter_page(_newest_first(6, 45), 1, 2, total=45),
+            2: _chapter_page(_newest_first(1, 5), 2, 2, total=45),
+        })
 
-        def fake_get_json(url, *a, **k):
-            calls.append(url)
-            return pages[int(url.split("page=")[1].split("&")[0])]
-
-        monkeypatch.setattr(ol, "_get_json", fake_get_json)
         chapters = ol.get_chapters("https://olympusxyz.com/series/comic-los-gemelos-baek")
+
         assert calls == [
-            "https://panel.olympusxyz.com/api/series/los-gemelos-baek/chapters?page=1&direction=asc",
-            "https://panel.olympusxyz.com/api/series/los-gemelos-baek/chapters?page=2&direction=asc",
+            "https://olympusxyz.com/api/series/los-gemelos-baek/chapters?page=1&direction=desc&type=comic",
+            "https://olympusxyz.com/api/series/los-gemelos-baek/chapters?page=2&direction=desc&type=comic",
         ]
+        assert [c.number for c in chapters] == [str(n) for n in range(1, 46)]
+        assert not any("panel." in url for url in calls)
+
+    def test_list_that_ends_before_its_total_is_an_error(self, monkeypatch, ol):
+        from memanga.scrapers.olympus import OlympusSourceError
+
+        _serve_pages(monkeypatch, ol, {
+            1: _chapter_page(_newest_first(6, 45), 1, 2, total=45),
+            2: _chapter_page([], 2, 2, total=45),
+        })
+
+        with pytest.raises(OlympusSourceError,
+                           match="has 40 of the 45 chapters it reports"):
+            ol.get_chapters("https://olympusxyz.com/series/comic-los-gemelos-baek")
+
+    def test_without_a_total_last_page_ends_the_list(self, monkeypatch, ol):
+        calls = _serve_pages(monkeypatch, ol, {
+            1: _chapter_page(_newest_first(41, 45), 1, 2),
+            2: _chapter_page(_newest_first(1, 40), 2, 2),
+        })
+
+        chapters = ol.get_chapters("https://olympusxyz.com/series/comic-los-gemelos-baek")
+
+        assert len(calls) == 2
         assert len(chapters) == 45
-        assert chapters[-1].number == "45"
+
+    @pytest.mark.parametrize("payload", [None, {}, {"data": "x"}, ["rows"]])
+    def test_invalid_payload_is_an_error_not_an_empty_list(
+            self, monkeypatch, ol, payload):
+        from memanga.scrapers.olympus import OlympusSourceError
+
+        monkeypatch.setattr(ol, "_get_json", lambda *a, **k: payload)
+
+        with pytest.raises(OlympusSourceError, match="invalid chapter list"):
+            ol.get_chapters("https://olympusxyz.com/series/comic-solo-swordmaster")
+
+    def test_a_list_that_never_ends_is_an_error(self, monkeypatch, ol):
+        from memanga.scrapers.olympus import OlympusSourceError
+
+        monkeypatch.setattr(OlympusScraper, "_MAX_CHAPTER_PAGES", 3)
+        _serve_pages(monkeypatch, ol, {
+            p: _chapter_page([_row(p, str(p))], p, None) for p in range(1, 10)
+        })
+
+        with pytest.raises(OlympusSourceError, match="still had more pages"):
+            ol.get_chapters("https://olympusxyz.com/series/comic-solo-swordmaster")
+
+    def test_repeated_number_keeps_the_earliest_release(self, monkeypatch, ol):
+        """Rows arrive newest first; the oldest listed release of a number
+        still wins, as it did when the list was read oldest first."""
+        _serve_pages(monkeypatch, ol, {
+            1: _chapter_page([_row(30, "2"), _row(20, "2"), _row(10, "1")],
+                             1, 1, total=3),
+        })
+
+        chapters = ol.get_chapters("https://olympusxyz.com/series/comic-solo-swordmaster")
+
+        assert [c.number for c in chapters] == ["1", "2"]
+        assert chapters[1].url.endswith("/capitulo/20/comic-solo-swordmaster")
 
     def test_novel_and_invalid_urls_return_empty(self, monkeypatch, ol):
         def boom(*a, **k):
@@ -261,6 +333,39 @@ class TestPages:
         monkeypatch.setattr(ol, "_get_html", fake_get_html)
         assert ol.get_pages(CHAPTER_URL) == [f"{MEDIA}/1_01.webp", f"{MEDIA}/1_02.webp"]
         assert seen["url"] == CHAPTER_URL
+
+    def test_html_fallback_reads_the_reader_strip_in_order(self, ol):
+        """The reader renders one ``div.panel`` per page in
+        ``main.strip``; its images are the pages, in order, even when
+        their paths do not carry the chapter id."""
+        html = """
+        <html><body>
+          <img src="https://media.imagesolymp.xyz/comics/covers/1777/c-xl.webp"/>
+          <main class="strip">
+            <div class="panel"><img src="https://cdn.example.test/p/03.webp"/></div>
+            <div class="panel"><img src="/media/p/04.webp"/></div>
+            <div class="panel"><img src="https://cdn.example.test/p/05.webp"/></div>
+          </main>
+        </body></html>
+        """
+        assert ol._parse_pages_html(html, "133779") == [
+            "https://cdn.example.test/p/03.webp",
+            "https://olympusxyz.com/media/p/04.webp",
+            "https://cdn.example.test/p/05.webp",
+        ]
+
+    def test_reader_html_failure_is_raised_not_an_empty_chapter(
+            self, monkeypatch, ol):
+        import requests
+
+        def fail(*a, **k):
+            raise requests.HTTPError("404 Client Error")
+
+        monkeypatch.setattr(ol, "_get_json", fail)
+        monkeypatch.setattr(ol, "_get_html", fail)
+
+        with pytest.raises(requests.HTTPError):
+            ol.get_pages(CHAPTER_URL)
 
     def test_get_pages_invalid_url_returns_empty(self, ol):
         assert ol.get_pages("https://olympusxyz.com/series/comic-solo-swordmaster") == []
