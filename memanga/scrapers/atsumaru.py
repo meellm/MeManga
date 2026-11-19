@@ -40,6 +40,22 @@ def _cloudflare_refusal(response) -> bool:
             or "cf-ray" in headers or "cf-mitigated" in headers)
 
 
+def _refusal_facts(response) -> str:
+    """What a 403 says about itself, from its headers only. Cloudflare
+    marks a challenge response with ``cf-mitigated: challenge``."""
+    headers = (response.headers if response is not None else None) or {}
+    return (f"server={headers.get('server') or '-'}, "
+            f"cf-ray={'yes' if 'cf-ray' in headers else 'no'}, "
+            f"cf-mitigated={headers.get('cf-mitigated') or '-'}, "
+            f"content-type={headers.get('content-type') or '-'}")
+
+
+def _with_detail(error: requests.HTTPError, detail: str) -> requests.HTTPError:
+    """``error`` again, with ``detail`` appended; same type and response."""
+    return requests.HTTPError(f"{error} ({detail})", response=error.response,
+                              request=error.request)
+
+
 class AtsumaruScraper(BaseScraper):
     """Scraper for Atsumaru (atsu.moe)."""
 
@@ -88,17 +104,37 @@ class AtsumaruScraper(BaseScraper):
         A request refused with Cloudflare's 403 is sent again through a
         cloudscraper session, which this scraper then keeps. Any other
         error, and a refusal of the cloudscraper session as well, is
-        raised as before.
+        raised as before. A 403 that ends the request says which clients
+        were refused and what the refusal's headers show.
         """
         try:
             return super()._request(url, **kwargs)
         except requests.HTTPError as error:
-            if self._cloudflare_session or not _cloudflare_refusal(error.response):
+            if self._cloudflare_session:
+                raise
+            if not _cloudflare_refusal(error.response):
+                if error.response is not None and error.response.status_code == 403:
+                    raise _with_detail(error, (
+                        f"403 without Cloudflare markers; no cloudscraper retry; "
+                        f"{_refusal_facts(error.response)}")) from error
                 raise
         logger.info("atsu.moe refused the plain HTTP client (Cloudflare 403); "
                     "retrying through cloudscraper")
         self._switch_to_cloudflare_session()
-        return super()._request(url, **kwargs)
+        try:
+            return super()._request(url, **kwargs)
+        except requests.HTTPError as error:
+            if error.response is None or error.response.status_code != 403:
+                raise
+            headers = error.response.headers or {}
+            kind = ("Cloudflare challenge"
+                    if str(headers.get("cf-mitigated") or "").lower() == "challenge"
+                    else "403 with Cloudflare markers, no challenge header"
+                    if _cloudflare_refusal(error.response)
+                    else "403 without Cloudflare markers")
+            raise _with_detail(error, (
+                f"refused through the plain and cloudscraper clients; {kind}; "
+                f"{_refusal_facts(error.response)}")) from error
 
     def worker_copy(self) -> "AtsumaruScraper":
         """A copy for another thread; it keeps the cloudscraper session if

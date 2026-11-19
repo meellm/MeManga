@@ -474,23 +474,42 @@ class TestCloudflareFallback:
 
         scraper.session = _Session(_Response(403, headers={"server": "nginx"}))
 
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(requests.HTTPError) as exc:
             scraper.search("one piece")
         assert cloudscraper["profiles"] == []
+        # The error says why no cloudscraper retry was made.
+        assert "403 without Cloudflare markers; no cloudscraper retry" in str(exc.value)
+        assert "server=nginx, cf-ray=no" in str(exc.value)
+        assert exc.value.response.status_code == 403
 
+    @pytest.mark.parametrize("second, kind", [
+        ({"server": "cloudflare", "cf-ray": "1-IAD",
+          "content-type": "text/html; charset=UTF-8"},
+         "403 with Cloudflare markers, no challenge header"),
+        ({"server": "cloudflare", "cf-ray": "1-IAD", "cf-mitigated": "challenge",
+          "content-type": "text/html"},
+         "Cloudflare challenge"),
+    ])
     def test_refusal_of_cloudscraper_too_is_raised_not_looped(
-            self, scraper, cloudscraper):
+            self, scraper, cloudscraper, second, kind):
         import requests
 
         plain = _Session(_Response(403, headers=_CF_403))
-        cf = _Session(_Response(403, headers=_CF_403))
+        cf = _Session(_Response(403, headers=second))
         scraper.session = plain
         cloudscraper["sessions"].append(cf)
 
-        with pytest.raises(requests.HTTPError):
+        with pytest.raises(requests.HTTPError) as exc:
             scraper.search("one piece")
         assert len(plain.calls) == 1 and len(cf.calls) == 1
         assert len(cloudscraper["profiles"]) == 1
+        # Which clients were refused, and whether the refusal carried the
+        # challenge header, read from its headers only.
+        message = str(exc.value)
+        assert f"refused through the plain and cloudscraper clients; {kind};" in message
+        assert "cf-ray=yes" in message
+        assert exc.value.response.status_code == 403
+        assert isinstance(exc.value.__cause__, requests.HTTPError)
 
     def test_worker_copy_of_a_switched_scraper_keeps_cloudscraper(
             self, scraper, cloudscraper):
