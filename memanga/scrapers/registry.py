@@ -101,13 +101,6 @@ _cfg_gachiakutayo = {
     "SEARCH_KEYWORDS": ["gachiakuta"],
 }
 
-_cfg_jujutsumodulo_nuxt = {
-    "BASE_URL": "https://jujutsumodulo.com",
-    "ASSETS_URL": "https://assets.jujutsumodulo.com/jujutsumodulo",
-    "MANGA_TITLE": "Jujutsu Kaisen Modulo",
-    "SEARCH_KEYWORDS": ["jujutsu modulo"],
-}
-
 # ═══════════════════════════════════════════════════════════════════
 # OG Image Meta configs
 # ═══════════════════════════════════════════════════════════════════
@@ -615,7 +608,6 @@ TEMPLATE_SCRAPERS = {
     "blackclova.com": (NuxtSSRScraper, _cfg_blackclova),
     "kagurabachiread.com": (NuxtSSRScraper, _cfg_kagurabachiread),
     "gachiakutayo.com": (NuxtSSRScraper, _cfg_gachiakutayo),
-    "jujutsumodulo.com": (NuxtSSRScraper, _cfg_jujutsumodulo_nuxt),
 
     # ── OG Image Meta ──
     "frieren-manga.com": (OGImageMetaScraper, _cfg_frierenmanga),
