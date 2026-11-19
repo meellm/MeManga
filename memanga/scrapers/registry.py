@@ -94,13 +94,6 @@ _cfg_kagurabachiread = {
     "SEARCH_KEYWORDS": ["kagurabachi"],
 }
 
-_cfg_grandbluemanga = {
-    "BASE_URL": "https://grandbluemanga.com",
-    "ASSETS_URL": "https://assets.grandbluemanga.com/grandblue",
-    "MANGA_TITLE": "Grand Blue Dreaming",
-    "SEARCH_KEYWORDS": ["grand blue"],
-}
-
 _cfg_gachiakutayo = {
     "BASE_URL": "https://gachiakutayo.com",
     "ASSETS_URL": "https://assets.gachiakutayo.com/gachiakuta",
@@ -628,7 +621,6 @@ TEMPLATE_SCRAPERS = {
     "onepunchmanofficial.com": (NuxtSSRScraper, _cfg_onepunchmanofficial),
     "blackclova.com": (NuxtSSRScraper, _cfg_blackclova),
     "kagurabachiread.com": (NuxtSSRScraper, _cfg_kagurabachiread),
-    "grandbluemanga.com": (NuxtSSRScraper, _cfg_grandbluemanga),
     "gachiakutayo.com": (NuxtSSRScraper, _cfg_gachiakutayo),
     "ichithewitchread.com": (NuxtSSRScraper, _cfg_ichithewitchread),
     "jujutsumodulo.com": (NuxtSSRScraper, _cfg_jujutsumodulo_nuxt),

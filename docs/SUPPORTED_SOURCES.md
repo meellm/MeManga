@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 278 domains across 210 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 277 domains across 209 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -78,7 +78,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | gachiakutayo.com | — | http | — | No | Not searched (template) | Gachiakuta |
 | gantzmangafree.com | — | http | — | No | Not searched (template) | Gantz |
 | goblin-slayer-manga.online | — | http | — | No | Not searched (template) | Goblin Slayer |
-| grandbluemanga.com | — | http | — | No | Not searched (template) | Grand Blue Dreaming |
 | gutsberserk.com | — | http | — | No | Not searched (template) | Berserk |
 | hajime-no-ippo-manga.online | — | http | — | No | Included in search | Hajime no Ippo |
 | hajime-noippo.com | w22.hajime-noippo.com (Included in search) | http | — | No | Included in search | Hajime no Ippo |
