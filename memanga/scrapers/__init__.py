@@ -79,10 +79,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "bato.to": "batoto:BatoToScraper",
     "batoto.to": "batoto:BatoToScraper",
 
-    # Mangakakalot
-    "mangakakalot.com": "mangakakalot:MangakakalotScraper",
-    "mangakakalot.to": "mangakakalot:MangakakalotScraper",
-
     # Manganato
     "manganato.com": "manganato:ManganatoScraper",
     "chapmanganato.to": "manganato:ManganatoScraper",

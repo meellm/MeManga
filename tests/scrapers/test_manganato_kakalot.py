@@ -1,7 +1,7 @@
-"""HTML-fixture tests for the Manganato + Mangakakalot family.
+"""HTML-fixture tests for the Manganato scraper.
 
-These two share nearly identical HTML structure (same network), so we
-test them in one file with shared fixtures.
+The fixtures live under fixtures/manganato_kakalot/, named after the
+site family the scraper was written for.
 """
 
 from __future__ import annotations
@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 
 from memanga.scrapers.manganato import ManganatoScraper
-from memanga.scrapers.mangakakalot import MangakakalotScraper
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -74,42 +73,3 @@ class TestManganatoDownload:
         monkeypatch.setattr(s.session, "get",
                              lambda *a, **k: (_ for _ in ()).throw(IOError("x")))
         assert s.download_image("https://x", tmp_path / "p.jpg") is False
-
-
-# ──────────────────────────────────────────────────────────────────────
-# Mangakakalot
-# ──────────────────────────────────────────────────────────────────────
-
-
-class TestKakalotSearch:
-    def test_absolutizes_relative_urls(self, patch_html, load_fixture):
-        s = MangakakalotScraper()
-        patch_html(s, load_fixture("manganato_kakalot", "kakalot_search.html"))
-        results = s.search("piece")
-        # Two unique mangas
-        assert len(results) == 2
-        # Relative href got absolutized
-        rel = next((r for r in results if "Relative" in r.title), None)
-        assert rel and rel.url.startswith("https://mangakakalot.com")
-
-
-class TestKakalotChapters:
-    def test_extracts_chapters_with_absolute_urls(self, patch_html, load_fixture):
-        s = MangakakalotScraper()
-        patch_html(s, load_fixture("manganato_kakalot", "kakalot_manga.html"))
-        chapters = s.get_chapters("https://mangakakalot.com/manga/one_piece")
-        # 4 chapters
-        assert len(chapters) == 4
-        assert all(c.url.startswith("https://mangakakalot.com") for c in chapters)
-        nums = [c.numeric for c in chapters]
-        assert nums == sorted(nums)
-
-
-class TestKakalotPages:
-    def test_absolutizes_relative_image_paths(self, patch_html, load_fixture):
-        s = MangakakalotScraper()
-        patch_html(s, load_fixture("manganato_kakalot", "kakalot_chapter.html"))
-        pages = s.get_pages("https://mangakakalot.com/chapter/one_piece/chapter_1")
-        # 3 images, including relative one that got absolutized
-        assert len(pages) == 3
-        assert any(p.startswith("https://mangakakalot.com/relative-page") for p in pages)

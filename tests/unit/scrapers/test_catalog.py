@@ -9,8 +9,8 @@ from memanga.search import BROKEN_SEARCH_SOURCES
 def test_search_skips_preserve_legacy_set_and_registered_domains():
     legacy = {
         "mangasee123.com", "mangareader.to", "chapmanganato.to",
-        "readmanganato.com", "manganato.com", "mangakakalot.com",
-        "mangakakalot.to", "manga4life.com", "mangalife.us",
+        "readmanganato.com", "manganato.com",
+        "manga4life.com", "mangalife.us",
         "mangaclash.com", "mangatown.com", "www.mangatown.com",
         "manhwa18.cc", "mangafreak.me", "mangafreak.ws",
         "ww2.mangafreak.me", "bato.to", "batoto.to", "hiperdex.com",

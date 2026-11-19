@@ -117,8 +117,6 @@ def test_plain_title_wire_format_is_unchanged(monkeypatch, fake_response):
 PATH_CASES = [
     ("manganato", "ManganatoScraper", "/search/story/",
      lambda q: q.replace(" ", "_")),
-    ("mangakakalot", "MangakakalotScraper", "/search/story/",
-     lambda q: q.replace(" ", "_")),
     ("manganato_gg", "ManganatoGGScraper", "/search/story/",
      lambda q: q.replace(" ", "_")),
     ("mangafreak", "MangaFreakScraper", "/Find/", lambda q: q),
