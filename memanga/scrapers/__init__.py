@@ -247,10 +247,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "hivetoons.org": "hivetoons:HivetoonsScraper",
     "hivetoon.com": "hivetoons:HivetoonsScraper",
 
-    # MangaYY - WordPress Madara (Playwright)
-    "mangayy.org": "mangayy:MangaYYScraper",
-    "likemanga.io": "mangayy:MangaYYScraper",
-
     # ZazaManga - Manga aggregator (Playwright, redirected series sites)
     "zazamanga.com": "zazamanga:ZazaMangaScraper",
     "www.zazamanga.com": "zazamanga:ZazaMangaScraper",

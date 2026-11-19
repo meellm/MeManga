@@ -239,7 +239,6 @@ PLAYWRIGHT_DOMAINS = [
     "toonily.me",
     "omegascans.org",
     "hivetoons.org",
-    "mangayy.org",
     "zazamanga.com",
     "kunmanga.com",
     "manytoon.com",

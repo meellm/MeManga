@@ -168,7 +168,6 @@ POPULAR_SOURCES: List[str] = [
     "manhuaplus.org",
     "mangaeffect.com",
     "mangafox.fun",
-    "mangayy.org",
 ]
 
 DEFAULT_ENABLED_COUNT = 15
