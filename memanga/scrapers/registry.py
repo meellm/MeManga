@@ -616,13 +616,6 @@ _cfg_readjjkfree = {
     "cdn_domains": ["planeptune.us", "wp-content/uploads"],
 }
 
-_cfg_bleachorg = {
-    "base_url": "https://www.bleachmanga.org",
-    "manga_title": "Bleach",
-    "manga_slug": "bleach",
-    "cdn_domains": ["cdn.mangaclash.com"],
-}
-
 _cfg_kagurabachimnew = {
     "base_url": "https://kagurabachi-manga.com",
     "manga_title": "Kagurabachi",
@@ -761,8 +754,6 @@ TEMPLATE_SCRAPERS = {
     "hxhmanga.com": (MangosmScraper, _cfg_hxh),
     "jujutsukaisenmodulo.org": (MangosmScraper, _cfg_jjkmodulo),
     "readjujutsukaisenfree.com": (MangosmScraper, _cfg_readjjkfree),
-    "bleachmanga.org": (MangosmScraper, _cfg_bleachorg),
-    "www.bleachmanga.org": (MangosmScraper, _cfg_bleachorg),
     "kagurabachi-manga.com": (MangosmScraper, _cfg_kagurabachimnew),
 }
 

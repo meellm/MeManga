@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 287 domains across 217 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 286 domains across 216 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -47,7 +47,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | blackclova.com | — | http | — | No | Not searched (template) | Black Clover |
 | blame-manga.com | w9.blame-manga.com (Included in search) | http | — | No | Included in search | BLAME! |
 | bleach-read.com | w38.bleach-read.com (Not searched (template)) | http | — | No | Not searched (template) | Bleach |
-| bleachmanga.org | — | http | — | No | Not searched (template) | Bleach |
 | blue-box-manga.online | — | http | — | No | Not searched (template) | Blue Box |
 | blue-exorcist.online | — | http | — | No | Not searched (template) | Blue Exorcist |
 | blueexorcistmanga.com | — | http | — | No | Included in search | Blue Exorcist |
