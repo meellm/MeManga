@@ -84,7 +84,6 @@ PARSING_PROBES = {
     "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),
     "tcbonepiecechapters.com": ProbeSpec("TCB Scans (project list)",
                                            query="one piece"),
-    "manganato.com": ProbeSpec("Manganato", query="naruto"),
     "mangahub.io": ProbeSpec("MangaHub", query="one piece"),
     # dm5 reader: page URLs are only reachable through chapterfun.ashx,
     # and the CDN hotlink-checks the Referer (issue #174). This probe

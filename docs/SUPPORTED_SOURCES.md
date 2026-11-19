@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 308 domains across 233 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 305 domains across 232 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -136,7 +136,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangafreak.ws | mangafreak.me (Not searched (unreliable)), ww2.mangafreak.me (Not searched (unreliable)) | http | — | No | Not searched (unreliable) | — |
 | mangago.me | — | http | — | No | Not searched (region-blocked) | Yaoi/Shoujo collection |
 | mangahub.us | — | http | — | No | Not searched (needs-js) | MangaHub network |
-| manganato.com | chapmanganato.to (Not searched (unreachable)), readmanganato.com (Not searched (unreachable)) | http | — | No | Not searched (unreachable) | — |
 | manganato.gg | — | browser | — | No | Not searched (challenge) | — |
 | mangaread.org | — | http | — | No | Not searched (template) | — |
 | mangareader.to | — | http | — | No | Not searched (unreachable) | General library |
