@@ -128,9 +128,6 @@ SITES = {
     "elusive-samurai.com": (
         "ElusiveSamuraiScraper", "elusivesamurai", "https://elusive-samurai.com",
         "The Elusive Samurai", "https://elusive-samurai.com/", None),
-    "readbluelock.org": (
-        "ReadBlueLockOrgScraper", "readbluelockorg", "https://readbluelock.org",
-        "Blue Lock", "https://readbluelock.org/", None),
     "drstonemanga.com": (
         "DrStoneMangaScraper", "drstonemanga", "https://drstonemanga.com",
         "Dr. Stone", "https://drstonemanga.com/", None),
@@ -555,12 +552,6 @@ class TestNumberedLayout:
             ("2", "Chapter 2", "https://drstonemanga.com/chapter/2"),
             ("232", "Chapter 232", "https://drstonemanga.com/chapter/232"),
         ]
-
-    def test_read_blue_lock_lazy_images(self, patch_html):
-        s = get_scraper("readbluelock.org")
-        patch_html(s, '<img src="https://readbluelock.org/logo.png" '
-                      'data-src="https://images.asuratoon.top/1.jpg">')
-        assert s.get_pages("x") == ["https://images.asuratoon.top/1.jpg"]
 
 
 # ──────────────────────────────────────────────────────────────────────

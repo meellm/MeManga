@@ -269,7 +269,6 @@ SOURCE_NOTES: Dict[str, str] = {
     "sakamotomanga.com": "Sakamoto Days",
     "sakamoto-days.online": "Sakamoto Days",
     "elusive-samurai.com": "The Elusive Samurai",
-    "readbluelock.org": "Blue Lock",
     "bluelockread.online": "Blue Lock",
     "bluelockmanga.net": "Blue Lock",
     "bluelock-read.com": "Blue Lock",

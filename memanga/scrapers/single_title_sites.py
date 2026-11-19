@@ -488,16 +488,6 @@ class ElusiveSamuraiScraper(NumberedChaptersScraper):
     image_cdn_filters = ("readkakegurui.com",)
 
 
-class ReadBlueLockOrgScraper(NumberedChaptersScraper):
-    """Scraper for readbluelock.org - Blue Lock (images on images.asuratoon.top)."""
-
-    name = "readbluelockorg"
-    base_url = "https://readbluelock.org"
-    manga_title = "Blue Lock"
-    image_attrs = ("data-src", "src")
-    image_cdn_filters = ("asuratoon.top",)
-
-
 class DrStoneMangaScraper(NumberedChaptersScraper):
     """Scraper for drstonemanga.com - Dr. Stone (images on assets.drstonemanga.com)."""
 

@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 288 domains across 218 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 287 domains across 217 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -172,7 +172,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | readberserk.com | — | http | — | No | Included in search | Berserk |
 | readblackclover.com | ww7.readblackclover.com (Included in search) | http | — | No | Included in search | Black Clover |
 | readblacklagoon.com | — | http | — | No | Not searched (template) | Black Lagoon |
-| readbluelock.org | — | http | — | No | Included in search | Blue Lock |
 | readchainsawman.com | — | http | — | No | Included in search | Chainsaw Man |
 | readclaymore.com | — | http | — | No | Not searched (template) | Claymore |
 | readcomiconline.li | — | http | — | No | Included in search | Western comics |

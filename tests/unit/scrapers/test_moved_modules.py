@@ -49,7 +49,6 @@ MOVED = {
     "readkenganashura": ("ReadKenganAshuraScraper", "read-kengan-ashura.com"),
     "bocchitherockmanga": ("BocchiTheRockMangaScraper", "bocchitherockmanga.com"),
     "elusivesamurai": ("ElusiveSamuraiScraper", "elusive-samurai.com"),
-    "readbluelockorg": ("ReadBlueLockOrgScraper", "readbluelock.org"),
     "drstonemanga": ("DrStoneMangaScraper", "drstonemanga.com"),
     "mangaeffect": ("MangaReadScraper", "mangaeffect.com"),
     "mangafoxfun": ("MangaFoxFunScraper", "mangafox.fun"),

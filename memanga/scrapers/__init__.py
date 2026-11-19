@@ -317,9 +317,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "elusive-samurai.com": "single_title_sites:ElusiveSamuraiScraper",
     "w4.elusive-samurai.com": "single_title_sites:ElusiveSamuraiScraper",
 
-    # ReadBlueLockOrg - Blue Lock dedicated (images.asuratoon.top)
-    "readbluelock.org": "single_title_sites:ReadBlueLockOrgScraper",
-
     # BocchiTheRockManga - Bocchi the Rock! dedicated (cdn.black-clover.org)
     "bocchitherockmanga.com": "single_title_sites:BocchiTheRockMangaScraper",
     "w5.bocchitherockmanga.com": "single_title_sites:BocchiTheRockMangaScraper",
@@ -581,7 +578,7 @@ _MOVED_MODULES: Dict[str, str] = {
         "bluelockmangaorg", "kaijuno8manga", "dragonballsuperonline",
         "dragonballsuperorg", "onepiecemanga1", "readslamdunkonline",
         "readtokyorevengers", "fairytailmangafree", "readkenganashura",
-        "bocchitherockmanga", "elusivesamurai", "readbluelockorg", "drstonemanga",
+        "bocchitherockmanga", "elusivesamurai", "drstonemanga",
     ), "single_title_sites"),
     "mangaeffect": "coffeemanga",
     "mangafoxfun": "mangapanda",
