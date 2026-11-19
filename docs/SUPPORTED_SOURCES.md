@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 301 domains across 229 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 300 domains across 228 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -202,7 +202,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | readundeadunluck.com | — | http | — | No | Not searched (template) | Undead Unluck |
 | real-manga.online | — | http | — | No | Not searched (template) | Real |
 | record-of-ragnarok-manga.com | w1.record-of-ragnarok-manga.com (Not searched (template)) | http | — | No | Not searched (template) | Record of Ragnarok |
-| reset-scans.org | — | http | — | No | Not searched (template) | — |
 | rezero-manga.online | re-zero-manga.online (Not searched (template)) | http | — | No | Not searched (template) | Re:ZERO -Starting Life in Another World- |
 | ruyamanga2.com | — | http | — | No | Not searched (template) | — |
 | s2manga.com | s2manga.io (Not searched (template)) | http | — | No | Not searched (template) | — |

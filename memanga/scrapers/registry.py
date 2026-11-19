@@ -500,11 +500,6 @@ _cfg_rawxz = {
     "image_cdn_filters": ["rawxz.xyz"],
 }
 
-_cfg_resetscans = {
-    "base_url": "https://reset-scans.org",
-    "uses_ajax": True,
-}
-
 _cfg_ruyamanga = {
     "base_url": "https://www.ruyamanga2.com",
     "uses_ajax": True,
@@ -782,7 +777,6 @@ TEMPLATE_SCRAPERS = {
     "mangawow.com": (WordPressMadaraScraper, _cfg_mangawow),
     "pawmanga.com": (WordPressMadaraScraper, _cfg_pawmanga),
     "rawjx.net": (WordPressMadaraScraper, _cfg_rawxz),
-    "reset-scans.org": (WordPressMadaraScraper, _cfg_resetscans),
     "ruyamanga2.com": (WordPressMadaraScraper, _cfg_ruyamanga),
     "www.ruyamanga2.com": (WordPressMadaraScraper, _cfg_ruyamanga),
     "shinobiscans.com": (WordPressMadaraScraper, _cfg_shinobiscans),
