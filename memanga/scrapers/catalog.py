@@ -111,7 +111,6 @@ SEARCH_SKIPS: Dict[str, SearchSkip] = {
              "truemanga.com", "mangamonk.com",
              "mangahub.us",
              "hivetoons.org", "hivetoon.com",
-             "isekaiscan.com",
              "kunmanga.com",
              "flamecomics.xyz"),
     **_skips(SkipReason.CHALLENGE, "Even cloudscraper gets a 403.",
@@ -225,7 +224,6 @@ SOURCE_NOTES: Dict[str, str] = {
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",
-    "isekaiscan.com": "Isekai focused",
     "manhuaplus.org": "Manhua focused",
     "manhuaus.org": "Manhua focused",
     "manhuafast.com": "Manhua focused",
