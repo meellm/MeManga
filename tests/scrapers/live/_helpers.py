@@ -26,6 +26,7 @@ from memanga.scrapers.mangafire import MangaFireError
 from memanga.scrapers.mangapark import MangaParkSourceError
 from memanga.scrapers.olympus import OlympusSourceError
 from memanga.scrapers.weebcentral import WeebCentralError
+from memanga.scrapers.zonatmo import ZonaTMOSourceError
 
 
 # Status constants — used in test output and the JSON report.
@@ -207,6 +208,7 @@ SOURCE_ERRORS = (
     MangaParkSourceError,
     OlympusSourceError,
     WeebCentralError,
+    ZonaTMOSourceError,
 )
 
 

@@ -2,7 +2,7 @@
 ZonaTMO scraper - Spanish manga/manhwa/manhua library
 Site: zonatmo.org
 
-ZonaTMO is a server-rendered Laravel site, so plain HTTP + HTML parsing
+ZonaTMO is a server-rendered Laravel site, so HTML parsing
 covers the whole pipeline:
 
 * search   -> GET /biblioteca?title=<query> lists result cards linking to
@@ -22,21 +22,68 @@ and novel URLs resolve to no chapters.
 
 Image downloads send the site Referer and reject non-image bodies so a
 CDN block page can never end up saved as a page.
+
+HTML pages are fetched over plain HTTP. Only when that request is
+refused with a Cloudflare-marked HTTP 403 is the same page loaded once
+in a headless browser, which then has a bounded time to get past a
+Cloudflare challenge. A page that stays challenged, or answers with an
+error status, is raised as an error, never parsed as data.
 """
 
 import logging
 import re
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
-from .base import BaseScraper, Chapter, Manga, looks_like_image
+import requests
+
+from .base import Chapter, Manga, looks_like_image
+from .playwright_base import PlaywrightScraper, step_timeout_ms
 
 logger = logging.getLogger(__name__)
 
 
-class ZonaTMOScraper(BaseScraper):
-    """Scraper for ZonaTMO (zonatmo.org)."""
+class ZonaTMOSourceError(RuntimeError):
+    """zonatmo.org refused a page through both the plain client and the
+    browser, or the browser was left on a challenge or an error status."""
+
+
+def _cloudflare_refusal(response) -> bool:
+    """True for an HTTP 403 that Cloudflare's edge sent or passed on."""
+    if response is None or response.status_code != 403:
+        return False
+    headers = response.headers or {}
+    return (str(headers.get("server") or "").lower() == "cloudflare"
+            or "cf-ray" in headers or "cf-mitigated" in headers)
+
+
+def _refusal_facts(response) -> str:
+    """What a refusal says about itself, from its headers only."""
+    headers = (response.headers if response is not None else None) or {}
+    return (f"server={headers.get('server') or '-'}, "
+            f"cf-ray={'yes' if 'cf-ray' in headers else 'no'}, "
+            f"cf-mitigated={headers.get('cf-mitigated') or '-'}, "
+            f"content-type={headers.get('content-type') or '-'}")
+
+
+def _on_challenge(page, response=None) -> bool:
+    """True while the browser page is a Cloudflare challenge: the
+    response is marked ``cf-mitigated: challenge``, or the page carries
+    the interstitial's "Just a moment" title."""
+    try:
+        if response is not None and str(
+                (response.headers or {}).get("cf-mitigated") or "").lower() == "challenge":
+            return True
+        return "just a moment" in (page.title() or "").lower()
+    except Exception:
+        # title() races the challenge's own reload; treat as still running.
+        return True
+
+
+class ZonaTMOScraper(PlaywrightScraper):
+    """Scraper for ZonaTMO (zonatmo.org): plain HTTP, with a browser
+    fallback for HTML pages Cloudflare refuses to plain clients."""
 
     name = "zonatmo"
     base_url = "https://zonatmo.org"
@@ -54,12 +101,86 @@ class ZonaTMOScraper(BaseScraper):
     # Text-only entries: nothing to download as images.
     _NOVEL_TYPES = {"novel", "novela"}
 
+    # How long a Cloudflare challenge may run in the browser page:
+    # polls x interval, each wait cut to the caller's budget.
+    _CHALLENGE_POLLS = 40
+    _CHALLENGE_POLL_MS = 500
+    # Budget for one browser page load, browser startup included.
+    _BROWSER_TIMEOUT_S = 120
+
     def __init__(self):
         super().__init__()
         self.session.headers.update({
             "Accept-Language": "es-ES,es;q=0.9,en;q=0.5",
             "Referer": self.base_url + "/",
         })
+
+    # Transport
+
+    def _get_html(self, url: str, params: Optional[dict] = None) -> str:
+        """Fetch an HTML page: plain HTTP, then the browser on a
+        Cloudflare-marked 403.
+
+        Any other HTTP or transport error is raised as it is. A plain
+        200 never starts a browser.
+        """
+        try:
+            response = (self._request(url, params=params) if params
+                        else self._request(url))
+        except requests.HTTPError as error:
+            if not _cloudflare_refusal(error.response):
+                raise
+            page_url = f"{url}?{urlencode(params)}" if params else url
+            logger.info("zonatmo.org refused the plain HTTP client (Cloudflare "
+                        "403); loading %s in the browser", page_url)
+            try:
+                return self._run_serialized(
+                    self._browser_html_in_thread, page_url,
+                    timeout=self._BROWSER_TIMEOUT_S)
+            except ZonaTMOSourceError as browser_error:
+                raise ZonaTMOSourceError(
+                    f"{browser_error} (after the plain client's HTTP 403; "
+                    f"{_refusal_facts(error.response)})") from error
+        return response.text
+
+    def _browser_html_in_thread(self, url: str) -> str:
+        """Load ``url`` in this source's browser and return its HTML.
+
+        A Cloudflare challenge gets a bounded time to clear, then the
+        page is loaded again. A challenge that does not clear, or an
+        error status, raises ``ZonaTMOSourceError``. The page is always
+        closed; the browser itself belongs to this class's worker.
+        """
+        from playwright_stealth import Stealth
+
+        _, context = self._get_browser_in_thread()
+        page = context.new_page()
+        try:
+            Stealth().apply_stealth_sync(page)
+            response = page.goto(url, wait_until="domcontentloaded",
+                                 timeout=step_timeout_ms(45000))
+            if _on_challenge(page, response):
+                for _ in range(self._CHALLENGE_POLLS):
+                    page.wait_for_timeout(step_timeout_ms(self._CHALLENGE_POLL_MS))
+                    if not _on_challenge(page):
+                        break
+                else:
+                    raise ZonaTMOSourceError(
+                        f"ZonaTMO's Cloudflare challenge did not clear in the "
+                        f"browser for {url}")
+                response = page.goto(url, wait_until="domcontentloaded",
+                                     timeout=step_timeout_ms(45000))
+                if _on_challenge(page, response):
+                    raise ZonaTMOSourceError(
+                        f"ZonaTMO's Cloudflare challenge came back in the "
+                        f"browser for {url}")
+            status = getattr(response, "status", None)
+            if status is None or status >= 400:
+                raise ZonaTMOSourceError(
+                    f"ZonaTMO answered the browser with HTTP {status} for {url}")
+            return page.content()
+        finally:
+            page.close()
 
     # URL helpers
 
@@ -108,8 +229,8 @@ class ZonaTMOScraper(BaseScraper):
         query = (query or "").strip()
         if not query:
             return []
-        response = self._request(f"{self.base_url}/biblioteca", params={"title": query})
-        return self._parse_search(response.text)
+        html = self._get_html(f"{self.base_url}/biblioteca", params={"title": query})
+        return self._parse_search(html)
 
     def _parse_search(self, html: str) -> List[Manga]:
         """Parse /biblioteca result cards into Manga objects, skipping novels."""
@@ -250,15 +371,15 @@ class ZonaTMOScraper(BaseScraper):
     # Pages
 
     def get_pages(self, chapter_url: str) -> List[str]:
-        """Get ordered page image URLs for a chapter."""
+        """Get ordered page image URLs for a chapter.
+
+        A reader page that cannot be fetched is an error, not a chapter
+        without pages.
+        """
         upload_id = self._parse_upload_url(chapter_url)
         if not upload_id:
             return []
-        try:
-            html = self._get_html(f"{self.base_url}/view_uploads/{upload_id}")
-        except Exception as e:
-            logger.debug(f"Failed to fetch pages for {chapter_url}: {e}")
-            return []
+        html = self._get_html(f"{self.base_url}/view_uploads/{upload_id}")
         return self._parse_pages(html, upload_id)
 
     def _parse_pages(self, html: str, upload_id: str) -> List[str]:

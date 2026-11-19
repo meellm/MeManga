@@ -293,6 +293,7 @@ def _expected_errors():
     from memanga.scrapers.mangapark import MangaParkSourceError
     from memanga.scrapers.olympus import OlympusSourceError
     from memanga.scrapers.playwright_base import BrowserTimeoutError
+    from memanga.scrapers.zonatmo import ZonaTMOSourceError
     from memanga.scrapers.weebcentral import (WeebCentralChallengeError,
                                               WeebCentralError)
     dead, http, stale = "STATUS_DEAD", "STATUS_HTTP_ERROR", "STATUS_STALE"
@@ -314,6 +315,8 @@ def _expected_errors():
             "Olympus chapter list for https://olympusxyz.com/series/comic-x has 40 of the 45 chapters it reports"), stale),
         "atsumaru-shape": (AtsumaruSourceError(
             "Atsumaru returned an unexpected response for https://atsu.moe/x (no 'hits' list)"), stale),
+        "zonatmo-browser": (ZonaTMOSourceError(
+            "ZonaTMO's Cloudflare challenge did not clear in the browser for https://zonatmo.org/x"), stale),
         "wrapped-timeout": (_wrapped(WeebCentralError("search failed"),
                                      PlaywrightTimeoutError("Timeout 20000ms")), stale),
         # Network and HTTP failures, as requests raises them (over

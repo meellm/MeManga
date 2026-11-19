@@ -239,4 +239,4 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | yakshascans.com | — | http | — | No | Not searched (template) | — |
 | zazamanga.com | deathnotemanga.com (Included in search), death-note-online.com (Included in search), fairytail100yearsquest.com (Included in search), gintama.site (Included in search), initialdmanga.com (Included in search), inuyasha.net (Included in search), onepunchmanmanga.org (Included in search), readhellsing.com (Included in search), readoverlord.com (Included in search) | browser | — | No | Included in search | Also serves several redirected series sites |
 | zinmanga.com | — | browser | — | No | Not searched (needs-js) | — |
-| zonatmo.org | — | http | es | No | Included in search | Spanish manga/manhwa library |
+| zonatmo.org | — | browser | es | No | Included in search | Spanish manga/manhwa library |

@@ -277,16 +277,18 @@ class TestPages:
         assert len(zt.get_pages("https://zonatmo.org/view_uploads/969671")) == 5
         assert fetched == ["https://zonatmo.org/view_uploads/969671"]
 
-    def test_get_pages_bad_url_or_error(self, zt, monkeypatch, caplog):
+    def test_get_pages_bad_url_is_empty_but_fetch_error_is_raised(
+            self, zt, monkeypatch):
+        """An invalid reader URL has nothing to fetch; a reader page that
+        cannot be fetched is a failure, not a chapter without pages."""
         assert zt.get_pages("https://zonatmo.org/library/manhwa/6426/solo-leveling") == []
 
         def boom(url):
             raise RuntimeError("down")
 
         monkeypatch.setattr(zt, "_get_html", boom)
-        with caplog.at_level(logging.DEBUG, logger="memanga.scrapers.zonatmo"):
-            assert zt.get_pages("https://zonatmo.org/view_uploads/969671") == []
-        assert "down" in caplog.text
+        with pytest.raises(RuntimeError, match="down"):
+            zt.get_pages("https://zonatmo.org/view_uploads/969671")
 
 
 # Images
@@ -327,3 +329,161 @@ class TestDownloadImage:
             assert not zt.download_image("https://storage.zonatmo.org/chapters/969671/1.webp", out)
         assert not out.exists()
         assert "timeout" in caplog.text
+
+
+# Transport: browser fallback for HTML on a Cloudflare 403
+
+
+_CF_HEADERS = {"server": "cloudflare", "cf-ray": "8f00-IAD",
+               "content-type": "text/html; charset=UTF-8"}
+
+
+def _http_error(status, headers):
+    import requests
+
+    response = SimpleNamespace(status_code=status, headers=dict(headers))
+    return requests.HTTPError(f"{status} Client Error", response=response)
+
+
+class _BrowserResponse:
+    def __init__(self, status=200, headers=None):
+        self.status = status
+        self.headers = dict(headers or {})
+
+
+class _Page:
+    """A browser page: ``loads`` are the responses of successive goto()
+    calls; ``titles`` the titles read in turn (the last one repeats)."""
+
+    def __init__(self, html, loads, titles=("Biblioteca | ZonaTMO",)):
+        self.html = html
+        self.loads = list(loads)
+        self.titles = list(titles)
+        self.visited = []
+        self.waits = 0
+        self.closed = False
+
+    def goto(self, url, **kwargs):
+        self.visited.append(url)
+        return self.loads.pop(0)
+
+    def title(self):
+        return self.titles.pop(0) if len(self.titles) > 1 else self.titles[0]
+
+    def wait_for_timeout(self, _ms):
+        self.waits += 1
+
+    def content(self):
+        return self.html
+
+    def close(self):
+        self.closed = True
+
+
+class TestBrowserFallback:
+    @pytest.fixture
+    def browser(self, zt, monkeypatch):
+        """Hand out one prepared page, and count browser starts."""
+        import playwright_stealth
+
+        state = {"page": None, "starts": 0}
+
+        def get_browser(self):
+            state["starts"] += 1
+            context = SimpleNamespace(new_page=lambda: state["page"])
+            return None, context
+
+        monkeypatch.setattr(ZonaTMOScraper, "_get_browser_in_thread", get_browser)
+        monkeypatch.setattr(playwright_stealth, "Stealth",
+                            lambda: SimpleNamespace(apply_stealth_sync=lambda page: None))
+        return state
+
+    def _refuse_plain(self, zt, monkeypatch, headers=_CF_HEADERS):
+        calls = []
+
+        def fake_request(url, **kwargs):
+            calls.append((url, kwargs))
+            raise _http_error(403, headers)
+
+        monkeypatch.setattr(zt, "_request", fake_request)
+        return calls
+
+    def test_plain_200_never_starts_a_browser(self, zt, monkeypatch, browser):
+        monkeypatch.setattr(zt, "_request",
+                            lambda url, **k: SimpleNamespace(text=SEARCH_HTML))
+
+        assert len(zt.search("solo leveling")) == 2
+        assert browser["starts"] == 0
+
+    def test_cloudflare_403_loads_the_page_once_in_the_browser(
+            self, zt, monkeypatch, browser):
+        plain = self._refuse_plain(zt, monkeypatch)
+        page = browser["page"] = _Page(SEARCH_HTML, [_BrowserResponse(200)])
+
+        results = zt.search("solo leveling")
+
+        assert len(results) == 2
+        assert len(plain) == 1
+        assert page.visited == ["https://zonatmo.org/biblioteca?title=solo+leveling"]
+        assert browser["starts"] == 1
+        assert page.closed
+
+    def test_challenge_that_clears_is_loaded_again_and_read(
+            self, zt, monkeypatch, browser):
+        self._refuse_plain(zt, monkeypatch)
+        page = browser["page"] = _Page(
+            READER_HTML,
+            [_BrowserResponse(403, {"cf-mitigated": "challenge"}), _BrowserResponse(200)],
+            titles=["Just a moment...", "Just a moment...", "Visor | ZonaTMO"])
+
+        assert len(zt.get_pages("https://zonatmo.org/view_uploads/969671")) == 5
+        assert page.visited == ["https://zonatmo.org/view_uploads/969671"] * 2
+        assert page.closed
+
+    def test_challenge_that_never_clears_is_an_error_not_data(
+            self, zt, monkeypatch, browser):
+        from memanga.scrapers.zonatmo import ZonaTMOSourceError
+
+        self._refuse_plain(zt, monkeypatch)
+        page = browser["page"] = _Page(
+            "<html><title>Just a moment...</title></html>",
+            [_BrowserResponse(403, {"cf-mitigated": "challenge"})],
+            titles=["Just a moment..."])
+
+        with pytest.raises(ZonaTMOSourceError) as exc:
+            zt.search("solo leveling")
+
+        message = str(exc.value)
+        assert "challenge did not clear in the browser" in message
+        assert "after the plain client's HTTP 403; server=cloudflare, cf-ray=yes" in message
+        assert page.waits == ZonaTMOScraper._CHALLENGE_POLLS
+        assert page.closed
+        # The plain refusal stays the cause, so it is still a source error.
+        import requests
+        assert isinstance(exc.value.__cause__, requests.HTTPError)
+
+    def test_browser_error_status_is_an_error_not_data(
+            self, zt, monkeypatch, browser):
+        from memanga.scrapers.zonatmo import ZonaTMOSourceError
+
+        self._refuse_plain(zt, monkeypatch)
+        page = browser["page"] = _Page("<html>Forbidden</html>", [_BrowserResponse(403)],
+                                       titles=["403 Forbidden"])
+
+        with pytest.raises(ZonaTMOSourceError,
+                           match="answered the browser with HTTP 403"):
+            zt.get_chapters("https://zonatmo.org/library/manhwa/6426/solo-leveling")
+        assert page.closed
+
+    def test_403_without_cloudflare_markers_is_raised_without_a_browser(
+            self, zt, monkeypatch, browser):
+        import requests
+
+        self._refuse_plain(zt, monkeypatch, headers={"server": "nginx"})
+
+        with pytest.raises(requests.HTTPError):
+            zt.search("solo leveling")
+        assert browser["starts"] == 0
+
+    def test_source_is_listed_as_browser_capable(self):
+        assert ZonaTMOScraper.engine == "browser"
