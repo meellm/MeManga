@@ -288,6 +288,7 @@ def _expected_errors():
     from cloudscraper.exceptions import CloudflareChallengeError
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+    from memanga.scrapers.atsumaru import AtsumaruSourceError
     from memanga.scrapers.mangafire import MangaFireError
     from memanga.scrapers.mangapark import MangaParkSourceError
     from memanga.scrapers.olympus import OlympusSourceError
@@ -311,6 +312,8 @@ def _expected_errors():
             "Cloudflare challenge not cleared for https://mangapark1.com/x"), stale),
         "olympus-incomplete": (OlympusSourceError(
             "Olympus chapter list for https://olympusxyz.com/series/comic-x has 40 of the 45 chapters it reports"), stale),
+        "atsumaru-shape": (AtsumaruSourceError(
+            "Atsumaru returned an unexpected response for https://atsu.moe/x (no 'hits' list)"), stale),
         "wrapped-timeout": (_wrapped(WeebCentralError("search failed"),
                                      PlaywrightTimeoutError("Timeout 20000ms")), stale),
         # Network and HTTP failures, as requests raises them (over

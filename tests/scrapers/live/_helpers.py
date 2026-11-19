@@ -21,6 +21,7 @@ import urllib3
 from cloudscraper.exceptions import CloudflareException
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+from memanga.scrapers.atsumaru import AtsumaruSourceError
 from memanga.scrapers.mangafire import MangaFireError
 from memanga.scrapers.mangapark import MangaParkSourceError
 from memanga.scrapers.olympus import OlympusSourceError
@@ -201,6 +202,7 @@ SOURCE_ERRORS = (
     TimeoutError,
     PlaywrightTimeoutError,
     CloudflareException,
+    AtsumaruSourceError,
     MangaFireError,
     MangaParkSourceError,
     OlympusSourceError,
