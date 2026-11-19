@@ -83,16 +83,22 @@ class OlympusScraper(BaseScraper):
 
     # Transport
 
-    def _switch_to_cloudflare_session(self) -> None:
+    def _switch_to_cloudflare_session(self, user_agent: Optional[str] = None) -> None:
         """Send this scraper's requests through cloudscraper from now on.
 
         Cloudflare refuses the plain ``requests`` client outright on some
         networks (HTTP 403 even on the catalogue) while it lets a
         browser-like client through. cloudscraper keeps its own
         User-Agent, which matches its TLS profile; only the site's Accept
-        and Referer are put back.
+        and Referer are put back. Given ``user_agent``, the session is
+        built for that exact User-Agent (cloudscraper's ``custom`` profile
+        key), with the cipher suite of its browser, instead of a randomly
+        picked one.
         """
-        self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
+        profile = dict(CLOUDSCRAPER_CHROME_DESKTOP)
+        if user_agent:
+            profile["custom"] = user_agent
+        self._use_cloudscraper(profile)
         self.session.headers.update(self._HEADERS)
         self._cloudflare_session = True
 
@@ -117,11 +123,21 @@ class OlympusScraper(BaseScraper):
     def worker_copy(self) -> "OlympusScraper":
         """A copy for another thread; it keeps the cloudscraper session if
         this scraper had to switch to it (the base copy rebuilds a plain
-        one)."""
+        one).
+
+        Cloudflare pairs a clearance cookie with the client that earned
+        it, so the copy is built for this session's own User-Agent and
+        then given this session's exact headers and cookies. A freshly
+        generated cloudscraper session would pick a different
+        User-Agent.
+        """
         clone = super().worker_copy()
         if self._cloudflare_session:
-            clone._switch_to_cloudflare_session()
-            clone.session.cookies.update(self.session.cookies)
+            parent = self.session
+            clone._switch_to_cloudflare_session(
+                user_agent=parent.headers.get("User-Agent"))
+            clone.session.headers = parent.headers.copy()
+            clone.session.cookies.update(parent.cookies)
         return clone
 
     # URL helpers

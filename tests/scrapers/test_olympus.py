@@ -512,3 +512,70 @@ class TestCloudflareFallback:
         assert copy.session.headers["Referer"] == "https://olympusxyz.com/"
         assert copy.session.cookies.get("cf_clearance") == "x"
         assert len(cloudscraper["profiles"]) == 2
+
+    def test_first_switch_uses_the_plain_chrome_profile(self, ol, cloudscraper):
+        from memanga.scrapers.base import CLOUDSCRAPER_CHROME_DESKTOP
+
+        cloudscraper["sessions"].append(_Session())
+        ol._switch_to_cloudflare_session()
+
+        assert cloudscraper["profiles"] == [CLOUDSCRAPER_CHROME_DESKTOP]
+        assert "custom" not in cloudscraper["profiles"][0]
+        # The shared profile constant is copied, never modified.
+        assert "custom" not in CLOUDSCRAPER_CHROME_DESKTOP
+
+    def test_worker_copy_keeps_the_parents_user_agent_headers_and_cookies(
+            self, ol, monkeypatch):
+        """cloudscraper picks a random User-Agent per new session, but a
+        clearance cookie belongs with the client that earned it. Every
+        generated session here gets a different User-Agent, so a copy
+        that rebuilt its identity could not match by chance."""
+        import itertools
+
+        generated = itertools.count(1)
+        profiles = []
+
+        def fake(self, browser=None):
+            profiles.append(dict(browser))
+            self.session = _Session()
+            # Like cloudscraper: a "custom" User-Agent is used as given,
+            # otherwise one is picked for the browser profile.
+            self.session.headers = {
+                "User-Agent": browser.get("custom") or f"Chrome/UA-{next(generated)}",
+                "Accept-Language": f"en-US;variant={len(profiles)}",
+            }
+            return self.session
+
+        monkeypatch.setattr(OlympusScraper, "_use_cloudscraper", fake)
+        ol._switch_to_cloudflare_session()
+        ol.session.cookies.set("cf_clearance", "x", domain="olympusxyz.com")
+        ol.session.cookies.set("other", "y", domain="olympusxyz.com")
+        parent_headers = dict(ol.session.headers)
+
+        copy = ol.worker_copy()
+
+        assert copy._cloudflare_session is True
+        assert copy.session is not ol.session
+        assert dict(copy.session.headers) == parent_headers
+        assert copy.session.headers["User-Agent"] == "Chrome/UA-1"
+        assert copy.session.headers["Referer"] == "https://olympusxyz.com/"
+        # Built for the parent's User-Agent, on the same browser profile.
+        assert profiles[1]["custom"] == "Chrome/UA-1"
+        assert {k: v for k, v in profiles[1].items() if k != "custom"} == profiles[0]
+        assert {c.name: c.value for c in copy.session.cookies} == \
+            {c.name: c.value for c in ol.session.cookies}
+        # The copy's session is independent of the parent's.
+        copy.session.headers["X-Worker"] = "1"
+        assert "X-Worker" not in ol.session.headers
+        assert dict(ol.session.headers) == parent_headers
+
+    def test_worker_copy_of_a_plain_scraper_stays_plain(self, ol, cloudscraper):
+        ol.session.cookies.set("session", "z", domain="olympusxyz.com")
+
+        copy = ol.worker_copy()
+
+        assert copy._cloudflare_session is False
+        assert cloudscraper["profiles"] == []
+        assert copy.session is not ol.session
+        assert dict(copy.session.headers) == dict(ol.session.headers)
+        assert copy.session.cookies.get("session") == "z"
