@@ -351,10 +351,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # DragonBallSuperOnline - Dragon Ball Super dedicated (WordPress + wp-content/uploads)
     "thedragonballsuper.online": "single_title_sites:DragonBallSuperOnlineScraper",
 
-    # DragonBallSuperOrg - Dragon Ball Super dedicated (WordPress + mangaread.org CDN)
-    "dragonballsuper.org": "single_title_sites:DragonBallSuperOrgScraper",
-    "www.dragonballsuper.org": "single_title_sites:DragonBallSuperOrgScraper",
-
     # FairyTailMangaFree - Fairy Tail 100 Years Quest dedicated (WordPress + cdn.mangaclash.com)
     "fairytailmangafree.com": "single_title_sites:FairyTailMangaFreeScraper",
     "www.fairytailmangafree.com": "single_title_sites:FairyTailMangaFreeScraper",
@@ -568,7 +564,7 @@ _MOVED_MODULES: Dict[str, str] = {
         "spyxfamilymanga", "tgmanga", "blueexorcistmanga", "blamemanga",
         "homunculusmanga", "fireforcemangaorg", "tokyoghoulclub", "deathnotemanga",
         "bluelockmangaorg", "kaijuno8manga", "dragonballsuperonline",
-        "dragonballsuperorg", "onepiecemanga1", "readslamdunkonline",
+        "onepiecemanga1", "readslamdunkonline",
         "readtokyorevengers", "fairytailmangafree", "readkenganashura",
         "bocchitherockmanga", "elusivesamurai", "drstonemanga",
     ), "single_title_sites"),

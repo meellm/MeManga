@@ -143,7 +143,11 @@ class TestLazyRegistry:
     def test_listing_domains_loads_no_scraper_module(self):
         code = (
             "from memanga.scrapers import SCRAPERS, list_supported_sources\n"
-            "assert len(SCRAPERS) == len(list(SCRAPERS)) > 300\n"
+            "import memanga.scrapers as pkg\n"
+            "from memanga.scrapers.registry import TEMPLATE_SCRAPERS\n"
+            "expected = set(pkg._SCRAPER_PATHS) | set(TEMPLATE_SCRAPERS)\n"
+            "assert expected and len(SCRAPERS) == len(list(SCRAPERS)) == len(expected)\n"
+            "assert set(SCRAPERS) == expected\n"
             "assert 'mangadex.org' in SCRAPERS and 'nope.invalid' not in SCRAPERS\n"
             "assert 'mangadex.org' in list_supported_sources()\n"
         )

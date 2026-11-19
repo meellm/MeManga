@@ -281,7 +281,6 @@ SOURCE_NOTES: Dict[str, str] = {
     "read-slamdunk.online": "Slam Dunk",
     "read-tokyorevengers.com": "Tokyo Revengers",
     "thedragonballsuper.online": "Dragon Ball Super",
-    "dragonballsuper.org": "Dragon Ball Super",
     "jojolionmanga.com": "JoJo Part 8: JoJolion",
     "homunculusmanga.com": "Homunculus",
     "sousou-no-frieren.com": "Frieren",

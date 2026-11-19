@@ -354,26 +354,6 @@ class DragonBallSuperOnlineScraper(_PlainLinksScraper):
         return "wp-content" in url or any(ext in url for ext in _IMAGE_EXTENSIONS)
 
 
-class DragonBallSuperOrgScraper(_PlainLinksScraper):
-    """Scraper for dragonballsuper.org - Dragon Ball Super (images on mangaread.org CDN)."""
-
-    name = "dragonballsuperorg"
-    base_url = "https://www.dragonballsuper.org"
-    manga_title = "Dragon Ball Super"
-    cover_url = ""  # Uses inline images
-    chapter_link_selector = "a[href*='dragon-ball-chou-super-chapter-']"
-    chapter_number_pattern = r'chapter-(\d+(?:\.\d+|-\d+)?)'
-    chapter_number_dash_decimal = True
-
-    def _page_urls(self, soup):
-        imgs = soup.select("div.reading-content img, div.page-break img, img.wp-manga-chapter-img")
-        return self._pick(self._img_srcs(imgs, ("data-src", "data-lazy-src", "src")))
-
-    def _is_page_image(self, url):
-        return ("mangaread.org" in url or "wp-content" in url
-                or any(ext in url for ext in _IMAGE_EXTENSIONS))
-
-
 class OnePieceManga1Scraper(_PlainLinksScraper):
     """Scraper for 1piecemanga.com - One Piece (images on Contabo storage)."""
 

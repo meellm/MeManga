@@ -40,7 +40,6 @@ MOVED = {
     "bluelockmangaorg": ("BlueLockMangaNetScraper", "bluelockmanga.net"),
     "kaijuno8manga": ("KaijuNo8MangaScraper", "kaijuno8-manga.com"),
     "dragonballsuperonline": ("DragonBallSuperOnlineScraper", "thedragonballsuper.online"),
-    "dragonballsuperorg": ("DragonBallSuperOrgScraper", "dragonballsuper.org"),
     "onepiecemanga1": ("OnePieceManga1Scraper", "1piecemanga.com"),
     "readslamdunkonline": ("ReadSlamDunkOnlineScraper", "read-slamdunk.online"),
     "readtokyorevengers": ("ReadTokyoRevengersScraper", "read-tokyorevengers.com"),

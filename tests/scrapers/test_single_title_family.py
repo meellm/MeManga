@@ -99,9 +99,6 @@ SITES = {
         "https://thedragonballsuper.online", "Dragon Ball Super",
         "https://thedragonballsuper.online/",
         "https://thedragonballsuper.online/wp-content/uploads/2024/08/thumb-350-330775.webp"),
-    "dragonballsuper.org": (
-        "DragonBallSuperOrgScraper", "dragonballsuperorg", "https://www.dragonballsuper.org",
-        "Dragon Ball Super", "https://www.dragonballsuper.org/", ""),
     "1piecemanga.com": (
         "OnePieceManga1Scraper", "onepiecemanga1", "https://w064.1piecemanga.com",
         "One Piece", "https://w064.1piecemanga.com/",
@@ -139,7 +136,6 @@ ALIASES = {
     "w9.blame-manga.com": "blame-manga.com",
     "www.homunculusmanga.com": "homunculusmanga.com",
     "w22.hajime-noippo.com": "hajime-noippo.com",
-    "www.dragonballsuper.org": "dragonballsuper.org",
     "w064.1piecemanga.com": "1piecemanga.com",
     "w20.read-tokyorevengers.com": "read-tokyorevengers.com",
     "w23.read-tokyorevengers.com": "read-tokyorevengers.com",
@@ -468,12 +464,6 @@ class TestPlainLinkLayout:
         s = get_scraper("read-tokyorevengers.com")
         html = '<a href="/manga/tokyo-manji-revengers-chapter-278/Chapter-1">Last</a>'
         assert [c[0] for c in _chapters(s, patch_html, html)] == ["278"]
-
-    def test_dragon_ball_org_dash_decimals(self, patch_html):
-        s = get_scraper("dragonballsuper.org")
-        html = '<a href="/manga/dragon-ball-chou-super-chapter-67-5/">67</a>'
-        assert _chapters(s, patch_html, html) == [
-            ("67.5", "Chapter 67.5", "/manga/dragon-ball-chou-super-chapter-67-5/")]
 
     def test_kaiju_pages_skip_logos(self, patch_html):
         s = get_scraper("kaijuno8-manga.com")

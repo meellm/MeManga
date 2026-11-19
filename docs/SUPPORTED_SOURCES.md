@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 281 domains across 213 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 280 domains across 212 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -66,7 +66,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | detective-conan-manga.online | — | http | — | No | Not searched (template) | Detective Conan (Case Closed) |
 | detective-conan.online | — | http | — | No | Not searched (template) | Detective Conan |
 | dorohedoro.online | — | http | — | No | Not searched (template) | Dorohedoro |
-| dragonballsuper.org | — | http | — | No | Included in search | Dragon Ball Super |
 | dragontranslation.org | — | http | — | No | Not searched (template) | — |
 | drstonemanga.com | — | http | — | No | Included in search | Dr. Stone |
 | e-hentai.org | exhentai.org (Included in search) | http | — | Yes | Included in search | Galleries |
