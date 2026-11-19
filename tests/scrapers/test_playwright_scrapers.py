@@ -244,7 +244,6 @@ PLAYWRIGHT_DOMAINS = [
     "zazamanga.com",
     "kunmanga.com",
     "manytoon.com",
-    "pururin.to",
     "hentairead.com",
     "manganato.gg",
     "mangahere.onl",

@@ -279,9 +279,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # ManyToon - Adult manhwa (Playwright + JS chapters)
     "manytoon.com": "manytoon:ManyToonScraper",
 
-    # Pururin - Doujin gallery (Playwright + JS)
-    "pururin.to": "pururin:PururinScraper",
-
     # HentaiRead - Hentai manga (Playwright)
     "hentairead.com": "hentairead:HentaiReadScraper",
 

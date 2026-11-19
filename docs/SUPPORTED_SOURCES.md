@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 300 domains across 228 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 299 domains across 227 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -171,7 +171,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | parasytemanga.com | w9.parasytemanga.com (Not searched (template)) | http | — | No | Not searched (template) | Parasyte |
 | pawmanga.com | — | http | — | No | Not searched (template) | — |
 | punpunmanga.com | — | http | — | No | Not searched (template) | Goodnight Punpun (Oyasumi Punpun) |
-| pururin.to | — | browser | — | Yes | Included in search | Doujinshi |
 | rawjx.net | — | http | — | No | Not searched (template) | — |
 | read-berserk-manga.com | — | http | — | No | Included in search | Berserk |
 | read-jjk.com | — | http | — | No | Included in search | Jujutsu Kaisen |

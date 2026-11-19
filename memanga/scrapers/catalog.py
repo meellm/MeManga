@@ -236,7 +236,6 @@ SOURCE_NOTES: Dict[str, str] = {
     "hentaifox.com": "Doujinshi",
     "imhentai.xxx": "Doujinshi",
     "hentairead.com": "Doujinshi",
-    "pururin.to": "Doujinshi",
     "manga18fx.com": "Adult manga",
     "manhwa18.cc": "Adult manhwa",
     "hentai20.io": "Adult content",
