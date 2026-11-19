@@ -459,12 +459,6 @@ _cfg_mangawow = {
     "image_cdn_filters": ["mangawow.com"],
 }
 
-_cfg_pawmanga = {
-    "base_url": "https://pawmanga.com",
-    "uses_ajax": True,
-    "image_cdn_filters": ["pawmanga.com"],
-}
-
 _cfg_rawxz = {
     "base_url": "https://rawjx.net",
     "uses_ajax": True,
@@ -741,7 +735,6 @@ TEMPLATE_SCRAPERS = {
     "bokugents.com": (WordPressMadaraScraper, _cfg_bokugents),
     "dragontranslation.org": (WordPressMadaraScraper, _cfg_dragontranslation),
     "mangawow.com": (WordPressMadaraScraper, _cfg_mangawow),
-    "pawmanga.com": (WordPressMadaraScraper, _cfg_pawmanga),
     "rawjx.net": (WordPressMadaraScraper, _cfg_rawxz),
     "ruyamanga2.com": (WordPressMadaraScraper, _cfg_ruyamanga),
     "www.ruyamanga2.com": (WordPressMadaraScraper, _cfg_ruyamanga),

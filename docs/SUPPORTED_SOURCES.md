@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 291 domains across 220 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 290 domains across 219 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -162,7 +162,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | overlord-manga.online | — | http | — | No | Not searched (template) | Overlord |
 | oyasumipunpun.com | — | http | — | No | Included in search | Goodnight Punpun |
 | parasytemanga.com | w9.parasytemanga.com (Not searched (template)) | http | — | No | Not searched (template) | Parasyte |
-| pawmanga.com | — | http | — | No | Not searched (template) | — |
 | punpunmanga.com | — | http | — | No | Not searched (template) | Goodnight Punpun (Oyasumi Punpun) |
 | rawjx.net | — | http | — | No | Not searched (template) | — |
 | read-berserk-manga.com | — | http | — | No | Included in search | Berserk |
