@@ -101,13 +101,6 @@ _cfg_kagurabachiread = {
     "SEARCH_KEYWORDS": ["kagurabachi"],
 }
 
-_cfg_centuriya = {
-    "BASE_URL": "https://centuriya.com",
-    "ASSETS_URL": "https://assets.centuriya.com/centuria",
-    "MANGA_TITLE": "Centuria",
-    "SEARCH_KEYWORDS": ["centuria"],
-}
-
 _cfg_grandbluemanga = {
     "BASE_URL": "https://grandbluemanga.com",
     "ASSETS_URL": "https://assets.grandbluemanga.com/grandblue",
@@ -673,7 +666,6 @@ TEMPLATE_SCRAPERS = {
     "onepunchmanofficial.com": (NuxtSSRScraper, _cfg_onepunchmanofficial),
     "blackclova.com": (NuxtSSRScraper, _cfg_blackclova),
     "kagurabachiread.com": (NuxtSSRScraper, _cfg_kagurabachiread),
-    "centuriya.com": (NuxtSSRScraper, _cfg_centuriya),
     "grandbluemanga.com": (NuxtSSRScraper, _cfg_grandbluemanga),
     "gachiakutayo.com": (NuxtSSRScraper, _cfg_gachiakutayo),
     "galaxxias.com": (NuxtSSRScraper, _cfg_galaxxias),

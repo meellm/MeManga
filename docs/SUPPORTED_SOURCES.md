@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 296 domains across 224 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 295 domains across 223 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -60,7 +60,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | bokugents.com | — | http | — | No | Not searched (template) | — |
 | call-of-the-night.online | w2.call-of-the-night.online (Not searched (template)) | http | — | No | Not searched (template) | Call of the Night (Yofukashi no Uta) |
 | case-closed.online | — | http | — | No | Not searched (template) | Case Closed (Detective Conan) |
-| centuriya.com | — | http | — | No | Not searched (template) | Centuria |
 | chainsawdevil.com | — | http | — | No | Not searched (template) | Chainsaw Man |
 | d-grayman.online | — | http | — | No | Not searched (template) | D.Gray-man |
 | dandadanmanga.net | ww2.dandadanmanga.net (Not searched (template)), w2.dandadanmanga.net (Not searched (template)) | http | — | No | Not searched (template) | Dandadan |
