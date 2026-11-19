@@ -477,11 +477,6 @@ _cfg_hipercool = {
     "uses_ajax": True,
 }
 
-_cfg_mangasehri = {
-    "base_url": "https://mangasehri.com",
-    "uses_ajax": True,
-}
-
 _cfg_mangawow = {
     "base_url": "https://mangawow.com",
     "uses_ajax": True,
@@ -773,7 +768,6 @@ TEMPLATE_SCRAPERS = {
     "bokugents.com": (WordPressMadaraScraper, _cfg_bokugents),
     "dragontranslation.org": (WordPressMadaraScraper, _cfg_dragontranslation),
     "hipercool.net": (WordPressMadaraScraper, _cfg_hipercool),
-    "mangasehri.com": (WordPressMadaraScraper, _cfg_mangasehri),
     "mangawow.com": (WordPressMadaraScraper, _cfg_mangawow),
     "pawmanga.com": (WordPressMadaraScraper, _cfg_pawmanga),
     "rawjx.net": (WordPressMadaraScraper, _cfg_rawxz),
