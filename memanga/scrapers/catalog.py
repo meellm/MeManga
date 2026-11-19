@@ -112,7 +112,6 @@ SEARCH_SKIPS: Dict[str, SearchSkip] = {
              "mangahub.us",
              "hivetoons.org", "hivetoon.com",
              "isekaiscan.com",
-             "zinmanga.com",
              "kunmanga.com",
              "flamecomics.xyz"),
     **_skips(SkipReason.CHALLENGE, "Even cloudscraper gets a 403.",

@@ -254,9 +254,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # IsekaiScan - Isekai manga/manhwa (Playwright + Madara)
     "isekaiscan.com": "isekaiscan:IsekaiScanScraper",
 
-    # ZinManga - Manga aggregator (Playwright + Madara)
-    "zinmanga.com": "zinmanga:ZinMangaScraper",
-
     # ZazaManga - Manga aggregator (Playwright, redirected series sites)
     "zazamanga.com": "zazamanga:ZazaMangaScraper",
     "www.zazamanga.com": "zazamanga:ZazaMangaScraper",

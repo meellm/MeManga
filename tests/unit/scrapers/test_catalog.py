@@ -16,7 +16,7 @@ def test_search_skips_preserve_legacy_set_and_registered_domains():
         "asuratoon.com", "lectormangass.net", "mangabolt.com",
         "truemanga.com", "mangamonk.com", "mangahub.us",
         "hivetoons.org", "hivetoon.com", "isekaiscan.com",
-        "zinmanga.com", "kunmanga.com", "flamecomics.xyz",
+        "kunmanga.com", "flamecomics.xyz",
         "manhuafast.com", "manhuaus.org", "manganato.gg",
         "kagane.org", "www.kagane.org", "kagane.to", "mangapark1.com",
     }
