@@ -276,11 +276,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Atsumaru - Manga aggregator (Typesense search + REST API)
     "atsu.moe": "atsumaru:AtsumaruScraper",
 
-    # MangaClash - Manga aggregator (Playwright + Madara + CF).
-    # Site unreachable (#179); kept so saved library entries still
-    # resolve, but skipped by the search sweep.
-    "mangaclash.com": "kunmanga:MangaClashScraper",
-
     # KunManga - Manga aggregator (Playwright + Madara + CF)
     "kunmanga.com": "kunmanga:KunMangaScraper",
 
@@ -601,7 +596,6 @@ _MOVED_MODULES: Dict[str, str] = {
         "readtokyorevengers", "fairytailmangafree", "readkenganashura",
         "bocchitherockmanga", "elusivesamurai", "readbluelockorg", "drstonemanga",
     ), "single_title_sites"),
-    "mangaclash": "kunmanga",
     "mangaeffect": "coffeemanga",
     "mangafoxfun": "mangapanda",
 }

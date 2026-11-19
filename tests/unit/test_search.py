@@ -238,23 +238,6 @@ class TestComputeSearchSources:
         }))
         assert "mgeko.cc" not in sources
 
-    def test_unreachable_mangaclash_excluded(self):
-        # mangaclash.com fails TLS and its plain-HTTP site is no longer
-        # MangaClash, with no verified replacement domain (issue #179).
-        # It stays registered so saved entries resolve, but must never
-        # reach the sweep - not even when it's already in the user's
-        # library.
-        assert "mangaclash.com" in BROKEN_SEARCH_SOURCES
-        assert "mangaclash.com" not in compute_search_sources(FakeConfig())
-        assert "mangaclash.com" not in compute_search_sources(FakeConfig({
-            "manga": [{"title": "X", "source": "mangaclash.com"}],
-        }))
-
-    def test_mangaclash_not_a_default_source(self):
-        from memanga.scrapers import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES
-        assert "mangaclash.com" not in POPULAR_SOURCES
-        assert "mangaclash.com" not in DEFAULT_ENABLED_SOURCES
-
     def test_unreachable_hiperdex_excluded(self):
         # hiperdex.com is blocked/unreachable from the audit network
         # (self-signed cert, regional access-block page), with no verified

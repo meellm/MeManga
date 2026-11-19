@@ -89,10 +89,6 @@ def _skips(reason: SkipReason, note: str, *domains: str,
 SEARCH_SKIPS: Dict[str, SearchSkip] = {
     **_skips(SkipReason.UNREACHABLE, "",
              "mangareader.to"),
-    **_skips(SkipReason.UNREACHABLE,
-             "Fails TLS verification and plain HTTP no longer serves "
-             "MangaClash; www. has no DNS. No verified replacement domain.",
-             "mangaclash.com", issue=179),
     **_skips(SkipReason.UNRELIABLE, "",
              "mangatown.com", "www.mangatown.com",
              "manhwa18.cc",

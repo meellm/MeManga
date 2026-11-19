@@ -243,7 +243,6 @@ PLAYWRIGHT_DOMAINS = [
     "isekaiscan.com",
     "zinmanga.com",
     "zazamanga.com",
-    "mangaclash.com",
     "kunmanga.com",
     "manytoon.com",
     "pururin.to",
