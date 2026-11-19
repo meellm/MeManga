@@ -542,11 +542,6 @@ _cfg_witchhat = {
     "cdn_domains": ["laiond.com", "loinew.com"],
 }
 
-_cfg_callofthenight = {
-    "base_url": "https://w2.call-of-the-night.online",
-    "manga_title": "Call of the Night (Yofukashi no Uta)",
-}
-
 _cfg_aoashi = {
     "base_url": "https://ao-ashi-manga.com",
     "manga_title": "Ao Ashi",
@@ -740,8 +735,6 @@ TEMPLATE_SCRAPERS = {
     "detective-conan-manga.online": (LaiondCDNScraper, _cfg_conan_laiond),
     "case-closed.online": (LaiondCDNScraper, _cfg_caseclosed),
     "witch-hat-atelier.online": (LaiondCDNScraper, _cfg_witchhat),
-    "call-of-the-night.online": (LaiondCDNScraper, _cfg_callofthenight),
-    "w2.call-of-the-night.online": (LaiondCDNScraper, _cfg_callofthenight),
     "ao-ashi-manga.com": (LaiondCDNScraper, _cfg_aoashi),
     "d-grayman.online": (LaiondCDNScraper, _cfg_dgrayman),
     "blue-exorcist.online": (LaiondCDNScraper, _cfg_blueexorcist_laiond),
