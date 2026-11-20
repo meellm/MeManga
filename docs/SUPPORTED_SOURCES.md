@@ -18,7 +18,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | comick.io | comick.dev (Included in search) | api | — | No | Included in search | General library |
 | mangahub.io | — | browser | — | No | Included in search | MangaHub network |
 | mangahere.cc | — | http | — | No | Included in search | General library |
-| mangapanda.onl | — | http | — | No | Included in search | MangaHub network |
+| mangapanda.onl | — | browser | — | No | Included in search | MangaHub network |
 | mangahere.onl | — | browser | — | No | Included in search | Alternate mirror |
 | mangataro.org | — | http | — | No | Included in search | ComicK replacement |
 | luminousscans.com | — | http | — | No | Included in search | Manhwa translations |
@@ -28,7 +28,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | coffeemanga.io | — | http | — | No | Included in search | — |
 | manhuaplus.org | — | http | — | No | Included in search | Manhua focused |
 | mangaeffect.com | — | http | — | No | Included in search | — |
-| mangafox.fun | — | http | — | No | Included in search | MangaHub network |
+| mangafox.fun | — | browser | — | No | Included in search | MangaHub network |
 | 1piecemanga.com | w064.1piecemanga.com (Included in search) | http | — | No | Included in search | One Piece |
 | akiramanga.com | — | http | — | No | Not searched (template) | Akira |
 | ao-ashi-manga.com | — | http | — | No | Not searched (template) | Ao Ashi |
