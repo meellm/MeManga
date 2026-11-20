@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 266 domains across 201 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 265 domains across 200 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -202,7 +202,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | vermanhwa.com | — | http | — | No | Not searched (template) | — |
 | witch-hat-atelier.online | — | http | — | No | Not searched (template) | Witch Hat Atelier (Tongari Boushi no Atelier) |
 | witch-watch.com | — | http | — | No | Not searched (template) | Witch Watch |
-| world-trigger.online | — | http | — | No | Not searched (template) | World Trigger |
 | wurmz.net | — | http | id | No | Included in search | Indonesian manga/manhwa/manhua reader |
 | yakshascans.com | — | http | — | No | Not searched (template) | — |
 | zazamanga.com | deathnotemanga.com (Included in search), death-note-online.com (Included in search), fairytail100yearsquest.com (Included in search), gintama.site (Included in search), initialdmanga.com (Included in search), inuyasha.net (Included in search), onepunchmanmanga.org (Included in search), readhellsing.com (Included in search), readoverlord.com (Included in search) | browser | — | No | Included in search | Also serves several redirected series sites |

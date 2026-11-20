@@ -264,14 +264,6 @@ _cfg_bakidou = {
     "cover_url": "https://bakidou.com/wp-content/uploads/2020/01/hiya.jpg",
 }
 
-_cfg_worldtrigger = {
-    "base_url": "https://world-trigger.online",
-    "manga_title": "World Trigger",
-    "chapter_link_pattern": r'chapter-(\d+(?:\.\d+)?)',
-    "image_cdn_filters": ["blogger.googleusercontent.com"],
-    "cover_url": "https://world-trigger.online/wp-content/uploads/2022/06/World-Trigger-Manga.webp",
-}
-
 _cfg_hyouka = {
     "base_url": "https://hyoukamanga.com",
     "manga_title": "Hyouka",
@@ -621,7 +613,6 @@ TEMPLATE_SCRAPERS = {
     "beckmanga.com": (OGImageMetaScraper, _cfg_beck),
     "readclaymore.com": (OGImageMetaScraper, _cfg_claymore),
     "bakidou.com": (OGImageMetaScraper, _cfg_bakidou),
-    "world-trigger.online": (OGImageMetaScraper, _cfg_worldtrigger),
     "hyoukamanga.com": (OGImageMetaScraper, _cfg_hyouka),
     "witch-watch.com": (OGImageMetaScraper, _cfg_witchwatch),
     "onepiece-manga-online.net": (OGImageMetaScraper, _cfg_onepiecemangaonline),
