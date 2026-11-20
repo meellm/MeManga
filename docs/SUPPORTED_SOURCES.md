@@ -24,7 +24,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | luminousscans.com | — | http | — | No | Included in search | Manhwa translations |
 | tcbonepiecechapters.com | tcbscans.com (Included in search), tcbscans.me (Included in search) | http | en | No | Included in search | Jump manga (One Piece, JJK) |
 | fanfox.net | mangafox.me (Included in search) | browser | — | No | Included in search | — |
-| 1manga.co | — | http | — | No | Included in search | MangaHub network |
+| 1manga.co | — | browser | — | No | Included in search | MangaHub network |
 | coffeemanga.io | — | http | — | No | Included in search | — |
 | manhuaplus.org | — | http | — | No | Included in search | Manhua focused |
 | mangaeffect.com | — | http | — | No | Included in search | — |
