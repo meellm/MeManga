@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 266 domains across 201 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 267 domains across 202 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -201,6 +201,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | unopiece.com | — | http | — | No | Not searched (template) | One Piece |
 | vagabondmanga.org | — | http | — | No | Included in search | Vagabond |
 | vermanhwa.com | — | http | — | No | Not searched (template) | — |
+| webtoons.com | — | http | — | No | Included in search | Official WEBTOON Originals in English, Spanish, French and German |
 | witch-hat-atelier.online | — | http | — | No | Not searched (template) | Witch Hat Atelier (Tongari Boushi no Atelier) |
 | witch-watch.com | — | http | — | No | Not searched (template) | Witch Watch |
 | wurmz.net | — | http | id | No | Included in search | Indonesian manga/manhwa/manhua reader |

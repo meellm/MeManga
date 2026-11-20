@@ -221,6 +221,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "en-thunderscans.com": "English manhwa scans",
     "wurmz.net": "Indonesian manga/manhwa/manhua reader",
     "mangadenizi.net": "Turkish manga/manhwa/webtoon reader",
+    "webtoons.com": "Official WEBTOON Originals in English, Spanish, French and German",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",

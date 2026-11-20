@@ -110,6 +110,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # MangaDenizi - Turkish manga/manhwa/webtoon reader (Nuxt JSON API)
     "mangadenizi.net": "mangadenizi:MangaDeniziScraper",
 
+    # WEBTOON - official Originals in English, Spanish, French and German
+    "webtoons.com": "webtoon:WebtoonScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
