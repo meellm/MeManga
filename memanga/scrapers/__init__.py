@@ -107,6 +107,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Wurmz - Indonesian manga/manhwa/manhua reader (Next.js SSR HTML)
     "wurmz.net": "wurmz:WurmzScraper",
 
+    # MangaDenizi - Turkish manga/manhwa/webtoon reader (Nuxt JSON API)
+    "mangadenizi.net": "mangadenizi:MangaDeniziScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
