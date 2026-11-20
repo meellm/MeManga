@@ -143,10 +143,9 @@ PARSING_PROBES = {
     # the reader's div.reader-page Blogger images (issue #187).
     "wurmz.net": ProbeSpec("Wurmz (Next.js SSR HTML)", query="solo"),
     # Search and chapters come from api.comick.dev; the web pages are
-    # Cloudflare-gated (issue #181). Many popular ComicK chapters are
-    # official/external links with no hosted images, so this probe only
-    # guards search + chapter API drift; pages were proven manually on a
-    # hosted chapter.
+    # Cloudflare-gated (issue #181). Sampled ComicK releases have no
+    # hosted page images, so this probe only guards search + chapter API
+    # drift; a full chapter download from ComicK is unverified.
     "comick.io": ProbeSpec("ComicK (JSON API)", query="one piece",
                             check_pages=False),
 
