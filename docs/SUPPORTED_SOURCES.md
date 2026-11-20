@@ -16,7 +16,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | asurascans.com | asuracomic.net (Not searched (alias)), asuratoon.com (Not searched (alias)) | api | — | No | Included in search | Manhwa specialist |
 | comix.to | — | browser | — | No | Included in search | General library |
 | comick.io | comick.dev (Included in search) | api | — | No | Included in search | General library |
-| mangahub.io | — | http | — | No | Included in search | MangaHub network |
+| mangahub.io | — | browser | — | No | Included in search | MangaHub network |
 | mangahere.cc | — | http | — | No | Included in search | General library |
 | mangapanda.onl | — | http | — | No | Included in search | MangaHub network |
 | mangahere.onl | — | browser | — | No | Included in search | Alternate mirror |
