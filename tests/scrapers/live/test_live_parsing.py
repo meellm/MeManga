@@ -61,6 +61,8 @@ class ProbeSpec:
     check_chapters: bool = True
     check_pages: bool = True
     check_image: bool = True
+    min_chapters: int = 1         # fewer listed chapters → STALE:chapters
+    chapter: str | None = None    # probe pages of this chapter, not the newest
 
 
 PARSING_PROBES = {
@@ -162,6 +164,13 @@ PARSING_PROBES = {
     "readsnk.com": ProbeSpec("ReadManga base (Attack on Titan)",
                                query="attack on titan",
                                check_chapters=False),
+    # Single-series ReadManga site: search answers offline, chapters come
+    # from the chapter selector on a chapter page (the home-page fallback
+    # lists only a few, so require a full listing), and pages from chapter
+    # 100, since the newest chapters currently list a single reader image.
+    "readblackclover.com": ProbeSpec(
+        "ReadManga base (Black Clover chapter selector)",
+        query="black clover", min_chapters=100, chapter="100"),
 }
 
 
@@ -211,9 +220,11 @@ def test_scraper_pipeline_live(domain, spec, health_recorder):
             results = pipe.search(spec.query)
             manga_url = results[0].url
         if spec.check_chapters:
-            chapters = pipe.chapters(manga_url)
+            chapters = pipe.chapters(manga_url, spec.min_chapters)
             if spec.check_pages:
-                pages = pipe.pages(chapters[0])
+                target = (pipe.pick_chapter(chapters, spec.chapter)
+                          if spec.chapter else chapters[0])
+                pages = pipe.pages(target)
                 if spec.check_image:
                     pipe.image(pages[0])
     except StageFailure as e:

@@ -21,6 +21,7 @@ import urllib3
 from cloudscraper.exceptions import CloudflareException
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+from memanga.chapters import chapter_value
 from memanga.scrapers.atsumaru import AtsumaruSourceError
 from memanga.scrapers.mangafire import MangaFireError
 from memanga.scrapers.mangapark import MangaParkSourceError
@@ -318,6 +319,24 @@ class ScraperPipeline:
                    f"{label} → {len(chapters)} chapters "
                    f"(#{chapters[0].number} … #{chapters[-1].number})", ms)
         return chapters
+
+    def pick_chapter(self, chapters: list, number: str):
+        """The listed chapter numbered ``number`` (exact label first, then
+        the same numeric value, so "099" or "100.0" still match); a STALE
+        chapters failure when the listing no longer has it."""
+        for chapter in chapters:
+            if chapter.number == number:
+                return chapter
+        wanted = chapter_value(number)
+        if wanted is not None:
+            for chapter in chapters:
+                if chapter_value(chapter.number) == wanted:
+                    return chapter
+        listed = (f"#{chapters[0].number} … #{chapters[-1].number}"
+                  if chapters else "none")
+        self._fail(STAGE_CHAPTERS,
+                   f"chapter {number!r} not among the {len(chapters)} "
+                   f"listed chapters ({listed})")
 
     def pages(self, chapter) -> list:
         label = f"get_pages(ch {chapter.number!r} {chapter.url})"
