@@ -108,6 +108,27 @@ LIVE_HEADERS = {
 # Enough to hold any of the magic byte signatures below.
 _MIN_IMAGE_BYTES = 1024
 
+# A registrar's parking page for an expired domain answers 200 with a
+# normal-sized body, so it would pass as a reachable source. It is told
+# apart by its notice together with the lander's own markup; neither
+# alone is enough, since a real page can mention renewals or link out.
+_LANDER_SCAN_CHARS = 65536
+_LANDER_NOTICES = ("domain registration has expired",)
+_LANDER_MARKUP = ("lander.parity.domains", "utm_source=parkingpage")
+
+
+def _registrar_lander(text: str):
+    """The matched markers when ``text`` is a registrar parking lander, else None."""
+    start = text[:_LANDER_SCAN_CHARS].lower()
+    # The page source wraps the notice across lines, so match its words
+    # with any whitespace between them; the markup is matched as is.
+    words = " ".join(start.split())
+    notice = next((m for m in _LANDER_NOTICES if m in words), None)
+    markup = next((m for m in _LANDER_MARKUP if m in start), None)
+    if notice and markup:
+        return f"{notice!r} with {markup!r}"
+    return None
+
 
 def probe_url(url: str, timeout: float = LIVE_TIMEOUT) -> HealthResult:
     """Reach a URL and classify what came back."""
@@ -152,6 +173,13 @@ def probe_url(url: str, timeout: float = LIVE_TIMEOUT) -> HealthResult:
     if len(resp.text) < 200:
         return HealthResult(domain, STATUS_STALE, STAGE_REACHABILITY,
                               f"HTTP 200 but body only {len(resp.text)} bytes",
+                              elapsed)
+
+    lander = _registrar_lander(resp.text)
+    if lander:
+        return HealthResult(domain, STATUS_STALE, STAGE_REACHABILITY,
+                              f"HTTP {resp.status_code} but a registrar parking "
+                              f"lander ({lander})",
                               elapsed)
 
     return HealthResult(domain, STATUS_OK, "",
