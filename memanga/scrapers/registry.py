@@ -53,7 +53,9 @@ _cfg_punpunmanga = {
 }
 
 _cfg_kokounohito = {
-    "BASE_URL": "https://kokounohito.com",
+    # The site only answers over plain HTTP, where it redirects (path
+    # preserved) to its HTTPS reader; port 443 does not respond.
+    "BASE_URL": "http://kokounohito.com",
     "ASSETS_URL": "https://assets.kokounohito.com/kokounohito",
     "MANGA_TITLE": "The Climber (Kokou no Hito)",
     "SEARCH_KEYWORDS": ["climber", "kokou"],
