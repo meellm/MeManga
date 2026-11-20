@@ -291,10 +291,12 @@ def _expected_errors():
     from memanga.scrapers.atsumaru import AtsumaruSourceError
     from memanga.scrapers.comix import ComixSourceError
     from memanga.scrapers.mangafire import MangaFireError
+    from memanga.scrapers.mangahereonl import MangaHereOnlSourceError
     from memanga.scrapers.mangapark import MangaParkSourceError
     from memanga.scrapers.mangapark_cc import MangaParkCCSourceError
     from memanga.scrapers.olympus import OlympusSourceError
     from memanga.scrapers.playwright_base import BrowserTimeoutError
+    from memanga.scrapers.templates.nuxt_ssr import NuxtSSRSourceError
     from memanga.scrapers.zonatmo import ZonaTMOSourceError
     from memanga.scrapers.weebcentral import (WeebCentralChallengeError,
                                               WeebCentralError)
@@ -323,6 +325,10 @@ def _expected_errors():
             "Atsumaru returned an unexpected response for https://atsu.moe/x (no 'hits' list)"), stale),
         "zonatmo-browser": (ZonaTMOSourceError(
             "ZonaTMO's Cloudflare challenge did not clear in the browser for https://zonatmo.org/x"), stale),
+        "nuxt-ssr-no-chapters": (NuxtSSRSourceError(
+            "No chapter count or chapter links found on https://dddmanga.com"), stale),
+        "mangahereonl-graphql": (MangaHereOnlSourceError(
+            "GraphQL reply from https://mangahere.onl/graphql is not JSON"), stale),
         "wrapped-timeout": (_wrapped(WeebCentralError("search failed"),
                                      PlaywrightTimeoutError("Timeout 20000ms")), stale),
         # Network and HTTP failures, as requests raises them (over

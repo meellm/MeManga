@@ -9,7 +9,6 @@ Subclass config attributes:
     ASSETS_URL: str      - CDN base (e.g., "https://assets.dddmanga.com/dandadan")
     MANGA_TITLE: str     - Display title (e.g., "Dandadan")
     SEARCH_KEYWORDS: list - Strings that trigger search match
-    FALLBACK_MAX: int    - Chapter count fallback if detection fails
     CHAPTERS_FROM_LINKS: bool - List the chapters the site links (including
                            decimal ones such as /chapter/16-5/) instead of
                            numbering 1..N; off by default
@@ -28,6 +27,10 @@ from ..base import BaseScraper, Chapter, Manga
 logger = logging.getLogger(__name__)
 
 
+class NuxtSSRSourceError(RuntimeError):
+    """The site answered, but with no chapter information to list."""
+
+
 class NuxtSSRScraper(BaseScraper):
     """Template for Nuxt SSR single-manga sites with sequential chapters."""
 
@@ -35,7 +38,6 @@ class NuxtSSRScraper(BaseScraper):
     ASSETS_URL: str = ""
     MANGA_TITLE: str = ""
     SEARCH_KEYWORDS: list = []
-    FALLBACK_MAX: int = 200
     CHAPTERS_FROM_LINKS: bool = False
 
     def __init__(self):
@@ -59,22 +61,20 @@ class NuxtSSRScraper(BaseScraper):
         """Get chapters by detecting max chapter from homepage."""
         if self.CHAPTERS_FROM_LINKS:
             return self._chapters_from_links()
-        try:
-            resp = self._request(self.BASE_URL)
+        # A failed fetch raises; there is no list to guess.
+        resp = self._request(self.BASE_URL)
 
-            # Try "Read Latest Chapter (N)" pattern
-            match = re.search(r'Read Latest Chapter \((\d+)\)', resp.text)
-            if match:
-                max_chapter = int(match.group(1))
-            else:
-                # Fallback: find highest chapter number in links
-                chapter_matches = re.findall(r'/chapter/(\d+)/', resp.text)
-                if chapter_matches:
-                    max_chapter = max(int(c) for c in chapter_matches)
-                else:
-                    max_chapter = self.FALLBACK_MAX
-        except Exception:
-            max_chapter = self.FALLBACK_MAX
+        # Try "Read Latest Chapter (N)" pattern
+        match = re.search(r'Read Latest Chapter \((\d+)\)', resp.text)
+        if match:
+            max_chapter = int(match.group(1))
+        else:
+            # Fallback: find highest chapter number in links
+            chapter_matches = re.findall(r'/chapter/(\d+)/', resp.text)
+            max_chapter = max((int(c) for c in chapter_matches), default=0)
+        if max_chapter < 1:
+            raise NuxtSSRSourceError(
+                f"No chapter count or chapter links found on {self.BASE_URL}")
 
         return [
             Chapter(
@@ -123,7 +123,7 @@ class NuxtSSRScraper(BaseScraper):
             found.setdefault(chapter_id, f"{whole}.{part}" if part else whole)
 
         if not found:
-            raise ValueError(f"No chapter links found on {self.BASE_URL}")
+            raise NuxtSSRSourceError(f"No chapter links found on {self.BASE_URL}")
 
         chapters = [
             Chapter(

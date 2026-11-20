@@ -10,8 +10,10 @@ two other concrete domains so the registry wiring stays honest.
 from __future__ import annotations
 
 import pytest
+import requests
 
 from memanga.scrapers.templates import NuxtSSRScraper
+from memanga.scrapers.templates.nuxt_ssr import NuxtSSRSourceError
 from memanga.scrapers import get_scraper
 from memanga.scrapers.base import Chapter, Manga
 
@@ -27,7 +29,6 @@ def _make_scraper(**overrides):
         "ASSETS_URL": "https://assets.dddmanga.com/dandadan",
         "MANGA_TITLE": "Dandadan",
         "SEARCH_KEYWORDS": ["danda", "dan da dan"],
-        "FALLBACK_MAX": 5,
         **overrides,
     })
     return cls()
@@ -74,19 +75,38 @@ class TestGetChapters:
         assert len(chapters) == 15
         assert chapters[-1].number == "15"
 
-    def test_falls_back_to_fallback_max_on_empty(self, patch_request, load_fixture):
-        s = _make_scraper()  # FALLBACK_MAX=5
+    def test_page_without_chapter_information_raises(self, patch_request, load_fixture):
+        # A page with neither a latest-chapter label nor chapter links
+        # (a parking or changed page) is a source failure, not 1..N.
+        s = _make_scraper()
         patch_request(s, text=load_fixture("nuxt_ssr", "homepage_empty.html"))
-        chapters = s.get_chapters("https://dddmanga.com")
-        assert len(chapters) == 5
+        with pytest.raises(NuxtSSRSourceError, match="No chapter count or chapter links"):
+            s.get_chapters("https://dddmanga.com")
 
-    def test_falls_back_to_fallback_max_on_exception(self, monkeypatch):
+    def test_zero_latest_label_raises(self, patch_request):
+        s = _make_scraper()
+        patch_request(s, text="<html><body>Read Latest Chapter (0)</body></html>")
+        with pytest.raises(NuxtSSRSourceError):
+            s.get_chapters("https://dddmanga.com")
+
+    @pytest.mark.parametrize("error", [
+        requests.exceptions.ConnectionError("network down"),
+        requests.exceptions.HTTPError("503 Server Error"),
+    ])
+    def test_fetch_failure_propagates(self, monkeypatch, error):
+        # The real failure reaches the caller; no chapter list is made up.
         s = _make_scraper()
         def boom(*a, **k):
-            raise IOError("network down")
+            raise error
         monkeypatch.setattr(s, "_request", boom)
-        chapters = s.get_chapters("https://dddmanga.com")
-        assert len(chapters) == 5
+        with pytest.raises(type(error)) as caught:
+            s.get_chapters("https://dddmanga.com")
+        assert caught.value is error
+
+    def test_source_error_is_a_runtime_error_not_a_value_error(self):
+        # Callers and the health report treat it as a source failure.
+        assert issubclass(NuxtSSRSourceError, RuntimeError)
+        assert not issubclass(NuxtSSRSourceError, ValueError)
 
 
 class TestGetPages:

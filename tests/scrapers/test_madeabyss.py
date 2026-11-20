@@ -15,6 +15,7 @@ import pytest
 
 from memanga.scrapers import get_scraper
 from memanga.scrapers.templates import NuxtSSRScraper
+from memanga.scrapers.templates.nuxt_ssr import NuxtSSRSourceError
 
 HOST = "http://madeabyss.com"
 TITLE = "Made in Abyss"
@@ -162,7 +163,7 @@ class TestChapters:
         requests_made.replies[HOST] = _Response(
             '<a href="https://reader.example/read/other-title/chapter/1/">x</a>', url=SERIES)
 
-        with pytest.raises(ValueError, match="No chapter links"):
+        with pytest.raises(NuxtSSRSourceError, match="No chapter links"):
             scraper.get_chapters(HOST)
 
 

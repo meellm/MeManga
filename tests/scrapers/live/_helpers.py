@@ -25,9 +25,11 @@ from memanga.chapters import chapter_value
 from memanga.scrapers.atsumaru import AtsumaruSourceError
 from memanga.scrapers.comix import ComixSourceError
 from memanga.scrapers.mangafire import MangaFireError
+from memanga.scrapers.mangahereonl import MangaHereOnlSourceError
 from memanga.scrapers.mangapark import MangaParkSourceError
 from memanga.scrapers.mangapark_cc import MangaParkCCSourceError
 from memanga.scrapers.olympus import OlympusSourceError
+from memanga.scrapers.templates.nuxt_ssr import NuxtSSRSourceError
 from memanga.scrapers.weebcentral import WeebCentralError
 from memanga.scrapers.zonatmo import ZonaTMOSourceError
 
@@ -209,8 +211,10 @@ SOURCE_ERRORS = (
     AtsumaruSourceError,
     ComixSourceError,
     MangaFireError,
+    MangaHereOnlSourceError,
     MangaParkSourceError,
     MangaParkCCSourceError,
+    NuxtSSRSourceError,
     OlympusSourceError,
     WeebCentralError,
     ZonaTMOSourceError,
