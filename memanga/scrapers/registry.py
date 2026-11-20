@@ -62,10 +62,14 @@ _cfg_kokounohito = {
 }
 
 _cfg_madeabyss = {
-    "BASE_URL": "https://madeabyss.com",
+    # The site only answers over plain HTTP, where it redirects (path
+    # preserved) to its HTTPS reader; port 443 does not respond.
+    "BASE_URL": "http://madeabyss.com",
     "ASSETS_URL": "https://assets.madeabyss.com/madeinabyss",
     "MANGA_TITLE": "Made in Abyss",
     "SEARCH_KEYWORDS": ["abyss", "made"],
+    # Chapters include decimal ones (16.5, 42.1, ...) the site links to.
+    "CHAPTERS_FROM_LINKS": True,
 }
 
 _cfg_unopiece = {
