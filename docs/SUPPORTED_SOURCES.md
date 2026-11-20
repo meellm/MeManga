@@ -116,7 +116,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangaforfree.net | — | http | — | No | Not searched (template) | — |
 | mangafreak.ws | mangafreak.me (Not searched (unreliable)), ww2.mangafreak.me (Not searched (unreliable)) | http | — | No | Not searched (unreliable) | — |
 | mangago.me | — | http | — | No | Not searched (region-blocked) | Yaoi/Shoujo collection |
-| mangahub.us | — | http | — | No | Not searched (needs-js) | MangaHub network |
+| mangahub.us | — | browser | — | No | Not searched (needs-js) | MangaHub network |
 | manganato.gg | — | browser | — | No | Not searched (challenge) | — |
 | mangapark1.com | — | browser | — | No | Not searched (challenge) | General library |
 | mangaread.org | — | http | — | No | Not searched (template) | — |
