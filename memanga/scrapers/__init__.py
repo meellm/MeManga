@@ -419,9 +419,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # KenganAshuraManga - Kengan Ashura/Omega dedicated (WordPress + wp-content CDN)
     "kenganashura.com": "kenganashuramanga:KenganAshuraMangaScraper",
 
-    # OyasumiPunpunManga - Goodnight Punpun dedicated (WordPress Ifenzi + cdn.readkakegurui.com)
-    "oyasumipunpun.com": "oyasumipunpunmanga:OyasumiPunpunMangaScraper",
-
     # ReadSNKManga - Attack on Titan dedicated (WordPress + Blogger CDN)
     "readsnkmanga.com": "readsnkmanga:ReadSNKMangaScraper",
 

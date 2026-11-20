@@ -288,7 +288,6 @@ SOURCE_NOTES: Dict[str, str] = {
     "read-kengan-ashura.com": "Kengan Ashura",
     "kenganashura.com": "Kengan Ashura / Omega",
     "readoshinoko.com": "Oshi no Ko",
-    "oyasumipunpun.com": "Goodnight Punpun",
     "onepunchmanmangaa.com": "One Punch Man",
     "readopm.com": "One Punch Man",
     "onepunchmanread.com": "One Punch Man",
