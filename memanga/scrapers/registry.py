@@ -535,13 +535,6 @@ _cfg_conan2 = {
     "uses_cloudscraper": True,
 }
 
-_cfg_skipbeat2 = {
-    "base_url": "https://skip-beat.online",
-    "manga_title": "Skip Beat!",
-    "cdn_domains": ["loinew.com"],
-    "uses_cloudscraper": True,
-}
-
 # ═══════════════════════════════════════════════════════════════════
 # Mangosm configs
 # ═══════════════════════════════════════════════════════════════════
@@ -698,7 +691,6 @@ TEMPLATE_SCRAPERS = {
     "blue-exorcist.online": (LaiondCDNScraper, _cfg_blueexorcist_laiond),
     "real-manga.online": (LaiondCDNScraper, _cfg_real),
     "detective-conan.online": (LaiondCDNScraper, _cfg_conan2),
-    "skip-beat.online": (LaiondCDNScraper, _cfg_skipbeat2),
 
     # ── Mangosm ──
     "readblacklagoon.com": (MangosmScraper, _cfg_blacklagoon),

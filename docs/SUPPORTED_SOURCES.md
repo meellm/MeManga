@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 270 domains across 203 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 269 domains across 202 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -184,7 +184,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | sakamotomanga.com | — | http | — | No | Included in search | Sakamoto Days |
 | shinobiscans.com | — | http | — | No | Not searched (template) | — |
 | skip-beat-manga.online | — | http | — | No | Not searched (template) | Skip Beat! |
-| skip-beat.online | — | http | — | No | Not searched (template) | Skip Beat! |
 | sousou-no-frieren.com | — | http | — | No | Included in search | Frieren |
 | spyxfamilymanga.org | — | http | — | No | Included in search | Spy x Family |
 | steel-ball-run.com | — | http | — | No | Not searched (template) | Steel Ball Run |
