@@ -344,14 +344,6 @@ _cfg_gutsberserk = {
     "uses_cloudscraper": True,
 }
 
-_cfg_vinlandsaga = {
-    "base_url": "https://ww3.vinlandsagamanga.net",
-    "manga_title": "Vinland Saga",
-    "manga_slug": "vinland-saga",
-    "is_single_manga": True,
-    "image_cdn_filters": ["img.spoilerhat.com", "zjcdn.mangafox.me"],
-}
-
 _cfg_dandadannet = {
     "base_url": "https://ww2.dandadanmanga.net",
     "manga_title": "Dandadan",
@@ -648,9 +640,6 @@ TEMPLATE_SCRAPERS = {
     "www.mashlemanga.net": (WordPressMadaraScraper, _cfg_mashlemanga),
     "gutsberserk.com": (WordPressMadaraScraper, _cfg_gutsberserk),
     "www.gutsberserk.com": (WordPressMadaraScraper, _cfg_gutsberserk),
-    "vinlandsagamanga.net": (WordPressMadaraScraper, _cfg_vinlandsaga),
-    "ww3.vinlandsagamanga.net": (WordPressMadaraScraper, _cfg_vinlandsaga),
-    "w3.vinlandsagamanga.net": (WordPressMadaraScraper, _cfg_vinlandsaga),
     "dandadanmanga.net": (WordPressMadaraScraper, _cfg_dandadannet),
     "ww2.dandadanmanga.net": (WordPressMadaraScraper, _cfg_dandadannet),
     "w2.dandadanmanga.net": (WordPressMadaraScraper, _cfg_dandadannet),
