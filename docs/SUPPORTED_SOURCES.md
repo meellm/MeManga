@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 271 domains across 204 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 270 domains across 203 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -181,7 +181,6 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | record-of-ragnarok-manga.com | w1.record-of-ragnarok-manga.com (Not searched (template)) | http | — | No | Not searched (template) | Record of Ragnarok |
 | rezero-manga.online | re-zero-manga.online (Not searched (template)) | http | — | No | Not searched (template) | Re:ZERO -Starting Life in Another World- |
 | ruyamanga2.com | — | http | — | No | Not searched (template) | — |
-| sakamoto-days.online | — | http | — | No | Included in search | Sakamoto Days |
 | sakamotomanga.com | — | http | — | No | Included in search | Sakamoto Days |
 | shinobiscans.com | — | http | — | No | Not searched (template) | — |
 | skip-beat-manga.online | — | http | — | No | Not searched (template) | Skip Beat! |

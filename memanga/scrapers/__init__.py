@@ -370,9 +370,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "readkingdomfree.com": "readkingdomfree:ReadKingdomFreeScraper",
     "www.readkingdomfree.com": "readkingdomfree:ReadKingdomFreeScraper",
 
-    # SakamotoDaysOnline - Sakamoto Days dedicated (PHP + attachment CDN)
-    "sakamoto-days.online": "sakamotodaysonline:SakamotoDaysOnlineScraper",
-
     # OnePieceManga1 - One Piece dedicated (WordPress + Contabo storage CDN)
     "1piecemanga.com": "single_title_sites:OnePieceManga1Scraper",
     "w064.1piecemanga.com": "single_title_sites:OnePieceManga1Scraper",
