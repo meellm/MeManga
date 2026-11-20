@@ -23,6 +23,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from memanga.chapters import chapter_value
 from memanga.scrapers.atsumaru import AtsumaruSourceError
+from memanga.scrapers.comix import ComixSourceError
 from memanga.scrapers.mangafire import MangaFireError
 from memanga.scrapers.mangapark import MangaParkSourceError
 from memanga.scrapers.mangapark_cc import MangaParkCCSourceError
@@ -206,6 +207,7 @@ SOURCE_ERRORS = (
     PlaywrightTimeoutError,
     CloudflareException,
     AtsumaruSourceError,
+    ComixSourceError,
     MangaFireError,
     MangaParkSourceError,
     MangaParkCCSourceError,

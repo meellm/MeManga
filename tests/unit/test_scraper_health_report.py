@@ -289,6 +289,7 @@ def _expected_errors():
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
     from memanga.scrapers.atsumaru import AtsumaruSourceError
+    from memanga.scrapers.comix import ComixSourceError
     from memanga.scrapers.mangafire import MangaFireError
     from memanga.scrapers.mangapark import MangaParkSourceError
     from memanga.scrapers.mangapark_cc import MangaParkCCSourceError
@@ -312,6 +313,8 @@ def _expected_errors():
         "mangapark-no-response": (MangaParkSourceError("No response for https://mangapark1.com/x"), stale),
         "mangapark-challenge": (MangaParkSourceError(
             "Cloudflare challenge not cleared for https://mangapark1.com/x"), stale),
+        "comix-pages": (ComixSourceError(
+            "Comix page 4 of 65 did not load for https://comix.to/title/x/1-chapter-1"), stale),
         "mangapark-cc-incomplete": (MangaParkCCSourceError(
             "mangapark.cc chapter list for x has 400 of the 1204 chapters it reports"), stale),
         "olympus-incomplete": (OlympusSourceError(

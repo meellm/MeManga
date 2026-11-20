@@ -92,7 +92,11 @@ PARSING_PROBES = {
     # catches either side changing - the image stage is what fails when
     # the reader starts handing back HTML again.
     "mangahere.cc": ProbeSpec("MangaHere (dm5 reader)", query="one piece"),
-    "comix.to": ProbeSpec("Comix.to", query="kubera"),
+    # Chapters come from a list paged 20 rows at a time that must come
+    # back whole (Kubera lists over 1,100 entries), and pages from chapter
+    # 671, a long chapter whose reader loads each page lazily.
+    "comix.to": ProbeSpec("Comix.to", query="kubera",
+                          min_chapters=1000, chapter="671"),
     # Pages come from a JSON API keyed by the chapter id in the URL
     # (issue #152) - this probe catches that endpoint/host changing.
     "mangataro.org": ProbeSpec("MangaTaro (JSON page API)",
