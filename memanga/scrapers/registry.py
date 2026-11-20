@@ -233,14 +233,6 @@ _cfg_gantz = {
     "uses_cloudscraper": True,
 }
 
-_cfg_parasyte = {
-    "base_url": "https://w9.parasytemanga.com",
-    "manga_title": "Parasyte",
-    "chapter_link_pattern": r'chapter-(\d+(?:\.\d+)?)',
-    "image_cdn_filters": ["blogger.googleusercontent.com"],
-    "uses_cloudscraper": True,
-}
-
 _cfg_fma = {
     "base_url": "https://w9.full-metal-alchemist.online",
     "manga_title": "Fullmetal Alchemist",
@@ -638,8 +630,6 @@ TEMPLATE_SCRAPERS = {
     "dorohedoro.online": (OGImageMetaScraper, _cfg_dorohedoro),
     "gantzmangafree.com": (OGImageMetaScraper, _cfg_gantz),
     "www.gantzmangafree.com": (OGImageMetaScraper, _cfg_gantz),
-    "parasytemanga.com": (OGImageMetaScraper, _cfg_parasyte),
-    "w9.parasytemanga.com": (OGImageMetaScraper, _cfg_parasyte),
     "full-metal-alchemist.online": (OGImageMetaScraper, _cfg_fma),
     "w9.full-metal-alchemist.online": (OGImageMetaScraper, _cfg_fma),
 
