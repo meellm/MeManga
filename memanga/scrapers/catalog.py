@@ -245,6 +245,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "mangas-origines.fr": "Unofficial French manga, manhwa and manhua scans",
     "rawuwu.net": "Raw manga (One Piece verified Japanese)",
     "anime-sama.to": "Unofficial French manga scans",
+    "mangaraw.ink": "Raw manga (One Piece verified Japanese)",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",

@@ -171,6 +171,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Anime-Sama - French manga scans (published viewer)
     "anime-sama.to": "animesama:AnimeSamaScraper",
 
+    # Mangaraw.ink - raw manga
+    "mangaraw.ink": "mangarawink:MangarawInkScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
