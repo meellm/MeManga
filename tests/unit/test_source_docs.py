@@ -369,7 +369,7 @@ def test_shared_parts_follow_what_a_subclass_defines():
 
 @pytest.mark.parametrize("domain, own", [
     ("homunculusmanga.com", ("chapters",)),      # its own _page_urls, _skip_chapter
-    ("dragonballsuper.org", ("chapters",)),      # its own page helpers
+    ("thedragonballsuper.online", ("chapters",)),  # its own page helpers
     ("vagabondmanga.org", ("chapters",)),        # its own chapter-title helper
     ("tokyoghoul.club", ()),                     # page helper of the site it extends
 ])
@@ -390,13 +390,24 @@ def test_families_without_site_code_keep_shared_credit():
     sources = source_catalog()
     tested = source_docs.source_parser_tests(
         sources, source_docs.parser_test_declarations(ROOT))
+    # Family members with parser tests of their own: Read Black Clover
+    # also replaces the family's code.
+    own = {"readblackclover.com": ("chapters", "pages"),
+           "kokounohito.com": ("chapters", "pages"),
+           "madeabyss.com": ("chapters", "pages")}
+    seen = set()
     for base, parts in ((ReadMangaBaseScraper, ("search", "chapters", "pages")),
                         (NuxtSSRScraper, ("chapters", "pages"))):
         family = [s.domain for s in sources
                   if issubclass(_source_class(s.domain), base)]
         assert family
         for domain in family:
-            assert tested[domain] == ((), parts), domain
+            if domain in own:
+                seen.add(domain)
+                assert tested[domain] == (own[domain], ()), domain
+            else:
+                assert tested[domain] == ((), parts), domain
+    assert seen == set(own)
 
 
 def test_own_parts_win_over_shared_ones():

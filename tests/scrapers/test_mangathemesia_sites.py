@@ -245,7 +245,9 @@ class TestRegistration:
             "http", "fr", "Included in search")
         assert domain not in DEFAULT_ENABLED_SOURCES
         docs = Path(__file__).resolve().parents[2] / "docs" / "SUPPORTED_SOURCES.md"
-        assert row in docs.read_text(encoding="utf-8").splitlines()
+        # The generated table has coverage columns after the notes.
+        assert any(line.startswith(f"{row} ")
+                   for line in docs.read_text(encoding="utf-8").splitlines())
 
     @pytest.mark.parametrize("cls", [SushiScanScraper, LelMangaScraper])
     def test_source_metadata(self, cls):

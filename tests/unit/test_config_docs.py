@@ -20,6 +20,7 @@ PACKAGE = ROOT / "memanga"
 NOT_SETTINGS = {
     "gui.library.refresh",  # a timer name
     "mangadex.org",  # a source domain
+    "reader.php",  # a URL path on a source (scrapers/mangademon.py)
 }
 
 

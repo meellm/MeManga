@@ -2315,6 +2315,30 @@ class TestSourcesCommand:
         assert block["Parser tests"] == "own search, chapters, pages"
         assert block["Live probe"] == "search, chapters, pages, image"
 
+    @pytest.mark.parametrize("note, joiner", [
+        ("Serves [bold]every[/bold] chapter through a reader whose address "
+         "changes, so add a series by its direct URL", " "),
+        ("世界" * 40, ""),
+    ], ids=["words-and-markup", "wide-unbroken"])
+    def test_coverage_block_wraps_a_long_note_under_itself(self, note, joiner):
+        from types import SimpleNamespace
+        from rich.cells import cell_len
+        from rich.text import Text
+        from memanga.cli import _source_coverage_block
+        source = SimpleNamespace(domain="example.test", search_status="x",
+                                 note=note, nsfw=False, default_enabled=False)
+        facts = {"parser_tests": {"own": [], "shared": []}, "live_probe": None}
+        lines = [Text.from_markup(line).plain
+                 for line in _source_coverage_block(source, None, facts)]
+        label = "  Notes:        "
+        notes = lines[5:]
+        assert len(notes) > 1
+        assert notes[0].startswith(label)
+        assert all(line.startswith(" " * len(label)) for line in notes[1:])
+        assert all(cell_len(line) <= 80 for line in notes)
+        # The brackets stay literal and no text is lost.
+        assert joiner.join(line[len(label):] for line in notes) == note
+
     def test_default_table_points_to_coverage(self, run_cli, capsys):
         assert run_cli("sources", "mangadex") == 0
         out = capsys.readouterr().out

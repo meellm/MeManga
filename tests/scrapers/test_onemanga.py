@@ -189,8 +189,11 @@ class TestEngine:
         rows = {row.domain: row for row in source_catalog()}
         assert rows["1manga.co"].engine == "browser"
         docs = Path(__file__).resolve().parents[2] / "docs" / "SUPPORTED_SOURCES.md"
-        assert ("| 1manga.co | — | browser | — | No | Included in search | "
-                "MangaHub network |") in docs.read_text(encoding="utf-8").splitlines()
+        # The generated table has coverage columns after the notes.
+        row = ("| 1manga.co | — | browser | — | No | Included in search | "
+               "MangaHub network | ")
+        assert any(line.startswith(row)
+                   for line in docs.read_text(encoding="utf-8").splitlines())
         # Search, chapters and downloads stay on HTTP.
         assert not issubclass(OneMangaScraper, PlaywrightScraper)
 

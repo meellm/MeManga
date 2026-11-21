@@ -25,6 +25,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.table import Table
+from rich.text import Text
 from rich import box
 
 from .backup import (
@@ -3014,7 +3015,8 @@ def _source_coverage_block(source, health, facts):
     """Lines of one source in `memanga sources --coverage`.
 
     Short labelled lines rather than table cells, so each fact stays on
-    one line in an 80-column terminal and in plain output.
+    one line in an 80-column terminal and in plain output. A long note
+    continues under itself.
     """
     status = health["status"] if health else "unknown"
     checked = _health_checked(health)
@@ -3030,7 +3032,12 @@ def _source_coverage_block(source, health, facts):
     ]
     notes = _source_notes(source)
     if notes:
-        lines.append(f"  Notes:        {_esc(notes)}")
+        label = "  Notes:        "
+        # Wrapped before escaping, so a break cannot split an escape.
+        wrapped = Text(notes).wrap(console, 80 - len(label), overflow="fold")
+        for number, part in enumerate(wrapped):
+            prefix = " " * len(label) if number else label
+            lines.append(f"{prefix}{_esc(part.plain.rstrip())}")
     return lines
 
 
