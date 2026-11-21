@@ -102,7 +102,17 @@ the Build & Release workflow (`.github/workflows/release.yml`).
 1. Set the version in `memanga/__init__.py` (`__version__`).
    `pyproject.toml` reads it from there.
 2. Give the version its own section in `CHANGELOG.md`, `## [1.2.3]`. The
-   section becomes the text of the GitHub release.
+   section becomes the text of the GitHub release. In the links at the end
+   of the file, below `## Earlier versions` so that they stay out of the
+   release text, add the new version and move `[Unreleased]` to its tag:
+
+   ```md
+   [Unreleased]: https://github.com/meellm/MeManga/compare/v1.2.3...main
+   [1.2.3]: https://github.com/meellm/MeManga/compare/v1.2.2...v1.2.3
+   ```
+
+   `tests/unit/test_release_notes.py` checks these links against the
+   section headings.
 3. Push the tag `v` plus that version, for example `v1.2.3`.
 
 The workflow then runs, and publishes nothing unless every step passes:
