@@ -177,6 +177,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Mangaraw.ink - raw manga
     "mangaraw.ink": "mangarawink:MangarawInkScraper",
 
+    # Dynasty Scans - English yuri scanlations (public JSON)
+    "dynasty-scans.com": "dynasty:DynastyScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
