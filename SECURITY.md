@@ -12,15 +12,21 @@ branches are unsupported.
 
 Email `info.meellm@gmail.com` with:
 - A short description of the issue.
-- Steps to reproduce (URL, payload, manga config snippet, etc.).
-- The MeManga version and the OS you're running on. The command line
-  prints the version with `memanga --version` (or
-  `python -m memanga --version`); the desktop app shows it in its window
-  title and on the Settings page.
+- Steps to reproduce (URL, payload, only the config lines needed, etc.).
+- The MeManga version and the OS you're running on. The desktop app shows
+  the version in its window title and on the Settings page. With Docker,
+  give the image tag. In the development version, `memanga --version` (or
+  `python -m memanga --version`) also prints it.
 
-Remove email addresses, app passwords and other personal details from
-any config output, logs or screenshots you send. `memanga config show`
-already hides the app password and email addresses.
+Send only the details needed. Do not send your whole `config.yaml`, which
+can contain your app password. Remove email addresses, passwords, tokens,
+user names in file paths and other personal details from any config
+output, logs or screenshots.
+
+In the development version, `memanga config show` hides the app password
+and the part of an email address before the `@`. In v0.4.4,
+`memanga config --show` hides only the app password. Neither removes
+everything personal, so read the output before you send it.
 
 You'll get an acknowledgement within 72 hours. Once a fix lands we'll
 coordinate disclosure timing with you and credit you in the release
