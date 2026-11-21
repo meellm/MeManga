@@ -218,6 +218,10 @@ source, as the notices file describes.
 The {{ release.tag }} downloads and image came out before these notices
 files.
 
+Firefox and Chromium, which some sources need, are also third-party software
+under their own licenses: the Docker image includes them, and the desktop app
+and `memanga setup` download them only when you agree.
+
 ## Where MeManga keeps its files
 
 MeManga keeps your settings and your library in `config.yaml`, and what it

@@ -16,6 +16,8 @@ export default defineConfig({
   // package metadata. They stay where they are until their content has been
   // moved into the site.
   srcExclude: [
+    // The index of this folder for people reading it on GitHub.
+    'README.md',
     'Guide.md',
     'SUPPORTED_SOURCES.md',
     'ACCESSIBILITY.md',

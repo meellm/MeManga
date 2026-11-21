@@ -178,6 +178,7 @@ first part to translate.
 
 ## Reporting issues
 
-See [SECURITY.md](SECURITY.md) for vulnerability reports. For
-everything else, open a GitHub issue with the **Bug report** or
+See [SECURITY.md](SECURITY.md) for vulnerability reports. Ask questions
+and share ideas in [Discussions](https://github.com/meellm/MeManga/discussions).
+For everything else, open a GitHub issue with the **Bug report** or
 **Feature request** template.
