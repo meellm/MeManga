@@ -144,6 +144,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # MangaRW - raw manga (public JSON API)
     "mangarw.com": "mangarw:MangaRwScraper",
 
+    # Manga Demon - English manga and manhwa scans
+    "demonicscans.org": "mangademon:MangaDemonScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

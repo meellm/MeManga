@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 278 domains across 213 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 279 domains across 214 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -63,6 +63,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | dddmanga.com | — | http | — | No | Not searched (template) | Dandadan |
 | death-note-manga.com | w13.death-note-manga.com (Included in search) | http | — | No | Included in search | Death Note |
 | deathnotemangafree.com | — | http | — | No | Not searched (template) | Death Note |
+| demonicscans.org | — | http | en | No | Included in search | Unofficial English manga and manhwa scans |
 | demonslayermanga.com | ww9.demonslayermanga.com (Included in search) | http | — | No | Included in search | Demon Slayer |
 | detective-conan-manga.online | — | http | — | No | Not searched (template) | Detective Conan (Case Closed) |
 | detective-conan.online | — | http | — | No | Not searched (template) | Detective Conan |
