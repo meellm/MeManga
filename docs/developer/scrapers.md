@@ -345,8 +345,23 @@ name the stage that failed, and list every stage in `extra.stages`.
 | `DEAD` | DNS, connection, TLS or timeout failure. |
 | `PROTECTED` | The probe's plain request got a Cloudflare-style 403 or 503 page. This is reported, not counted as a failure. The reachability test skips such a site; the pipeline probe goes on and its stages decide. |
 | `HTTP_ERROR` | Another 4xx or 5xx answer. |
-| `STALE` | The site answered, but a stage found nothing or raised: usually a changed layout. |
+| `STALE` | The home page answered with almost nothing, a stage found nothing, or a stage failed with another source error, such as a reply that is not JSON, a page wait that ran out of time or a Cloudflare block. A changed layout is a common cause. |
 | `SKIP` | Counted in the summary; the current probes do not set it. |
+
+A source that fails its probe is listed in the run's summary and in
+`health.json`, and does not fail the workflow run. The run fails when the
+probes could not run or report:
+
+- the browsers do not start, which is checked before the probes;
+- pytest does not complete or does not run every collected test;
+- `health.json` is missing, malformed or does not match what pytest saw;
+- a test fails without recording a failing source, for example after a
+  programming error in a scraper or a browser crash.
+
+After the probes, `scripts/check_health_report.py` checks the last three.
+An error from a scraper counts as a source failure only when its type is
+covered by `SOURCE_ERRORS` in `tests/scrapers/live/_helpers.py`, and so is
+any error it was raised `from`.
 
 The report has limits:
 

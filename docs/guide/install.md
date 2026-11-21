@@ -107,7 +107,7 @@ the v0.4.4 download:
 This installs the current development version from the repository. It can be
 ahead of {{ release.tag }}.
 
-You need Python 3.11 or newer and Git.
+You need Python 3.11.5 or newer and Git.
 
 ::: code-group
 

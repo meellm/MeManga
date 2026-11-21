@@ -6,7 +6,7 @@ MeManga rather than work on it, see [Download and install](../guide/install).
 
 ## Install for development
 
-You need Git and Python 3.11 or newer. CI tests Python 3.11, 3.12 and
+You need Git and Python 3.11.5 or newer. CI tests Python 3.11, 3.12 and
 3.13.
 
 The development install uses the same two steps as CI: first the pinned
@@ -135,8 +135,8 @@ The workflows in `.github/workflows/` run on GitHub:
 | Workflow | When | What |
 |---|---|---|
 | CI (`ci.yml`) | Pushes and pull requests to `main`; by hand; from the release workflow | See below |
-| Source docs (`source-docs.yml`) | Pushes and pull requests to `main` | `--check` of `source_docs`, `cli_docs` and `config_docs` (see [Generated files](#generated-files)) |
-| Dependency locks (`dependency-locks.yml`) | Pushes and pull requests to `main` | `python scripts/lock_dependencies.py --check` |
+| Source docs (`source-docs.yml`) | Pushes and pull requests to `main`; by hand | `--check` of `source_docs`, `cli_docs` and `config_docs` (see [Generated files](#generated-files)) |
+| Dependency locks (`dependency-locks.yml`) | Pushes and pull requests to `main`; by hand | `python scripts/lock_dependencies.py --check` |
 | Dependency audit (`dependency-audit.yml`) | Changes to `requirements/`, `pyproject.toml` or the audit settings on `main` and its pull requests; weekly; by hand; before a release | Known vulnerabilities in the pinned packages |
 | Documentation site (`docs.yml`) | Pushes to `main` that change `docs/`, a file the site shows or the workflow itself ([full list](https://github.com/meellm/MeManga/blob/main/.github/workflows/docs.yml)) | Builds and publishes this site |
 | Scraper health (`scraper-health.yml`) | Weekly; by hand | The live probes; never on pushes or pull requests |
