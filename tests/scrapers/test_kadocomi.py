@@ -20,6 +20,10 @@ from memanga.scrapers.kadocomi import (
     KadoComiScraper, KadoComiSourceError, _xor, chapter_labels, parse_expires_at,
     viewer_pages, work_episodes)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"KadoComiScraper": ("search", "chapters", "pages")}
+
 BASE = "https://comic-walker.com"
 WORK = "KC_000123_S"
 WORK_URL = f"{BASE}/detail/{WORK}"

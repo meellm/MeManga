@@ -17,6 +17,10 @@ from memanga.scrapers import get_scraper
 from memanga.scrapers.templates import NuxtSSRScraper
 from memanga.scrapers.templates.nuxt_ssr import NuxtSSRSourceError
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"madeabyss.com": ("chapters", "pages")}
+
 HOST = "http://madeabyss.com"
 TITLE = "Made in Abyss"
 # Where the HTTP host's redirect lands (the response's final URL).

@@ -22,6 +22,10 @@ from memanga.scrapers import mangarawink
 from memanga.scrapers.mangarawink import (
     MangarawInkScraper, MangarawInkSourceError, chapter_parts, series_url)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangarawInkScraper": ("search", "chapters", "pages")}
+
 BASE = "https://mangaraw.ink"
 SERIES = f"{BASE}/manga/test-work"
 OTHER_SERIES = f"{BASE}/manga/other-work"

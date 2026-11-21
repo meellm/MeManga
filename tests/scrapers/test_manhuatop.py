@@ -21,6 +21,10 @@ from memanga.scrapers import manhuatop as mt
 from memanga.scrapers.manhuatop import (ManhuaTopScraper, ManhuaTopSourceError,
                                         ManhuaTopUnsupportedError)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"ManhuaTopScraper": ("search", "chapters", "pages")}
+
 SITE = "https://manhuatop.org"
 SLUG = "martial-god"
 SERIES = f"{SITE}/manhua/{SLUG}/"

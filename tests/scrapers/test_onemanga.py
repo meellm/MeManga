@@ -22,6 +22,10 @@ import requests
 from memanga.scrapers import onemanga as om
 from memanga.scrapers.onemanga import OneMangaScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"OneMangaScraper": ("chapters", "pages")}
+
 SERIES_URL = "https://1manga.co/manga/yukoku-no-moriarty"
 CHAPTER = "https://1manga.co/chapter/yukoku-no-moriarty/chapter-"
 

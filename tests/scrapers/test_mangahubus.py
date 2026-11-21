@@ -17,6 +17,10 @@ from memanga.scrapers.mangahubus import (
     MangaHubUsScraper, MangaHubUsSourceError, _MangaHubUsReader,
     _PAGE_LIST_OBSERVER, _READER_STATE, page_folder, reply_end, served_folder)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaHubUsScraper": ("search", "chapters", "pages")}
+
 BASE = "https://mangahub.us"
 SERIES = f"{BASE}/manga/one-piece"
 CH = f"{BASE}/chapter/one-piece/chapter-1199"

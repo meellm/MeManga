@@ -27,6 +27,13 @@ from memanga.scrapers.mangathemesia_sites import (LelMangaScraper,
                                                   MangaThemesiaUnsupportedError,
                                                   SushiScanScraper)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {
+    "LelMangaScraper": ("search", "chapters", "pages"),
+    "SushiScanScraper": ("search", "chapters", "pages"),
+}
+
 SUSHI = "https://sushiscan.net"
 LEL = "https://www.lelmanga.com"
 SUSHI_SERIES = f"{SUSHI}/catalogue/kagurabachi/"

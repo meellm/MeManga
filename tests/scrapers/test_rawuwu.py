@@ -21,6 +21,10 @@ from memanga.scrapers import rawuwu
 from memanga.scrapers.rawuwu import (
     RawUwuScraper, RawUwuSourceError, chapter_parts, series_id)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"RawUwuScraper": ("search", "chapters", "pages")}
+
 BASE = "https://rawuwu.net"
 API = f"{BASE}/spa"
 SERVER = "https://s3.rawuwu.net/"

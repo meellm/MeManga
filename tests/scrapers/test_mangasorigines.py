@@ -20,6 +20,10 @@ from memanga.scrapers.mangasorigines import (MangasOriginesScraper,
                                              MangasOriginesSourceError,
                                              MangasOriginesUnsupportedError)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangasOriginesScraper": ("search", "chapters", "pages")}
+
 SITE = "https://mangas-origines.fr"
 SLUG = "solo-farming-in-the-tower"
 SERIES = f"{SITE}/oeuvre/{SLUG}/"

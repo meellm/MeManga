@@ -23,6 +23,10 @@ from memanga.scrapers.mangadenizi import (
     unscramble,
 )
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaDeniziScraper": ("search", "chapters", "pages")}
+
 BASE = "https://mangadenizi.net"
 IMAGE = "https://img.mangadenizi.net/reader-images/black-clover/385/1-abc123.webp"
 IMAGE_PNG = "https://img.mangadenizi.net/reader-images/black-clover/385/1-abc123.png"

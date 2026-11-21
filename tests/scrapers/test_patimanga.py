@@ -13,6 +13,10 @@ from PIL import Image
 
 from memanga.scrapers.patimanga import PatiMangaScraper, PatiMangaSourceError
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"PatiMangaScraper": ("search", "chapters", "pages")}
+
 SITE = "https://www.patimanga.com"
 SLUG = "darma-duman-etmeye-geldim"
 SERIES_URL = f"{SITE}/manga/{SLUG}/"

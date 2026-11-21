@@ -19,6 +19,10 @@ import requests
 from memanga.scrapers import mangahub as mh
 from memanga.scrapers.mangahub import MangaHubScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaHubScraper": ("chapters", "pages")}
+
 SERIES_URL = "https://mangahub.io/manga/one-piece_142"
 READER = "https://mangahub.io/chapter/one-piece_142/chapter-"
 

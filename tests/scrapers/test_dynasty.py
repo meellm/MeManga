@@ -18,6 +18,10 @@ from memanga.scrapers import dynasty as dy
 from memanga.scrapers.dynasty import (DynastyScraper, DynastySourceError,
                                       DynastyUnsupportedError)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"DynastyScraper": ("search", "chapters", "pages")}
+
 SITE = "https://dynasty-scans.com"
 SLUG = "former_evil_general_is_crushing_on_the_magical_girl"
 SERIES = f"{SITE}/series/{SLUG}"

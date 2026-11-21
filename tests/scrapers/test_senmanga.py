@@ -20,6 +20,10 @@ from memanga.scrapers.senmanga import (
     SenMangaScraper, SenMangaSourceError, chapter_ids, series_slug)
 from memanga.search import BROKEN_SEARCH_SOURCES, sweep
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"SenMangaScraper": ("chapters", "pages")}
+
 BASE = "https://raw.senmanga.com"
 SERIES_URL = f"{BASE}/manga/one-piece"
 CDN = "https://cdn.rawkuma.com"

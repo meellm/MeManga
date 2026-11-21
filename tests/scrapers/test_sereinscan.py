@@ -18,6 +18,10 @@ from memanga.scrapers.mangathemesia_sites import (
 )
 from memanga.scrapers.sereinscan import SereinScanScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"SereinScanScraper": ("search", "chapters", "pages")}
+
 BASE = "https://sereinscan.com"
 SLUG = "caninin-tek-sonu-olum"
 TITLE = "Caninin Tek Sonu Ölüm"

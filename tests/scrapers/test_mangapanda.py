@@ -20,6 +20,10 @@ from memanga.scrapers.mangapanda import (
 )
 from memanga.scrapers.playwright_base import PlaywrightScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaPandaScraper": ("chapters", "pages")}
+
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
 JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 
