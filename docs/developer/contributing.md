@@ -1,8 +1,9 @@
 # Set up for development
 
 How to install MeManga from a clone for development, run it and its tests,
-what the checks on GitHub run, and how to start a translation. To use
-MeManga rather than work on it, see [Download and install](../guide/install).
+what the checks on GitHub run, how to write command-line output and how to
+start a translation. To use MeManga rather than work on it, see
+[Download and install](../guide/install).
 
 ## Install for development
 
@@ -186,6 +187,59 @@ npm ci
 npm run dev      # local preview while you write
 npm run build    # the build CI runs
 ```
+
+## Command-line output
+
+How `memanga` prints today, then the rules for messages you add or change.
+`memanga/cli.py` and `memanga/output.py` are the reference for the
+development version.
+
+### How output works today
+
+- **Two consoles.** `console` writes to standard output and `err_console`
+  to standard error. Results go to `console`. `_error()` prints an error on
+  `err_console`. `_diagnostic()` reports a warning or error as a log record,
+  so `memanga -q` and the log level decide whether it shows. It takes both
+  the styled text and a plain message.
+- **The split is not complete.** Some commands also print hints, warnings
+  or progress on standard output; see
+  [Output](../reference/scripting#output).
+- **Plain or styled, per stream.** Standard output and standard error are
+  decided separately, so one can be plain while the other is styled. A
+  stream is plain with `--plain`, with `TERM=dumb`, or when it is not a
+  terminal. `NO_COLOR` turns off colour only.
+- **What plain output removes.** Colour, live widgets, line wrapping, box
+  drawing and the icons listed in `APP_DECORATION`. Other Unicode stays,
+  such as `→` or a `★` in a title. `_panel()` and `_table()` drop their
+  frames when standard output is plain.
+- **JSON.** With `--json`, standard output carries only the JSON document.
+  `_print_json()` is the helper for this.
+
+### For new or changed messages
+
+Existing messages vary, and many do not follow these rules yet: for
+example, several still say `chapter(s)`. Change an existing message on
+purpose, together with any test that checks its text.
+
+- **Status.** Do not carry meaning in an icon or colour alone, because plain
+  output drops them. When a line or column needs a status word, use `OK`,
+  `NEW`, `SKIP`, `WARN` or `FAIL`. In plain output, `memanga doctor` already
+  prints `OK`, `WARN`, `FAIL` and `SKIP`. `NEW`, for something newly found,
+  is the word to use from now on; no command prints it yet.
+- **Grammar.** Write `<subject>: <what happened> (<detail>)`, as in
+  `Some Title: check failed (connection timed out)`.
+- **Plurals.** Use the real singular and plural, `1 chapter` and
+  `2 chapters`, not `chapter(s)`.
+- **Plain words.** Use terms a user knows. Keep class names and other
+  internal details out of normal output.
+- **Escaping.** Pass every value you insert into Rich markup, such as a
+  title, path, URL or error text, through `_esc()`. Otherwise brackets in
+  the value can [act as markup](https://rich.readthedocs.io/en/stable/markup.html#escaping).
+- **Icons.** Add a new icon to `APP_DECORATION` in `memanga/output.py`, or
+  plain output will keep it.
+- **JSON.** Keep `--json` output to the JSON document alone. Send
+  diagnostics to standard error, because
+  [scripts read this output](../reference/scripting#json-output).
 
 ## Translations
 

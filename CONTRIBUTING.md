@@ -126,6 +126,8 @@ and the generated files, which are listed only here.
 - [ ] Generated files are regenerated when their inputs changed
 - [ ] If you touched a scraper, you ran the live probe at least once
 
+If you add or change what the command line prints, follow [Command-line output](https://meellm.github.io/MeManga/developer/contributing#command-line-output).
+
 ## Building executables
 
 ```bash
