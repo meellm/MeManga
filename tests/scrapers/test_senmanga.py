@@ -514,7 +514,7 @@ class TestMetadata:
         assert isinstance(get_scraper("raw.senmanga.com"), SenMangaScraper)
         assert [d for d in SCRAPERS
                 if d == "senmanga.com" or d.endswith(".senmanga.com")] == ["raw.senmanga.com"]
-        assert not [d for d in SCRAPERS if "rawkuma" in d]
+        assert [d for d, cls in SCRAPERS.items() if cls is SenMangaScraper] == ["raw.senmanga.com"]
 
     def test_catalog_states_direct_url_only(self):
         row = next(r for r in source_catalog() if r.domain == "raw.senmanga.com")
