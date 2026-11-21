@@ -141,6 +141,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 
+    # MangaRW - raw manga (public JSON API)
+    "mangarw.com": "mangarw:MangaRwScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
