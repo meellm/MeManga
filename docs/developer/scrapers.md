@@ -172,9 +172,9 @@ that refuses them do not make it work, and they can get the user blocked.
 A class or module name is a separate label, and some look like typos:
 
 - **Spelled like the domain.** Many class names follow their domain rather
-  than the series title. The Hajime no Ippo sources are four separately
-  registered domains, and `AjimeNoIppoScraper` and `HajimNoIppoScraper`
-  follow the spelling of `ajimenoippo.com` and `hajimnoippo.com`.
+  than the series title. The Hajime no Ippo sources are three separately
+  registered domains, and `HajimNoIppoScraper` follows the spelling of
+  `hajimnoippo.com`.
 - **Moved.** `mangaeffect.com` uses `MangaReadScraper`, now in
   `coffeemanga.py`. The old import path `memanga.scrapers.mangaeffect` still
   works and gives a `DeprecationWarning` (`_MOVED_MODULES`).
@@ -321,8 +321,10 @@ fails:
 1. **Reachability:** the home page answers at all. Only a dead site stops
    the probe here.
 2. **Search:** at least one result with a URL.
-3. **Chapters:** at least one chapter with a URL.
-4. **Pages:** at least one absolute page URL.
+3. **Chapters:** at least one chapter with a URL, or as many as the probe
+   requires with `min_chapters`.
+4. **Pages:** at least one absolute page URL, from the first listed chapter
+   or the one the probe names with `chapter`.
 5. **Image:** the scraper's own `download_image` saves the first page of
    that chapter, and the file is at least 1 KB and starts with a known
    image signature. Only that one page is checked, and it is not decoded.
@@ -330,8 +332,9 @@ fails:
 An answer with HTTP 200 is not proof that a source works: a block page or
 a changed layout also answers with 200. A probe that passes the image
 stage shows only what its stages checked: the first search result (or the
-base URL of a single-series site), its first listed chapter and that
-chapter's first page. It says nothing about the other pages and chapters.
+base URL of a single-series site), its first listed chapter or the one the
+probe names, and that chapter's first page. It says nothing about the other
+pages and chapters.
 
 **Adding a probe.** An aggregator, or a new template family, gets an entry
 in `PARSING_PROBES` in `tests/scrapers/live/test_live_parsing.py`. A
@@ -341,10 +344,12 @@ template site is covered by its family's entry.
   site, whose chapters are read from its base URL.
 - `check_chapters`, `check_pages` and `check_image` turn off later stages.
   Use them only with a comment that gives the reason. For example,
-  `comick.io` skips pages because many of its chapters are links to other
-  sites, and `readsnk.com` skips chapters because its search results don't
+  `comick.io` skips pages because the releases sampled have no hosted page
+  images, and `readsnk.com` skips chapters because its search results don't
   reliably give a series URL that the chapter list can use.
 - These flags are shown in the Live probe column of the source list.
+- `min_chapters` sets how many chapters the list must have. `chapter` names
+  the chapter to probe instead of the first listed one.
 - Keep a probe light: the whole pipeline is about four requests. Run it
   once rather than in a loop.
 
@@ -364,7 +369,7 @@ name the stage that failed, and list every stage in `extra.stages`.
 | `DEAD` | DNS, connection, TLS or timeout failure. |
 | `PROTECTED` | The probe's plain request got a Cloudflare-style 403 or 503 page. This is reported, not counted as a failure. The reachability test skips such a site; the pipeline probe goes on and its stages decide. |
 | `HTTP_ERROR` | Another 4xx or 5xx answer. |
-| `STALE` | The home page answered with almost nothing, a stage found nothing, or a stage failed with another source error, such as a reply that is not JSON, a page wait that ran out of time or a Cloudflare block. A changed layout is a common cause. |
+| `STALE` | The home page answered with almost nothing or a registrar's parking page, a stage found nothing or too few chapters, or a stage failed with another source error, such as a reply that is not JSON, a page wait that ran out of time or a Cloudflare block. A changed layout is a common cause. |
 | `SKIP` | Counted in the summary; the current probes do not set it. |
 
 A source that fails its probe is listed in the run's summary and in
