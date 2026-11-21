@@ -144,9 +144,9 @@ def target_requirements(project: dict, extras) -> list[str]:
 
 
 def python_floor(project: dict) -> str:
-    match = re.fullmatch(r">=\s*(\d+\.\d+)", project["requires-python"].strip())
+    match = re.fullmatch(r">=\s*(\d+\.\d+(?:\.\d+)?)", project["requires-python"].strip())
     if not match:
-        raise SystemExit("requires-python must be a plain floor such as >=3.11, "
+        raise SystemExit("requires-python must be a plain floor such as >=3.11.5, "
                          f"got {project['requires-python']!r}")
     return match.group(1)
 

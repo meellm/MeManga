@@ -7,7 +7,9 @@ Python rather than only as pytest fixtures.
 
 from __future__ import annotations
 
+import json
 import socket
+import ssl
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -15,6 +17,13 @@ from pathlib import Path
 
 import pytest
 import requests
+import urllib3
+from cloudscraper.exceptions import CloudflareException
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
+from memanga.scrapers.mangafire import MangaFireError
+from memanga.scrapers.mangapark import MangaParkSourceError
+from memanga.scrapers.weebcentral import WeebCentralError
 
 
 # Status constants — used in test output and the JSON report.
@@ -173,6 +182,50 @@ def scraper_base_url(scraper) -> str:
             or getattr(scraper, "base_url", None) or "")
 
 
+# What a scraper raises when its source fails it, rather than the probe
+# or the runner: a requests error or the network error under it (DNS,
+# refused or reset connection, TLS, urllib3), a non-JSON reply, a page
+# or browser wait running out of time, a Cloudflare block, and the
+# errors the scrapers raise for their own sources. Anything else
+# (TypeError, AttributeError, a plain RuntimeError or ValueError, a
+# Playwright error such as a closed or missing browser,
+# BrowserSetupError) is not one.
+SOURCE_ERRORS = (
+    requests.exceptions.RequestException,
+    urllib3.exceptions.HTTPError,
+    socket.gaierror,
+    ConnectionError,
+    ssl.SSLError,
+    json.JSONDecodeError,
+    TimeoutError,
+    PlaywrightTimeoutError,
+    CloudflareException,
+    MangaFireError,
+    MangaParkSourceError,
+    WeebCentralError,
+)
+
+
+def is_source_error(error: BaseException) -> bool:
+    """True when `error` and every exception it was raised from (`raise
+    ... from e`, as the scrapers wrap what failed) are SOURCE_ERRORS.
+
+    Only that explicit cause is followed, not the implicit context
+    Python records for anything raised while another exception is
+    handled. requests itself raises its errors that way, over urllib3's
+    and the socket's, and the scrapers' retry loops re-raise the last
+    error after handling it; a wrapper that means "this is what failed"
+    says so with `from`, and `from None` hides the context anyway.
+    """
+    seen = set()
+    while error is not None and id(error) not in seen:
+        if not isinstance(error, SOURCE_ERRORS):
+            return False
+        seen.add(id(error))
+        error = error.__cause__
+    return True
+
+
 class ScraperPipeline:
     """Runs one scraper's user-visible stages in order against the live
     site: search → chapters → pages → image download.
@@ -203,18 +256,23 @@ class ScraperPipeline:
         t0 = time.monotonic()
         try:
             out = fn(*args)
-        except (requests.exceptions.ConnectionError,
-                requests.exceptions.Timeout, socket.gaierror) as e:
-            self._fail(stage, f"{label} → connection error: {e!s}",
-                       (time.monotonic() - t0) * 1000, STATUS_DEAD)
-        except requests.exceptions.HTTPError as e:
-            self._fail(stage, f"{label} → HTTP error: {e!s}",
-                       (time.monotonic() - t0) * 1000, STATUS_HTTP_ERROR)
         except Exception as e:
+            if not is_source_error(e):
+                # A bug, a browser that crashed or could not start, also
+                # behind a network or HTTP error raised from it: the test
+                # fails without a source row, which fails the run.
+                raise
+            ms = (time.monotonic() - t0) * 1000
+            if isinstance(e, (requests.exceptions.ConnectionError,
+                              requests.exceptions.Timeout, socket.gaierror)):
+                self._fail(stage, f"{label} → connection error: {e!s}",
+                           ms, STATUS_DEAD)
+            if isinstance(e, requests.exceptions.HTTPError):
+                self._fail(stage, f"{label} → HTTP error: {e!s}",
+                           ms, STATUS_HTTP_ERROR)
             self._fail(stage,
                        f"{label} raised {type(e).__name__}: {e!s} "
-                       f"(HTML structure may have changed)",
-                       (time.monotonic() - t0) * 1000)
+                       f"(HTML structure may have changed)", ms)
         return out, (time.monotonic() - t0) * 1000
 
     # ── stages ───────────────────────────────────────────────────

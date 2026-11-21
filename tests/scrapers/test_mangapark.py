@@ -211,3 +211,87 @@ class TestRegistry:
         from memanga.scrapers import get_scraper
         s = get_scraper("www.mangapark1.com")
         assert isinstance(s, MangaParkScraper)
+
+
+class FakeResponse:
+    def __init__(self, status=200, body=""):
+        self.status = status
+        self._body = body
+
+    def text(self):
+        return self._body
+
+
+class FakePage:
+    """A Chromium page that answers goto() from `routes` ({url part:
+    response or None}) and shows `title`."""
+
+    def __init__(self, routes, title=""):
+        self.routes = routes
+        self._title = title
+
+    def goto(self, url, **kwargs):
+        for part, response in self.routes.items():
+            if part in url:
+                return response
+        return FakeResponse(404)
+
+    def title(self):
+        return self._title
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def close(self):
+        pass
+
+
+def fake_browser(monkeypatch, scraper, routes, title=""):
+    """Fetch through the real _fetch_in_thread, on fake pages, in this
+    thread."""
+    context = type("Context", (), {
+        "new_page": lambda self: FakePage(routes, title)})()
+    monkeypatch.setattr(scraper, "_get_browser_in_thread", lambda: (None, context))
+    monkeypatch.setattr(scraper, "_get_html", scraper._fetch_in_thread)
+
+
+class TestFetchErrors:
+    """The site not serving a page is a MangaParkSourceError (still a
+    RuntimeError), with the message it always had."""
+
+    URL = "https://mangapark1.com/read/one-piece/chapter-1"
+
+    @pytest.mark.parametrize("routes, title, message", [
+        ({"/read/": FakeResponse(503)}, "", "HTTP 503 for {url}"),
+        ({"/read/": None}, "", "No response for {url}"),
+        ({"/read/": FakeResponse(200)}, "Just a moment...",
+         "Cloudflare challenge not cleared for {url}"),
+    ], ids=["http-error", "no-response", "challenge"])
+    def test_source_failures_are_typed(self, monkeypatch, scraper,
+                                       routes, title, message):
+        from memanga.scrapers import mangapark
+        monkeypatch.setattr(mangapark, "_CHALLENGE_TIMEOUT", 0)
+        fake_browser(monkeypatch, scraper, routes, title)
+        with pytest.raises(mangapark.MangaParkSourceError) as caught:
+            scraper.get_pages(self.URL)
+        assert str(caught.value) == message.format(url=self.URL)
+        assert isinstance(caught.value, RuntimeError)
+
+    def test_a_served_page_is_parsed(self, monkeypatch, scraper, load_fixture):
+        fake_browser(monkeypatch, scraper, {
+            "/read/": FakeResponse(200, load_fixture("mangapark", "chapter.html"))})
+        assert scraper.get_pages(self.URL)
+
+    def test_no_chromium_stays_a_plain_runtime_error(self, monkeypatch):
+        # Not the source: the runner has no browser MangaPark can use.
+        from memanga.scrapers import mangapark
+
+        def fail(**kwargs):
+            raise Exception("Executable doesn't exist")
+        pw = type("Playwright", (), {})()
+        pw.chromium = type("Chromium", (), {"launch": staticmethod(fail)})()
+        monkeypatch.setattr(mangapark.shutil, "which", lambda name: None)
+        with pytest.raises(RuntimeError) as caught:
+            mangapark._launch_chromium(pw)
+        assert type(caught.value) is RuntimeError
+        assert "needs a Chromium-based browser" in str(caught.value)
