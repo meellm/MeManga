@@ -238,6 +238,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "onepiece.tube": "German One Piece main chapter list; available entries only",
     "mangarw.com": "Raw manga (One Piece verified Japanese)",
     "demonicscans.org": "Unofficial English manga and manhwa scans",
+    "rawkuma.net": "Raw manga (One Piece verified Japanese)",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",
