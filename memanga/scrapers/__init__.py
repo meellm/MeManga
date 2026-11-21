@@ -180,6 +180,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Dynasty Scans - English yuri scanlations (public JSON)
     "dynasty-scans.com": "dynasty:DynastyScraper",
 
+    # Lelscan VF - French manga scans (first chapter-list page only)
+    "lelscanfr.com": "lelscanvf:LelscanVFScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
