@@ -168,6 +168,25 @@ that refuses them do not make it work, and they can get the user blocked.
   one source: the catalog picks a canonical domain and lists the others as
   aliases.
 
+**Source and class names.** The catalog identifies a source by its domain.
+A class or module name is a separate label, and some look like typos:
+
+- **Spelled like the domain.** Many class names follow their domain rather
+  than the series title. The Hajime no Ippo sources are four separately
+  registered domains, and `AjimeNoIppoScraper` and `HajimNoIppoScraper`
+  follow the spelling of `ajimenoippo.com` and `hajimnoippo.com`.
+- **Moved.** `mangaeffect.com` uses `MangaReadScraper`, now in
+  `coffeemanga.py`. The old import path `memanga.scrapers.mangaeffect` still
+  works and gives a `DeprecationWarning` (`_MOVED_MODULES`).
+- **Misspelled.** `MangakatanataScraper`, for `mangakatana.com`, is a
+  misspelling that has stayed.
+
+Not every odd name has a reason, so check the registry rather than assume
+one. A rename is more than a spelling fix: `memanga sources --json` prints
+the class name in its [`scraper` field](../reference/scripting#sources-json),
+`memanga.scrapers` exports the class by name, and `PARSER_TESTS` can refer
+to it.
+
 **Class attributes** describe what is true for every title of the source:
 
 | Attribute | Values |
