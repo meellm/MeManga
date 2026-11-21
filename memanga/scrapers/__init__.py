@@ -138,6 +138,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Uzay Manga - Turkish manga/manhwa/manhua reader (SvelteKit data routes)
     "uzaymanga.com": "uzaymanga:UzayMangaScraper",
 
+    # Serein Scan - Turkish manhwa reader (MangaThemesia)
+    "sereinscan.com": "sereinscan:SereinScanScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 
