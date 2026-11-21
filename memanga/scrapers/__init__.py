@@ -144,6 +144,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # PatiManga - Turkish manhwa and webtoon library (Yomiko theme)
     "patimanga.com": "patimanga:PatiMangaScraper",
 
+    # MangaVault - Spanish manhwa, manga and manhua library (Astro pages)
+    "mangavault.lat": "mangavault:MangaVaultScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 
