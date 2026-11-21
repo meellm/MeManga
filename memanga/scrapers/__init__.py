@@ -120,6 +120,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "sushiscan.net": "mangathemesia_sites:SushiScanScraper",
     "lelmanga.com": "mangathemesia_sites:LelMangaScraper",
 
+    # Sen Manga - raw manga (public JSON API)
+    "raw.senmanga.com": "senmanga:SenMangaScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

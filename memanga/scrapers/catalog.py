@@ -94,6 +94,9 @@ SEARCH_SKIPS: Dict[str, SearchSkip] = {
              "manhwa18.cc",
              "mangafreak.me", "mangafreak.ws", "ww2.mangafreak.me",
              "bato.to", "batoto.to"),
+    **_skips(SkipReason.UNRELIABLE,
+             "Search endpoint ignores queries; use direct series URLs.",
+             "raw.senmanga.com"),
     **_skips(SkipReason.REGION_BLOCKED,
              "Self-signed certificate and a regional access-block page from "
              "the audit network. No verified replacement domain.",
@@ -225,6 +228,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "comic-walker.com": "Official KADOKAWA Japanese manga; public page-listed active episodes",
     "sushiscan.net": "French manga scans",
     "lelmanga.com": "French manga and manhwa scans",
+    "raw.senmanga.com": "Raw manga by direct series URL; not searched (One Piece verified Japanese)",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",
