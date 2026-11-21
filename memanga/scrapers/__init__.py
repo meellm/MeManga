@@ -153,6 +153,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Rawkuma - raw manga (WordPress pages and search form)
     "rawkuma.net": "rawkuma:RawkumaScraper",
 
+    # Mangas-Origines - French manga, manhwa and manhua scans
+    "mangas-origines.fr": "mangasorigines:MangasOriginesScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

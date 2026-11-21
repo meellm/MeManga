@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 281 domains across 216 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 282 domains across 217 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -128,6 +128,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangaread.org | — | http | — | No | Not searched (template) | — |
 | mangareader.to | — | http | — | No | Not searched (unreachable) | General library |
 | mangarw.com | — | api | — | Yes | Included in search | Raw manga (One Piece verified Japanese) |
+| mangas-origines.fr | — | http | fr | No | Included in search | Unofficial French manga, manhwa and manhua scans |
 | mangatown.com | — | http | — | No | Not searched (unreliable) | — |
 | mangavyvy.net | vymanga.net (Included in search), vyvymanga.net (Included in search) | http | — | No | Included in search | — |
 | mangawow.com | — | http | — | No | Not searched (template) | — |
