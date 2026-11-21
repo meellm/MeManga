@@ -234,6 +234,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "manhwaweb.com": "Spanish manhwa, manga and manhua library",
     "leercapitulo.co": "Spanish manga/manhwa/manhua reader",
     "uzaymanga.com": "Turkish manga/manhwa/manhua reader",
+    "onepiece.tube": "German One Piece main chapter list; available entries only",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",

@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 276 domains across 211 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 277 domains across 212 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -150,6 +150,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | omegascans.org | — | browser | — | No | Included in search | Manhwa translations |
 | one-punch.online | read.one-punch.online (Included in search) | http | — | No | Included in search | One Punch Man |
 | onepiece-manga-online.net | w57.onepiece-manga-online.net (Not searched (template)), w58.onepiece-manga-online.net (Not searched (template)) | http | — | No | Not searched (template) | One Piece |
+| onepiece.tube | — | http | de | No | Included in search | German One Piece main chapter list; available entries only |
 | onepieceread.com | — | http | — | No | Included in search | One Piece |
 | onepunchmanmangaa.com | — | http | — | No | Included in search | One Punch Man |
 | onepunchmanofficial.com | — | http | — | No | Not searched (template) | One Punch Man |
