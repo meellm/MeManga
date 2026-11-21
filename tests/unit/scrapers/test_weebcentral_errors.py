@@ -388,124 +388,130 @@ class TestTimeBudget:
         assert site.restarts == 0
 
 
-class _ExpandablePage(_Page):
-    """A series page with a "show all chapters" button. ``click`` gets
-    the click's timeout in ms; ``count_links`` answers the poll that
-    waits for the expanded list to stop growing."""
 
-    def __init__(self, click, count_links=lambda: 0, **kwargs):
+class _RecordingPage(_Page):
+    """A page that records where it was sent, and can show a Cloudflare
+    challenge for its first ``challenge_reads`` reads before the real
+    document."""
+
+    def __init__(self, challenge_reads=0, series_links=(), **kwargs):
         super().__init__(**kwargs)
-        self._click = click
-        self._count_links = count_links
-        self.click_timeouts = []
+        self._challenge_reads = challenge_reads
+        self._series_links = list(series_links)
+        self.visits = []
+        self.waits = 0
 
-    def locator(self, _selector):
-        page = self
+    def goto(self, url, **kwargs):
+        super().goto(url, **kwargs)
+        self.url = url
+        self.visits.append((url, kwargs.get("referer")))
 
-        class _Button:
-            first = property(lambda self: self)
+    def wait_for_timeout(self, *_):
+        self.waits += 1
 
-            def count(self):
-                return 1
+    def _challenged(self):
+        if self._challenge_reads > 0:
+            self._challenge_reads -= 1
+            return True
+        return False
 
-            def click(self, timeout=None):
-                page.click_timeouts.append(timeout)
-                page._click(timeout)
+    def content(self):
+        return CHALLENGE_HTML if self._challenged() else self._html
 
-        return _Button()
+    def title(self):
+        # content() is read first and has already counted this read.
+        return "Just a moment..." if self._challenge_reads > 0 else self._title
 
     def evaluate(self, expr):
-        if "/chapters/" in expr:
-            return self._count_links()
+        if "/series/" in expr:
+            return self._series_links
         return 0
 
 
-class TestChapterExpansionBudget:
-    """Running out of budget while expanding the chapter list must fail
-    the fetch: the links shown before expansion are only a partial list
-    and must never be reported as the whole series."""
+FULL_LIST_URL = "https://weebcentral.com/series/01ABC/full-chapter-list"
+IMAGES_URL = (f"{CHAPTER_URL}/images?is_prev=False&reading_style=long_strip")
 
-    def _run(self, timeout):
-        scraper = wc.WeebCentralScraper()
-        return wc.WeebCentralScraper._run_serialized(
-            scraper._get_chapters_in_thread, SERIES_URL, timeout=timeout)
 
-    def test_native_timeout_of_a_budget_cut_click_fails_the_fetch(self, site):
-        import time
-        from memanga.scrapers.playwright_base import (
-            STEP_RESERVE_S, BrowserTimeoutError)
-        pw = pytest.importorskip("playwright.sync_api")
+class TestFragments:
+    """The chapter list and the page images are read from the fragments
+    the site's own page requests, loaded directly as documents."""
 
-        native = []
-
-        def click(timeout_ms):
-            # Playwright waits out the (shortened) timeout, then raises.
-            time.sleep(timeout_ms / 1000)
-            native.append(pw.TimeoutError(
-                f"Locator.click: Timeout {timeout_ms:.0f}ms exceeded."))
-            raise native[-1]
-
-        page = _ExpandablePage(click, chapters=["1", "2"])
-        site.serve(page)
-        budget = STEP_RESERVE_S + 2.0
-
-        began = time.monotonic()
-        with pytest.raises(wc.WeebCentralError) as exc:
-            self._run(budget)
-
-        assert time.monotonic() - began < budget
-        assert page.click_timeouts[0] < 30000   # cut by the budget
-        _assert_failure(exc.value, wc.WeebCentralError, "chapter list",
-                        SERIES_URL)
-        assert ("budget ran out while expanding the chapter list: "
-                "Locator.click: Timeout") in str(exc.value)
-        assert isinstance(exc.value.__cause__, BrowserTimeoutError)
-        assert exc.value.__cause__.__cause__ is native[0]
-        # No time for a second attempt: fail rather than retry or return
-        # the two pre-expansion links.
-        assert site.opened == 1
-        assert site.restarts == 0
-
-    def test_list_that_never_settles_fails_at_the_deadline(self, site):
-        import itertools
-        import time
-        from memanga.scrapers.playwright_base import STEP_RESERVE_S
-
-        growing = itertools.count(10, 10)
-
-        def count_links():
-            time.sleep(0.3)          # each poll takes a while
-            return next(growing)     # and the list keeps growing
-
-        page = _ExpandablePage(lambda _ms: None, count_links,
-                               chapters=["1", "2"])
-        site.serve(page)
-        budget = STEP_RESERVE_S + 2.0
-
-        began = time.monotonic()
-        with pytest.raises(wc.WeebCentralError) as exc:
-            self._run(budget)
-
-        assert time.monotonic() - began < budget
-        _assert_failure(exc.value, wc.WeebCentralError, "chapter list",
-                        SERIES_URL)
-        assert (f"weebcentral get_chapters: {budget:g}s budget used up "
-                "before the next browser step") in str(exc.value)
-        assert site.opened == 1
-
-    def test_click_failure_with_budget_left_keeps_the_fallback(self, site):
-        """Control: a click that fails quickly, with plenty of budget
-        left, is still treated as a stale selector, as before."""
-        pw = pytest.importorskip("playwright.sync_api")
-
-        def click(_timeout_ms):
-            raise pw.TimeoutError("Locator.click: element is not visible")
-
-        page = _ExpandablePage(click, chapters=["1", "2"])
+    def test_chapters_come_from_the_full_list_fragment(self, site):
+        page = _RecordingPage(chapters=["2", "1"])
         site.serve(page)
 
         chapters = wc.WeebCentralScraper().get_chapters(SERIES_URL)
 
         assert [c.number for c in chapters] == ["1", "2"]
-        assert len(page.click_timeouts) == len(
-            wc.WeebCentralScraper._SHOW_ALL_SELECTORS)
+        assert page.visits == [(FULL_LIST_URL, SERIES_URL)]
+
+    def test_pages_come_from_the_images_fragment(self, site):
+        page = _RecordingPage(images=["https://img.test/1.png"])
+        site.serve(page)
+
+        assert wc.WeebCentralScraper().get_pages(CHAPTER_URL) == [
+            "https://img.test/1.png"]
+        # No homepage warm-up: one navigation, from the reader.
+        assert page.visits == [(IMAGES_URL, CHAPTER_URL)]
+
+    def test_legacy_chapter_url_is_resolved_to_its_series(self, site):
+        page = _RecordingPage(chapters=["1"],
+                              series_links=["/series/random",
+                                            "/series/01ABC/Blue-Lock"])
+        site.serve(page)
+
+        chapters = wc.WeebCentralScraper().get_chapters(CHAPTER_URL)
+
+        assert [c.number for c in chapters] == ["1"]
+        assert page.visits == [
+            (CHAPTER_URL, None),
+            (FULL_LIST_URL, "https://weebcentral.com/series/01ABC/Blue-Lock"),
+        ]
+
+    def test_unresolvable_chapter_url_is_an_error_not_stray_links(
+            self, site):
+        site.serve(_RecordingPage(chapters=["1"]), _RecordingPage(chapters=["1"]))
+
+        with pytest.raises(wc.WeebCentralError) as exc:
+            wc.WeebCentralScraper().get_chapters(CHAPTER_URL)
+
+        _assert_failure(exc.value, wc.WeebCentralError, "chapter list",
+                        CHAPTER_URL)
+        assert f"could not find the series for {CHAPTER_URL}" in str(exc.value)
+
+    def test_challenge_that_clears_is_loaded_again_and_read(self, site):
+        page = _RecordingPage(challenge_reads=3, chapters=["1"])
+        site.serve(page)
+
+        chapters = wc.WeebCentralScraper().get_chapters(SERIES_URL)
+
+        assert [c.number for c in chapters] == ["1"]
+        # Waited in the same page, then loaded the target again.
+        assert page.waits >= 1
+        assert page.visits == [(FULL_LIST_URL, SERIES_URL)] * 2
+        assert site.restarts == 0
+
+    def test_challenge_that_never_clears_waits_a_bounded_time(self, site):
+        first, second = _challenge(), _challenge()
+        waits = []
+        for page in (first, second):
+            page.wait_for_timeout = lambda *_: waits.append(1)
+        site.serve(first, second)
+
+        with pytest.raises(wc.WeebCentralChallengeError) as exc:
+            wc.WeebCentralScraper().get_pages(CHAPTER_URL)
+
+        assert "Cloudflare challenge did not clear" in str(exc.value)
+        assert len(waits) == 2 * wc.WeebCentralScraper._CHALLENGE_POLLS
+        assert site.restarts == 1
+
+    def test_missing_series_by_status_raises_not_found(self, site):
+        class _Gone(_Page):
+            def goto(self, url, **kwargs):
+                super().goto(url, **kwargs)
+                return type("_R", (), {"status": 404})()
+
+        site.serve(_Gone(), _Gone())
+
+        with pytest.raises(wc.WeebCentralNotFoundError):
+            wc.WeebCentralScraper().get_chapters(SERIES_URL)

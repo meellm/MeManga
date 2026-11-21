@@ -60,17 +60,17 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Mangapill - Large library (no Cloudflare, simple requests)
     "mangapill.com": "mangapill:MangapillScraper",
 
-    # MangaPark - current working domain
+    # MangaPark (mangapark1.com, behind a Cloudflare challenge)
     "mangapark1.com": "mangapark:MangaParkScraper",
+
+    # MangaPark (mangapark.cc) - a separate site; old hosts are not aliased
+    "mangapark.cc": "mangapark_cc:MangaParkCCScraper",
 
     # MangaReader.to
     "mangareader.to": "mangareader:MangaReaderScraper",
 
-    # MangaFire.to (Firefox + VRF bypass + descrambling)
+    # MangaFire.to (signed JSON API + descrambling)
     "mangafire.to": "mangafire:MangaFireScraper",
-
-    # MangaSee123
-    "mangasee123.com": "mangasee:MangaSeeScraper",
 
     # MangaBuddy
     "mangabuddy.com": "mangabuddy:MangaBuddyScraper",
@@ -78,15 +78,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Bato.to
     "bato.to": "batoto:BatoToScraper",
     "batoto.to": "batoto:BatoToScraper",
-
-    # Mangakakalot
-    "mangakakalot.com": "mangakakalot:MangakakalotScraper",
-    "mangakakalot.to": "mangakakalot:MangakakalotScraper",
-
-    # Manganato
-    "manganato.com": "manganato:ManganatoScraper",
-    "chapmanganato.to": "manganato:ManganatoScraper",
-    "readmanganato.com": "manganato:ManganatoScraper",
 
     # Mangago
     "mangago.me": "mangago:MangagoScraper",
@@ -115,6 +106,82 @@ _SCRAPER_PATHS: Dict[str, str] = {
 
     # Wurmz - Indonesian manga/manhwa/manhua reader (Next.js SSR HTML)
     "wurmz.net": "wurmz:WurmzScraper",
+
+    # MangaDenizi - Turkish manga/manhwa/webtoon reader (Nuxt JSON API)
+    "mangadenizi.net": "mangadenizi:MangaDeniziScraper",
+
+    # WEBTOON - official Originals in English, Spanish, French and German
+    "webtoons.com": "webtoon:WebtoonScraper",
+
+    # KadoComi - official KADOKAWA Japanese manga (public episode viewer)
+    "comic-walker.com": "kadocomi:KadoComiScraper",
+
+    # SushiScan and Lelmanga - French scans (MangaThemesia WordPress theme)
+    "sushiscan.net": "mangathemesia_sites:SushiScanScraper",
+    "lelmanga.com": "mangathemesia_sites:LelMangaScraper",
+
+    # Sen Manga - raw manga (public JSON API)
+    "raw.senmanga.com": "senmanga:SenMangaScraper",
+
+    # ManhuaTop - English manhua reader (public JSON API)
+    "manhuatop.org": "manhuatop:ManhuaTopScraper",
+
+    # MangaHome - English manga reader
+    "mangahome.com": "mangahome:MangaHomeScraper",
+
+    # ManhwaWeb - Spanish manhwa, manga and manhua library (public JSON API)
+    "manhwaweb.com": "manhwaweb:ManhwaWebScraper",
+
+    # LeerCapitulo - Spanish manga/manhwa/manhua reader
+    "leercapitulo.co": "leercapitulo:LeerCapituloScraper",
+
+    # Uzay Manga - Turkish manga/manhwa/manhua reader (SvelteKit data routes)
+    "uzaymanga.com": "uzaymanga:UzayMangaScraper",
+
+    # Serein Scan - Turkish manhwa reader (MangaThemesia)
+    "sereinscan.com": "sereinscan:SereinScanScraper",
+
+    # PatiManga - Turkish manhwa and webtoon library (Yomiko theme)
+    "patimanga.com": "patimanga:PatiMangaScraper",
+
+    # MangaVault - Spanish manhwa, manga and manhua library (Astro pages)
+    "mangavault.lat": "mangavault:MangaVaultScraper",
+
+    # HeavenManga - Spanish manhwa, manga and manhua library
+    "heavenmanga.com": "heavenmanga:HeavenMangaScraper",
+
+    # Uchuujin - Spanish manga and manhwa reader (MangaThemesia)
+    "uchuujinmangas.com": "uchuujin:UchuujinScraper",
+
+    # OnePiece-Tube - German One Piece main chapter list
+    "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
+
+    # MangaRW - raw manga (public JSON API)
+    "mangarw.com": "mangarw:MangaRwScraper",
+
+    # Manga Demon - English manga and manhwa scans
+    "demonicscans.org": "mangademon:MangaDemonScraper",
+
+    # Rawkuma - raw manga (WordPress pages and search form)
+    "rawkuma.net": "rawkuma:RawkumaScraper",
+
+    # Mangas-Origines - French manga, manhwa and manhua scans
+    "mangas-origines.fr": "mangasorigines:MangasOriginesScraper",
+
+    # Raw UwU - raw manga (public JSON routes)
+    "rawuwu.net": "rawuwu:RawUwuScraper",
+
+    # Anime-Sama - French manga scans (published viewer)
+    "anime-sama.to": "animesama:AnimeSamaScraper",
+
+    # Mangaraw.ink - raw manga
+    "mangaraw.ink": "mangarawink:MangarawInkScraper",
+
+    # Dynasty Scans - English yuri scanlations (public JSON)
+    "dynasty-scans.com": "dynasty:DynastyScraper",
+
+    # Lelscan VF - French manga scans (first chapter-list page only)
+    "lelscanfr.com": "lelscanvf:LelscanVFScraper",
 
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
@@ -256,20 +323,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "hivetoons.org": "hivetoons:HivetoonsScraper",
     "hivetoon.com": "hivetoons:HivetoonsScraper",
 
-    # MangaYY - WordPress Madara (Playwright)
-    "mangayy.org": "mangayy:MangaYYScraper",
-    "likemanga.io": "mangayy:MangaYYScraper",
-
-    # Manga4Life / MangaLife - Large library (Playwright + JS)
-    "manga4life.com": "manga4life:Manga4LifeScraper",
-    "mangalife.us": "manga4life:Manga4LifeScraper",
-
-    # IsekaiScan - Isekai manga/manhwa (Playwright + Madara)
-    "isekaiscan.com": "isekaiscan:IsekaiScanScraper",
-
-    # ZinManga - Manga aggregator (Playwright + Madara)
-    "zinmanga.com": "zinmanga:ZinMangaScraper",
-
     # ZazaManga - Manga aggregator (Playwright, redirected series sites)
     "zazamanga.com": "zazamanga:ZazaMangaScraper",
     "www.zazamanga.com": "zazamanga:ZazaMangaScraper",
@@ -289,19 +342,11 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Atsumaru - Manga aggregator (Typesense search + REST API)
     "atsu.moe": "atsumaru:AtsumaruScraper",
 
-    # MangaClash - Manga aggregator (Playwright + Madara + CF).
-    # Site unreachable (#179); kept so saved library entries still
-    # resolve, but skipped by the search sweep.
-    "mangaclash.com": "kunmanga:MangaClashScraper",
-
     # KunManga - Manga aggregator (Playwright + Madara + CF)
     "kunmanga.com": "kunmanga:KunMangaScraper",
 
     # ManyToon - Adult manhwa (Playwright + JS chapters)
     "manytoon.com": "manytoon:ManyToonScraper",
-
-    # Pururin - Doujin gallery (Playwright + JS)
-    "pururin.to": "pururin:PururinScraper",
 
     # HentaiRead - Hentai manga (Playwright)
     "hentairead.com": "hentairead:HentaiReadScraper",
@@ -338,18 +383,12 @@ _SCRAPER_PATHS: Dict[str, str] = {
     "demonslayermanga.com": "demonslayermanga:DemonSlayerMangaScraper",
     "ww9.demonslayermanga.com": "demonslayermanga:DemonSlayerMangaScraper",
 
-    # DrStoneManga - Dr. Stone dedicated (assets.drstonemanga.com)
-    "drstonemanga.com": "single_title_sites:DrStoneMangaScraper",
-
     # SakamotoManga - Sakamoto Days dedicated (cdn3.mangaclash.com)
     "sakamotomanga.com": "sakamotomanga:SakamotoMangaScraper",
 
     # ElusiveSamurai - The Elusive Samurai dedicated (pic.readkakegurui.com)
     "elusive-samurai.com": "single_title_sites:ElusiveSamuraiScraper",
     "w4.elusive-samurai.com": "single_title_sites:ElusiveSamuraiScraper",
-
-    # ReadBlueLockOrg - Blue Lock dedicated (images.asuratoon.top)
-    "readbluelock.org": "single_title_sites:ReadBlueLockOrgScraper",
 
     # BocchiTheRockManga - Bocchi the Rock! dedicated (cdn.black-clover.org)
     "bocchitherockmanga.com": "single_title_sites:BocchiTheRockMangaScraper",
@@ -360,10 +399,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
 
     # BlueExorcistManga - Blue Exorcist / Ao no Exorcist dedicated (cdn.readkakegurui.com)
     "blueexorcistmanga.com": "single_title_sites:BlueExorcistMangaScraper",
-
-    # AjimeNoIppo - Hajime no Ippo dedicated (WordPress + cdn.mangaclash.com)
-    "ajimenoippo.com": "single_title_sites:AjimeNoIppoScraper",
-    "www.ajimenoippo.com": "single_title_sites:AjimeNoIppoScraper",
 
     # HajimeNoIppoOnline - Hajime no Ippo dedicated (WordPress + laiond.com)
     "hajime-no-ippo-manga.online": "single_title_sites:HajimeNoIppoOnlineScraper",
@@ -389,10 +424,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # DragonBallSuperOnline - Dragon Ball Super dedicated (WordPress + wp-content/uploads)
     "thedragonballsuper.online": "single_title_sites:DragonBallSuperOnlineScraper",
 
-    # DragonBallSuperOrg - Dragon Ball Super dedicated (WordPress + mangaread.org CDN)
-    "dragonballsuper.org": "single_title_sites:DragonBallSuperOrgScraper",
-    "www.dragonballsuper.org": "single_title_sites:DragonBallSuperOrgScraper",
-
     # FairyTailMangaFree - Fairy Tail 100 Years Quest dedicated (WordPress + cdn.mangaclash.com)
     "fairytailmangafree.com": "single_title_sites:FairyTailMangaFreeScraper",
     "www.fairytailmangafree.com": "single_title_sites:FairyTailMangaFreeScraper",
@@ -407,10 +438,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # SousouNoFrieren - Frieren dedicated (WordPress + cdn.mangaclash.com)
     "sousou-no-frieren.com": "single_title_sites:SousouNoFrierenScraper",
 
-    # DemonSlayerOnline - Demon Slayer dedicated (WordPress Ifenzi + cdn.readkakegurui.com)
-    "demon-slayer.online": "demonslayeronline:DemonSlayerOnlineScraper",
-    "w4.demon-slayer.online": "demonslayeronline:DemonSlayerOnlineScraper",
-
     # MangOasis - Multilingual manga aggregator (WordPress MangaVerse + cdn.mangoasis.com)
     "mangoasis.com": "mangoasis:MangOasisScraper",
     "www.mangoasis.com": "mangoasis:MangOasisScraper",
@@ -418,9 +445,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # ReadKingdomFree - Kingdom dedicated (WordPress + planeptune.us CDN)
     "readkingdomfree.com": "readkingdomfree:ReadKingdomFreeScraper",
     "www.readkingdomfree.com": "readkingdomfree:ReadKingdomFreeScraper",
-
-    # SakamotoDaysOnline - Sakamoto Days dedicated (PHP + attachment CDN)
-    "sakamoto-days.online": "sakamotodaysonline:SakamotoDaysOnlineScraper",
 
     # OnePieceManga1 - One Piece dedicated (WordPress + Contabo storage CDN)
     "1piecemanga.com": "single_title_sites:OnePieceManga1Scraper",
@@ -468,9 +492,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # KenganAshuraManga - Kengan Ashura/Omega dedicated (WordPress + wp-content CDN)
     "kenganashura.com": "kenganashuramanga:KenganAshuraMangaScraper",
 
-    # OyasumiPunpunManga - Goodnight Punpun dedicated (WordPress Ifenzi + cdn.readkakegurui.com)
-    "oyasumipunpun.com": "oyasumipunpunmanga:OyasumiPunpunMangaScraper",
-
     # ReadSNKManga - Attack on Titan dedicated (WordPress + Blogger CDN)
     "readsnkmanga.com": "readsnkmanga:ReadSNKMangaScraper",
 
@@ -508,9 +529,6 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # BlameManga - BLAME! dedicated (WordPress Comic Easel + Blogger CDN)
     "blame-manga.com": "single_title_sites:BlameMangaScraper",
     "w9.blame-manga.com": "single_title_sites:BlameMangaScraper",
-
-    # JJKManga - Jujutsu Kaisen dedicated (cloudscraper + pic.readkakegurui.com CDN)
-    "jjkmanga.net": "jjkmanga:JJKMangaScraper",
 
     # Kagane - Multi-manga REST API + Playwright for DRM-protected images.
     # kagane.org now redirects to kagane.to; both sit behind a Cloudflare
@@ -604,17 +622,16 @@ def __dir__():
 # module carrying the same names; the package itself never uses them.
 _MOVED_MODULES: Dict[str, str] = {
     **dict.fromkeys((
-        "beastarsmanga", "monstermanga", "readichithewitch", "ajimenoippo",
+        "beastarsmanga", "monstermanga", "readichithewitch",
         "hajimenoippoonline", "hajimnoippo", "hajimenoippoblogger",
         "bluelockreadonline", "vagabondmanga", "sousnofrierenga",
         "spyxfamilymanga", "tgmanga", "blueexorcistmanga", "blamemanga",
         "homunculusmanga", "fireforcemangaorg", "tokyoghoulclub", "deathnotemanga",
         "bluelockmangaorg", "kaijuno8manga", "dragonballsuperonline",
-        "dragonballsuperorg", "onepiecemanga1", "readslamdunkonline",
+        "onepiecemanga1", "readslamdunkonline",
         "readtokyorevengers", "fairytailmangafree", "readkenganashura",
-        "bocchitherockmanga", "elusivesamurai", "readbluelockorg", "drstonemanga",
+        "bocchitherockmanga", "elusivesamurai",
     ), "single_title_sites"),
-    "mangaclash": "kunmanga",
     "mangaeffect": "coffeemanga",
     "mangafoxfun": "mangapanda",
 }

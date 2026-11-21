@@ -18,9 +18,6 @@ CASES = [
         ("Kengan Ashura", "https://kenganashura.com/manga/kengan-ashura-chapter-1/"),
         ("Kengan Omega", "https://kenganashura.com/manga/kengan-omega-chapter-1/"),
     ]),
-    ("oyasumipunpun.com", "oyasumi punpun", [
-        ("Oyasumi Punpun (Goodnight Punpun)", "https://oyasumipunpun.com"),
-    ]),
     ("readkingdomfree.com", "kingdom", [
         ("Kingdom", "https://www.readkingdomfree.com/"),
     ]),

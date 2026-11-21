@@ -679,16 +679,16 @@ class TestUseCloudscraper:
     def test_scrapers_keep_their_own_profile_and_headers(self, fake_cloudscraper):
         from memanga.scrapers.mangadna import MangaDNAScraper
         from memanga.scrapers.mangafire import MangaFireScraper
-        from memanga.scrapers.jjkmanga import JJKMangaScraper
+        from memanga.scrapers.readjjkcom import ReadJJKComScraper
 
         fire = MangaFireScraper()
         assert fake_cloudscraper.calls[-1] == {"browser": {
             "browser": "chrome", "platform": "windows", "mobile": False}}
         assert fire.session.headers["Accept-Language"] == "en-US,en;q=0.9"
 
-        jjk = JJKMangaScraper()
+        readjjk = ReadJJKComScraper()
         assert fake_cloudscraper.calls[-1] == {}
-        assert jjk.session.headers["Referer"] == "https://jjkmanga.net/"
+        assert readjjk.session.headers["Referer"] == "https://read-jjk.com"
 
         dna = MangaDNAScraper()
         assert dna.scraper is dna.session

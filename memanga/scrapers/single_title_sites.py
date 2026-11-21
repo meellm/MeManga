@@ -249,15 +249,6 @@ class _EntryContentScraper(SingleTitleScraper):
     image_attrs = ("data-src", "src")
 
 
-class AjimeNoIppoScraper(_EntryContentScraper):
-    """Scraper for ajimenoippo.com - Hajime no Ippo (images on cdn.mangaclash.com)."""
-
-    name = "ajimenoippo"
-    base_url = "https://www.ajimenoippo.com"
-    manga_title = "Hajime no Ippo"
-    image_cdn_filters = ("cdn.mangaclash.com",)
-
-
 class HajimeNoIppoOnlineScraper(_EntryContentScraper):
     """Scraper for hajime-no-ippo-manga.online - Hajime no Ippo (images on laiond.com)."""
 
@@ -363,26 +354,6 @@ class DragonBallSuperOnlineScraper(_PlainLinksScraper):
         return "wp-content" in url or any(ext in url for ext in _IMAGE_EXTENSIONS)
 
 
-class DragonBallSuperOrgScraper(_PlainLinksScraper):
-    """Scraper for dragonballsuper.org - Dragon Ball Super (images on mangaread.org CDN)."""
-
-    name = "dragonballsuperorg"
-    base_url = "https://www.dragonballsuper.org"
-    manga_title = "Dragon Ball Super"
-    cover_url = ""  # Uses inline images
-    chapter_link_selector = "a[href*='dragon-ball-chou-super-chapter-']"
-    chapter_number_pattern = r'chapter-(\d+(?:\.\d+|-\d+)?)'
-    chapter_number_dash_decimal = True
-
-    def _page_urls(self, soup):
-        imgs = soup.select("div.reading-content img, div.page-break img, img.wp-manga-chapter-img")
-        return self._pick(self._img_srcs(imgs, ("data-src", "data-lazy-src", "src")))
-
-    def _is_page_image(self, url):
-        return ("mangaread.org" in url or "wp-content" in url
-                or any(ext in url for ext in _IMAGE_EXTENSIONS))
-
-
 class OnePieceManga1Scraper(_PlainLinksScraper):
     """Scraper for 1piecemanga.com - One Piece (images on Contabo storage)."""
 
@@ -486,24 +457,3 @@ class ElusiveSamuraiScraper(NumberedChaptersScraper):
     chapter_url_base = "https://w4.elusive-samurai.com"
     manga_title = "The Elusive Samurai"
     image_cdn_filters = ("readkakegurui.com",)
-
-
-class ReadBlueLockOrgScraper(NumberedChaptersScraper):
-    """Scraper for readbluelock.org - Blue Lock (images on images.asuratoon.top)."""
-
-    name = "readbluelockorg"
-    base_url = "https://readbluelock.org"
-    manga_title = "Blue Lock"
-    image_attrs = ("data-src", "src")
-    image_cdn_filters = ("asuratoon.top",)
-
-
-class DrStoneMangaScraper(NumberedChaptersScraper):
-    """Scraper for drstonemanga.com - Dr. Stone (images on assets.drstonemanga.com)."""
-
-    name = "drstonemanga"
-    base_url = "https://drstonemanga.com"
-    manga_title = "Dr. Stone"
-    chapter_href_markers = ("/chapter/",)
-    chapter_number_pattern = r'/chapter/(\d+)'
-    image_cdn_filters = ("assets.drstonemanga.com",)

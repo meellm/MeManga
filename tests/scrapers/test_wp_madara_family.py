@@ -137,7 +137,7 @@ class TestGetPages:
 
 
 @pytest.mark.parametrize("domain", [
-    "hiperdex.com", "mangaread.org", "manga18fx.com", "azmanga.com",
+    "hiperdex.com", "mangaread.org", "manga18fx.com",
     "sxfmanga.net", "mashlemanga.net", "gutsberserk.com",
 ])
 def test_madara_registry(domain):

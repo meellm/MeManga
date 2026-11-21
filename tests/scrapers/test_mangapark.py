@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from memanga.scrapers.mangapark import MangaParkScraper
+from memanga.scrapers.mangapark import MangaParkScraper, MangaParkSourceError
+from memanga.scrapers.playwright_base import BrowserTimeoutError
 
 # What these tests run on saved or canned site responses; read by
 # python -m memanga.source_docs for the sources docs.
@@ -52,7 +53,7 @@ class TestSearchDirectFallback:
         def fake(url):
             fetched.append(url)
             if "/filter" in url:
-                raise RuntimeError("Cloudflare challenge not cleared")
+                raise MangaParkSourceError(f"Cloudflare challenge not cleared for {url}")
             return load_fixture("mangapark", "manga_direct.html")
 
         patch_html(scraper, fake)
@@ -87,14 +88,134 @@ class TestSearchDirectFallback:
         assert len(scraper.search("one piece")) == 3
         assert len(fetched) == 1 and "/filter" in fetched[0]
 
-    def test_missing_page_returns_nothing(self, scraper, patch_html):
+    def test_blocked_filter_and_missing_page_raise(self, scraper, patch_html):
+        # The search never ran, so "no results" would be a false answer
         def fake(url):
             if "/filter" in url:
-                raise RuntimeError("Cloudflare challenge not cleared")
-            raise RuntimeError(f"HTTP 404 for {url}")
+                raise MangaParkSourceError(f"Cloudflare challenge not cleared for {url}")
+            raise MangaParkSourceError(f"HTTP 404 for {url}")
+
+        patch_html(scraper, fake)
+        with pytest.raises(MangaParkSourceError) as caught:
+            scraper.search("does not exist xyz")
+        message = str(caught.value)
+        assert "Cloudflare challenge not cleared for " \
+               "https://mangapark1.com/filter?keyword=does+not+exist+xyz" in message
+        assert "HTTP 404 for https://mangapark1.com/manga/does-not-exist-xyz" in message
+        # Raised from the /filter failure, so it stays a source error
+        assert isinstance(caught.value.__cause__, MangaParkSourceError)
+        assert caught.value.__cause__.__cause__ is None
+
+    def test_blocked_filter_and_challenged_page_raise(self, scraper, patch_html):
+        def fake(url):
+            raise MangaParkSourceError(f"Cloudflare challenge not cleared for {url}")
+
+        patch_html(scraper, fake)
+        with pytest.raises(MangaParkSourceError, match="direct lookup: Cloudflare"):
+            scraper.search("one piece")
+
+    def test_blocked_filter_and_other_comic_page_raise(
+            self, scraper, patch_html, load_fixture):
+        def fake(url):
+            if "/filter" in url:
+                raise MangaParkSourceError(f"Cloudflare challenge not cleared for {url}")
+            return load_fixture("mangapark", "manga_direct.html")
+
+        patch_html(scraper, fake)
+        with pytest.raises(MangaParkSourceError) as caught:
+            scraper.search("naruto")
+        # The page loaded, so only the /filter failure is reported
+        assert "direct lookup" not in str(caught.value)
+
+    def test_blocked_filter_and_non_manga_page_raise(self, scraper, patch_html):
+        def fake(url):
+            if "/filter" in url:
+                raise MangaParkSourceError(f"Cloudflare challenge not cleared for {url}")
+            return ("<html><head><title>Page not found</title></head>"
+                    "<body><h1>404</h1></body></html>")
+
+        patch_html(scraper, fake)
+        with pytest.raises(MangaParkSourceError):
+            scraper.search("one piece")
+
+    def test_blocked_filter_with_blank_query_raises(self, scraper, patch_html):
+        fetched = []
+
+        def fake(url):
+            fetched.append(url)
+            raise MangaParkSourceError(f"Cloudflare challenge not cleared for {url}")
+
+        patch_html(scraper, fake)
+        with pytest.raises(MangaParkSourceError):
+            scraper.search("  ?! ")
+        assert all("/manga/" not in u for u in fetched)
+
+    def test_served_empty_filter_and_missing_page_return_nothing(
+            self, scraper, patch_html):
+        # The site answered the search with no cards: a real empty result
+        def fake(url):
+            if "/filter" in url:
+                return "<html><body></body></html>"
+            raise MangaParkSourceError(f"HTTP 404 for {url}")
 
         patch_html(scraper, fake)
         assert scraper.search("does not exist xyz") == []
+
+    def test_filter_timeout_falls_back_to_slug(
+            self, scraper, patch_html, load_fixture):
+        def fake(url):
+            if "/filter" in url:
+                raise BrowserTimeoutError("mangapark: browser task timed out")
+            return load_fixture("mangapark", "manga_direct.html")
+
+        patch_html(scraper, fake)
+        assert [r.url for r in scraper.search("one piece")] == \
+            ["https://mangapark1.com/manga/one-piece"]
+
+    def test_filter_page_load_timeout_falls_back_to_slug(
+            self, scraper, patch_html, load_fixture):
+        sync_api = pytest.importorskip("playwright.sync_api")
+
+        def fake(url):
+            if "/filter" in url:
+                raise sync_api.TimeoutError("Timeout 45000ms exceeded.")
+            return load_fixture("mangapark", "manga_direct.html")
+
+        patch_html(scraper, fake)
+        assert [r.url for r in scraper.search("one piece")] == \
+            ["https://mangapark1.com/manga/one-piece"]
+
+    def test_filter_timeout_and_missing_page_raise(self, scraper, patch_html):
+        def fake(url):
+            if "/filter" in url:
+                raise BrowserTimeoutError("mangapark: browser task timed out")
+            raise MangaParkSourceError(f"HTTP 404 for {url}")
+
+        patch_html(scraper, fake)
+        with pytest.raises(MangaParkSourceError) as caught:
+            scraper.search("one piece")
+        assert isinstance(caught.value.__cause__, BrowserTimeoutError)
+
+    def test_missing_chromium_is_not_a_search_result(self, scraper, patch_html):
+        # Not a site answer: the error reaches the caller unchanged
+        def fake(url):
+            raise RuntimeError("MangaPark needs a Chromium-based browser")
+
+        patch_html(scraper, fake)
+        with pytest.raises(RuntimeError) as caught:
+            scraper.search("one piece")
+        assert type(caught.value) is RuntimeError
+        assert str(caught.value) == "MangaPark needs a Chromium-based browser"
+
+    def test_unexpected_direct_lookup_error_propagates(self, scraper, patch_html):
+        def fake(url):
+            if "/filter" in url:
+                raise MangaParkSourceError(f"Cloudflare challenge not cleared for {url}")
+            raise ValueError("unexpected")
+
+        patch_html(scraper, fake)
+        with pytest.raises(ValueError, match="unexpected"):
+            scraper.search("one piece")
 
     def test_page_for_other_slug_rejected(
             self, scraper, patch_html, load_fixture):

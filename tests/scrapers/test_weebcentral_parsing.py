@@ -324,31 +324,29 @@ class TestChapters:
         assert chapters[0].title == "Chapter 366"
         assert all(c.title == f"Chapter {c.number}" for c in chapters)
 
-    def test_show_all_button_swaps_in_the_full_list(
-            self, scraper, load_fixture):
-        page = _page(load_fixture, "weebcentral_series_before_expand.html",
-                     after_click=load_fixture(
-                         "playwright_html",
-                         "weebcentral_series_after_expand.html"))
+    def test_captured_full_list_rows(self, scraper, load_fixture):
+        # The expanded #chapter-list is the full-chapter-list fragment
+        # the "Show All Chapters" button swaps in. Excerpt: 8 of 367
+        # rows; the trailing back-to-top link is not a chapter.
+        page = _page(load_fixture, "weebcentral_series_after_expand.html")
 
-        assert scraper._expand_all_chapters(page) is True
-
-        assert page.clicks == ["Show All Chapters"]
-        # Excerpt of the expanded list (8 of 367 rows); the trailing
-        # back-to-top link is not a chapter.
         assert _numbers(scraper._collect_chapters(page)) == [
             "366", "365", "364.2", "364", "4", "3", "2", "1"]
 
-    def test_get_chapters_on_the_captured_series(
+    def test_get_chapters_reads_the_full_list_fragment(
             self, scraper, serve, load_fixture):
-        serve(_page(load_fixture, "weebcentral_series_before_expand.html",
-                    title="Blue Lock | Weeb Central", url=SERIES_URL,
-                    after_click=load_fixture(
-                        "playwright_html",
-                        "weebcentral_series_after_expand.html")))
+        """The 9 rows of the series page's first render are never read
+        as the series: the full list is loaded directly, with no click
+        on the button that requests it over XHR."""
+        page, = serve(_page(load_fixture,
+                            "weebcentral_series_after_expand.html",
+                            title="Blue Lock | Weeb Central"))
 
         chapters = scraper.get_chapters(SERIES_URL)
 
+        assert page.url == (
+            f"{BASE}/series/01J76XYD7E91K8QP6CY0Y53900/full-chapter-list")
+        assert page.clicks == []
         assert _numbers(chapters) == [
             "1", "2", "3", "4", "364", "364.2", "365", "366"]
 
@@ -396,10 +394,37 @@ class TestReaderPages:
 
     def test_get_pages_on_the_captured_reader(
             self, scraper, serve, load_fixture):
-        serve(_page(load_fixture, "weebcentral_reader.html",
-                    title="Chapter 1 | Blue Lock | Weeb Central"))
+        page, = serve(_page(load_fixture, "weebcentral_reader.html",
+                            title="Chapter 1 | Blue Lock | Weeb Central"))
 
         assert scraper.get_pages(READER_URL) == self.CAPTURED
+        # Read from the reader's images fragment, not the reader page.
+        assert page.url == (
+            f"{READER_URL}/images?is_prev=False&reading_style=long_strip")
+
+    # SYNTHETIC, shaped like the live images fragment: one section whose
+    # Alpine x-data object holds the reader's scroll handlers, with the
+    # pages as its direct <img> children and no section id. The
+    # whitespace-separated word selector section[x-data~=scroll] does
+    # not match that x-data value; a substring match does.
+    _FRAGMENT = (
+        '<section class="flex flex-col" x-data="{\n'
+        "\t\tscrollDown() { window.scrollBy({ top: 1 }); },\n"
+        "\t\tscrollUp() { window.scrollBy({ top: -1 }); },\n"
+        '\t}">'
+        '<img alt="Page 1" src="https://cdn.example.test/manga/S/0001-001.png"/>'
+        '<img alt="Page 2" src="https://cdn.example.test/manga/S/0001-002.png"/>'
+        "</section>"
+    )
+
+    def test_synthetic_images_fragment_without_section_id(
+            self, scraper, serve):
+        serve(_DomPage(self._FRAGMENT))
+
+        assert scraper.get_pages(READER_URL) == [
+            "https://cdn.example.test/manga/S/0001-001.png",
+            "https://cdn.example.test/manga/S/0001-002.png",
+        ]
 
     def test_synthetic_stray_page_images_are_ignored(
             self, scraper, load_fixture):

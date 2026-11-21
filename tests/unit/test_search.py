@@ -214,8 +214,7 @@ class TestComputeSearchSources:
         assert "mangadex.org" in sources
         assert "mangapill.com" in sources
         # Known-dead sites never make the sweep list.
-        assert "mangasee123.com" not in sources
-        assert "manganato.com" not in sources
+        assert "mangareader.to" not in sources
 
     def test_region_blocked_mangago_excluded(self):
         # mangago.me is reachable globally but DNS/SNI-blocked in some
@@ -238,23 +237,6 @@ class TestComputeSearchSources:
             "sources.disabled": ["mgeko.cc"],
         }))
         assert "mgeko.cc" not in sources
-
-    def test_unreachable_mangaclash_excluded(self):
-        # mangaclash.com fails TLS and its plain-HTTP site is no longer
-        # MangaClash, with no verified replacement domain (issue #179).
-        # It stays registered so saved entries resolve, but must never
-        # reach the sweep - not even when it's already in the user's
-        # library.
-        assert "mangaclash.com" in BROKEN_SEARCH_SOURCES
-        assert "mangaclash.com" not in compute_search_sources(FakeConfig())
-        assert "mangaclash.com" not in compute_search_sources(FakeConfig({
-            "manga": [{"title": "X", "source": "mangaclash.com"}],
-        }))
-
-    def test_mangaclash_not_a_default_source(self):
-        from memanga.scrapers import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES
-        assert "mangaclash.com" not in POPULAR_SOURCES
-        assert "mangaclash.com" not in DEFAULT_ENABLED_SOURCES
 
     def test_unreachable_hiperdex_excluded(self):
         # hiperdex.com is blocked/unreachable from the audit network
@@ -311,7 +293,7 @@ class TestComputeSearchSources:
         # (#179) did not promote luminousscans.com into the defaults.
         from memanga.scrapers import DEFAULT_ENABLED_SOURCES
         assert DEFAULT_ENABLED_SOURCES == [
-            "mangadex.org", "mangapill.com", "mangapark1.com",
+            "mangadex.org", "mangapill.com", "mangapark.cc",
             "mangafire.to", "mangabuddy.com", "weebcentral.com",
             "mangakatana.com", "asurascans.com", "comix.to",
             "comick.io", "mangahub.io", "mangahere.cc",
