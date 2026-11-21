@@ -1172,7 +1172,7 @@ All notable changes are recorded here. Format loosely follows
   reporting "No new chapters". MangaDex chapter dedup is now stable
   across repeated checks.
 
-## [0.2.0] - 2026-05-28
+## [0.2.0] - 2026-05-30
 
 ### Added
 - PySide6 desktop GUI (Library / Detail / Reader / Downloads / Search /
@@ -1257,8 +1257,9 @@ All notable changes are recorded here. Format loosely follows
 
 ## Earlier versions
 
-Pre-PySide6 versions tracked the CLI-only releases — see the git tag
-history (`v0.0.x` → `v0.1.0`) for details.
+The oldest tagged and published release is v0.2.0, so this changelog
+starts there. Earlier work, including the untagged version 0.1.0, is in
+the git history.
 
 [Unreleased]: https://github.com/meellm/MeManga/compare/v0.4.4...main
 [0.4.4]: https://github.com/meellm/MeManga/compare/v0.4.3...v0.4.4
