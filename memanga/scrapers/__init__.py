@@ -147,6 +147,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # MangaVault - Spanish manhwa, manga and manhua library (Astro pages)
     "mangavault.lat": "mangavault:MangaVaultScraper",
 
+    # HeavenManga - Spanish manhwa, manga and manhua library
+    "heavenmanga.com": "heavenmanga:HeavenMangaScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 

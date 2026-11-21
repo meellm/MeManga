@@ -237,6 +237,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "sereinscan.com": "Turkish manhwa reader",
     "patimanga.com": "Turkish manhwa and webtoon library",
     "mangavault.lat": "Spanish manhwa, manga and manhua library",
+    "heavenmanga.com": "Spanish manhwa, manga and manhua library",
     "onepiece.tube": "German One Piece main chapter list; available entries only",
     "mangarw.com": "Raw manga (One Piece verified Japanese)",
     "demonicscans.org": "Unofficial English manga and manhwa scans",

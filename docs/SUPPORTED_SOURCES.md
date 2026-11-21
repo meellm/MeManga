@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 285 domains across 220 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 286 domains across 221 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -85,6 +85,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | hajime-noippo.com | w22.hajime-noippo.com (Included in search) | http | — | No | Included in search | Hajime no Ippo |
 | hajimnoippo.com | — | http | — | No | Included in search | Hajime no Ippo |
 | heavenly-delusion.com | — | http | — | No | Not searched (template) | Tengoku Daimakyou (Heavenly Delusion) |
+| heavenmanga.com | — | http | es | No | Included in search | Spanish manhwa, manga and manhua library |
 | hentai20.io | — | http | — | Yes | Included in search | Adult content |
 | hentaifox.com | — | http | — | Yes | Included in search | Doujinshi |
 | hentairead.com | — | browser | — | Yes | Included in search | Doujinshi |
