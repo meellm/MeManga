@@ -129,6 +129,15 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # MangaHome - English manga reader
     "mangahome.com": "mangahome:MangaHomeScraper",
 
+    # ManhwaWeb - Spanish manhwa, manga and manhua library (public JSON API)
+    "manhwaweb.com": "manhwaweb:ManhwaWebScraper",
+
+    # LeerCapitulo - Spanish manga/manhwa/manhua reader
+    "leercapitulo.co": "leercapitulo:LeerCapituloScraper",
+
+    # Uzay Manga - Turkish manga/manhwa/manhua reader (SvelteKit data routes)
+    "uzaymanga.com": "uzaymanga:UzayMangaScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 273 domains across 208 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 276 domains across 211 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -107,6 +107,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | kokounohito.com | — | http | — | No | Not searched (template) | The Climber (Kokou no Hito) |
 | kunmanga.com | — | browser | — | No | Not searched (needs-js) | — |
 | lector-mangas.lat | lectormangass.net (Not searched (alias)) | http | es | No | Included in search | Spanish manga/manhwa reader |
+| leercapitulo.co | — | http | es | No | Included in search | Spanish manga/manhwa/manhua reader |
 | lelmanga.com | — | http | fr | No | Included in search | French manga and manhwa scans |
 | madeabyss.com | — | http | — | No | Not searched (template) | Made in Abyss |
 | manga18fx.com | — | http | — | Yes | Not searched (template) | Adult manga |
@@ -135,6 +136,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | manhuaus.org | — | http | — | No | Not searched (challenge) | Manhua focused |
 | manhwa18.cc | — | http | — | Yes | Not searched (unreliable) | Adult manhwa |
 | manhwatop.com | — | http | — | No | Not searched (template) | Manhwa focused |
+| manhwaweb.com | — | api | es | No | Included in search | Spanish manhwa, manga and manhua library |
 | manytoon.com | — | browser | — | Yes | Included in search | Adult manhwa |
 | mashle-manga.online | — | http | — | No | Included in search | Mashle |
 | mashlemanga.net | — | http | — | No | Not searched (template) | Mashle: Magic and Muscles |
@@ -205,6 +207,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | trigunmanga.com | — | http | — | No | Not searched (template) | Trigun |
 | truemanga.com | mangamonk.com (Not searched (needs-js)) | http | — | No | Not searched (needs-js) | — |
 | unopiece.com | — | http | — | No | Not searched (template) | One Piece |
+| uzaymanga.com | — | api | tr | No | Included in search | Turkish manga/manhwa/manhua reader |
 | vagabondmanga.org | — | http | — | No | Included in search | Vagabond |
 | vermanhwa.com | — | http | — | No | Not searched (template) | — |
 | webtoons.com | — | http | — | No | Included in search | Official WEBTOON Originals in English, Spanish, French and German |

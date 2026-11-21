@@ -231,6 +231,9 @@ SOURCE_NOTES: Dict[str, str] = {
     "raw.senmanga.com": "Raw manga by direct series URL; not searched (One Piece verified Japanese)",
     "manhuatop.org": "English manhua reader",
     "mangahome.com": "English manga reader",
+    "manhwaweb.com": "Spanish manhwa, manga and manhua library",
+    "leercapitulo.co": "Spanish manga/manhwa/manhua reader",
+    "uzaymanga.com": "Turkish manga/manhwa/manhua reader",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",
