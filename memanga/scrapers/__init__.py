@@ -150,6 +150,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # HeavenManga - Spanish manhwa, manga and manhua library
     "heavenmanga.com": "heavenmanga:HeavenMangaScraper",
 
+    # Uchuujin - Spanish manga and manhwa reader (MangaThemesia)
+    "uchuujinmangas.com": "uchuujin:UchuujinScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 

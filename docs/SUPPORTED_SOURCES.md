@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 288 domains across 223 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 289 domains across 224 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -218,6 +218,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | tortugaceviri.com | — | http | — | No | Not searched (template) | — |
 | trigunmanga.com | — | http | — | No | Not searched (template) | Trigun |
 | truemanga.com | mangamonk.com (Not searched (needs-js)) | http | — | No | Not searched (needs-js) | — |
+| uchuujinmangas.com | — | http | es | No | Included in search | Spanish manga and manhwa reader |
 | unopiece.com | — | http | — | No | Not searched (template) | One Piece |
 | uzaymanga.com | — | api | tr | No | Included in search | Turkish manga/manhwa/manhua reader |
 | vagabondmanga.org | — | http | — | No | Included in search | Vagabond |
