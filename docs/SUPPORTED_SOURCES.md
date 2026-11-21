@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 282 domains across 217 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 283 domains across 218 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -160,6 +160,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | onepunchmanread.com | — | http | — | No | Included in search | One Punch Man |
 | oshinokoyo.com | — | http | — | No | Not searched (template) | Oshi no Ko |
 | overlord-manga.online | — | http | — | No | Not searched (template) | Overlord |
+| patimanga.com | — | http | tr | No | Included in search | Turkish manhwa and webtoon library |
 | punpunmanga.com | — | http | — | No | Not searched (template) | Goodnight Punpun (Oyasumi Punpun) |
 | raw.senmanga.com | — | api | — | Yes | Not searched (unreliable) | Raw manga by direct series URL; not searched (One Piece verified Japanese) |
 | rawjx.net | — | http | — | No | Not searched (template) | — |

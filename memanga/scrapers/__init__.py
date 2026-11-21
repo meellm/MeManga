@@ -141,6 +141,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Serein Scan - Turkish manhwa reader (MangaThemesia)
     "sereinscan.com": "sereinscan:SereinScanScraper",
 
+    # PatiManga - Turkish manhwa and webtoon library (Yomiko theme)
+    "patimanga.com": "patimanga:PatiMangaScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 
