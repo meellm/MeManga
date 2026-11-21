@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 268 domains across 203 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 270 domains across 205 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -107,6 +107,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | kokounohito.com | — | http | — | No | Not searched (template) | The Climber (Kokou no Hito) |
 | kunmanga.com | — | browser | — | No | Not searched (needs-js) | — |
 | lector-mangas.lat | lectormangass.net (Not searched (alias)) | http | es | No | Included in search | Spanish manga/manhwa reader |
+| lelmanga.com | — | http | fr | No | Included in search | French manga and manhwa scans |
 | madeabyss.com | — | http | — | No | Not searched (template) | Made in Abyss |
 | manga18fx.com | — | http | — | Yes | Not searched (template) | Adult manga |
 | mangaball.net | — | http | — | No | Included in search | Multi-language |
@@ -190,6 +191,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | spyxfamilymanga.org | — | http | — | No | Included in search | Spy x Family |
 | steel-ball-run.com | — | http | — | No | Not searched (template) | Steel Ball Run |
 | stone-ocean-manga.com | — | http | — | No | Not searched (template) | JoJo's Bizarre Adventure Part 6: Stone Ocean |
+| sushiscan.net | — | http | fr | No | Included in search | French manga scans |
 | sxfmanga.net | ww2.sxfmanga.net (Not searched (template)) | http | — | No | Not searched (template) | Spy x Family |
 | tgmanga.com | — | http | — | No | Included in search | Tokyo Ghoul |
 | thedragonballsuper.online | — | http | — | No | Included in search | Dragon Ball Super |

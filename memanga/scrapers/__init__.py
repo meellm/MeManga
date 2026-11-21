@@ -116,6 +116,10 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # KadoComi - official KADOKAWA Japanese manga (public episode viewer)
     "comic-walker.com": "kadocomi:KadoComiScraper",
 
+    # SushiScan and Lelmanga - French scans (MangaThemesia WordPress theme)
+    "sushiscan.net": "mangathemesia_sites:SushiScanScraper",
+    "lelmanga.com": "mangathemesia_sites:LelMangaScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

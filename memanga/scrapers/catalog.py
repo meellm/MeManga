@@ -223,6 +223,8 @@ SOURCE_NOTES: Dict[str, str] = {
     "mangadenizi.net": "Turkish manga/manhwa/webtoon reader",
     "webtoons.com": "Official WEBTOON Originals in English, Spanish, French and German",
     "comic-walker.com": "Official KADOKAWA Japanese manga; public page-listed active episodes",
+    "sushiscan.net": "French manga scans",
+    "lelmanga.com": "French manga and manhwa scans",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",
