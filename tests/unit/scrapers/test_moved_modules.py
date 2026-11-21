@@ -23,7 +23,6 @@ MOVED = {
     "beastarsmanga": ("BeastarsMangaScraper", "beastarsmanga.com"),
     "monstermanga": ("MonsterMangaScraper", "monstermanga.org"),
     "readichithewitch": ("ReadIchiTheWitchScraper", "readichithewitch.com"),
-    "ajimenoippo": ("AjimeNoIppoScraper", "ajimenoippo.com"),
     "hajimenoippoonline": ("HajimeNoIppoOnlineScraper", "hajime-no-ippo-manga.online"),
     "hajimnoippo": ("HajimNoIppoScraper", "hajimnoippo.com"),
     "hajimenoippoblogger": ("HajimeNoIppoBloggerScraper", "hajime-noippo.com"),
@@ -41,7 +40,6 @@ MOVED = {
     "bluelockmangaorg": ("BlueLockMangaNetScraper", "bluelockmanga.net"),
     "kaijuno8manga": ("KaijuNo8MangaScraper", "kaijuno8-manga.com"),
     "dragonballsuperonline": ("DragonBallSuperOnlineScraper", "thedragonballsuper.online"),
-    "dragonballsuperorg": ("DragonBallSuperOrgScraper", "dragonballsuper.org"),
     "onepiecemanga1": ("OnePieceManga1Scraper", "1piecemanga.com"),
     "readslamdunkonline": ("ReadSlamDunkOnlineScraper", "read-slamdunk.online"),
     "readtokyorevengers": ("ReadTokyoRevengersScraper", "read-tokyorevengers.com"),
@@ -49,9 +47,6 @@ MOVED = {
     "readkenganashura": ("ReadKenganAshuraScraper", "read-kengan-ashura.com"),
     "bocchitherockmanga": ("BocchiTheRockMangaScraper", "bocchitherockmanga.com"),
     "elusivesamurai": ("ElusiveSamuraiScraper", "elusive-samurai.com"),
-    "readbluelockorg": ("ReadBlueLockOrgScraper", "readbluelock.org"),
-    "drstonemanga": ("DrStoneMangaScraper", "drstonemanga.com"),
-    "mangaclash": ("MangaClashScraper", "mangaclash.com"),
     "mangaeffect": ("MangaReadScraper", "mangaeffect.com"),
     "mangafoxfun": ("MangaFoxFunScraper", "mangafox.fun"),
 }
@@ -98,8 +93,6 @@ def test_unknown_module_still_fails():
 
 TWINS = [
     # (domain, class, name, base_url, twin domain)
-    ("mangaclash.com", "MangaClashScraper", "mangaclash", "https://mangaclash.com",
-     "kunmanga.com"),
     ("mangaeffect.com", "MangaReadScraper", "mangaread", "https://www.mangaread.org",
      "coffeemanga.io"),
     ("mangafox.fun", "MangaFoxFunScraper", "mangafoxfun", "https://mangafox.fun",
@@ -117,12 +110,6 @@ def test_twin_keeps_its_identity(domain, cls_name, name, base_url, twin):
     assert cls.base_url == base_url
     # Every method is inherited unchanged from the twin
     assert not any(inspect.isfunction(v) for v in vars(cls).values())
-
-
-def test_playwright_twin_has_its_own_browser_worker():
-    clash, kun = SCRAPERS["mangaclash.com"], SCRAPERS["kunmanga.com"]
-    assert "_worker" in vars(clash)
-    assert clash._worker is not kun._worker
 
 
 @pytest.mark.parametrize("domain", [t[0] for t in TWINS])

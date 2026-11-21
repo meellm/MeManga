@@ -1,8 +1,8 @@
 """JSON-fixture tests for Atsumaru's API-driven scraper.
 
-The network-facing helpers (``_get_json``) are never invoked here - these tests
-exercise only the pure parsing/normalisation layer, using payloads shaped after
-the live Typesense and REST API responses.
+The network-facing helpers are replaced with fakes here - these tests
+exercise the parsing, error and transport-fallback layers, using payloads
+shaped after the live Typesense and REST API responses.
 """
 
 from __future__ import annotations
@@ -332,3 +332,232 @@ class TestPages:
 
     def test_get_pages_invalid_url_returns_empty(self, scraper):
         assert scraper.get_pages("https://atsu.moe/unknown/path") == []
+
+
+# Errors are raised, not returned as empty lists
+
+
+class TestErrors:
+    @pytest.mark.parametrize("call", [
+        lambda s: s.search("one piece"),
+        lambda s: s.get_chapters("https://atsu.moe/manga/sVC2A"),
+        lambda s: s.get_pages("https://atsu.moe/read/sVC2A/Nd6vV"),
+    ])
+    def test_request_failure_is_raised(self, monkeypatch, scraper, call):
+        import requests
+
+        def fail(url):
+            raise requests.HTTPError("403 Client Error: Forbidden")
+
+        monkeypatch.setattr(scraper, "_get_json", fail)
+
+        with pytest.raises(requests.HTTPError):
+            call(scraper)
+
+    @pytest.mark.parametrize("call, payload, key", [
+        (lambda s: s.search("one piece"), {"message": "x"}, "hits"),
+        (lambda s: s.search("one piece"), None, "hits"),
+        (lambda s: s.get_chapters("https://atsu.moe/manga/sVC2A"),
+         {"chapters": "x"}, "chapters"),
+        (lambda s: s.get_pages("https://atsu.moe/read/sVC2A/Nd6vV"),
+         {}, "readChapter"),
+        (lambda s: s.get_pages("https://atsu.moe/read/sVC2A/Nd6vV"),
+         {"readChapter": {}}, "pages"),
+    ])
+    def test_wrong_shaped_payload_is_a_source_error(
+            self, monkeypatch, scraper, call, payload, key):
+        from memanga.scrapers.atsumaru import AtsumaruSourceError
+
+        monkeypatch.setattr(scraper, "_get_json", lambda url: payload)
+
+        with pytest.raises(AtsumaruSourceError, match=f"no '{key}'"):
+            call(scraper)
+
+    def test_search_that_matches_nothing_is_still_empty(
+            self, monkeypatch, scraper):
+        monkeypatch.setattr(scraper, "_get_json", lambda url: {"hits": []})
+
+        assert scraper.search("zzzz") == []
+
+
+# Transport: Cloudflare refusal of the plain client
+
+
+class _Response:
+    def __init__(self, status, payload=None, headers=None):
+        self.status_code = status
+        self._payload = payload
+        self.headers = dict(headers or {})
+        self.url = "https://atsu.moe/collections/manga/documents/search"
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        import requests
+
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error",
+                                     response=self)
+
+
+class _Session:
+    def __init__(self, *responses):
+        import requests
+
+        self.responses = list(responses)
+        self.calls = []
+        self.headers = {}
+        self.cookies = requests.cookies.RequestsCookieJar()
+
+    def get(self, url, **kwargs):
+        self.calls.append(url)
+        return self.responses.pop(0)
+
+
+_CF_403 = {"server": "cloudflare", "cf-ray": "8f0000000000-IAD"}
+
+
+class TestCloudflareFallback:
+    @pytest.fixture(autouse=True)
+    def no_sleep(self, monkeypatch):
+        import time
+        import types
+        from memanga.scrapers import base
+
+        monkeypatch.setattr(base, "time", types.SimpleNamespace(
+            time=time.time, monotonic=time.monotonic, sleep=lambda _s: None))
+
+    @pytest.fixture
+    def cloudscraper(self, monkeypatch):
+        """Stand in for _use_cloudscraper: each call gives the scraper the
+        next prepared session and records the browser profile."""
+        made = {"profiles": [], "sessions": []}
+
+        def fake(self, browser=None):
+            made["profiles"].append(browser)
+            self.session = made["sessions"].pop(0)
+            return self.session
+
+        monkeypatch.setattr(AtsumaruScraper, "_use_cloudscraper", fake)
+        return made
+
+    def test_cloudflare_403_switches_to_cloudscraper_once(
+            self, scraper, cloudscraper):
+        from memanga.scrapers.base import CLOUDSCRAPER_CHROME_DESKTOP
+
+        plain = _Session(_Response(403, headers=_CF_403))
+        cf = _Session(_Response(200, SEARCH_PAYLOAD),
+                      _Response(200, CHAPTERS_PAYLOAD))
+        scraper.session = plain
+        cloudscraper["sessions"].append(cf)
+
+        assert len(scraper.search("one piece")) == 2
+        assert len(scraper.get_chapters("https://atsu.moe/manga/sVC2A")) == 4
+
+        assert len(plain.calls) == 1
+        assert len(cf.calls) == 2
+        assert "/collections/manga/documents/search" in cf.calls[0]
+        assert "/api/manga/allChapters" in cf.calls[1]
+        assert cloudscraper["profiles"] == [CLOUDSCRAPER_CHROME_DESKTOP]
+        assert cf.headers["Referer"] == "https://atsu.moe/"
+        assert cf.headers["Accept"].startswith("application/json")
+
+    def test_plain_client_that_works_never_switches(self, scraper, cloudscraper):
+        scraper.session = _Session(_Response(200, SEARCH_PAYLOAD))
+
+        assert len(scraper.search("one piece")) == 2
+        assert cloudscraper["profiles"] == []
+
+    def test_403_without_cloudflare_markers_is_raised(self, scraper, cloudscraper):
+        import requests
+
+        scraper.session = _Session(_Response(403, headers={"server": "nginx"}))
+
+        with pytest.raises(requests.HTTPError) as exc:
+            scraper.search("one piece")
+        assert cloudscraper["profiles"] == []
+        # The error says why no cloudscraper retry was made.
+        assert "403 without Cloudflare markers; no cloudscraper retry" in str(exc.value)
+        assert "server=nginx, cf-ray=no" in str(exc.value)
+        assert exc.value.response.status_code == 403
+
+    @pytest.mark.parametrize("second, kind", [
+        ({"server": "cloudflare", "cf-ray": "1-IAD",
+          "content-type": "text/html; charset=UTF-8"},
+         "403 with Cloudflare markers, no challenge header"),
+        ({"server": "cloudflare", "cf-ray": "1-IAD", "cf-mitigated": "challenge",
+          "content-type": "text/html"},
+         "Cloudflare challenge"),
+    ])
+    def test_refusal_of_cloudscraper_too_is_raised_not_looped(
+            self, scraper, cloudscraper, second, kind):
+        import requests
+
+        plain = _Session(_Response(403, headers=_CF_403))
+        cf = _Session(_Response(403, headers=second))
+        scraper.session = plain
+        cloudscraper["sessions"].append(cf)
+
+        with pytest.raises(requests.HTTPError) as exc:
+            scraper.search("one piece")
+        assert len(plain.calls) == 1 and len(cf.calls) == 1
+        assert len(cloudscraper["profiles"]) == 1
+        # Which clients were refused, and whether the refusal carried the
+        # challenge header, read from its headers only.
+        message = str(exc.value)
+        assert f"refused through the plain and cloudscraper clients; {kind};" in message
+        assert "cf-ray=yes" in message
+        assert exc.value.response.status_code == 403
+        assert isinstance(exc.value.__cause__, requests.HTTPError)
+
+    def test_worker_copy_of_a_switched_scraper_keeps_cloudscraper(
+            self, scraper, cloudscraper):
+        first = _Session()
+        first.cookies.set("cf_clearance", "x", domain="atsu.moe")
+        cloudscraper["sessions"].extend([first, _Session()])
+        scraper._switch_to_cloudflare_session()
+
+        copy = scraper.worker_copy()
+
+        assert copy.session is not scraper.session
+        assert copy._cloudflare_session is True
+        assert copy.session.headers["Referer"] == "https://atsu.moe/"
+        assert copy.session.cookies.get("cf_clearance") == "x"
+        assert len(cloudscraper["profiles"]) == 2
+
+    def test_worker_copy_keeps_the_parents_user_agent_and_headers(
+            self, scraper, monkeypatch):
+        """cloudscraper picks a random User-Agent per new session, but a
+        clearance cookie belongs with the client that earned it. Every
+        generated session here gets a different User-Agent, so a copy
+        that rebuilt its identity could not match by chance."""
+        import itertools
+
+        generated = itertools.count(1)
+        profiles = []
+
+        def fake(self, browser=None):
+            profiles.append(dict(browser))
+            self.session = _Session()
+            # Like cloudscraper: a "custom" User-Agent is used as given,
+            # otherwise one is picked for the browser profile.
+            self.session.headers = {
+                "User-Agent": browser.get("custom") or f"Chrome/UA-{next(generated)}",
+                "Accept-Language": f"en-US;variant={len(profiles)}",
+            }
+            return self.session
+
+        monkeypatch.setattr(AtsumaruScraper, "_use_cloudscraper", fake)
+        scraper._switch_to_cloudflare_session()
+        scraper.session.cookies.set("cf_clearance", "x", domain="atsu.moe")
+
+        copy = scraper.worker_copy()
+
+        assert dict(copy.session.headers) == dict(scraper.session.headers)
+        assert copy.session.headers["User-Agent"] == "Chrome/UA-1"
+        # Built for the parent's User-Agent, on the same browser profile.
+        assert profiles[1]["custom"] == "Chrome/UA-1"
+        assert profiles[1]["browser"] == profiles[0]["browser"] == "chrome"
+        assert copy.session.cookies.get("cf_clearance") == "x"
+        assert copy.session is not scraper.session

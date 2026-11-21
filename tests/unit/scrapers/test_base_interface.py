@@ -195,9 +195,9 @@ class TestMangaFireSearchUsesJsonApi:
     links, so that selector matched nothing and every search returned 0
     results. search() must hit GET /api/titles?keyword=... instead.
 
-    Issue #142 added a `vrf` token to that call, so the browser is back -
-    but only to mint the token. The result set still comes from one JSON
-    request, never from scraped HTML.
+    Issue #142 added a `vrf` token to that call. It is computed locally,
+    so the whole search is one plain JSON request, never scraped HTML
+    and never a browser.
     """
 
     class _FakeResponse:
@@ -221,20 +221,8 @@ class TestMangaFireSearchUsesJsonApi:
             self.urls.append(url)
             return TestMangaFireSearchUsesJsonApi._FakeResponse(self._payload)
 
-    class _StubVRF:
-        def __init__(self, token="TOKEN"):
-            self._token = token
-
-        def get_token(self, api_path, params=()):
-            return self._token
-
-        def invalidate(self):
-            pass
-
-    def test_search_hits_titles_api_with_encoded_keyword(self, monkeypatch):
+    def test_search_hits_titles_api_with_encoded_keyword(self):
         from memanga.scrapers import mangafire as mf
-
-        monkeypatch.setattr(mf, "get_vrf_generator", lambda: self._StubVRF())
 
         scraper = mf.MangaFireScraper()
         scraper.session = self._FakeSession({
@@ -249,18 +237,17 @@ class TestMangaFireSearchUsesJsonApi:
         results = scraper.search("blue lock/2")
 
         # One JSON call, keyword still escaped so the slash can't break
-        # out into the path, now signed with the vrf token.
+        # out into the path, signed over the decoded keyword.
+        token = mf.sign_api_request("/titles", [("keyword", "blue lock/2")])
         assert scraper.session.urls == [
-            "https://mangafire.to/api/titles?keyword=blue+lock%2F2&vrf=TOKEN",
+            "https://mangafire.to/api/titles?keyword=blue+lock%2F2"
+            f"&vrf={token}",
         ]
         assert results and results[0].url == "https://mangafire.to/title/abc-blue-lock"
 
-    def test_search_only_touches_the_browser_to_mint_a_token(self, monkeypatch):
-        """Hard guard: the browser is a token source, not the search
-        transport. With an unprotected endpoint (MangaFire's generator
-        returns null) the whole path stays browser-free, and results
-        never come from a rendered page.
-        """
+    def test_search_never_starts_a_browser(self, monkeypatch):
+        """Hard guard: signing is local, so search starts no browser and
+        results never come from a rendered page."""
         from memanga.scrapers import mangafire as mf
 
         called = {"n": 0}
@@ -280,15 +267,17 @@ class TestMangaFireSearchUsesJsonApi:
 
         import playwright.sync_api as pwapi
         monkeypatch.setattr(pwapi, "sync_playwright", lambda: _BoomPW())
-        monkeypatch.setattr(mf, "get_vrf_generator",
-                            lambda: self._StubVRF(token=None))
 
         scraper = mf.MangaFireScraper()
         scraper.session = self._FakeSession({"items": [], "meta": {}})
         scraper.search("x")
 
         assert called["n"] == 0, "search must stay browser-free"
-        assert scraper.session.urls == ["https://mangafire.to/api/titles?keyword=x"]
+        assert mf.MangaFireScraper.engine == "http"
+        assert scraper.session.urls == [
+            "https://mangafire.to/api/titles?keyword=x"
+            f"&vrf={mf.sign_api_request('/titles', [('keyword', 'x')])}",
+        ]
 
 
 class TestWeebCentralSearchHitsDataEndpoint:
@@ -446,50 +435,57 @@ class TestWeebCentralCloudflareDetection:
         assert results and results[0].title == "Blue Lock"
 
 
-class TestWeebCentralChapterListStability:
+class TestWeebCentralChapterListIsComplete:
     """Regression for the "only 9 of 349 chapters returned" bug. The
-    HTMX swap that lands the full chapter list arrives in batches; the
-    scraper must wait for the count to stabilise rather than returning
-    after the first batch crosses some threshold.
+    series page renders just the newest and oldest few chapters and
+    fetches the rest over XHR on "Show All Chapters"; when that request
+    failed, the short list was returned as the whole series. The list
+    must come from the full-chapter-list fragment itself.
     """
 
-    def test_waits_until_link_count_stops_growing(self):
-        from memanga.scrapers.weebcentral import WeebCentralScraper
+    def test_reads_the_full_list_fragment_not_the_series_page(
+            self, monkeypatch):
+        from memanga.scrapers import weebcentral as wc
 
-        # Simulate the HTMX swap by returning a growing count from
-        # `page.evaluate(...)` until it plateaus.
-        sequence = iter([5, 12, 80, 200, 340, 349, 349, 349])
+        series = "https://weebcentral.com/series/01ABC/Blue-Lock"
+        full_list = "https://weebcentral.com/series/01ABC/full-chapter-list"
 
-        class _FakePage:
-            def evaluate(self, _expr):
-                return next(sequence, 349)
-            def wait_for_timeout(self, _ms):
-                pass
-
-        scraper = WeebCentralScraper()
-        final = scraper._wait_for_chapter_list_stable(
-            _FakePage(), max_passes=20, interval_ms=0,
-        )
-        assert final == 349, f"expected 349, got {final}"
-
-    def test_returns_when_count_never_grows_past_zero(self):
-        """A page with no chapter links at all must still terminate
-        (don't sit on max_passes × interval just because the count is
-        stuck at zero)."""
-        from memanga.scrapers.weebcentral import WeebCentralScraper
+        class _Link:
+            def __init__(self, n):
+                self.n = n
+            def get_attribute(self, _name):
+                return f"/chapters/C{self.n}"
+            def inner_text(self):
+                return f"Chapter {self.n}"
 
         class _FakePage:
-            def evaluate(self, _expr):
-                return 0
+            def __init__(self):
+                self.url = ""
+                self.visits = []
+            def goto(self, url, **kwargs):
+                self.url = url
+                self.visits.append((url, kwargs.get("referer")))
             def wait_for_timeout(self, _ms):
                 pass
+            def content(self):
+                return "<html><body></body></html>"
+            def title(self):
+                return "Blue Lock | Weeb Central"
+            def query_selector_all(self, _selector):
+                # The series page's first render vs the full fragment.
+                count = 349 if self.url == full_list else 9
+                return [_Link(n) for n in range(1, count + 1)]
+            def close(self):
+                pass
 
-        scraper = WeebCentralScraper()
-        # Bound the call so a regression wouldn't hang the suite.
-        final = scraper._wait_for_chapter_list_stable(
-            _FakePage(), max_passes=5, interval_ms=0,
-        )
-        assert final == 0
+        page = _FakePage()
+        monkeypatch.setattr(wc.WeebCentralScraper, "_new_page",
+                            lambda self: (None, None, page))
+
+        chapters = wc.WeebCentralScraper().get_chapters(series)
+
+        assert len(chapters) == 349
+        assert page.visits == [(full_list, series)]
 
 
 class TestWeebCentralChapterUrlSelfHeal:

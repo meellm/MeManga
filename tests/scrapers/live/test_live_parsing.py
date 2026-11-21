@@ -61,6 +61,8 @@ class ProbeSpec:
     check_chapters: bool = True
     check_pages: bool = True
     check_image: bool = True
+    min_chapters: int = 1         # fewer listed chapters → STALE:chapters
+    chapter: str | None = None    # probe pages of this chapter, not the newest
 
 
 PARSING_PROBES = {
@@ -69,30 +71,32 @@ PARSING_PROBES = {
     # chapters, so probe a title that is actually hosted there.
     "mangadex.org": ProbeSpec("API client", query="chainsaw man"),
     "mangapill.com": ProbeSpec("Simple HTTP aggregator", query="one piece"),
-    # Signs every API call with a vrf token minted in a headless browser
+    # Signs every API call with a locally computed vrf token
     # (issue #142). This probe is what catches MangaFire changing that
     # scheme again — without a valid token every stage 403s at once.
     "mangafire.to": ProbeSpec("MangaFire (vrf-signed JSON API)",
                                 query="one piece"),
-    # Fully browser-rendered: search is the /search/data fragment, the
-    # chapter list needs the "Show All Chapters" swap, and pages come
-    # from the reader's section#chapter-images. Saved excerpts of each
-    # page live in fixtures/playwright_html/weebcentral_*.html; this
-    # probe catches the live markup drifting away from them.
+    # Loaded in the browser as HTMX fragments: search is /search/data,
+    # the chapter list /series/{id}/full-chapter-list, and pages the
+    # reader's /chapters/{id}/images. Saved excerpts of each page live
+    # in fixtures/playwright_html/weebcentral_*.html; this probe catches
+    # the live markup drifting away from them.
     "weebcentral.com": ProbeSpec("WeebCentral (browser-rendered HTML)",
                                   query="blue lock"),
-    "mangapark1.com": ProbeSpec("MangaPark", query="one piece"),
+    "mangapark.cc": ProbeSpec("MangaPark", query="one piece"),
     "tcbonepiecechapters.com": ProbeSpec("TCB Scans (project list)",
                                            query="one piece"),
-    "mangakakalot.com": ProbeSpec("Mangakakalot", query="naruto"),
-    "manganato.com": ProbeSpec("Manganato", query="naruto"),
     "mangahub.io": ProbeSpec("MangaHub", query="one piece"),
     # dm5 reader: page URLs are only reachable through chapterfun.ashx,
     # and the CDN hotlink-checks the Referer (issue #174). This probe
     # catches either side changing - the image stage is what fails when
     # the reader starts handing back HTML again.
     "mangahere.cc": ProbeSpec("MangaHere (dm5 reader)", query="one piece"),
-    "comix.to": ProbeSpec("Comix.to", query="kubera"),
+    # Chapters come from a list paged 20 rows at a time that must come
+    # back whole (Kubera lists over 1,100 entries), and pages from chapter
+    # 671, a long chapter whose reader loads each page lazily.
+    "comix.to": ProbeSpec("Comix.to", query="kubera",
+                          min_chapters=1000, chapter="671"),
     # Pages come from a JSON API keyed by the chapter id in the URL
     # (issue #152) - this probe catches that endpoint/host changing.
     "mangataro.org": ProbeSpec("MangaTaro (JSON page API)",
@@ -115,7 +119,7 @@ PARSING_PROBES = {
     # site actually carries.
     "mgeko.cc": ProbeSpec("MGeko (plain HTML)", query="solo leveling"),
     # Search filters the /api/series/list catalogue client-side, chapters
-    # come from the panel host's paginated list, and pages from the
+    # come from the main host's paginated chapter list, and pages from the
     # /api/capitulo reader payload (issue #183).
     "olympusxyz.com": ProbeSpec("Olympus Scanlation (Nuxt JSON API)",
                                  query="solo swordmaster"),
@@ -139,10 +143,9 @@ PARSING_PROBES = {
     # the reader's div.reader-page Blogger images (issue #187).
     "wurmz.net": ProbeSpec("Wurmz (Next.js SSR HTML)", query="solo"),
     # Search and chapters come from api.comick.dev; the web pages are
-    # Cloudflare-gated (issue #181). Many popular ComicK chapters are
-    # official/external links with no hosted images, so this probe only
-    # guards search + chapter API drift; pages were proven manually on a
-    # hosted chapter.
+    # Cloudflare-gated (issue #181). Sampled ComicK releases have no
+    # hosted page images, so this probe only guards search + chapter API
+    # drift; a full chapter download from ComicK is unverified.
     "comick.io": ProbeSpec("ComicK (JSON API)", query="one piece",
                             check_pages=False),
 
@@ -164,6 +167,13 @@ PARSING_PROBES = {
     "readsnk.com": ProbeSpec("ReadManga base (Attack on Titan)",
                                query="attack on titan",
                                check_chapters=False),
+    # Single-series ReadManga site: search answers offline, chapters come
+    # from the chapter selector on a chapter page (the home-page fallback
+    # lists only a few, so require a full listing), and pages from chapter
+    # 100, since the newest chapters currently list a single reader image.
+    "readblackclover.com": ProbeSpec(
+        "ReadManga base (Black Clover chapter selector)",
+        query="black clover", min_chapters=100, chapter="100"),
 }
 
 
@@ -213,9 +223,11 @@ def test_scraper_pipeline_live(domain, spec, health_recorder):
             results = pipe.search(spec.query)
             manga_url = results[0].url
         if spec.check_chapters:
-            chapters = pipe.chapters(manga_url)
+            chapters = pipe.chapters(manga_url, spec.min_chapters)
             if spec.check_pages:
-                pages = pipe.pages(chapters[0])
+                target = (pipe.pick_chapter(chapters, spec.chapter)
+                          if spec.chapter else chapters[0])
+                pages = pipe.pages(target)
                 if spec.check_image:
                     pipe.image(pages[0])
     except StageFailure as e:

@@ -176,62 +176,50 @@ class TestBrowserCleanup:
         code = (
             "import sys, threading\n"
             "import memanga.downloader\n"
-            "from memanga.scrapers import mangafire as mf\n"
             "from memanga.scrapers import playwright_base as pb\n"
             "def _report(what):\n"
             "    sys.stderr.write(what + ' closed on '\n"
             "                     + threading.current_thread().name + '\\n')\n"
             "pb.cleanup_browsers = lambda: _report('browser')\n"
-            "mf.VRFGenerator._close_in_thread = lambda self: _report('vrf')\n"
             "class _Used(pb.PlaywrightScraper):\n"
             "    name = 'used'\n"
             "class _Unused(pb.PlaywrightScraper):\n"
             "    name = 'unused'\n"
             "_Used._run_serialized(lambda: None, timeout=10)\n"
-            "mf.get_vrf_generator()\n"
-            "mf.VRFGenerator._run_serialized(lambda: None, timeout=10)\n"
         )
         result = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT,
                                 capture_output=True, text=True, timeout=120)
         assert result.returncode == 0, result.stderr
         assert result.stdout == ""
         closed = sorted(result.stderr.splitlines())
-        assert len(closed) == 2, result.stderr
+        assert len(closed) == 1, result.stderr
         assert closed[0].startswith("browser closed on pw-_Used")
-        assert closed[1].startswith("vrf closed on mangafire-vrf")
         assert "_Unused" not in result.stderr
 
     def test_exit_cleanup_reaches_scraper_hooks_silently(self, monkeypatch,
                                                          capsys):
-        import memanga.scrapers.mangafire as mangafire
+        # MangaFire signs its API calls without a browser, so a run that
+        # imported it still has only the Playwright browsers to close.
+        import memanga.scrapers.mangafire  # noqa: F401
         from memanga.scrapers.playwright_base import PlaywrightScraper
 
         calls = []
-        monkeypatch.setattr(mangafire, "cleanup_mangafire",
-                            lambda: calls.append("mangafire"))
         monkeypatch.setattr(PlaywrightScraper, "cleanup",
                             staticmethod(lambda: calls.append("playwright")))
 
         dl._cleanup_at_exit()
 
-        assert calls == ["mangafire", "playwright"]
+        assert calls == ["playwright"]
         # Issue #250: exit cleanup must not print (breaks --json output).
         assert capsys.readouterr().out == ""
 
     def test_restart_browsers_reaches_scraper_hooks(self, monkeypatch):
-        import memanga.scrapers.mangafire as mangafire
         from memanga.scrapers.playwright_base import PlaywrightScraper
 
         calls = []
-
-        class _FakeVRFGenerator:
-            def restart(self):
-                calls.append("vrf")
-
-        monkeypatch.setattr(mangafire, "VRFGenerator", _FakeVRFGenerator)
         monkeypatch.setattr(PlaywrightScraper, "cleanup",
                             staticmethod(lambda: calls.append("playwright")))
 
         dl.restart_browsers()
 
-        assert calls == ["vrf", "playwright"]
+        assert calls == ["playwright"]

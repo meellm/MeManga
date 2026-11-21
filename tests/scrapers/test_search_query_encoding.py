@@ -72,10 +72,8 @@ QUERY_CASES = [
     ("mangapanda", "MangaPandaScraper", "/search", "q", {}),
     ("mangapill", "MangapillScraper", "/search", "q", {}),
     ("mangareader", "MangaReaderScraper", "/search", "keyword", {}),
-    ("mangasee", "MangaSeeScraper", "/search/", "name", {}),
     ("mangataro", "MangaTaroScraper", "/api/manga", "q", {}),
     ("mangatown", "MangaTownScraper", "/search", "name", {}),
-    ("mangayy", "MangaYYScraper", "/", "s", {"post_type": "wp-manga"}),
     ("mangoasis", "MangOasisScraper", "/en/", "s", {}),
     ("manhuafast", "ManhuaFastScraper", "/", "s", {"post_type": "wp-manga"}),
     ("manhuaplus", "ManhuaPlusScraper", "/", "s", {"post_type": "wp-manga"}),
@@ -115,10 +113,6 @@ def test_plain_title_wire_format_is_unchanged(monkeypatch, fake_response):
 
 # (module, class, path prefix, how the source turns the title into a segment)
 PATH_CASES = [
-    ("manganato", "ManganatoScraper", "/search/story/",
-     lambda q: q.replace(" ", "_")),
-    ("mangakakalot", "MangakakalotScraper", "/search/story/",
-     lambda q: q.replace(" ", "_")),
     ("manganato_gg", "ManganatoGGScraper", "/search/story/",
      lambda q: q.replace(" ", "_")),
     ("mangafreak", "MangaFreakScraper", "/Find/", lambda q: q),
@@ -145,9 +139,6 @@ def test_path_segment_round_trips(module, cls, prefix, segment, title,
 
 
 def test_path_segment_space_conventions_are_unchanged(monkeypatch, fake_response):
-    nato = _make("manganato", "ManganatoScraper")
-    assert _search_urls(nato, "one piece", monkeypatch, fake_response) == [
-        "https://manganato.com/search/story/one_piece"]
     freak = _make("mangafreak", "MangaFreakScraper")
     assert _search_urls(freak, "one piece", monkeypatch, fake_response) == [
         "https://mangafreak.ws/Find/one%20piece"]

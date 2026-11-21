@@ -71,9 +71,6 @@ SITES = {
         "ReadKenganAshuraScraper", "readkenganashura", "https://read-kengan-ashura.com",
         "Kengan Ashura", "https://read-kengan-ashura.com/manga/kengan-ashura/",
         "https://read-kengan-ashura.com/wp-content/uploads/2022/06/kengan-ashura-1.jpg"),
-    "ajimenoippo.com": (
-        "AjimeNoIppoScraper", "ajimenoippo", "https://www.ajimenoippo.com",
-        "Hajime no Ippo", "https://www.ajimenoippo.com/", None),
     "hajime-no-ippo-manga.online": (
         "HajimeNoIppoOnlineScraper", "hajimenoippoonline",
         "https://hajime-no-ippo-manga.online", "Hajime no Ippo",
@@ -102,9 +99,6 @@ SITES = {
         "https://thedragonballsuper.online", "Dragon Ball Super",
         "https://thedragonballsuper.online/",
         "https://thedragonballsuper.online/wp-content/uploads/2024/08/thumb-350-330775.webp"),
-    "dragonballsuper.org": (
-        "DragonBallSuperOrgScraper", "dragonballsuperorg", "https://www.dragonballsuper.org",
-        "Dragon Ball Super", "https://www.dragonballsuper.org/", ""),
     "1piecemanga.com": (
         "OnePieceManga1Scraper", "onepiecemanga1", "https://w064.1piecemanga.com",
         "One Piece", "https://w064.1piecemanga.com/",
@@ -128,12 +122,6 @@ SITES = {
     "elusive-samurai.com": (
         "ElusiveSamuraiScraper", "elusivesamurai", "https://elusive-samurai.com",
         "The Elusive Samurai", "https://elusive-samurai.com/", None),
-    "readbluelock.org": (
-        "ReadBlueLockOrgScraper", "readbluelockorg", "https://readbluelock.org",
-        "Blue Lock", "https://readbluelock.org/", None),
-    "drstonemanga.com": (
-        "DrStoneMangaScraper", "drstonemanga", "https://drstonemanga.com",
-        "Dr. Stone", "https://drstonemanga.com/", None),
 }
 
 ALIASES = {
@@ -144,9 +132,7 @@ ALIASES = {
     "w1.fireforcemanga.org": "fireforcemanga.org",
     "w9.blame-manga.com": "blame-manga.com",
     "www.homunculusmanga.com": "homunculusmanga.com",
-    "www.ajimenoippo.com": "ajimenoippo.com",
     "w22.hajime-noippo.com": "hajime-noippo.com",
-    "www.dragonballsuper.org": "dragonballsuper.org",
     "w064.1piecemanga.com": "1piecemanga.com",
     "w20.read-tokyorevengers.com": "read-tokyorevengers.com",
     "w23.read-tokyorevengers.com": "read-tokyorevengers.com",
@@ -393,10 +379,10 @@ class TestSelectorLayoutPages:
 
 IPPO_HOME = """
 <html><body>
-  <a href="https://www.ajimenoippo.com/manga/hajime-no-ippo-chapter-1470/">Chapter 1470</a>
+  <a href="https://hajimnoippo.com/manga/hajime-no-ippo-chapter-1470/">Chapter 1470</a>
   <a href="/manga/HAJIME-NO-IPPO-CHAPTER-12/"></a>
-  <a href="https://www.ajimenoippo.com/manga/hajime-no-ippo-chapter-5.5/">Chapter 5.5</a>
-  <a href="https://www.ajimenoippo.com/contact/">Contact</a>
+  <a href="https://hajimnoippo.com/manga/hajime-no-ippo-chapter-5.5/">Chapter 5.5</a>
+  <a href="https://hajimnoippo.com/contact/">Contact</a>
 </body></html>
 """
 
@@ -404,35 +390,35 @@ IPPO_HOME = """
 class TestEntryContentLayoutChapters:
     def test_any_chapter_link_and_untitled_links_get_a_title(self, patch_html):
         fetched = []
-        chapters = _chapters(get_scraper("ajimenoippo.com"), patch_html,
+        chapters = _chapters(get_scraper("hajimnoippo.com"), patch_html,
                              IPPO_HOME, fetched)
-        assert fetched == ["https://www.ajimenoippo.com/"]
+        assert fetched == ["https://hajimnoippo.com/"]
         assert chapters == [
             ("1470", "Chapter 1470",
-             "https://www.ajimenoippo.com/manga/hajime-no-ippo-chapter-1470/"),
+             "https://hajimnoippo.com/manga/hajime-no-ippo-chapter-1470/"),
             ("12", "Chapter 12",
-             "https://www.ajimenoippo.com/manga/HAJIME-NO-IPPO-CHAPTER-12/"),
+             "https://hajimnoippo.com/manga/HAJIME-NO-IPPO-CHAPTER-12/"),
             ("5.5", "Chapter 5.5",
-             "https://www.ajimenoippo.com/manga/hajime-no-ippo-chapter-5.5/"),
+             "https://hajimnoippo.com/manga/hajime-no-ippo-chapter-5.5/"),
         ]
 
 
 class TestEntryContentLayoutPages:
     def test_lazy_images_inside_entry_content(self, patch_html):
-        s = get_scraper("ajimenoippo.com")
+        s = get_scraper("hajimnoippo.com")
         patch_html(s, """
-          <img src="https://cdn.mangaclash.com/outside.jpg">
+          <img src="https://planeptune.us/outside.jpg">
           <div class="entry-content">
             <img src="data:image/svg+xml;base64,AAAA"
-                 data-src="https://cdn.mangaclash.com/ippo/1.jpg">
+                 data-src="https://planeptune.us/ippo/1.jpg">
             <img src="data:image/gif;base64,R0lG">
-            <img src="https://cdn.mangaclash.com/ippo/2.jpg">
+            <img src="https://planeptune.us/ippo/2.jpg">
             <img data-src="https://elsewhere.example/3.jpg">
           </div>
         """)
-        assert s.get_pages("https://www.ajimenoippo.com/manga/x-chapter-1/") == [
-            "https://cdn.mangaclash.com/ippo/1.jpg",
-            "https://cdn.mangaclash.com/ippo/2.jpg",
+        assert s.get_pages("https://hajimnoippo.com/manga/x-chapter-1/") == [
+            "https://planeptune.us/ippo/1.jpg",
+            "https://planeptune.us/ippo/2.jpg",
         ]
 
     def test_whole_page_when_no_entry_content(self, patch_html):
@@ -475,12 +461,6 @@ class TestPlainLinkLayout:
         s = get_scraper("read-tokyorevengers.com")
         html = '<a href="/manga/tokyo-manji-revengers-chapter-278/Chapter-1">Last</a>'
         assert [c[0] for c in _chapters(s, patch_html, html)] == ["278"]
-
-    def test_dragon_ball_org_dash_decimals(self, patch_html):
-        s = get_scraper("dragonballsuper.org")
-        html = '<a href="/manga/dragon-ball-chou-super-chapter-67-5/">67</a>'
-        assert _chapters(s, patch_html, html) == [
-            ("67.5", "Chapter 67.5", "/manga/dragon-ball-chou-super-chapter-67-5/")]
 
     def test_kaiju_pages_skip_logos(self, patch_html):
         s = get_scraper("kaijuno8-manga.com")
@@ -547,20 +527,6 @@ class TestNumberedLayout:
             ("2", "Chapter 2", "https://w5.bocchitherockmanga.com/read/manga/bocchi-chapter-2/"),
             ("10", "Chapter 10", "https://w5.bocchitherockmanga.com/manga/bocchi-chapter-10/"),
         ]
-
-    def test_dr_stone_chapter_paths(self, patch_html):
-        s = get_scraper("drstonemanga.com")
-        html = '<a href="/chapter/232">x</a><a href="/chapter/2">y</a><a href="/manga/z">z</a>'
-        assert _chapters(s, patch_html, html) == [
-            ("2", "Chapter 2", "https://drstonemanga.com/chapter/2"),
-            ("232", "Chapter 232", "https://drstonemanga.com/chapter/232"),
-        ]
-
-    def test_read_blue_lock_lazy_images(self, patch_html):
-        s = get_scraper("readbluelock.org")
-        patch_html(s, '<img src="https://readbluelock.org/logo.png" '
-                      'data-src="https://images.asuratoon.top/1.jpg">')
-        assert s.get_pages("x") == ["https://images.asuratoon.top/1.jpg"]
 
 
 # ──────────────────────────────────────────────────────────────────────

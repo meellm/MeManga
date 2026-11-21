@@ -51,7 +51,7 @@ On Windows the download is a `.zip` — extract it and run `MeManga.exe` from th
 On macOS the download is a `.zip` — unzip it to get `MeManga.app`, then double-click.
 
 > **First launch downloads Firefox** (about 80 MB, once).
-> Playwright uses it for sources that need a browser, such as MangaFire and WeebCentral.
+> Playwright uses it for sources that need a browser, such as WeebCentral.
 >
 > **Windows SmartScreen** may show a warning the first time, because the Windows
 > build is not yet code-signed. Download MeManga only from the
@@ -712,7 +712,7 @@ Their availability can change; check the Sources page for current health.
 |---|---|
 | mangadex.org | Fan-translation library |
 | mangapill.com | General library |
-| mangapark1.com | General library |
+| mangapark.cc | General library |
 | mangafire.to | General library |
 | mangabuddy.com | General library |
 | weebcentral.com | General library |

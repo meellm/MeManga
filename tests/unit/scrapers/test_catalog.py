@@ -8,25 +8,25 @@ from memanga.search import BROKEN_SEARCH_SOURCES
 
 def test_search_skips_preserve_legacy_set_and_registered_domains():
     legacy = {
-        "mangasee123.com", "mangareader.to", "chapmanganato.to",
-        "readmanganato.com", "manganato.com", "mangakakalot.com",
-        "mangakakalot.to", "manga4life.com", "mangalife.us",
-        "mangaclash.com", "mangatown.com", "www.mangatown.com",
+        "mangareader.to",
+        "mangatown.com", "www.mangatown.com",
         "manhwa18.cc", "mangafreak.me", "mangafreak.ws",
         "ww2.mangafreak.me", "bato.to", "batoto.to", "hiperdex.com",
         "mangago.me", "www.mangago.me", "asuracomic.net",
         "asuratoon.com", "lectormangass.net", "mangabolt.com",
         "truemanga.com", "mangamonk.com", "mangahub.us",
-        "hivetoons.org", "hivetoon.com", "isekaiscan.com",
-        "zinmanga.com", "kunmanga.com", "flamecomics.xyz",
+        "hivetoons.org", "hivetoon.com",
+        "kunmanga.com", "flamecomics.xyz",
         "manhuafast.com", "manhuaus.org", "manganato.gg",
-        "kagane.org", "www.kagane.org", "kagane.to",
+        "kagane.org", "www.kagane.org", "kagane.to", "mangapark1.com",
+        "raw.senmanga.com",
     }
     assert BROKEN_SEARCH_SOURCES == set(SEARCH_SKIPS)
     assert BROKEN_SEARCH_SOURCES == legacy
     assert BROKEN_SEARCH_SOURCES <= set(SCRAPERS)
     assert SEARCH_SKIPS["asuracomic.net"].reason.value == "alias"
     assert SEARCH_SKIPS["mangago.me"].reason.value == "region-blocked"
+    assert SEARCH_SKIPS["raw.senmanga.com"].reason.value == "unreliable"
 
 
 def test_popularity_and_defaults_are_registered_and_ordered():

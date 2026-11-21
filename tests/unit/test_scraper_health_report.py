@@ -288,9 +288,16 @@ def _expected_errors():
     from cloudscraper.exceptions import CloudflareChallengeError
     from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+    from memanga.scrapers.atsumaru import AtsumaruSourceError
+    from memanga.scrapers.comix import ComixSourceError
     from memanga.scrapers.mangafire import MangaFireError
+    from memanga.scrapers.mangahereonl import MangaHereOnlSourceError
     from memanga.scrapers.mangapark import MangaParkSourceError
+    from memanga.scrapers.mangapark_cc import MangaParkCCSourceError
+    from memanga.scrapers.olympus import OlympusSourceError
     from memanga.scrapers.playwright_base import BrowserTimeoutError
+    from memanga.scrapers.templates.nuxt_ssr import NuxtSSRSourceError
+    from memanga.scrapers.zonatmo import ZonaTMOSourceError
     from memanga.scrapers.weebcentral import (WeebCentralChallengeError,
                                               WeebCentralError)
     dead, http, stale = "STATUS_DEAD", "STATUS_HTTP_ERROR", "STATUS_STALE"
@@ -308,6 +315,20 @@ def _expected_errors():
         "mangapark-no-response": (MangaParkSourceError("No response for https://mangapark1.com/x"), stale),
         "mangapark-challenge": (MangaParkSourceError(
             "Cloudflare challenge not cleared for https://mangapark1.com/x"), stale),
+        "comix-pages": (ComixSourceError(
+            "Comix page 4 of 65 did not load for https://comix.to/title/x/1-chapter-1"), stale),
+        "mangapark-cc-incomplete": (MangaParkCCSourceError(
+            "mangapark.cc chapter list for x has 400 of the 1204 chapters it reports"), stale),
+        "olympus-incomplete": (OlympusSourceError(
+            "Olympus chapter list for https://olympusxyz.com/series/comic-x has 40 of the 45 chapters it reports"), stale),
+        "atsumaru-shape": (AtsumaruSourceError(
+            "Atsumaru returned an unexpected response for https://atsu.moe/x (no 'hits' list)"), stale),
+        "zonatmo-browser": (ZonaTMOSourceError(
+            "ZonaTMO's Cloudflare challenge did not clear in the browser for https://zonatmo.org/x"), stale),
+        "nuxt-ssr-no-chapters": (NuxtSSRSourceError(
+            "No chapter count or chapter links found on https://dddmanga.com"), stale),
+        "mangahereonl-graphql": (MangaHereOnlSourceError(
+            "GraphQL reply from https://mangahere.onl/graphql is not JSON"), stale),
         "wrapped-timeout": (_wrapped(WeebCentralError("search failed"),
                                      PlaywrightTimeoutError("Timeout 20000ms")), stale),
         # Network and HTTP failures, as requests raises them (over
@@ -509,3 +530,74 @@ def test_a_mangapark_runner_failure_still_fails_the_run(
     ])
     assert (f"{_test(0)} failed without recording a source failure"
             in check.problems(report, 1))
+
+
+# ─── Probe options: a chapter floor and a chosen chapter ────────────────
+
+class _Listing:
+    """A scraper whose chapter list is fixed."""
+
+    def __init__(self, numbers):
+        from memanga.chapters import Chapter
+        self.chapters = [Chapter(number=n, title=f"Chapter {n}",
+                                 url=f"https://site.test/chapter/{n}/")
+                         for n in numbers]
+
+    def get_chapters(self, manga_url):
+        return list(self.chapters)
+
+
+def _listed(helpers, numbers, min_chapters=1):
+    pipe = helpers.ScraperPipeline(_Listing(numbers), "site.test")
+    return pipe, pipe.chapters("https://site.test/manga/x/", min_chapters)
+
+
+def test_a_short_chapter_listing_fails_the_chapter_floor(helpers):
+    # A few recent links where the full listing is expected.
+    pipe = helpers.ScraperPipeline(_Listing(["383", "382", "381"]), "site.test")
+    with pytest.raises(helpers.StageFailure) as caught:
+        pipe.chapters("https://site.test/manga/x/", 100)
+    failed = caught.value.failed
+    assert (failed.stage, failed.status) == (helpers.STAGE_CHAPTERS,
+                                             helpers.STATUS_STALE)
+    assert "returned 3 chapters, expected ≥ 100" in failed.detail
+
+
+def test_a_listing_at_the_chapter_floor_passes(helpers):
+    pipe, chapters = _listed(helpers, ["3", "2", "1"], min_chapters=3)
+    assert [c.number for c in chapters] == ["3", "2", "1"]
+    assert [(s.stage, s.status) for s in pipe.stages] == [
+        (helpers.STAGE_CHAPTERS, helpers.STATUS_OK)]
+
+
+@pytest.mark.parametrize("number, picked", [
+    ("100", "100"),     # the exact label
+    ("99", "099"),      # zero-padded listing
+    ("100.0", "100"),   # same value, other spelling
+    ("one-shot", "one-shot"),
+])
+def test_the_chosen_chapter_is_picked_from_the_listing(helpers, number, picked):
+    pipe, chapters = _listed(helpers, ["383", "100", "099", "one-shot"])
+    chapter = pipe.pick_chapter(chapters, number)
+    assert chapter.number == picked
+    assert chapter.url == f"https://site.test/chapter/{picked}/"
+    # Picking records no stage of its own.
+    assert [(s.stage, s.status) for s in pipe.stages] == [
+        (helpers.STAGE_CHAPTERS, helpers.STATUS_OK)]
+
+
+@pytest.mark.parametrize("number", ["101", "Chapter 7", "extra"])
+def test_a_missing_chosen_chapter_fails_at_chapters(helpers, number):
+    pipe, chapters = _listed(helpers, ["383", "100", "099"])
+    with pytest.raises(helpers.StageFailure) as caught:
+        pipe.pick_chapter(chapters, number)
+    failed = caught.value.failed
+    assert (failed.stage, failed.status) == (helpers.STAGE_CHAPTERS,
+                                             helpers.STATUS_STALE)
+    assert failed.detail == (f"chapter {number!r} not among the 3 listed "
+                             f"chapters (#383 … #099)")
+    # The listing that passed stays recorded ahead of the failure.
+    assert [(s.stage, s.status) for s in caught.value.stages] == [
+        (helpers.STAGE_CHAPTERS, helpers.STATUS_OK),
+        (helpers.STAGE_CHAPTERS, helpers.STATUS_STALE),
+    ]
