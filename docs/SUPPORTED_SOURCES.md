@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 267 domains across 202 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 268 domains across 203 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -57,6 +57,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | bokugents.com | — | http | — | No | Not searched (template) | — |
 | case-closed.online | — | http | — | No | Not searched (template) | Case Closed (Detective Conan) |
 | chainsawdevil.com | — | http | — | No | Not searched (template) | Chainsaw Man |
+| comic-walker.com | — | http | ja | No | Included in search | Official KADOKAWA Japanese manga; public page-listed active episodes |
 | d-grayman.online | — | http | — | No | Not searched (template) | D.Gray-man |
 | dandadanmanga.net | ww2.dandadanmanga.net (Not searched (template)), w2.dandadanmanga.net (Not searched (template)) | http | — | No | Not searched (template) | Dandadan |
 | dddmanga.com | — | http | — | No | Not searched (template) | Dandadan |

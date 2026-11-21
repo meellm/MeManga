@@ -113,6 +113,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # WEBTOON - official Originals in English, Spanish, French and German
     "webtoons.com": "webtoon:WebtoonScraper",
 
+    # KadoComi - official KADOKAWA Japanese manga (public episode viewer)
+    "comic-walker.com": "kadocomi:KadoComiScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
