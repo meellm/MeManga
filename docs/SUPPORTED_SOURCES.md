@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 271 domains across 206 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 273 domains across 208 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -119,6 +119,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangaforfree.net | — | http | — | No | Not searched (template) | — |
 | mangafreak.ws | mangafreak.me (Not searched (unreliable)), ww2.mangafreak.me (Not searched (unreliable)) | http | — | No | Not searched (unreliable) | — |
 | mangago.me | — | http | — | No | Not searched (region-blocked) | Yaoi/Shoujo collection |
+| mangahome.com | — | http | en | Yes | Included in search | English manga reader |
 | mangahub.us | — | browser | — | No | Not searched (needs-js) | MangaHub network |
 | manganato.gg | — | browser | — | No | Not searched (challenge) | — |
 | mangapark1.com | — | browser | — | No | Not searched (challenge) | General library |
@@ -130,6 +131,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | mangazin.org | — | http | — | No | Not searched (template) | — |
 | mangoasis.com | — | http | — | No | Included in search | — |
 | manhuafast.com | — | http | — | No | Not searched (challenge) | Manhua focused |
+| manhuatop.org | — | api | en | No | Included in search | English manhua reader |
 | manhuaus.org | — | http | — | No | Not searched (challenge) | Manhua focused |
 | manhwa18.cc | — | http | — | Yes | Not searched (unreliable) | Adult manhwa |
 | manhwatop.com | — | http | — | No | Not searched (template) | Manhwa focused |

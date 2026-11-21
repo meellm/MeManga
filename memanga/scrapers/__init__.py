@@ -123,6 +123,12 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Sen Manga - raw manga (public JSON API)
     "raw.senmanga.com": "senmanga:SenMangaScraper",
 
+    # ManhuaTop - English manhua reader (public JSON API)
+    "manhuatop.org": "manhuatop:ManhuaTopScraper",
+
+    # MangaHome - English manga reader
+    "mangahome.com": "mangahome:MangaHomeScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

@@ -229,6 +229,8 @@ SOURCE_NOTES: Dict[str, str] = {
     "sushiscan.net": "French manga scans",
     "lelmanga.com": "French manga and manhwa scans",
     "raw.senmanga.com": "Raw manga by direct series URL; not searched (One Piece verified Japanese)",
+    "manhuatop.org": "English manhua reader",
+    "mangahome.com": "English manga reader",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",
