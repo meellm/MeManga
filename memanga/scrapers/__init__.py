@@ -159,6 +159,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Mangas-Origines - French manga, manhwa and manhua scans
     "mangas-origines.fr": "mangasorigines:MangasOriginesScraper",
 
+    # Raw UwU - raw manga (public JSON routes)
+    "rawuwu.net": "rawuwu:RawUwuScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 283 domains across 218 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 284 domains across 219 scrapers. Registration does not mean a site is currently reachable.
 Search status describes the default sweep; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 
@@ -165,6 +165,7 @@ Use `memanga sources --json` for per-domain skip reasons and issue numbers; open
 | raw.senmanga.com | — | api | — | Yes | Not searched (unreliable) | Raw manga by direct series URL; not searched (One Piece verified Japanese) |
 | rawjx.net | — | http | — | No | Not searched (template) | — |
 | rawkuma.net | — | http | — | Yes | Included in search | Raw manga (One Piece verified Japanese) |
+| rawuwu.net | — | api | — | Yes | Included in search | Raw manga (One Piece verified Japanese) |
 | read-berserk-manga.com | — | http | — | No | Included in search | Berserk |
 | read-jjk.com | — | http | — | No | Included in search | Jujutsu Kaisen |
 | read-kengan-ashura.com | — | http | — | No | Included in search | Kengan Ashura |
