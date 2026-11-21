@@ -168,6 +168,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Raw UwU - raw manga (public JSON routes)
     "rawuwu.net": "rawuwu:RawUwuScraper",
 
+    # Anime-Sama - French manga scans (published viewer)
+    "anime-sama.to": "animesama:AnimeSamaScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
