@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: >-
+        What problem would this solve for someone using MeManga? Include a
+        concrete situation you ran into.
+      placeholder: I tried to do X and Y happened.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: >-
+        What you would like MeManga to do. A sketch or rough idea of the code
+        is welcome but not needed.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Anything else you tried or considered, and why it was not enough.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Optional. Screenshots, links to similar features in other apps, related issues.

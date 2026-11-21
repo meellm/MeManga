@@ -1,0 +1,102 @@
+name: Bug report
+description: Something is wrong with MeManga
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. Remove passwords, tokens, email addresses and your user name in file paths from anything you paste. Never post your `config.yaml`: it can contain your app password.
+
+        For a security problem, follow the [security policy](https://github.com/meellm/MeManga/security/policy) instead of opening an issue.
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: A short description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: action
+    attributes:
+      label: Command or desktop action
+      description: The command you ran or what you clicked when it went wrong.
+      placeholder: memanga check, or Library → Check all
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: MeManga version
+      description: >-
+        The desktop app shows it in the window title. On a development
+        install, run `memanga --version`. With Docker, give the image tag.
+      placeholder: "0.4.4"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11, macOS 15, Ubuntu 24.04
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install MeManga?
+      options:
+        - Desktop download from the releases page
+        - Docker
+        - Command line from source
+        - Desktop app from source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Source or series address
+      description: Only if the bug involves a particular site or series.
+      placeholder: https://example.com/manga/some-title
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error message
+      description: >-
+        Paste the relevant part of the terminal output or of a
+        [log file](https://meellm.github.io/MeManga/guide/troubleshooting#log-files).
+        If there is nothing to paste, write `none`.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >-
+        Optional. In the development version, **Settings → About → Copy
+        diagnostics** copies the version, the system and the state of the
+        browser components and the keyring, without folder paths. v0.4.4 does
+        not have this button.
+      render: text
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Optional. Screenshots or anything else that helps reproduce it.
