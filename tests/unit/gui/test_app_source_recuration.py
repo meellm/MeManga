@@ -100,7 +100,7 @@ class TestRecurateFixedSources:
 
     def test_unseeded_config_is_left_alone(self, stub_app, config):
         # Pre-seeding installs ran everything-on; whatever they disabled
-        # was a deliberate choice, and seeding rewrites the list anyway.
+        # was a deliberate choice, and seeding keeps a saved list.
         config.set("sources.disabled", ["asurascans.com"])
 
         _repair(stub_app)
@@ -120,24 +120,109 @@ class TestRecurateFixedSources:
         assert reloaded.get(_flag()) is True
 
 
+def _ticked(config):
+    """Search sources left enabled: template sites are never disabled
+    and never searched, so they are not part of the selection."""
+    from memanga.scrapers import SCRAPERS
+    from memanga.scrapers.registry import TEMPLATE_SCRAPERS
+    disabled = set(config.get("sources.disabled"))
+    return {d for d in SCRAPERS
+            if d not in disabled and d not in TEMPLATE_SCRAPERS}
+
+
 class TestFreshInstallUnaffected:
-    def test_seeding_still_leaves_asura_enabled(self, stub_app, config):
+    def test_seeding_ticks_exactly_the_default_selection(self, stub_app,
+                                                         config):
         # Repair runs before seeding on every launch; on a fresh config
-        # it must be a no-op that doesn't disturb the curated set.
+        # it must be a no-op that doesn't disturb the default selection.
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES
+        from memanga.search import compute_search_sources
         _repair(stub_app)
         _seed(stub_app)
 
-        disabled = config.get("sources.disabled")
-        assert "asurascans.com" not in disabled
+        assert _ticked(config) == {
+            "mangadex.org", "mangapark.cc", "mangafire.to",
+            "mangabuddy.com", "weebcentral.com"}
         assert config.get("sources.first_run_seeded") is True
-        # The aliases are seeded disabled, as before.
-        assert "asuracomic.net" in disabled
-        assert "asuratoon.com" in disabled
+        # The Search page and `memanga search` sweep those same five.
+        assert sorted(compute_search_sources(config)) == sorted(
+            DEFAULT_ENABLED_SOURCES)
+        # Sources outside the selection, and aliases, are seeded disabled.
+        disabled = config.get("sources.disabled")
+        for domain in ("mangapill.com", "asurascans.com",
+                       "asuracomic.net", "asuratoon.com"):
+            assert domain in disabled
 
-    def test_repair_after_seeding_is_a_no_op(self, stub_app, config):
+    @pytest.mark.parametrize("saved", [
+        [],
+        ["mangadex.org", "mgeko.cc"],
+    ])
+    def test_seeding_keeps_a_list_saved_before_first_launch(
+            self, stub_app, config, saved):
+        # A list written before the desktop app ever ran (by hand, or by
+        # a pre-seeding install) is a selection; an empty one means
+        # everything ticked. Seeding must not replace either.
+        config.set("sources.disabled", list(saved))
+
+        _seed(stub_app)
+
+        assert config.get("sources.disabled") == saved
+        assert config.get("sources.first_run_seeded") is True
+
+    def test_seeding_keeps_everything_disabled(self, stub_app, config):
+        from memanga.scrapers import SCRAPERS
+        everything = sorted(SCRAPERS)
+        config.set("sources.disabled", list(everything))
+
+        _seed(stub_app)
+
+        assert config.get("sources.disabled") == everything
+
+    def test_seeded_selection_survives_a_new_default_set(self, stub_app,
+                                                         config):
+        # A config seeded by an earlier release keeps the sources it was
+        # given, and any edits, when the default selection changes.
+        from memanga.scrapers import SCRAPERS
+        from memanga.scrapers.registry import TEMPLATE_SCRAPERS
+        kept = {"mangadex.org", "mangapill.com", "mangakatana.com",
+                "comix.to"}
+        disabled = sorted(d for d in SCRAPERS
+                          if d not in kept and d not in TEMPLATE_SCRAPERS)
+        config.set("sources.first_run_seeded", True)
+        config.set("sources.disabled", list(disabled))
+
+        _repair(stub_app)
+        _seed(stub_app)
+
+        # The one-time Asura repair still applies; nothing else moves.
+        assert _ticked(config) == kept | {"asurascans.com"}
+
+    def test_second_launch_keeps_the_seeded_selection(self, stub_app, config):
+        # Every launch runs the repair, then seeding. On a fresh install
+        # the repair sets its flag before anything is seeded, so the next
+        # launch must not tick Asura Scans, which seeding left disabled.
+        _repair(stub_app)
         _seed(stub_app)
         before = list(config.get("sources.disabled"))
+        assert "asurascans.com" in before
 
         _repair(stub_app)
+        _seed(stub_app)
 
         assert config.get("sources.disabled") == before
+
+    def test_second_launch_keeps_the_users_changes(self, stub_app, config):
+        _repair(stub_app)
+        _seed(stub_app)
+        # The user unticks one default and ticks a source outside them.
+        disabled = set(config.get("sources.disabled"))
+        disabled.add("mangadex.org")
+        disabled.discard("mangapill.com")
+        config.set("sources.disabled", sorted(disabled))
+
+        _repair(stub_app)
+        _seed(stub_app)
+
+        assert _ticked(config) == {
+            "mangapark.cc", "mangafire.to", "mangabuddy.com",
+            "weebcentral.com", "mangapill.com"}

@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from memanga.scrapers import (
-    DEFAULT_ENABLED_SOURCES, SCRAPERS, get_scraper,
+    DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES, SCRAPERS, get_scraper,
 )
 from memanga.scrapers.asurascans import AsuraScansScraper
 from memanga.scrapers.playwright_base import PlaywrightScraper
@@ -244,7 +244,8 @@ class TestRegistration:
 
     def test_asurascans_is_no_longer_skipped_in_search(self):
         assert "asurascans.com" not in BROKEN_SEARCH_SOURCES
-        sources = compute_search_sources(FakeConfig())
+        sources = compute_search_sources(
+            FakeConfig({"sources.disabled": []}))
         assert [d for d in sources if "asura" in d] == ["asurascans.com"]
 
     def test_retired_aliases_stay_out_of_the_sweep(self):
@@ -252,27 +253,32 @@ class TestRegistration:
         assert "asuracomic.net" in BROKEN_SEARCH_SOURCES
         assert "asuratoon.com" in BROKEN_SEARCH_SOURCES
 
-    def test_only_the_canonical_domain_is_curated(self):
-        # Aliases in the curated set would be seeded enabled and then
-        # dropped by BROKEN_SEARCH_SOURCES anyway - just noise.
-        assert "asurascans.com" in DEFAULT_ENABLED_SOURCES
-        assert "asuracomic.net" not in DEFAULT_ENABLED_SOURCES
-        assert "asuratoon.com" not in DEFAULT_ENABLED_SOURCES
+    def test_only_the_canonical_domain_is_ranked(self):
+        # Aliases in the ranking would be probed as separate sources and
+        # then dropped by BROKEN_SEARCH_SOURCES anyway - just noise.
+        assert "asurascans.com" in POPULAR_SOURCES
+        assert "asuracomic.net" not in POPULAR_SOURCES
+        assert "asuratoon.com" not in POPULAR_SOURCES
 
-    def test_first_run_config_still_sweeps_asura(self):
-        # Clearing BROKEN_SEARCH_SOURCES isn't enough on its own: the GUI
-        # seeds a fresh config by disabling every non-template source
-        # outside the curated list, so a source that isn't curated never
-        # reaches the sweep for a new user. Reproduce that seeding.
+    def test_asura_is_opt_in_on_a_first_run_config(self):
+        # Asura Scans is outside the default selection, so the GUI seeds
+        # it disabled along with its aliases. Reproduce that seeding,
+        # then tick the canonical domain as a user would.
+        assert "asurascans.com" not in DEFAULT_ENABLED_SOURCES
         enabled = set(DEFAULT_ENABLED_SOURCES)
         templates = set(TEMPLATE_SCRAPERS.keys())
         disabled = sorted(d for d in SCRAPERS
                           if d not in enabled and d not in templates)
-        assert "asuracomic.net" in disabled and "asuratoon.com" in disabled
+        assert {"asurascans.com", "asuracomic.net",
+                "asuratoon.com"} <= set(disabled)
 
+        seeded = compute_search_sources(
+            FakeConfig({"sources.disabled": disabled}))
+        assert not [d for d in seeded if "asura" in d]
+
+        disabled.remove("asurascans.com")
         sources = compute_search_sources(
             FakeConfig({"sources.disabled": disabled}))
-
         assert [d for d in sources if "asura" in d] == ["asurascans.com"]
 
 

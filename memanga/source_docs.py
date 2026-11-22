@@ -371,7 +371,7 @@ def render_supported_sources(root=None):
         "# Supported Sources",
         "",
         f"MeManga registers {_domain_count(sources)} domains across {len(sources)} scrapers. Registration does not mean a site is currently reachable.",
-        "Search status describes the default sweep; direct URLs remain available for registered sources.",
+        "Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.",
         "Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.",
         f"Live probe: the steps the weekly [scraper health check]({HEALTH_WORKFLOW}) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.",
         "Parser tests: the parts of the scraper (search, chapters, pages) that offline tests run on saved or canned responses from the site; \"shared parser\" means the tests ran code this source shares with other sites, on another site's responses; a source that replaces any of that code with its own is not credited with it.",
@@ -481,7 +481,7 @@ def _adult_notice(sources, where):
     else:
         lines.append("- **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.")
     if adult_searched:
-        lines.append(f"- **Command line:** until the desktop app has set [`sources.disabled`](./config#sources-disabled), `memanga search` asks every source that is included in search, and that includes {_domain_list(s.domain for s in adult_searched)}. Use `memanga search --source DOMAIN` to ask one source only.")
+        lines.append(f"- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes {_domain_list(s.domain for s in adult_searched)}. Use `memanga search --source DOMAIN` to ask one source only.")
     lines.append(":::")
     return lines
 
@@ -518,7 +518,7 @@ def render_site_list(root=None):
         "",
         "## Default selection",
         "",
-        f"The first time the desktop app starts, it turns on these {len(DEFAULT_ENABLED_SOURCES)} sources and turns off the others, apart from template sites. They are searched in this order, and results from earlier sources are listed first.",
+        f"These {len(DEFAULT_ENABLED_SOURCES)} sources are the default search selection. The first time the desktop app starts, it turns them on and turns off the others, apart from template sites, unless a selection is already saved in [`sources.disabled`](./config#sources-disabled). While that setting is missing, `memanga search` asks them and the sources in your library. They are searched in this order, and results from earlier sources are listed first.",
         "",
         "| Source | Notes |",
         "|---|---|",
@@ -540,7 +540,7 @@ def render_site_list(root=None):
         "",
         "## Sources included in search",
         "",
-        f"{len(searched)} sources, in search order.",
+        f"{len(searched)} sources that a search can ask, in search order.",
         "",
         *_site_table(searched, probed, tested),
         "",

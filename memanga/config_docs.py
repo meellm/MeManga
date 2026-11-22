@@ -344,8 +344,11 @@ KEYS: Dict[str, KeyDoc] = {
         desktop="the Sources page",
         kind="list of domains",
         missing=(
-            "Missing until the desktop app first starts. It then turns off "
-            "every source outside its default selection.")),
+            "Missing until the desktop app first starts. It then saves a "
+            "list that turns off every source outside its default "
+            "selection. While the key is missing or has no value, search "
+            "asks the default selection and the sources in your library. "
+            "An empty list, `[]`, turns no source off.")),
     "sources.first_run_seeded": KeyDoc(
         "Records that the desktop app has set up `sources.disabled` for the "
         "first time.",

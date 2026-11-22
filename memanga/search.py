@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from .scrapers import POPULAR_SOURCES, get_scraper
+from .scrapers import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES, get_scraper
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -101,7 +101,11 @@ def compute_search_sources(config) -> List[str]:
       2. Every source the user has in their library — they've proven
          useful for this user already.
       3. Minus anything disabled on the Sources page
-         (`sources.disabled` in config).
+         (`sources.disabled` in config). While that key is missing
+         no selection was ever saved, so only the default selection
+         (`DEFAULT_ENABLED_SOURCES`) is swept, as on a fresh desktop
+         install. A saved list is used as it is, an empty one
+         included.
       4. Minus sites that are known dead / not searchable from plain
          HTML (BROKEN_SEARCH_SOURCES — verified against the live
          probe; updating that set is the supported way to re-enable a
@@ -113,7 +117,8 @@ def compute_search_sources(config) -> List[str]:
     except Exception:
         TEMPLATE_SCRAPERS = {}
 
-    disabled = set(config.get("sources.disabled", []) or [])
+    saved_disabled = config.get("sources.disabled")
+    disabled = set(saved_disabled or [])
     library: set = set()
     for m in config.get("manga", []):
         for s in m.get("sources", []) or []:
@@ -137,6 +142,8 @@ def compute_search_sources(config) -> List[str]:
     # reason.
     template_domains = set(TEMPLATE_SCRAPERS.keys())
     aggregators = {d for d in SCRAPERS.keys() if d not in template_domains}
+    if saved_disabled is None:
+        aggregators &= set(DEFAULT_ENABLED_SOURCES)
 
     # De-dupe canonical hostnames — many aliases map to the same scraper
     # class (e.g. tcbscans.com / tcbscans.me / tcbonepiecechapters.com

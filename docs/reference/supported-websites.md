@@ -21,8 +21,8 @@ checks of every source.
 
 | Search | What it means |
 |---|---|
-| In search, on by default | Search asks this site. The desktop app turns it on the first time it starts. |
-| In search | Search can ask this site. The desktop app starts with it turned off, so turn it on under **Sources** to use it there. The command line asks it until the desktop app has set [`sources.disabled`](./config#sources-disabled). |
+| In search, on by default | In the [default selection](./sources#default-selection): search asks this site unless you turn it off. |
+| In search | Search can ask this site, but it is not in the default selection. Turn it on under **Sources**. With no saved [`sources.disabled`](./config#sources-disabled), the command line asks it only if you follow a series from it. |
 | Added series only | Search asks this site only when you follow a series from it. Most of these sites carry one series. |
 | Left out of search | Search does not ask this site. The catalog gives [the reason](./sources#why-a-source-is-not-searched). |
 

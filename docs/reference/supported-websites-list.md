@@ -7,21 +7,21 @@
 | Site | Other domains | Language | Search |
 |---|---|---|---|
 | `mangadex.org` | `api.mangadex.org` | English | In search, on by default |
-| `mangapill.com` | — | — | In search, on by default |
+| `mangapill.com` | — | — | In search |
 | `mangapark.cc` | — | English | In search, on by default |
 | `mangapark1.com` | — | — | Left out of search |
 | `mangafire.to` | — | — | In search, on by default |
 | `mangabuddy.com` | — | — | In search, on by default |
 | `weebcentral.com` | — | — | In search, on by default |
-| `mangakatana.com` | — | — | In search, on by default |
+| `mangakatana.com` | — | — | In search |
 | `bato.to` | `batoto.to` | — | Left out of search |
 | `mangareader.to` | — | — | Left out of search |
 | `manganato.gg` | — | — | Left out of search |
-| `comix.to` | — | — | In search, on by default |
-| `comick.io` | `comick.dev` | — | In search, on by default |
-| `mangahub.io` | — | — | In search, on by default |
-| `mangahere.cc` | — | — | In search, on by default |
-| `mangataro.org` | — | — | In search, on by default |
+| `comix.to` | — | — | In search |
+| `comick.io` | `comick.dev` | — | In search |
+| `mangahub.io` | — | — | In search |
+| `mangahere.cc` | — | — | In search |
+| `mangataro.org` | — | — | In search |
 | `fanfox.net` | `mangafox.me` | — | In search |
 | `mangatown.com` | — | — | Left out of search |
 | `mangafreak.ws` | `mangafreak.me`, `ww2.mangafreak.me` | — | Left out of search |
@@ -32,8 +32,8 @@
 
 | Site | Other domains | Language | Search |
 |---|---|---|---|
-| `mangapanda.onl` | — | — | In search, on by default |
-| `mangahere.onl` | — | — | In search, on by default |
+| `mangapanda.onl` | — | — | In search |
+| `mangahere.onl` | — | — | In search |
 | `1manga.co` | — | — | In search |
 | `coffeemanga.io` | — | — | In search |
 | `mangaeffect.com` | — | — | In search |
@@ -74,7 +74,7 @@
 
 | Site | Other domains | Language | Search |
 |---|---|---|---|
-| `asurascans.com` | `asuracomic.net` (left out of search), `asuratoon.com` (left out of search) | — | In search, on by default |
+| `asurascans.com` | `asuracomic.net` (left out of search), `asuratoon.com` (left out of search) | — | In search |
 | `tcbonepiecechapters.com` | `tcbscans.com`, `tcbscans.me` | English | In search |
 | `flamecomics.xyz` | — | — | Left out of search |
 | `luminousscans.com` | — | — | In search |
@@ -284,7 +284,7 @@
 17 sources serve adult content. They are all in this section. MeManga does not hide or filter them.
 
 - **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.
-- **Command line:** until the desktop app has set [`sources.disabled`](./config#sources-disabled), `memanga search` asks every source that is included in search, and that includes `dynasty-scans.com`, `e-hentai.org`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
+- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `dynasty-scans.com`, `e-hentai.org`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
 :::
 
 ### Hentai and doujinshi

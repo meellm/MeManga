@@ -7,7 +7,7 @@
 | Sources (one scraper each) | 226 |
 | Domains, with other domains of the same source | 291 |
 | Included in search | 129 |
-| In the default selection | 15 |
+| In the default selection | 5 |
 | Adult content | 17 |
 | With parser tests of their own | 80 |
 | With tests of a shared parser only | 90 |
@@ -20,30 +20,20 @@
 17 sources serve adult content. They are marked **Yes** in the **Adult** column below. MeManga does not hide or filter them.
 
 - **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.
-- **Command line:** until the desktop app has set [`sources.disabled`](./config#sources-disabled), `memanga search` asks every source that is included in search, and that includes `dynasty-scans.com`, `e-hentai.org`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
+- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `dynasty-scans.com`, `e-hentai.org`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
 :::
 
 ## Default selection
 
-The first time the desktop app starts, it turns on these 15 sources and turns off the others, apart from template sites. They are searched in this order, and results from earlier sources are listed first.
+These 5 sources are the default search selection. The first time the desktop app starts, it turns them on and turns off the others, apart from template sites, unless a selection is already saved in [`sources.disabled`](./config#sources-disabled). While that setting is missing, `memanga search` asks them and the sources in your library. They are searched in this order, and results from earlier sources are listed first.
 
 | Source | Notes |
 |---|---|
 | mangadex.org | Fan-translation library |
-| mangapill.com | General library |
 | mangapark.cc | General library |
 | mangafire.to | General library |
 | mangabuddy.com | General library |
 | weebcentral.com | General library |
-| mangakatana.com | General library |
-| asurascans.com | Manhwa specialist |
-| comix.to | General library |
-| comick.io | General library |
-| mangahub.io | MangaHub network |
-| mangahere.cc | General library |
-| mangapanda.onl | MangaHub network |
-| mangahere.onl | Alternate mirror |
-| mangataro.org | ComicK replacement |
 
 ## Why a source is not searched
 
@@ -61,7 +51,7 @@ The first time the desktop app starts, it turns on these 15 sources and turns of
 
 ## Sources included in search
 
-129 sources, in search order.
+129 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
