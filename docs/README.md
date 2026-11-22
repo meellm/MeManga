@@ -13,7 +13,7 @@ folder holds its source.
 | Check on a schedule | [Check on a schedule](https://meellm.github.io/MeManga/guide/schedule) |
 | Run it in a container | [Run MeManga in Docker](https://meellm.github.io/MeManga/guide/docker) |
 | Send chapters to a Kindle | [Send to a Kindle](https://meellm.github.io/MeManga/guide/kindle) |
-| See which sites it reads | [Sources](https://meellm.github.io/MeManga/reference/sources) |
+| See which sites it reads | [Supported websites](https://meellm.github.io/MeManga/reference/supported-websites), [Sources](https://meellm.github.io/MeManga/reference/sources) |
 | Look up settings and data files | [Settings reference](https://meellm.github.io/MeManga/reference/config), [Data files and backups](https://meellm.github.io/MeManga/reference/state), [Network connections](https://meellm.github.io/MeManga/reference/network) |
 | Fix a problem | [Troubleshooting](https://meellm.github.io/MeManga/guide/troubleshooting) |
 | Work on MeManga | [Set up for development](https://meellm.github.io/MeManga/developer/contributing), [Architecture](https://meellm.github.io/MeManga/developer/architecture), [Write a scraper](https://meellm.github.io/MeManga/developer/scrapers), [Build and release](https://meellm.github.io/MeManga/developer/build-release) |

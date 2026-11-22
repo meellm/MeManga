@@ -21,11 +21,12 @@ export default defineConfig({
     'Guide.md',
     'SUPPORTED_SOURCES.md',
     'ACCESSIBILITY.md',
-    // Generated; shown as part of reference/cli.md, reference/config.md and
-    // reference/sources.md.
+    // Generated; shown as part of reference/cli.md, reference/config.md,
+    // reference/sources.md and reference/supported-websites.md.
     'reference/cli-commands.md',
     'reference/config-keys.md',
-    'reference/source-list.md'
+    'reference/source-list.md',
+    'reference/supported-websites-list.md'
   ],
 
   themeConfig: {
@@ -44,6 +45,7 @@ export default defineConfig({
           { text: 'Docs overview', link: '/guide/' },
           { text: 'Download and install', link: '/guide/install' },
           { text: 'First steps', link: '/guide/first-steps' },
+          { text: 'Supported websites', link: '/reference/supported-websites' },
           { text: 'Use a backup source', link: '/guide/backup-sources' },
           { text: 'Troubleshooting', link: '/guide/troubleshooting' }
         ]

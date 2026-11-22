@@ -10,6 +10,8 @@ import re
 import types
 from pathlib import Path
 
+import yaml
+
 from .scrapers.catalog import (DEFAULT_ENABLED_SOURCES, SOURCE_NOTES,
                                SkipReason, source_catalog)
 
@@ -48,6 +50,15 @@ SITE_LIST = "docs/reference/source-list.md"
 COVERAGE_MODULE = "memanga/scrapers/coverage_data.py"
 
 INCLUDED = "Included in search"
+
+# The Supported websites page: a curated file says how sites are grouped
+# and ordered, and the catalog supplies every fact about them.
+WEBSITE_GROUPS = "docs/data/supported-websites.yaml"
+WEBSITE_LIST = "docs/reference/supported-websites-list.md"
+OTHER_LANGUAGES = "Other languages"
+LANGUAGE_NAMES = {"de": "German", "en": "English", "es": "Spanish",
+                  "fr": "French", "id": "Indonesian", "it": "Italian",
+                  "ja": "Japanese", "tr": "Turkish"}
 
 
 def _repo_root():
@@ -455,6 +466,26 @@ def _domain_list(domains):
     return ", ".join(f"`{domain}`" for domain in domains)
 
 
+def _adult_notice(sources, where):
+    """The warning about adult sources; ``where`` says how to find them."""
+    adult = [s for s in sources if s.nsfw]
+    adult_default = [s.domain for s in adult if s.default_enabled]
+    adult_searched = [s for s in adult if s.search_status == INCLUDED]
+    lines = [
+        "::: warning Adult content",
+        f"{_count_phrase(len(adult), 'source serves', 'sources serve')} adult content. {where} MeManga does not hide or filter them.",
+        "",
+    ]
+    if adult_default:
+        lines.append(f"- **Desktop app:** the default selection includes {_domain_list(adult_default)}. The **Sources** page does not mark adult sources, so check this list before you turn a source on.")
+    else:
+        lines.append("- **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.")
+    if adult_searched:
+        lines.append(f"- **Command line:** until the desktop app has set [`sources.disabled`](./config#sources-disabled), `memanga search` asks every source that is included in search, and that includes {_domain_list(s.domain for s in adult_searched)}. Use `memanga search --source DOMAIN` to ask one source only.")
+    lines.append(":::")
+    return lines
+
+
 def render_site_list(root=None):
     sources = source_catalog()
     probed = source_probe_steps(sources, pipeline_probe_steps(root))
@@ -463,8 +494,6 @@ def render_site_list(root=None):
     templates = [s for s in sources if s.template]
     skipped = [s for s in sources if s.search_skip and not s.template]
     adult = [s for s in sources if s.nsfw]
-    adult_default = [s.domain for s in adult if s.default_enabled]
-    adult_searched = [s for s in adult if s.search_status == INCLUDED]
 
     lines = [
         "<!-- Written by python -m memanga.source_docs; do not edit. -->",
@@ -485,18 +514,7 @@ def render_site_list(root=None):
         "",
         "## Adult sources",
         "",
-        "::: warning Adult content",
-        f"{_count_phrase(len(adult), 'source serves', 'sources serve')} adult content. They are marked **Yes** in the **Adult** column below. MeManga does not hide or filter them.",
-        "",
-    ]
-    if adult_default:
-        lines.append(f"- **Desktop app:** the default selection includes {_domain_list(adult_default)}. The **Sources** page does not mark adult sources, so check this list before you turn a source on.")
-    else:
-        lines.append("- **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.")
-    if adult_searched:
-        lines.append(f"- **Command line:** until the desktop app has set [`sources.disabled`](./config#sources-disabled), `memanga search` asks every source that is included in search, and that includes {_domain_list(s.domain for s in adult_searched)}. Use `memanga search --source DOMAIN` to ask one source only.")
-    lines.extend([
-        ":::",
+        *_adult_notice(sources, "They are marked **Yes** in the **Adult** column below."),
         "",
         "## Default selection",
         "",
@@ -504,7 +522,7 @@ def render_site_list(root=None):
         "",
         "| Source | Notes |",
         "|---|---|",
-    ])
+    ]
     for domain in DEFAULT_ENABLED_SOURCES:
         lines.append(_row((domain, SOURCE_NOTES.get(domain, "") or "—")))
     lines.extend([
@@ -538,6 +556,128 @@ def render_site_list(root=None):
         "",
         *_site_table(templates, probed, tested),
     ])
+    return "\n".join(lines) + "\n"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# docs/reference/supported-websites-list.md, included in the site's
+# Supported websites page
+# ─────────────────────────────────────────────────────────────────────
+
+
+def load_website_groups(root=None):
+    path = (root or _repo_root()) / WEBSITE_GROUPS
+    return yaml.safe_load(path.read_text(encoding="utf-8"))["categories"]
+
+
+def _language_name(code):
+    return LANGUAGE_NAMES.get(code, code)
+
+
+def check_website_groups(categories, sources):
+    """Raise ValueError unless the curated groups list every source once,
+    by its catalog domain, and agree with the catalog's facts."""
+    by_domain = {source.domain: source for source in sources}
+    primary = {alias: source.domain
+               for source in sources for alias in source.aliases}
+    seen = set()
+    for category in categories:
+        for group in category["groups"]:
+            for domain in group["sites"]:
+                if domain in primary:
+                    raise ValueError(f"{WEBSITE_GROUPS}: {domain} is another "
+                                     f"domain of {primary[domain]}; list "
+                                     f"{primary[domain]} instead")
+                if domain not in by_domain:
+                    raise ValueError(f"{WEBSITE_GROUPS}: unknown source {domain}")
+                if domain in seen:
+                    raise ValueError(f"{WEBSITE_GROUPS}: {domain} is listed twice")
+                seen.add(domain)
+    missing = sorted(set(by_domain) - seen)
+    if missing:
+        raise ValueError(f"{WEBSITE_GROUPS}: missing {', '.join(missing)}")
+
+    last = {domain for group in categories[-1]["groups"]
+            for domain in group["sites"]}
+    adult = {source.domain for source in sources if source.nsfw}
+    if last != adult:
+        raise ValueError(f"{WEBSITE_GROUPS}: the last category must list "
+                         f"exactly the adult sources; differs by "
+                         f"{', '.join(sorted(last ^ adult))}")
+
+    for category in categories[:-1]:
+        by_language = category["title"] == OTHER_LANGUAGES
+        for group in category["groups"]:
+            for domain in group["sites"]:
+                language = by_domain[domain].language
+                if by_language:
+                    wrong = language and _language_name(language) != group["title"]
+                else:
+                    wrong = language not in (None, "en")
+                if wrong:
+                    raise ValueError(f"{WEBSITE_GROUPS}: {domain} has language "
+                                     f"{language} but is in {group['title']}")
+
+
+def _website_search(source):
+    """What search does with a source, before any choice of the user's."""
+    if source.search_skip is not None:
+        return "Left out of search"
+    if source.template:
+        return "Added series only"
+    if source.default_enabled:
+        return "In search, on by default"
+    return "In search"
+
+
+def _website_domains(source):
+    # A code span, so the site does not turn a domain into a link.
+    parts = []
+    for domain in source.aliases:
+        left_out = (source.searchable
+                    and source.search_status_for(domain) != source.search_status)
+        parts.append(f"`{domain}` (left out of search)" if left_out
+                     else f"`{domain}`")
+    return ", ".join(parts) or "—"
+
+
+def _website_row(source, *lead):
+    language = _language_name(source.language) if source.language else "—"
+    return _row((*lead, f"`{source.domain}`", _website_domains(source),
+                 language, _website_search(source)))
+
+
+def render_supported_websites(root=None):
+    sources = source_catalog()
+    categories = load_website_groups(root)
+    check_website_groups(categories, sources)
+    by_domain = {source.domain: source for source in sources}
+    header = ("| Site | Other domains | Language | Search |",
+              "|---|---|---|---|")
+
+    lines = ["<!-- Written by python -m memanga.source_docs; do not edit. -->"]
+    for category in categories:
+        title = category["title"]
+        groups = category["groups"]
+        lines.extend(("", f"## {title}", ""))
+        if category is categories[-1]:
+            lines.extend(_adult_notice(sources, "They are all in this section."))
+            lines.append("")
+        column = category.get("column")
+        if column:
+            lines.extend((f"| {column} |{header[0][1:]}", f"|---{header[1]}"))
+            for group in groups:
+                lines.extend(_website_row(by_domain[domain], group["title"])
+                             for domain in group["sites"])
+            continue
+        for index, group in enumerate(groups):
+            if len(groups) > 1:
+                if index:
+                    lines.append("")
+                lines.extend((f"### {group['title']}", ""))
+            lines.extend(header)
+            lines.extend(_website_row(by_domain[domain])
+                         for domain in group["sites"])
     return "\n".join(lines) + "\n"
 
 
@@ -602,6 +742,7 @@ def generated_files(root):
     return {
         root / "docs/SUPPORTED_SOURCES.md": render_supported_sources(root),
         root / SITE_LIST: render_site_list(root),
+        root / WEBSITE_LIST: render_supported_websites(root),
         root / COVERAGE_MODULE: render_coverage_module(root),
         readme: _replace_regions(readme_text, START, END,
                                  render_readme_section()),

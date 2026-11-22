@@ -1,0 +1,351 @@
+# The groups and order of the Supported websites page.
+#
+# Curated by hand: which group a site belongs to and, within a group, which
+# sites come first. Better-known sites go first. This is an editorial
+# judgement, not a traffic measurement, and it does not change the order in
+# which search asks sources (POPULAR_SOURCES in memanga/scrapers/catalog.py).
+#
+# List each source once, by the domain in the catalog; its other domains are
+# added for you. Do not add facts here: language, adult content, search state
+# and other domains come from the catalog.
+#
+# After a change, run: python -m memanga.source_docs
+# The check fails if a source is missing, unknown or listed twice, if adult
+# sources are not all in the last category, or if a source with a language
+# of its own is in the wrong language group.
+
+categories:
+  - title: Popular manga libraries
+    groups:
+      - title: Well-known libraries
+        sites:
+          - mangadex.org
+          - mangapill.com
+          - mangapark.cc
+          - mangapark1.com
+          - mangafire.to
+          - mangabuddy.com
+          - weebcentral.com
+          - mangakatana.com
+          - bato.to
+          - mangareader.to
+          - manganato.gg
+          - comix.to
+          - comick.io
+          - mangahub.io
+          - mangahere.cc
+          - mangataro.org
+          - fanfox.net
+          - mangatown.com
+          - mangafreak.ws
+          - mangago.me
+          - kagane.org
+      - title: More libraries
+        sites:
+          - mangapanda.onl
+          - mangahere.onl
+          - 1manga.co
+          - coffeemanga.io
+          - mangaeffect.com
+          - mangafox.fun
+          - mangahub.us
+          - mangaread.org
+          - mgeko.cc
+          - mangadna.com
+          - atsu.moe
+          - mangavyvy.net
+          - kunmanga.com
+          - truemanga.com
+          - mangabolt.com
+          - mangaball.net
+          - mangadot.net
+          - mangoasis.com
+          - zazamanga.com
+          - mangazin.org
+          - mangadistrict.com
+          - mangaforfree.net
+          - rawjx.net
+
+  - title: Manhwa and manhua
+    groups:
+      - title: Manhwa and manhua
+        sites:
+          - webtoons.com
+          - toonily.me
+          - manhuaplus.org
+          - manhwatop.com
+          - manhuatop.org
+          - aquareader.net
+          - hiperdex.com
+          - manhuafast.com
+          - manhuaus.org
+
+  - title: Scanlation groups and readers
+    groups:
+      - title: Scanlation groups and readers
+        sites:
+          - asurascans.com
+          - tcbonepiecechapters.com
+          - flamecomics.xyz
+          - luminousscans.com
+          - omegascans.org
+          - en-thunderscans.com
+          - demonicscans.org
+          - hivetoons.org
+          - yakshascans.com
+          - bokugents.com
+
+  - title: Single-series sites
+    column: Series
+    groups:
+      - title: One Piece
+        sites:
+          - readonepiece.com
+          - onepieceread.com
+          - 1piecemanga.com
+          - onepiece-manga-online.net
+          - unopiece.com
+      - title: Naruto
+        sites: [readnaruto.com]
+      - title: Attack on Titan
+        sites: [readsnk.com, readsnkmanga.com]
+      - title: Demon Slayer
+        sites: [demonslayermanga.com, kimetsu-yaiba.online]
+      - title: Jujutsu Kaisen
+        sites:
+          - readjujutsukaisen.com
+          - readjujutsukaisenmanga.com
+          - read-jjk.com
+          - jjkaisen.com
+          - readjujutsukaisenfree.com
+          - jujutsukaisenmodulo.org
+      - title: My Hero Academia
+        sites: [readmha.com]
+      - title: Chainsaw Man
+        sites: [readchainsawman.com, chainsawdevil.com]
+      - title: One Punch Man
+        sites:
+          - readopm.com
+          - one-punch.online
+          - onepunchmanread.com
+          - onepunchmanmangaa.com
+          - onepunchmanofficial.com
+      - title: Dragon Ball Super
+        sites: [thedragonballsuper.online]
+      - title: Bleach
+        sites: [bleach-read.com]
+      - title: Hunter x Hunter
+        sites: [hxhmanga.com]
+      - title: Death Note
+        sites: [death-note-manga.com, deathnotemangafree.com]
+      - title: Tokyo Ghoul
+        sites: [tgmanga.com, tokyoghoul.club]
+      - title: Berserk
+        sites:
+          - readberserk.com
+          - read-berserk-manga.com
+          - berserk-manga.com
+          - berserkmang.org
+          - gutsberserk.com
+      - title: Blue Lock
+        sites:
+          - bluelockread.com
+          - bluelock-read.com
+          - bluelockmanga.net
+          - bluelockread.online
+      - title: JoJo's Bizarre Adventure
+        sites:
+          - jojolionmanga.com
+          - jojolandsmanga.com
+          - steel-ball-run.com
+          - stone-ocean-manga.com
+      - title: Fairy Tail
+        sites: [readfairytail.com, fairytailmangafree.com]
+      - title: Black Clover
+        sites: [readblackclover.com, blackclova.com]
+      - title: Spy x Family
+        sites: [spyxfamilymanga.org, sxfmanga.net]
+      - title: Haikyuu!!
+        sites: [readhaikyuu.com]
+      - title: Dandadan
+        sites: [dandadanmanga.net, dddmanga.com]
+      - title: Frieren
+        sites: [sousou-no-frieren.com, frieren-manga.com]
+      - title: Oshi no Ko
+        sites: [readoshinoko.com, oshinokoyo.com]
+      - title: Kagurabachi
+        sites: [kagurabachi-manga.com, kagurabachiread.com]
+      - title: Sakamoto Days
+        sites: [sakamotomanga.com]
+      - title: Kaiju No. 8
+        sites: [kaijuno8-manga.com]
+      - title: Tokyo Revengers
+        sites: [read-tokyorevengers.com]
+      - title: Vagabond
+        sites: [vagabondmanga.org]
+      - title: Kingdom
+        sites: [readkingdomfree.com]
+      - title: Slam Dunk
+        sites: [read-slamdunk.online]
+      - title: Fullmetal Alchemist
+        sites: [full-metal-alchemist.online]
+      - title: Detective Conan
+        sites:
+          - detective-conan.online
+          - detective-conan-manga.online
+          - case-closed.online
+      - title: Fire Force
+        sites: [fireforcemanga.org]
+      - title: Blue Exorcist
+        sites: [blueexorcistmanga.com, blue-exorcist.online]
+      - title: Mashle
+        sites: [mashle-manga.online, mashlemanga.net]
+      - title: Undead Unluck
+        sites: [readundeadunluck.com]
+      - title: Hajime no Ippo
+        sites:
+          - hajimnoippo.com
+          - hajime-noippo.com
+          - hajime-no-ippo-manga.online
+      - title: Kengan Ashura
+        sites: [kenganashura.com, read-kengan-ashura.com]
+      - title: Baki
+        sites: [bakidou.com, bakirahen.com]
+      - title: Monster
+        sites: [monstermanga.org, monster-manga.online]
+      - title: Gachiakuta
+        sites: [gachiakutayo.com]
+      - title: Blue Box
+        sites: [blue-box-manga.online]
+      - title: Witch Watch
+        sites: [witch-watch.com]
+      - title: Witch Hat Atelier
+        sites: [witch-hat-atelier.online]
+      - title: Ichi the Witch
+        sites: [readichithewitch.com]
+      - title: Re:ZERO
+        sites: [rezero-manga.online]
+      - title: Overlord
+        sites: [overlord-manga.online]
+      - title: Mushoku Tensei
+        sites: [mushoku-tensei-manga.online]
+      - title: Goblin Slayer
+        sites: [goblin-slayer-manga.online]
+      - title: Record of Ragnarok
+        sites: [record-of-ragnarok-manga.com]
+      - title: Heavenly Delusion
+        sites: [heavenly-delusion.com]
+      - title: Made in Abyss
+        sites: [madeabyss.com]
+      - title: Dorohedoro
+        sites: [dorohedoro.online]
+      - title: D.Gray-man
+        sites: [d-grayman.online]
+      - title: Claymore
+        sites: [readclaymore.com]
+      - title: Black Lagoon
+        sites: [readblacklagoon.com]
+      - title: Trigun
+        sites: [trigunmanga.com]
+      - title: Akira
+        sites: [akiramanga.com]
+      - title: Gantz
+        sites: [gantzmangafree.com]
+      - title: Goodnight Punpun
+        sites: [punpunmanga.com]
+      - title: Tomie
+        sites: [tomie-manga.com]
+      - title: Beastars
+        sites: [beastarsmanga.com]
+      - title: Banana Fish
+        sites: [bananafishmanga.com]
+      - title: Nana
+        sites: [nanamanga.online]
+      - title: Beck
+        sites: [beckmanga.com]
+      - title: Real
+        sites: [real-manga.online]
+      - title: Ao Ashi
+        sites: [ao-ashi-manga.com]
+      - title: Kaiji
+        sites: [kaijimanga.com]
+      - title: Homunculus
+        sites: [homunculusmanga.com]
+      - title: BLAME!
+        sites: [blame-manga.com]
+      - title: Hyouka
+        sites: [hyoukamanga.com]
+      - title: Skip Beat!
+        sites: [skip-beat-manga.online]
+      - title: The Elusive Samurai
+        sites: [elusive-samurai.com]
+      - title: Bocchi the Rock!
+        sites: [bocchitherockmanga.com]
+      - title: The Climber
+        sites: [kokounohito.com]
+
+  - title: Other languages
+    groups:
+      - title: Spanish
+        sites:
+          - zonatmo.org
+          - manhwaweb.com
+          - olympusxyz.com
+          - lector-mangas.lat
+          - leercapitulo.co
+          - heavenmanga.com
+          - uchuujinmangas.com
+          - dragontranslation.org
+          - apollcomics.es
+          - vermanhwa.com
+      - title: French
+        sites:
+          - anime-sama.to
+          - sushiscan.net
+          - mangas-origines.fr
+          - lelmanga.com
+      - title: Turkish
+        sites:
+          - mangadenizi.net
+          - uzaymanga.com
+          - patimanga.com
+          - sereinscan.com
+          - ruyamanga2.com
+          - tortugaceviri.com
+          - mangawow.com
+      - title: Japanese
+        sites: [comic-walker.com, mangaraw.ink]
+      - title: German
+        sites: [onepiece.tube]
+      - title: Italian
+        sites: [shinobiscans.com]
+      - title: Indonesian
+        sites: [wurmz.net]
+
+  - title: Western comics
+    groups:
+      - title: Western comics
+        sites: [readcomiconline.li]
+
+  - title: Adult sources
+    groups:
+      - title: Hentai and doujinshi
+        sites:
+          - nhentai.net
+          - e-hentai.org
+          - hentaifox.com
+          - imhentai.xxx
+          - hentairead.com
+          - hentai20.io
+      - title: Adult manhwa and manga
+        sites: [manytoon.com, manhwa18.cc, manga18fx.com]
+      - title: Other sites with adult content
+        sites:
+          - mangahome.com
+          - dynasty-scans.com
+          - rawkuma.net
+          - mangarw.com
+          - rawuwu.net
+          - raw.senmanga.com
+          - lelscanfr.com
+          - mangavault.lat

@@ -1,7 +1,9 @@
 """The committed source lists match the scraper registry."""
 
 import ast
+import copy
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -252,6 +254,161 @@ def test_site_headings_are_plain_text():
                  source_docs.render_site_list()):
         for heading in re.findall(r"^#+ .*$", text, re.MULTILINE):
             assert not re.search(r"[`*<>{}\[\]]", heading), heading
+
+
+# ── Supported websites page ────────────────────────────────────────────
+
+
+def _curated():
+    return copy.deepcopy(source_docs.load_website_groups(ROOT))
+
+
+def _curated_order(categories):
+    return [domain for category in categories
+            for group in category["groups"] for domain in group["sites"]]
+
+
+def _swap_site(categories, old, new):
+    for category in categories:
+        for group in category["groups"]:
+            group["sites"] = [new if d == old else d for d in group["sites"]]
+
+
+def _move_site(categories, domain, title):
+    for category in categories:
+        for group in category["groups"]:
+            if domain in group["sites"]:
+                group["sites"].remove(domain)
+    target = next(group for category in categories
+                  for group in category["groups"] if group["title"] == title)
+    target["sites"].append(domain)
+
+
+def _website_rows():
+    """{domain: [other domains, language, search]}, in page order."""
+    rows = {}
+    for line in source_docs.render_supported_websites().splitlines():
+        cells = [cell.strip() for cell in line.strip("|").split(" | ")]
+        if line.startswith("| ") and len(cells) >= 4 and cells[-4].startswith("`"):
+            rows[cells[-4].strip("`")] = cells[-3:]
+    return rows
+
+
+def test_websites_list_every_source_once_with_catalog_facts():
+    sources = source_catalog()
+    rows = _website_rows()
+    assert len(rows) == len(sources)
+    for source in sources:
+        others, language, search = rows[source.domain]
+        for alias in source.aliases:
+            assert f"`{alias}`" in others, alias
+            assert alias not in rows, alias
+        assert language == (source_docs.LANGUAGE_NAMES.get(
+            source.language, source.language) if source.language else "—")
+        assert search == source_docs._website_search(source)
+
+
+def test_websites_keep_the_curated_order():
+    assert list(_website_rows()) == _curated_order(_curated())
+
+
+def test_websites_never_link_a_site():
+    # The site turns a bare domain into a link; a code span stays text.
+    text = re.sub(r"`[^`]*`", "", source_docs.render_supported_websites())
+    assert "http" not in text
+    for source in source_catalog():
+        for domain in (source.domain, *source.aliases):
+            assert domain not in text, domain
+
+
+def test_website_search_state():
+    base = replace(source_catalog()[0], template=None, search_skip=None,
+                   default_enabled=False)
+    skip = next(s.search_skip for s in source_catalog() if s.search_skip)
+    state = source_docs._website_search
+    assert state(base) == "In search"
+    assert state(replace(base, default_enabled=True)) == "In search, on by default"
+    assert state(replace(base, template="Template")) == "Added series only"
+    assert state(replace(base, search_skip=skip)) == "Left out of search"
+    assert state(replace(base, template="Template",
+                         search_skip=skip)) == "Left out of search"
+
+
+def test_websites_reject_an_unknown_source():
+    categories = _curated()
+    categories[0]["groups"][0]["sites"].append("example.invalid")
+    with pytest.raises(ValueError, match="unknown source example.invalid"):
+        source_docs.check_website_groups(categories, source_catalog())
+
+
+def test_websites_reject_a_source_listed_twice():
+    categories = _curated()
+    sites = categories[0]["groups"][0]["sites"]
+    sites.append(sites[0])
+    with pytest.raises(ValueError, match="listed twice"):
+        source_docs.check_website_groups(categories, source_catalog())
+
+
+def test_websites_reject_a_missing_source():
+    categories = _curated()
+    removed = categories[0]["groups"][0]["sites"].pop()
+    with pytest.raises(ValueError, match=f"missing {re.escape(removed)}"):
+        source_docs.check_website_groups(categories, source_catalog())
+
+
+def test_websites_reject_another_domain_of_a_source():
+    source = next(s for s in source_catalog() if s.aliases)
+    categories = _curated()
+    _swap_site(categories, source.domain, source.aliases[0])
+    with pytest.raises(ValueError, match="is another domain of"):
+        source_docs.check_website_groups(categories, source_catalog())
+
+
+def test_websites_keep_adult_sources_last_and_complete():
+    sources = source_catalog()
+    adult = next(s.domain for s in sources if s.nsfw)
+    other = next(s.domain for s in sources
+                 if not s.nsfw and s.language in (None, "en"))
+
+    moved_out = _curated()
+    _move_site(moved_out, adult, "More libraries")
+    with pytest.raises(ValueError, match="exactly the adult sources"):
+        source_docs.check_website_groups(moved_out, sources)
+
+    moved_in = _curated()
+    _move_site(moved_in, other, "Hentai and doujinshi")
+    with pytest.raises(ValueError, match="exactly the adult sources"):
+        source_docs.check_website_groups(moved_in, sources)
+
+    not_last = _curated()
+    not_last.insert(0, not_last.pop())
+    with pytest.raises(ValueError, match="exactly the adult sources"):
+        source_docs.check_website_groups(not_last, sources)
+
+
+def test_websites_follow_the_catalog_language():
+    sources = source_catalog()
+    spanish = next(s.domain for s in sources
+                   if s.language == "es" and not s.nsfw)
+
+    wrong_language = _curated()
+    _move_site(wrong_language, spanish, "French")
+    with pytest.raises(ValueError, match="has language es"):
+        source_docs.check_website_groups(wrong_language, sources)
+
+    not_in_languages = _curated()
+    _move_site(not_in_languages, spanish, "More libraries")
+    with pytest.raises(ValueError, match="has language es"):
+        source_docs.check_website_groups(not_in_languages, sources)
+
+
+def test_websites_page_includes_the_generated_list():
+    page = (ROOT / "docs/reference/supported-websites.md").read_text(
+        encoding="utf-8")
+    assert "<!--@include: ./supported-websites-list.md-->" in page
+    site = (ROOT / "docs/.vitepress/config.mts").read_text(encoding="utf-8")
+    assert "'reference/supported-websites-list.md'" in site
+    assert "link: '/reference/supported-websites'" in site
 
 
 # ── Offline parser tests (issue #266) ──────────────────────────────────

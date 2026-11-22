@@ -173,7 +173,7 @@ date.
 |---|---|---|
 | A command, an option or its help | `python -m memanga.cli_docs` | `docs/reference/cli-commands.md` |
 | A setting or its default | `python -m memanga.config_docs` | `docs/reference/config-keys.md` |
-| A source, its catalog entry or a `PARSER_TESTS` declaration | `python -m memanga.source_docs` | The source lists, the source counts in the README and the guide, and `memanga/scrapers/coverage_data.py` |
+| A source, its catalog entry, a `PARSER_TESTS` declaration or `docs/data/supported-websites.yaml` | `python -m memanga.source_docs` | The source lists, the source counts in the README and the guide, and `memanga/scrapers/coverage_data.py` |
 | A dependency in `pyproject.toml` | `python scripts/lock_dependencies.py` (needs uv 0.13.1 and the network) | `requirements/*.txt` |
 
 Each of the three `python -m` commands takes `--check` to compare without

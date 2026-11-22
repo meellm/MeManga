@@ -7,7 +7,9 @@ import { release } from '../.vitepress/release'
 A source is a website MeManga can read. Each source has its own scraper,
 the part of MeManga that searches the site, reads its chapter lists and
 downloads the pages. Some sources answer on more than one domain; those
-are listed under **Other domains**.
+are listed under **Other domains**. This page is the technical catalog. For
+the same sites grouped by what they publish, see
+[Supported websites](./supported-websites).
 
 ::: info How to read this page
 - The list is generated from the **development version**. {{ release.tag }} has its own list, and its `memanga sources` shows only a few sources and the total.

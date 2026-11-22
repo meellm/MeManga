@@ -28,7 +28,9 @@ import { release } from '../.vitepress/release'
   scheduled checks.
 - [Send chapters to a Kindle](./kindle): email delivery from setup to
   troubleshooting.
-- [Sources](../reference/sources): the sites MeManga can read.
+- [Supported websites](../reference/supported-websites): the sites MeManga
+  can read, grouped by what they publish.
+- [Sources](../reference/sources): the technical catalog of those sites.
 
 ## Documents on GitHub
 

@@ -48,11 +48,13 @@ so check those notes before you expect a feature in a download.
 
 ## Sources
 
-The [list of sources](https://meellm.github.io/MeManga/reference/sources)
-shows every site MeManga has a scraper for, which ones a search includes,
-and how they are checked. Being listed does not mean a site works today:
+[Supported websites](https://meellm.github.io/MeManga/reference/supported-websites)
+lists every site MeManga has a scraper for, grouped by what it publishes,
+and which ones a search includes. The
+[technical catalog](https://meellm.github.io/MeManga/reference/sources)
+shows how they are checked. Being listed does not mean a site works today:
 sites change or go offline without notice. Some sources serve adult
-content; the list marks them.
+content; the list keeps them in their own section at the end.
 
 MeManga is a tool you run yourself. It does not host any manga and is not
 affiliated with the sites it reads; listing a site is not an endorsement.

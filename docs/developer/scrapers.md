@@ -205,6 +205,13 @@ to it.
   change this list only with live evidence.
 - `SOURCE_NOTES`: the short description in the source list.
 
+**The Supported websites page** is grouped by hand in
+`docs/data/supported-websites.yaml`. Add a new source there by its catalog
+domain, in the group that fits what the site publishes, with better-known
+sites first. Remove a source you delete. The file holds only groups and
+order: language, adult content, search state and other domains come from the
+catalog, and changing the file does not change search.
+
 Then regenerate the generated files:
 
 ```sh
@@ -212,9 +219,11 @@ python -m memanga.source_docs
 ```
 
 This rewrites the source lists, the counts in the README and the guide, and
-`memanga/scrapers/coverage_data.py`. CI runs
-`python -m memanga.source_docs --check` and fails when one of them is out
-of date.
+`memanga/scrapers/coverage_data.py`. It stops with an error when the
+Supported websites file has a source that is missing, unknown, listed twice
+or in a group that contradicts the catalog. CI runs
+`python -m memanga.source_docs --check` and fails on the same errors or
+when a generated file is out of date.
 
 ## Fixtures
 
@@ -447,7 +456,8 @@ A source change is done when:
   right, and any search skip or note is in the catalog.
 - Small, sanitized, labelled fixtures and offline tests cover each
   part written, including a block or unexpected page.
-- `PARSER_TESTS` declares that coverage, and
+- `PARSER_TESTS` declares that coverage, the source is in
+  `docs/data/supported-websites.yaml`, and
   `python -m memanga.source_docs` has been run.
 - The local checks above pass.
 - A live probe of the source passed the image stage. When it cannot,
