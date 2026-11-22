@@ -20,9 +20,12 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import re
 import sys
 from importlib import metadata
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -1061,6 +1064,59 @@ def test_builds_exclude_agpl_pymupdf_and_bundle_qt_pdf():
                  *sorted((REPO_ROOT / "requirements").glob("*.txt"))):
         text = path.read_text(encoding="utf-8").lower()
         assert "pymupdf" not in text and "fitz" not in text, path.name
+
+
+def test_release_spec_leaves_out_unused_tcl_tk():
+    # Only img2pdf's own --gui command imports tkinter; the app is Qt.
+    excludes = SPEC.read_text(encoding="utf-8").split(
+        "excludes=[", 1)[1].split("]", 1)[0]
+    assert '"tkinter"' in excludes and '"_tkinter"' in excludes
+    tk_import = re.compile(r"^\s*(?:from|import)\s+_?tkinter\b", re.M)
+    for path in (REPO_ROOT / "memanga").rglob("*.py"):
+        assert not tk_import.search(path.read_text(encoding="utf-8")), path
+
+
+@pytest.mark.parametrize("layout", ["onedir", "onefile"])
+def test_recovery_build_note_has_its_place_in_the_notices(
+        tmp_path, project, python, layout):
+    anchor = "MeManga's own source code, including the files"
+    assert f'_anchor = "{anchor}"' in SPEC.read_text(encoding="utf-8")
+    text = _render(project, python, _lgpl_components(tmp_path), layout=layout)
+    assert text.count(anchor) == 1
+
+
+def _notices_input(collected, platform, base_prefix):
+    # The spec's own expressions, over a fake Analysis.
+    text = SPEC.read_text(encoding="utf-8")
+    plist = text[text.index("_python_plist = ("):
+                 text.index("try:\n    _notices.write_bundle_notices(")]
+    paths = text[text.index("[src for toc in (a.scripts"):
+                 text.index(",\n        _notices_path,")]
+    scope = {"os": os,
+             "sys": SimpleNamespace(platform=platform, base_prefix=base_prefix),
+             "a": SimpleNamespace(scripts=[], pure=[], binaries=[],
+                                  datas=collected, zipfiles=[])}
+    exec(plist, scope)
+    return eval(paths, scope)
+
+
+def test_notices_skip_only_the_exact_python_framework_plist(tmp_path):
+    framework = tmp_path / "Python.framework" / "Versions" / "3.12"
+    plist = framework / "Resources" / "Info.plist"
+    other = tmp_path / "Other.framework" / "Resources" / "Info.plist"
+    for path in (plist, other):
+        path.parent.mkdir(parents=True)
+        path.write_text("plist\n", encoding="utf-8")
+    collected = [("python", str(plist), "DATA"), ("other", str(other), "DATA"),
+                 ("namespace", None, "PYMODULE")]
+    kept = [str(other), None]
+    assert _notices_input(collected, "darwin", str(framework)) == kept
+    assert _notices_input(collected, "linux", str(framework)) == [str(plist), *kept]
+    if os.name != "nt":
+        # The runner's Python can be reached through a symlink.
+        link = tmp_path / "toolcache"
+        link.symlink_to(framework)
+        assert _notices_input(collected, "darwin", str(link)) == kept
 
 
 def test_build_app_collects_onedir_and_checks_it():

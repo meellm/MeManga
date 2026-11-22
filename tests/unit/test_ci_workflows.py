@@ -3,6 +3,7 @@ health run, the documentation site and how the release workflow depends
 on them (#255, #317, #285, #385, #423)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -394,6 +395,42 @@ def test_recovery_skips_only_the_checks_it_reuses(release):
             in jobs["pypi-check"]["if"])
     for needed in ("build", "pypi-check", "tests", "audit"):
         assert f"needs.{needed}.result == 'success'" in jobs["release"]["if"]
+
+
+def test_recovery_replaces_only_the_release_spec(release):
+    # The tag stays as it is: one build file, at an exact blob, comes from
+    # the workflow's commit. Remove this with the one-shot recovery.
+    steps = release["jobs"]["build"]["steps"]
+    assert str(steps[0]["uses"]).startswith("actions/checkout@")
+    step = steps[1]
+    assert step["if"] == "github.event_name == 'workflow_dispatch'"
+    assert step["shell"] == "bash"
+    spec = (ROOT / "packaging" / "memanga-release.spec").read_bytes()
+    assert step["env"] == {
+        "TAG_SPEC_BLOB": "06a7ca436acc5af675d34c1f1ca0686a09f12d31",
+        "FIXED_SPEC_BLOB": hashlib.sha1(b"blob %d\0" % len(spec) + spec).hexdigest(),
+    }
+    lines = step["run"].splitlines()
+    assert lines[0] == "spec=packaging/memanga-release.spec"
+    for guard in ('test "$(git rev-parse HEAD)" = "$RELEASE_SHA"',
+                  'test -z "$(git status --porcelain)"',
+                  'test "$(git rev-parse "HEAD:$spec")" = "$TAG_SPEC_BLOB"',
+                  'test "$(git rev-parse "FETCH_HEAD:$spec")" = "$FIXED_SPEC_BLOB"',
+                  'test "$(git hash-object --no-filters -- "$spec")" = "$FIXED_SPEC_BLOB"',
+                  'test "$(git status --porcelain)" = " M $spec"'):
+        assert guard in lines, guard
+    assert lines.index('git show "FETCH_HEAD:$spec" > "$spec"') < lines.index(
+        'test "$(git status --porcelain)" = " M $spec"')
+    (build,) = [s for s in steps if s.get("name") == "Build release executable"]
+    assert build["env"]["MEMANGA_RECIPE_COMMIT"] == (
+        "${{ github.event_name == 'workflow_dispatch' && github.sha || '' }}")
+    names = [s.get("name") for s in steps]
+    note = names.index("Confirm the notices name the recovery recipe")
+    assert note == names.index("Check third-party notices") + 1
+    assert steps[note]["if"] == "github.event_name == 'workflow_dispatch'"
+    assert steps[note]["shell"] == "bash"
+    assert steps[note]["run"].strip() == (
+        'grep -Fq "$GITHUB_SHA" release/THIRD_PARTY_NOTICES.txt')
 
 
 def test_only_the_release_publisher_and_pages_deploy_request_an_identity():
