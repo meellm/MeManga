@@ -44,7 +44,10 @@ class TestStateLifecycle:
         example = json.loads(
             (REPO_ROOT / "examples" / "state.example.json").read_text(encoding="utf-8"))
         example.pop("_comment", None)
-        assert set(example) == set(state._default_state())
+        defaults = state._default_state()
+        assert set(example) == set(defaults)
+        # A layout change bumps the version, so the example has to follow.
+        assert example["schema_version"] == defaults["schema_version"]
 
         state.add_downloaded_chapter("One Piece", "1132")
         state.mark_chapter_read("One Piece", "1130")
@@ -76,9 +79,11 @@ class TestStateLifecycle:
         d = isolated_home / ".config" / "memanga"
         d.mkdir(parents=True, exist_ok=True)
         (d / "state.json").write_text("{this is not json")
-        # Should not raise — falls back to defaults.
+        # Should not raise — falls back to defaults, and the damaged file
+        # is kept for recovery (issue #243).
         s = State(config_dir=d)
         assert s.get_notifications() == []
+        assert s.preserved_path.read_text() == "{this is not json"
 
     def test_get_set_arbitrary_key(self, state):
         state.set("custom_key", {"a": 1})
@@ -762,6 +767,37 @@ class TestDownloadHistory:
         for i in range(220):
             state.add_download_history("X", str(i), "pdf", "", 0.1)
         assert len(state._data["download_history"]) <= 200
+
+    def test_source_and_flags_default_for_old_callers(self, state):
+        state.add_download_history("X", "1", "pdf", "/tmp/x.pdf", 1.0, True)
+        entry = state.get_download_history()[0]
+        assert entry["kindle_sent"] is True
+        assert (entry["source"], entry["from_backup"], entry["partial"]) == \
+            (None, False, False)
+        assert entry["deleted_after_send"] is False
+
+    def test_deleted_after_send_is_stored(self, state):
+        # Issue #338: a sent chapter whose local copy was deleted.
+        state.add_download_history("X", "1", "pdf", "/tmp/x.pdf", 1.0, True,
+                                   deleted_after_send=True)
+        entry = state.get_download_history()[0]
+        assert (entry["kindle_sent"], entry["deleted_after_send"]) == (True, True)
+
+    def test_source_and_flags_are_stored(self, state):
+        state.add_download_history("X", "1", "pdf", source="backup.test",
+                                   from_backup=True, partial=True)
+        entry = state.get_download_history()[0]
+        assert (entry["source"], entry["from_backup"], entry["partial"]) == \
+            ("backup.test", True, True)
+
+    def test_remove_download_history_drops_only_that_title(self, state):
+        # Issue #392: deleting a removed manga's history clears its log.
+        state.add_download_history("X", "1", "pdf", "/tmp/x1.pdf", 1.0)
+        state.add_download_history("Y", "1", "pdf", "/tmp/y1.pdf", 1.0)
+        state.add_download_history("X", "2", "pdf", "/tmp/x2.pdf", 1.0)
+        assert state.remove_download_history("X") == 2
+        assert [e["title"] for e in state.get_download_history()] == ["Y"]
+        assert state.remove_download_history("X") == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────

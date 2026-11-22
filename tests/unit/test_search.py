@@ -177,6 +177,31 @@ class TestChapterCounts:
         assert results[0].chapter_count == 7
         assert results[1].chapter_count is None
 
+    def test_probe_runs_at_most_four_at_once(self, monkeypatch):
+        # Issue #405: kept low so slow connections aren't flooded.
+        import threading
+        import time
+        from memanga import search as search_mod
+        lock = threading.Lock()
+        state = {"now": 0, "peak": 0}
+
+        def fake_fetch(source, url):
+            with lock:
+                state["now"] += 1
+                state["peak"] = max(state["peak"], state["now"])
+            time.sleep(0.05)
+            with lock:
+                state["now"] -= 1
+            return 1
+
+        monkeypatch.setattr(search_mod, "fetch_chapter_count", fake_fetch)
+        results = [SearchResult(title=str(i), url=f"https://x.test/{i}",
+                                source="x.test") for i in range(12)]
+        probe_chapter_counts(results)
+        assert search_mod.CHAPTER_COUNT_WORKERS == 4
+        assert 1 <= state["peak"] <= 4
+        assert all(r.chapter_count == 1 for r in results)
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # source selection
@@ -185,12 +210,11 @@ class TestChapterCounts:
 
 class TestComputeSearchSources:
     def test_includes_aggregators_excludes_broken(self):
-        sources = compute_search_sources(FakeConfig())
+        sources = compute_search_sources(FakeConfig({"sources.disabled": []}))
         assert "mangadex.org" in sources
         assert "mangapill.com" in sources
         # Known-dead sites never make the sweep list.
-        assert "mangasee123.com" not in sources
-        assert "manganato.com" not in sources
+        assert "mangareader.to" not in sources
 
     def test_region_blocked_mangago_excluded(self):
         # mangago.me is reachable globally but DNS/SNI-blocked in some
@@ -206,30 +230,14 @@ class TestComputeSearchSources:
         # chapters, pages and image download pass the live probe again
         # (issue #178), so it must reach the sweep when enabled.
         assert "mgeko.cc" not in BROKEN_SEARCH_SOURCES
-        assert "mgeko.cc" in compute_search_sources(FakeConfig())
+        assert "mgeko.cc" in compute_search_sources(
+            FakeConfig({"sources.disabled": []}))
 
     def test_disabled_mgeko_still_removed(self):
         sources = compute_search_sources(FakeConfig({
             "sources.disabled": ["mgeko.cc"],
         }))
         assert "mgeko.cc" not in sources
-
-    def test_unreachable_mangaclash_excluded(self):
-        # mangaclash.com fails TLS and its plain-HTTP site is no longer
-        # MangaClash, with no verified replacement domain (issue #179).
-        # It stays registered so saved entries resolve, but must never
-        # reach the sweep - not even when it's already in the user's
-        # library.
-        assert "mangaclash.com" in BROKEN_SEARCH_SOURCES
-        assert "mangaclash.com" not in compute_search_sources(FakeConfig())
-        assert "mangaclash.com" not in compute_search_sources(FakeConfig({
-            "manga": [{"title": "X", "source": "mangaclash.com"}],
-        }))
-
-    def test_mangaclash_not_a_default_source(self):
-        from memanga.scrapers import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES
-        assert "mangaclash.com" not in POPULAR_SOURCES
-        assert "mangaclash.com" not in DEFAULT_ENABLED_SOURCES
 
     def test_unreachable_hiperdex_excluded(self):
         # hiperdex.com is blocked/unreachable from the audit network
@@ -254,6 +262,7 @@ class TestComputeSearchSources:
         assert isinstance(get_scraper("lectormangass.net"), LectorMangaScraper)
         assert "lectormangass.net" in BROKEN_SEARCH_SOURCES
         sources = compute_search_sources(FakeConfig({
+            "sources.disabled": [],
             "manga": [{"title": "X", "source": "lectormangass.net"}],
         }))
         assert "lector-mangas.lat" in sources
@@ -282,16 +291,56 @@ class TestComputeSearchSources:
 
     def test_default_enabled_sources_pinned(self):
         # Pinned so a curation change is deliberate and the README's
-        # default-source list gets updated with it. Dropping MangaClash
-        # (#179) did not promote luminousscans.com into the defaults.
+        # default-source list gets updated with it. The set is small and
+        # chosen by measured search time and relevance, not by rank.
         from memanga.scrapers import DEFAULT_ENABLED_SOURCES
         assert DEFAULT_ENABLED_SOURCES == [
-            "mangadex.org", "mangapill.com", "mangapark1.com",
-            "mangafire.to", "mangabuddy.com", "weebcentral.com",
-            "mangakatana.com", "asurascans.com", "comix.to",
-            "comick.io", "mangahub.io", "mangahere.cc",
-            "mangapanda.onl", "mangahere.onl", "mangataro.org",
+            "mangadex.org", "mangapark.cc", "mangafire.to",
+            "mangabuddy.com", "weebcentral.com",
         ]
+
+    def test_no_saved_selection_sweeps_the_default_selection(self):
+        # `sources.disabled` is missing until a selection is saved. The
+        # command line then sweeps what a fresh desktop install ticks,
+        # not every aggregator.
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES
+        sources = compute_search_sources(FakeConfig())
+        assert sorted(sources) == sorted(DEFAULT_ENABLED_SOURCES)
+        assert len(sources) == 5
+
+    def test_no_saved_selection_still_sweeps_library_sources(self):
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES
+        sources = compute_search_sources(FakeConfig({
+            "manga": [{"title": "X", "source": "mangapill.com"}],
+        }))
+        assert sorted(sources) == sorted(
+            DEFAULT_ENABLED_SOURCES + ["mangapill.com"])
+
+    def test_saved_empty_selection_enables_every_aggregator(self):
+        # An empty list is a saved choice (everything ticked), not a
+        # missing one, so it must not fall back to the defaults.
+        from memanga.scrapers import DEFAULT_ENABLED_SOURCES
+        sources = compute_search_sources(FakeConfig({"sources.disabled": []}))
+        assert set(DEFAULT_ENABLED_SOURCES) < set(sources)
+        assert "mangapill.com" in sources
+        assert "mangakatana.com" in sources
+
+    def test_saved_selection_is_not_widened_to_the_defaults(self):
+        # A default source the user unticked stays out, and one outside
+        # the defaults that they left ticked stays in.
+        from memanga.scrapers import SCRAPERS
+        disabled = sorted(set(SCRAPERS) - {"mangakatana.com"})
+        sources = compute_search_sources(
+            FakeConfig({"sources.disabled": disabled}))
+        assert sources == ["mangakatana.com"]
+
+    def test_everything_disabled_sweeps_nothing(self):
+        from memanga.scrapers import SCRAPERS
+        sources = compute_search_sources(FakeConfig({
+            "sources.disabled": sorted(SCRAPERS),
+            "manga": [{"title": "X", "source": "mangadex.org"}],
+        }))
+        assert sources == []
 
     def test_disabled_sources_removed(self):
         sources = compute_search_sources(FakeConfig({

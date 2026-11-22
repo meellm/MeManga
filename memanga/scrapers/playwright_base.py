@@ -8,14 +8,216 @@ avoiding conflicts with asyncio event loops (e.g., from rich library).
 import time
 import logging
 from typing import Optional
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 import threading
+from ..first_run import browser_launch_error
 from .base import BaseScraper
 
 logger = logging.getLogger(__name__)
 
 # Thread-local storage for browser instances
 _thread_local = threading.local()
+
+# The running browser task's caller deadline, set on the worker thread.
+_task_local = threading.local()
+
+# A browser step ends this long before the caller's deadline, leaving
+# time to close the page and hand the result back.
+STEP_RESERVE_S = 5.0
+# Below this much usable time a browser step is not worth starting.
+_MIN_STEP_S = 1.0
+
+# A long-lived browser keeps growing in memory over a long check or
+# backfill (#402). After this many tasks (search, chapter list, pages)
+# it is closed at the start of the next task and a fresh one launched.
+BROWSER_RECYCLE_AFTER_TASKS = 20
+
+
+class BrowserTimeoutError(TimeoutError):
+    """A browser task did not finish within its caller's time budget."""
+
+
+def task_seconds_left() -> Optional[float]:
+    """Seconds until the caller of the running browser task gives up,
+    or None when not called from inside a ``BrowserWorker`` task."""
+    task = getattr(_task_local, "task", None)
+    if task is None:
+        return None
+    return task["deadline"] - time.monotonic()
+
+
+def task_budget_spent() -> bool:
+    """True inside a ``BrowserWorker`` task once too little of the
+    caller's budget is left to start another browser step, i.e. when a
+    step that just failed most likely failed because it was cut short."""
+    left = task_seconds_left()
+    return left is not None and left - STEP_RESERVE_S < _MIN_STEP_S
+
+
+def step_timeout_ms(cap_ms: float) -> float:
+    """Playwright timeout for one step of the running browser task.
+
+    ``cap_ms`` is the step's own limit. Inside a ``BrowserWorker`` task
+    it is shortened so the step ends ``STEP_RESERVE_S`` before the
+    caller's deadline; outside one it is returned unchanged. Raises
+    ``BrowserTimeoutError`` when too little time is left to start.
+    """
+    task = getattr(_task_local, "task", None)
+    if task is None:
+        return cap_ms
+    usable_s = task["deadline"] - time.monotonic() - STEP_RESERVE_S
+    if usable_s < _MIN_STEP_S:
+        raise BrowserTimeoutError(
+            f"{task['source']} {task['operation']}: {task['timeout']:g}s "
+            f"budget used up before the next browser step"
+        )
+    return min(cap_ms, usable_s * 1000)
+
+
+def browser_recycle_due(local, limit: int) -> bool:
+    """Count the running task against the browser kept in ``local``.
+
+    Only the first time a ``BrowserWorker`` task asks for the browser
+    counts, so a recycle happens between tasks and never closes a page
+    a task is still using. Returns True when the browser has already
+    served ``limit`` tasks and should be replaced before this one.
+    Calls outside a task, and a ``limit`` of 0, never recycle.
+    """
+    task = getattr(_task_local, "task", None)
+    if task is None or not limit or getattr(local, "last_task", None) is task:
+        return False
+    served = getattr(local, "tasks_served", 0)
+    if served >= limit:
+        return True
+    local.tasks_served = served + 1
+    local.last_task = task
+    return False
+
+
+def start_browser_count(local):
+    """Start counting tasks for a browser just launched into ``local``;
+    the running task, if any, is its first."""
+    task = getattr(_task_local, "task", None)
+    local.tasks_served = 0 if task is None else 1
+    local.last_task = task
+
+
+def _operation_name(fn) -> str:
+    """``_get_chapters_in_thread`` -> ``get_chapters``."""
+    name = (getattr(fn, "__name__", None) or type(fn).__name__).strip("_")
+    if name.endswith("_in_thread"):
+        name = name[:-len("_in_thread")]
+    return name
+
+
+class BrowserWorker:
+    """The one thread that owns a browser, and the rules for giving it work.
+
+    Playwright's sync objects belong to the thread that created them, so
+    every browser call for one owner runs on this worker, one task at a
+    time; cleanup goes through it too, so a browser is never touched
+    from another thread.
+
+    A caller's ``timeout`` starts once it holds the lock and covers both
+    waiting for earlier abandoned work and its own task. Waiting for the
+    lock itself means waiting for other live callers, each bounded by
+    its own budget, so a queued call does not burn its budget there.
+
+    Python cannot stop a running thread. When a caller times out, its
+    task keeps running; the worker remembers it, and the next caller
+    waits for it within its own budget instead of queueing behind it.
+    So there is at most one abandoned task, nothing is ever queued
+    behind it, and no task starts after its caller has given up. If the
+    abandoned task never returns, every later call fails after its own
+    budget until it does.
+    """
+
+    def __init__(self, thread_name_prefix: str):
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=thread_name_prefix,
+        )
+        self._lock = threading.Lock()
+        # (future, operation, monotonic time it was abandoned) or None.
+        self._abandoned = None
+        self._started = False
+
+    @property
+    def started(self) -> bool:
+        """True once the worker was given a task. One that never was has
+        no thread and no browser, so cleanup leaves it alone."""
+        return self._started
+
+    def call(self, source: str, timeout: float, fn, /, *args, **kwargs):
+        """Run ``fn(*args, **kwargs)`` on the worker and return its result.
+
+        Raises whatever ``fn`` raises, or ``BrowserTimeoutError`` when the
+        budget runs out.
+        """
+        operation = _operation_name(fn)
+        queued_at = time.monotonic()
+        with self._lock:
+            started = time.monotonic()
+            deadline = started + timeout
+            lock_wait = started - queued_at
+            self._wait_for_abandoned(source, operation, timeout, deadline)
+            task = {"source": source, "operation": operation,
+                    "timeout": timeout, "deadline": deadline}
+            self._started = True
+            future = self._executor.submit(self._run_task, task, fn,
+                                           args, kwargs)
+            # Decide "did it finish in time" with wait(), never by catching
+            # TimeoutError from result(): a task may raise TimeoutError
+            # itself (a socket timeout, a used-up step budget), and that
+            # must reach the caller unchanged, not be read as expiry.
+            wait([future], timeout=max(0.0, deadline - time.monotonic()))
+            if future.done():
+                # Also covers a task that ended just after wait() gave
+                # up: deliver its outcome rather than abandon finished work.
+                return future.result()
+            self._abandoned = (future, operation, time.monotonic())
+            future.add_done_callback(
+                lambda _f, s=source, o=operation:
+                logger.debug("abandoned %s %s finished", s, o))
+            waited = (f" (after {lock_wait:.0f}s waiting for earlier "
+                      f"{source} calls)" if lock_wait >= 1 else "")
+            raise BrowserTimeoutError(
+                f"{source} {operation} timed out after {timeout:g}s"
+                f"{waited}; the browser task is still running and "
+                f"will finish in the background"
+            )
+
+    def _wait_for_abandoned(self, source, operation, timeout, deadline):
+        """Wait, within the caller's budget, for an abandoned task to end."""
+        if self._abandoned is None:
+            return
+        future, stale_operation, abandoned_at = self._abandoned
+        done, _ = wait([future], timeout=max(0.0, deadline - time.monotonic()))
+        if not done:
+            raise BrowserTimeoutError(
+                f"{source} {operation} timed out after {timeout:g}s: the "
+                f"browser is still busy with an earlier {stale_operation} "
+                f"that timed out "
+                f"{time.monotonic() - abandoned_at:.0f}s ago"
+            )
+        self._abandoned = None
+        if deadline - time.monotonic() < _MIN_STEP_S:
+            # Starting now would only abandon another task at once.
+            raise BrowserTimeoutError(
+                f"{source} {operation} timed out after {timeout:g}s waiting "
+                f"for an earlier {stale_operation} to finish"
+            )
+
+    @staticmethod
+    def _run_task(task, fn, args, kwargs):
+        _task_local.task = task
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _task_local.task = None
+
+    def shutdown(self, wait: bool = True):
+        """Stop the worker thread once its current task ends."""
+        self._executor.shutdown(wait=wait)
 
 
 def cleanup_browsers():
@@ -45,43 +247,42 @@ def cleanup_browsers():
 class PlaywrightScraper(BaseScraper):
     """Base class for scrapers that need Playwright with stealth mode."""
 
-    # NOTE: do NOT define `_executor`/`_executor_lock` on this base class.
-    # `__init_subclass__` below gives every subclass its OWN dedicated pair
+    engine = "browser"
+
+    # Budget for closing one subclass's browser in cleanup().
+    _CLEANUP_TIMEOUT_S = 10.0
+
+    # Tasks one browser serves before it is replaced; 0 keeps it for
+    # the whole run. See BROWSER_RECYCLE_AFTER_TASKS.
+    browser_recycle_after = BROWSER_RECYCLE_AFTER_TASKS
+
+    # NOTE: do NOT define `_worker` on this base class.
+    # `__init_subclass__` below gives every subclass its OWN worker
     # so WeebCentral, MangaKatana, MangaClash, MangaHere etc.
     # can run their search/get_chapters/get_pages calls in PARALLEL inside
     # the search worker's 8-slot pool.
     #
-    # A single shared `ThreadPoolExecutor(max_workers=1)` on the base
-    # class would serialise every Playwright-based source through one
-    # browser thread — with 5+ such sources in the popular set, the
-    # slow ones starve the rest and the search appears to hang.
+    # A single shared worker thread on the base class would serialise
+    # every Playwright-based source through one browser thread — with 5+
+    # such sources in the popular set, the slow ones starve the rest and
+    # the search appears to hang.
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
-        # Skip if a subclass explicitly defines its own executor (e.g.
-        # MangaFire's VRFGenerator pattern). Only create one when the
-        # subclass would otherwise fall back to a shared one.
-        if "_executor" not in cls.__dict__:
-            cls._executor = ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix=f"pw-{cls.__name__}",
-            )
-        if "_executor_lock" not in cls.__dict__:
-            cls._executor_lock = threading.Lock()
+        if "_worker" not in cls.__dict__:
+            cls._worker = BrowserWorker(thread_name_prefix=f"pw-{cls.__name__}")
 
     @classmethod
     def _run_serialized(cls, fn, *args, timeout: float, **kwargs):
-        """Submit ``fn`` to this class's dedicated executor under its lock.
+        """Run ``fn`` on this class's browser worker within ``timeout``.
 
-        ``Future.result(timeout=N)`` measures wall-clock from the ``submit``
-        call, which means a queued task can blow its budget while waiting
-        for the prior task to finish — a real bug when downloading many
-        chapters in parallel. Holding the lock around submit + wait
-        guarantees the timeout reflects actual work time only.
+        The budget covers the task itself plus any earlier timed-out
+        task the worker is still finishing, but not waiting behind other
+        live callers; see ``BrowserWorker`` for the rules. A timeout
+        raises ``BrowserTimeoutError`` naming the source, operation and
+        budget.
         """
-        with cls._executor_lock:
-            future = cls._executor.submit(fn, *args, **kwargs)
-            return future.result(timeout=timeout)
+        return cls._worker.call(cls.name, timeout, fn, *args, **kwargs)
 
     def _get_browser_in_thread(self):
         """Get or create the thread-local browser.
@@ -96,11 +297,16 @@ class PlaywrightScraper(BaseScraper):
         cascading failure took out unrelated scrapers in the same
         worker thread.
         """
-        # Hot path: everything already up.
+        # Hot path: everything already up, unless it has served enough
+        # tasks to be replaced (#402).
         if (hasattr(_thread_local, 'browser')
                 and hasattr(_thread_local, 'context')
                 and hasattr(_thread_local, 'playwright')):
-            return _thread_local.browser, _thread_local.context
+            if not browser_recycle_due(_thread_local,
+                                       self.browser_recycle_after):
+                return _thread_local.browser, _thread_local.context
+            logger.debug("%s: restarting the browser after %d tasks to "
+                         "free memory", self.name, _thread_local.tasks_served)
 
         # Clear any dangling state from a previous partial init before
         # retrying — otherwise sync_playwright().start() raises
@@ -111,19 +317,24 @@ class PlaywrightScraper(BaseScraper):
         pw = sync_playwright().start()
         try:
             browser, context = self._launch_browser(pw)
-        except Exception:
+        except Exception as e:
             # Roll back the Playwright start so the next call can retry
             # cleanly instead of inheriting half-broken state.
             try:
                 pw.stop()
             except Exception:
                 pass
+            # Issue #217: a missing browser build says how to fix it.
+            setup_error = browser_launch_error(e)
+            if setup_error is not None:
+                raise setup_error from e
             raise
 
         # Commit all three at once — never leave half-set thread-local.
         _thread_local.playwright = pw
         _thread_local.browser = browser
         _thread_local.context = context
+        start_browser_count(_thread_local)
         return browser, context
 
     def _launch_browser(self, pw):
@@ -133,8 +344,11 @@ class PlaywrightScraper(BaseScraper):
         different engine (e.g. MangaPark, whose Cloudflare challenge only
         lets Chromium through). Runs inside the executor thread, and
         ``_get_browser_in_thread`` rolls Playwright back if this raises.
+        The launch keeps Playwright's default limit, cut to the task's
+        remaining budget.
         """
-        browser = pw.firefox.launch(headless=True)
+        browser = pw.firefox.launch(headless=True,
+                                    timeout=step_timeout_ms(180000))
         context = browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
@@ -229,12 +443,15 @@ class PlaywrightScraper(BaseScraper):
 
     @classmethod
     def cleanup(cls):
-        """Cleanup browser instances in every subclass's executor thread.
+        """Cleanup browser instances in every subclass's worker thread.
 
-        Each PlaywrightScraper subclass owns its own executor (see
+        Each PlaywrightScraper subclass owns its own worker (see
         `__init_subclass__`), so a single base-class cleanup would
         miss the real per-subclass browsers. Walk the subclass tree
-        and run cleanup_browsers in each dedicated thread.
+        and run cleanup_browsers in each dedicated thread. A worker
+        still busy with a timed-out task is skipped after the cleanup
+        budget rather than having its browser closed under it, and one
+        that never ran a task is skipped without starting its thread.
         """
         seen: set = set()
         def _walk(c):
@@ -242,9 +459,10 @@ class PlaywrightScraper(BaseScraper):
                 if sub in seen:
                     continue
                 seen.add(sub)
-                if "_executor" in sub.__dict__:
+                if "_worker" in sub.__dict__ and sub._worker.started:
                     try:
-                        sub._run_serialized(cleanup_browsers, timeout=10)
+                        sub._run_serialized(cleanup_browsers,
+                                            timeout=cls._CLEANUP_TIMEOUT_S)
                     except Exception:
                         pass
                 _walk(sub)

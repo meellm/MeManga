@@ -3,22 +3,28 @@ Reader page - Built-in manga reader with keyboard shortcuts and zoom.
 Three layouts: continuous vertical scroll, single page, two-up spreads.
 """
 
-import io
-import re
-import shutil
-import zipfile
+import time
+from bisect import bisect_left, bisect_right
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QScrollArea, QWidget,
 )
-from PySide6.QtGui import QPixmap, QImage, QKeyEvent, QShortcut
-from PySide6.QtCore import Qt, QByteArray, QBuffer, QEvent, QObject, QTimer
+from PySide6.QtGui import QPixmap, QShortcut
+from PySide6.QtCore import (Qt, QByteArray, QBuffer, QObject, QRect, QSize,
+                            QTimer)
 
+from ...image_limits import exceeds_pixel_limit
 from .base import BasePage
+from .reader_input import ReaderInputMixin
+from .reader_navigation import ReaderNavigationMixin
+from .reader_view_modes import ReaderViewModeMixin
+from .reader_pages import (PageLoader, PageRef, PixmapCache, display_size,
+                           index_chapter_file, index_chapter_folder)
 from .. import theme as T
+from .. import trash
 
 
 def _is_inside_download_dir(candidate: Path, download_dir: Path) -> bool:
@@ -37,110 +43,13 @@ def _is_inside_download_dir(candidate: Path, download_dir: Path) -> bool:
     return resolved != root and resolved.is_relative_to(root)
 
 
-def _extract_images_from_file(filepath: Path) -> List[QImage]:
-    """Extract images from a downloaded chapter file."""
-    suffix = filepath.suffix.lower()
-    images = []
-
-    if suffix in (".cbz", ".zip"):
-        with zipfile.ZipFile(filepath, "r") as zf:
-            names = sorted([n for n in zf.namelist() if not n.startswith("__")])
-            for name in names:
-                ext = Path(name).suffix.lower()
-                if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-                    data = zf.read(name)
-                    img = QImage()
-                    img.loadFromData(data)
-                    if not img.isNull():
-                        images.append(img)
-
-    elif suffix == ".pdf":
-        try:
-            import fitz
-            doc = fitz.open(str(filepath))
-            for page in doc:
-                pix = page.get_pixmap(dpi=150)
-                img = QImage(pix.samples, pix.width, pix.height, pix.stride, QImage.Format.Format_RGB888)
-                # Make a deep copy since pix.samples is transient
-                images.append(img.copy())
-            doc.close()
-        except ImportError:
-            try:
-                from PIL import Image as PILImage
-                import pikepdf
-                pdf = pikepdf.open(str(filepath))
-                for page in pdf.pages:
-                    for img_key in page.images:
-                        raw = page.images[img_key]
-                        pil_img = PILImage.open(io.BytesIO(raw.get_raw_stream_buffer()))
-                        buf = io.BytesIO()
-                        pil_img.save(buf, format="PNG")
-                        qimg = QImage()
-                        qimg.loadFromData(buf.getvalue())
-                        if not qimg.isNull():
-                            images.append(qimg)
-                pdf.close()
-            except Exception:
-                pass
-
-    elif suffix == ".epub":
-        try:
-            with zipfile.ZipFile(filepath, "r") as zf:
-                names = sorted(zf.namelist())
-                for name in names:
-                    ext = Path(name).suffix.lower()
-                    if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
-                        data = zf.read(name)
-                        img = QImage()
-                        img.loadFromData(data)
-                        if not img.isNull():
-                            images.append(img)
-        except Exception:
-            pass
-
-    return images
-
-
-def _chapter_sort_key(number) -> Optional[float]:
-    """Numeric sort key for a chapter number, or None when it can't be
-    parsed. Used by the reader prefetch (issue #107) to find the
-    immediate next chapter without assuming the cache is pre-sorted.
-    Mirrors Chapter.numeric's extraction so labels like "Chapter 2" or
-    "2 Part 1" resolve too, but yields None instead of 0.0 when nothing
-    numeric is found -- an unparseable chapter must skip prefetch, not
-    sort as chapter zero."""
-    if number is None:
-        return None
-    try:
-        return float(str(number).strip())
-    except (ValueError, TypeError):
-        pass
-    match = re.search(r"(\d+\.?\d*)", str(number))
-    if match:
-        return float(match.group(1))
-    return None
-
-
-_PREFETCH_SKIP = object()
-
-
-def _extract_images_from_folder(folder: Path) -> List[QImage]:
-    extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-    images = []
-    files = sorted([f for f in folder.iterdir() if f.suffix.lower() in extensions])
-    for f in files:
-        try:
-            img = QImage(str(f))
-            if not img.isNull():
-                images.append(img)
-        except Exception:
-            pass
-    return images
-
-
-class ReaderPage(BasePage):
+class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
+                 ReaderViewModeMixin, BasePage):
     """Manga reader with continuous / single-page / two-up layouts,
-    keyboard shortcuts and zoom."""
+    keyboard shortcuts and zoom. Input handling lives in reader_input,
+    chapter Prev/Next and prefetch in reader_navigation, the layouts and
+    page turning in reader_view_modes, page indexing and decoding in
+    reader_pages."""
 
     ZOOM_MIN = 0.5
     ZOOM_MAX = 2.5
@@ -151,10 +60,17 @@ class ReaderPage(BasePage):
     # appended after the last page, so finishing the final page is
     # enough without having to pixel-perfectly hit the bottom.
     READ_THRESHOLD = 0.98
-    # Issue #32: the three reader layouts the toolbar toggle cycles
-    # between. "double" is the issue-#24 two-up view, now paged.
-    VIEW_MODES = ("continuous", "single", "double")
-    PAGED_MODES = ("single", "double")
+    # Issue #389: pages (or spreads, in two-up) decoded ahead of and
+    # behind the visible ones, and the memory budget for scaled pages
+    # kept around for quick revisits. Everything else stays undecoded.
+    PAGE_PREFETCH_AHEAD = 3
+    PAGE_PREFETCH_BEHIND = 1
+    PAGE_CACHE_BYTES = 192 * 1024 * 1024
+    # Longest the UI waits for a page decode that is still reading a
+    # finished chapter's file when leaving it. Past that, remove-after-read
+    # is kept and retried every REMOVAL_RETRY_MS until the file is free.
+    REMOVAL_WAIT_S = 2.0
+    REMOVAL_RETRY_MS = 250
 
     def __init__(self, parent, app):
         super().__init__(parent, app)
@@ -164,8 +80,33 @@ class ReaderPage(BasePage):
         # from, recorded in _find_and_load_chapter so the "remove after
         # reading" cleanup deletes exactly what the reader opened.
         self._artifact_path: Optional[Path] = None
-        self._images: List[QImage] = []
+        # Issue #389: the open chapter's pages as lightweight refs (order
+        # + natural size). Pixels are decoded lazily off the UI thread.
+        self._images: List[PageRef] = []
         self._page_labels: list = []
+        # Issue #389: worker-thread decoding. Results come back through a
+        # queued connection, so _on_page_ready always runs on the GUI
+        # thread. The slot map ties a page index to its on-screen label;
+        # the offsets are each continuous-mode label's top edge.
+        self._page_loader = PageLoader(self)
+        self._page_loader.page_ready.connect(
+            self._on_page_ready, Qt.ConnectionType.QueuedConnection)
+        self._page_cache = PixmapCache(self.PAGE_CACHE_BYTES)
+        self._page_slots: Dict[int, QLabel] = {}
+        self._page_target_w = self.DEFAULT_MAX_WIDTH
+        self._page_offsets: List[int] = []
+        self._page_keep: Tuple[int, int] = (0, -1)
+        self._shown_pages: Set[int] = set()
+        self._failed_pages: Set[int] = set()
+        # Issue #389: remove-after-read for a finished chapter, deferred
+        # until the reader leaves it: (title, chapter, artifact path).
+        self._pending_removal: Optional[Tuple[str, str, Path]] = None
+        # Left chapters whose file a page decode was still reading at the
+        # deadline; the timer retries them, deleting only once idle.
+        self._removal_queue: List[Tuple[str, str, Path]] = []
+        self._removal_timer = QTimer(self)
+        self._removal_timer.setInterval(self.REMOVAL_RETRY_MS)
+        self._removal_timer.timeout.connect(self._retry_pending_removals)
         self._zoom_level = 1.0
         self._fit_width = True
         # Issue #32: reader layout — "continuous" (vertical scroll, all
@@ -246,322 +187,27 @@ class ReaderPage(BasePage):
         # Escape, sidebar — everything routed through show_page) is a
         # save point for the in-chapter resume position.
         self.save_reading_position()
+        self._reset_page_loading()
+        self._finish_pending_removal()
         self._images.clear()
         self._page_labels.clear()
-
-    def keyPressEvent(self, event: QKeyEvent):
-        key = event.key()
-        if key == Qt.Key.Key_Escape:
-            if self._manga:
-                self.app.show_page("detail", manga=self._manga)
-            return
-        if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
-            self._zoom_in()
-        elif key == Qt.Key.Key_Minus:
-            self._zoom_out()
-        elif key == Qt.Key.Key_F:
-            self._toggle_fit_width()
-        elif key == Qt.Key.Key_N:
-            self._go_next_chapter()
-        elif key == Qt.Key.Key_P:
-            self._go_prev_chapter()
-        elif self._view_mode in self.PAGED_MODES and key in (
-                Qt.Key.Key_Right, Qt.Key.Key_PageDown, Qt.Key.Key_Space):
-            self._page_step(+1)
-        elif self._view_mode in self.PAGED_MODES and key in (
-                Qt.Key.Key_Left, Qt.Key.Key_PageUp):
-            self._page_step(-1)
-        elif self._view_mode in self.PAGED_MODES and key == Qt.Key.Key_Home:
-            self._go_to_page(0)
-        elif self._view_mode in self.PAGED_MODES and key == Qt.Key.Key_End:
-            self._go_to_page(len(self._images) - 1)
-        elif key == Qt.Key.Key_Down:
-            self._scroll_vertical(+1)
-        elif key == Qt.Key.Key_Up:
-            self._scroll_vertical(-1)
-        elif key == Qt.Key.Key_Right:
-            self._arrow_horizontal(+1)
-        elif key == Qt.Key.Key_Left:
-            self._arrow_horizontal(-1)
-        else:
-            super().keyPressEvent(event)
-
-    # ── Arrow-key navigation (issue #43) ──────────────────────────────
-    # The page itself holds keyboard focus (StrongFocus + setFocus in
-    # on_show), so the QScrollArea never sees arrow keys natively —
-    # they must be handled here alongside the other shortcuts.
-
-    def _scroll_vertical(self, direction: int):
-        """Up/Down: scroll half a viewport per press."""
-        if self._scroll is None:
-            return
-        bar = self._scroll.verticalScrollBar()
-        bar.setValue(bar.value() + direction * max(40, bar.pageStep() // 2))
-
-    def _arrow_horizontal(self, direction: int):
-        """Left/Right in continuous mode: pan when zoomed content
-        overflows horizontally, otherwise jump to the prev/next chapter
-        (mirrors P/N). Paged modes never reach here — their Left/Right
-        turn pages in keyPressEvent (issue #32)."""
-        if self._scroll is not None:
-            bar = self._scroll.horizontalScrollBar()
-            if bar.maximum() > 0:
-                bar.setValue(bar.value() + direction * max(40, bar.pageStep() // 2))
-                return
-        if direction > 0:
-            self._go_next_chapter()
-        else:
-            self._go_prev_chapter()
-
-    # ── Page-by-page navigation (issue #32) ───────────────────────────
-    # Only active in the "single" and "double" layouts. Up/Down keep
-    # their scroll meaning so a zoomed-in page can still be read top to
-    # bottom; Left/Right/PageUp/PageDown/Space/Home/End move between
-    # pages (or spreads in two-up).
-
-    def _page_step(self, direction: int):
-        """Advance one page (single) or one spread (double)."""
-        step = 2 if self._view_mode == "double" else 1
-        self._go_to_page(self._current_page + direction * step)
-
-    def _go_to_page(self, index: int):
-        if not self._images:
-            return
-        index = max(0, min(len(self._images) - 1, index))
-        if self._view_mode == "double":
-            index -= index % 2  # spreads stay aligned to fixed pairs
-        if index == self._current_page:
-            return
-        self._current_page = index
-        self._rebuild_images()
-        # Each new page starts at its top-left corner, like turning a
-        # physical page — leftover scroll from a zoomed previous page
-        # would otherwise open the new one mid-panel.
-        if self._scroll is not None:
-            self._scroll.verticalScrollBar().setValue(0)
-            self._scroll.horizontalScrollBar().setValue(0)
-
-    def _zoom_in(self):
-        if self._zoom_level < self.ZOOM_MAX:
-            self._zoom_level += self.ZOOM_STEP
-            self._rebuild_images()
-
-    def _zoom_out(self):
-        if self._zoom_level > self.ZOOM_MIN:
-            self._zoom_level -= self.ZOOM_STEP
-            self._rebuild_images()
-
-    # ── Reader layout (issues #24, #32) ───────────────────────────────
-    # Three layouts: continuous scroll, single page, two-up spreads.
-    # The choice persists per manga so a webtoon can stay continuous
-    # while a print manga stays single-page.
-
-    def _resolve_view_mode(self) -> str:
-        """Layout for the current manga: its config entry's
-        ``reader_mode``, else the global ``gui.reader_view_mode``, else
-        the legacy ``gui.reader_dual_page`` boolean (issue #24)."""
-        title = (self._manga or {}).get("title", "")
-        for entry in self.app.config.get("manga", []) or []:
-            if entry.get("title") == title:
-                mode = entry.get("reader_mode")
-                if mode in self.VIEW_MODES:
-                    return mode
-                break
-        mode = self.app.config.get("gui.reader_view_mode")
-        if mode in self.VIEW_MODES:
-            return mode
-        if self.app.config.get("gui.reader_dual_page", False):
-            return "double"
-        return "continuous"
-
-    def _set_view_mode(self, mode: str):
-        """Switch layout, persist it for this manga, and re-render."""
-        if mode not in self.VIEW_MODES or mode == self._view_mode:
-            return
-        if self._view_mode == "continuous" and self._scroll is not None \
-                and self._images:
-            # Carry the reading position over: estimate the current page
-            # from the scroll ratio, same as the progress bar does.
-            sb = self._scroll.verticalScrollBar()
-            ratio = sb.value() / max(1, sb.maximum())
-            self._current_page = min(len(self._images) - 1,
-                                     int(ratio * len(self._images)))
-        self._view_mode = mode
-
-        def _store(entry):
-            entry["reader_mode"] = mode
-        title = (self._manga or {}).get("title", "")
-        if not (title and self.app.config.update_manga(title, _store)):
-            # Manga not in config (e.g. removed mid-read): fall back to
-            # the global default so the choice still sticks.
-            self.app.config.set("gui.reader_view_mode", mode)
-            self.app.config.save()
-
-        self._refresh_mode_btns()
-        self._rebuild_images()
-        if self._scroll is not None:
-            self._scroll.verticalScrollBar().setValue(0)
-            self._scroll.horizontalScrollBar().setValue(0)
-
-    def _refresh_mode_btns(self):
-        """Accent-tint the active layout's toolbar button."""
-        from ..assets.icons import icon as _ic
-        from PySide6.QtCore import QSize
-        for mode, (btn, icon_name) in self._mode_btns.items():
-            color = (T.tokens()["accent.primary"] if mode == self._view_mode
-                     else T.tokens()["text.t_2"])
-            btn.setIcon(_ic(icon_name, color, 16))
-            btn.setIconSize(QSize(16, 16))
-
-    # ── Ctrl+wheel zoom (issue #16) ──────────────────────────────────────
-    # The scroll area's viewport eats wheel events for native scrolling.
-    # We install ourselves as an event filter on the viewport AFTER the
-    # scroll area is created in _load_chapter, so we can peek at wheel
-    # events and consume them when Ctrl is held. Otherwise we let them
-    # fall through to the scroll area's default page-scroll handling.
-
-    def eventFilter(self, obj, event):
-        et = event.type()
-        if et == QEvent.Type.Wheel:
-            mods = event.modifiers()
-            is_ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
-            # On macOS, Cmd+wheel is the conventional zoom trigger.
-            # KeyboardModifier.MetaModifier is Cmd on macOS, Win key on
-            # other OSes — both unusual enough to safely treat as zoom.
-            is_cmd = bool(mods & Qt.KeyboardModifier.MetaModifier)
-            if is_ctrl or is_cmd:
-                # angleDelta().y() is in 1/8 degree units; positive = up.
-                # We also fall back to pixelDelta for high-precision
-                # touchpads (some Apple drivers fire pixelDelta only).
-                delta = event.angleDelta().y()
-                if delta == 0:
-                    delta = event.pixelDelta().y()
-                if delta > 0:
-                    self._zoom_in()
-                elif delta < 0:
-                    self._zoom_out()
-                event.accept()
-                return True  # consumed — don't let viewport scroll too
-
-        # ── Click-and-drag pan (issue #21) ──────────────────────────────
-        # When zoomed in, let users drag the page around to navigate
-        # parts that don't fit the viewport. Works in both directions —
-        # vertical pan complements wheel scroll, horizontal pan is the
-        # only way to reach off-screen content when ZOOM is >= ~1.0.
-        elif et == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.LeftButton and self._scroll is not None:
-                self._pan_active = True
-                self._pan_start_x = event.position().x()
-                self._pan_start_y = event.position().y()
-                self._pan_start_h = self._scroll.horizontalScrollBar().value()
-                self._pan_start_v = self._scroll.verticalScrollBar().value()
-                self._scroll.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
-                # Don't consume — let the press through in case child
-                # widgets want it (none do today, but safer).
-        elif et == QEvent.Type.MouseMove:
-            if getattr(self, "_pan_active", False) and self._scroll is not None:
-                dx = event.position().x() - self._pan_start_x
-                dy = event.position().y() - self._pan_start_y
-                hbar = self._scroll.horizontalScrollBar()
-                vbar = self._scroll.verticalScrollBar()
-                hbar.setValue(int(self._pan_start_h - dx))
-                vbar.setValue(int(self._pan_start_v - dy))
-                event.accept()
-                return True
-        elif et == QEvent.Type.MouseButtonRelease:
-            if getattr(self, "_pan_active", False):
-                self._pan_active = False
-                if self._scroll is not None:
-                    self._scroll.viewport().setCursor(self._idle_cursor())
-
-        return super().eventFilter(obj, event)
-
-    def _idle_cursor(self):
-        """OpenHand when content overflows (panning available), else
-        ArrowCursor (no point hinting at drag if there's nothing to pan).
-        """
-        if self._scroll is None:
-            return Qt.CursorShape.ArrowCursor
-        h = self._scroll.horizontalScrollBar()
-        v = self._scroll.verticalScrollBar()
-        if h.maximum() > 0 or v.maximum() > 0:
-            return Qt.CursorShape.OpenHandCursor
-        return Qt.CursorShape.ArrowCursor
-
-    # ── Touchpad pinch zoom (issue #16) ──────────────────────────────────
-    # Two delivery paths converge here:
-    #   1. QGestureEvent (Windows/Linux + Qt's gesture framework) — fires
-    #      via grabGesture(PinchGesture) in __init__. Pinch.totalScaleFactor
-    #      is multiplicative: 1.10 = 10% bigger than gesture start.
-    #   2. QNativeGestureEvent (macOS trackpad) — fires per OS gesture
-    #      tick. event.value() is a small additive delta (~0.04 per tick).
-    # We accumulate deltas until they cross ZOOM_STEP, then snap.
-
-    def event(self, ev):
-        if ev.type() == QEvent.Type.Gesture:
-            from PySide6.QtWidgets import QGesture
-            pinch = ev.gesture(Qt.GestureType.PinchGesture)
-            if pinch is not None:
-                self._handle_pinch(pinch)
-                ev.accept()
-                return True
-        elif ev.type() == QEvent.Type.NativeGesture:
-            # macOS trackpad gestures
-            try:
-                gt = ev.gestureType()
-            except AttributeError:
-                gt = None
-            # Qt.NativeGestureType.ZoomNativeGesture is the pinch on Mac.
-            if gt == Qt.NativeGestureType.ZoomNativeGesture:
-                self._pinch_accum += float(ev.value())
-                self._flush_pinch_accum()
-                ev.accept()
-                return True
-        return super().event(ev)
-
-    def _handle_pinch(self, pinch):
-        """Snap a PinchGesture's `totalScaleFactor` onto our discrete
-        ZOOM_STEP ladder. Starts fresh on each gesture, so users always
-        feel deterministic step behavior even after multiple pinches.
-        """
-        from PySide6.QtWidgets import QGesture
-        state = pinch.state()
-        if state == Qt.GestureState.GestureStarted:
-            self._pinch_baseline = self._zoom_level
-            return
-        # On Update/Finished, compute target from baseline * totalScaleFactor.
-        if state in (Qt.GestureState.GestureUpdated, Qt.GestureState.GestureFinished):
-            try:
-                factor = float(pinch.totalScaleFactor())
-            except Exception:
-                factor = 1.0
-            baseline = getattr(self, "_pinch_baseline", self._zoom_level)
-            target = max(self.ZOOM_MIN, min(self.ZOOM_MAX, baseline * factor))
-            # Snap to the nearest ZOOM_STEP so we don't constantly
-            # re-render at fractional sizes.
-            stepped = round(target / self.ZOOM_STEP) * self.ZOOM_STEP
-            if abs(stepped - self._zoom_level) >= self.ZOOM_STEP / 2:
-                self._zoom_level = stepped
-                self._rebuild_images()
-
-    def _flush_pinch_accum(self):
-        """Drain the macOS native-gesture accumulator one ZOOM_STEP at a time."""
-        # value() is additive per tick on macOS; positive = zoom in.
-        while self._pinch_accum >= self.ZOOM_STEP / 4:
-            self._zoom_in()
-            self._pinch_accum -= self.ZOOM_STEP / 4
-        while self._pinch_accum <= -self.ZOOM_STEP / 4:
-            self._zoom_out()
-            self._pinch_accum += self.ZOOM_STEP / 4
-
-    def _toggle_fit_width(self):
-        self._fit_width = not self._fit_width
-        self._rebuild_images()
 
     def _rebuild_images(self):
         if not self._scroll or not self._images:
             return
 
+        # Issue #389: zoom / fit-width in continuous mode only changes
+        # page sizes, so the placeholders are resized in place. Recreating
+        # every page widget of a long chapter stalled the UI.
+        if not (self._view_mode == "continuous"
+                and self._resize_continuous_pages()):
+            self._rebuild_page_widgets()
+
+        if hasattr(self, "_zoom_label") and self._zoom_label:
+            self._zoom_label.setText(f"{int(self._zoom_level * 100)}%")
+        self._update_progress_display()
+
+    def _rebuild_page_widgets(self):
         # Drain the layout completely — labels AND the dual-page HBox
         # spread layouts. Previously we only deleted labels, which left
         # orphaned QHBoxLayout items behind on every dual<->single flip.
@@ -588,10 +234,6 @@ class ReaderPage(BasePage):
 
         self._render_images()
 
-        if hasattr(self, "_zoom_label") and self._zoom_label:
-            self._zoom_label.setText(f"{int(self._zoom_level * 100)}%")
-        self._update_progress_display()
-
     def _clear_sub_layout(self, layout):
         """Recursively drain a layout's children + delete widgets."""
         while layout.count():
@@ -609,6 +251,7 @@ class ReaderPage(BasePage):
         # _update_progress_display instead.
         if self._view_mode in self.PAGED_MODES:
             return
+        self._update_page_window()
         try:
             sb = self._scroll.verticalScrollBar()
             mx = max(1, sb.maximum())
@@ -667,46 +310,67 @@ class ReaderPage(BasePage):
         # page, not keep resuming at the saved end-of-chapter position.
         self.app.app_state.clear_reader_position(title, str(self._chapter))
         # Issue #104: optionally discard the local file now that the
-        # chapter is finished. Runs after the read set is updated so read
-        # progress survives even if the deletion fails.
-        self._remove_after_read(title, str(self._chapter))
+        # chapter is finished. Issue #389: pages are decoded from that
+        # file on demand, so the deletion waits until the reader leaves
+        # the chapter (_finish_pending_removal). The read set is already
+        # updated, so read progress survives even if the deletion fails.
+        if (self.app.config.reader_remove_after_read
+                and self._artifact_path is not None):
+            self._pending_removal = (title, str(self._chapter),
+                                     self._artifact_path)
         # Tell other pages (Library, Detail) to repaint without
         # waiting for the next navigation.
         self.app.events.publish("chapter_read", {
             "title": title, "chapter": str(self._chapter),
         })
 
-    def _remove_after_read(self, title: str, chapter: str):
-        """Delete the just-read chapter's local artifact and drop it from
-        downloaded-state when the "remove chapters after reading" setting
-        is on (issue #104).
+    def _remove_after_read(self, title: str, chapter: str,
+                           path: Optional[Path]):
+        """Move the just-read chapter's local artifact to the system trash
+        and drop it from downloaded-state when the "remove chapters after
+        reading" setting is on (issue #104).
 
         Read-state is intentionally left intact — only the downloaded
         record and the on-disk file/folder go away, so the Detail row
-        returns to the Download state. Deletion failures are non-fatal:
+        returns to the Download state. Issue #393: the file goes to the
+        trash, never deleted for good, so a chapter finished by accident
+        can be restored. If the trash can't take it, the file is kept,
         the chapter stays marked downloaded and a notification is logged
         instead of desyncing state from disk or crashing the reader.
         """
-        if not self.app.config.get("reader.remove_after_read", False):
+        if not self.app.config.reader_remove_after_read:
             return
-        path = self._artifact_path
         if path is None:
             return
-        try:
-            if path.is_dir():
-                shutil.rmtree(path)
-            elif path.exists():
-                path.unlink()
-            # If the file is already gone, treat that as success and let
-            # the downloaded-state removal below reconcile with disk.
-        except OSError as exc:
+        # If the file is already gone, treat that as success and let the
+        # downloaded-state removal below reconcile with disk.
+        if path.exists() or path.is_symlink():
+            try:
+                location = trash.move_to_trash(path)
+            except OSError as exc:
+                self.app.app_state.add_notification(
+                    "error",
+                    f"Couldn't move {title} Chapter {chapter} to the "
+                    f"{trash.trash_name()} after reading, so it was kept: "
+                    f"{exc}",
+                )
+                return
             self.app.app_state.add_notification(
-                "error",
-                f"Couldn't remove {title} Chapter {chapter} after reading: {exc}",
+                "system",
+                f"Moved {title} Chapter {chapter} to the "
+                f"{trash.trash_name()} after reading.",
+                f"Now in the {trash.trash_name()} at: {location}"
+                if location else None,
             )
-            return
-        self._artifact_path = None
+        if self._artifact_path == path:
+            self._artifact_path = None
         self.app.app_state.remove_downloaded_chapter(title, chapter)
+        # Issue #389: the removal can finish after the reader was left
+        # (a page decode still held the file), so pages already showing
+        # the chapter as downloaded must hear about it.
+        self.app.events.publish("chapter_removed", {
+            "title": title, "chapter": chapter,
+        })
 
     def _mark_read_if_unscrollable(self):
         """A chapter that fits entirely in the viewport never scrolls, so
@@ -839,8 +503,8 @@ class ReaderPage(BasePage):
         except RuntimeError:
             pass  # scroll area torn down before the timer fired
 
-    def _render_images(self):
-        # Total width the spread is allowed to occupy.
+    def _page_width_budget(self) -> int:
+        """Total width the page or spread may occupy, zoom included."""
         if self._fit_width:
             try:
                 max_w = min(self._scroll.width() - 40, 1200)
@@ -851,81 +515,298 @@ class ReaderPage(BasePage):
         else:
             max_w = self.DEFAULT_MAX_WIDTH
 
-        max_w = int(max_w * self._zoom_level)
+        return int(max_w * self._zoom_level)
 
-        def _scaled_pixmap(qimg, target_w):
-            """Scale qimg so its width fits target_w (with zoom factored in)."""
-            w, h = qimg.width(), qimg.height()
-            if w > target_w:
-                ratio = target_w / w
-                new_w, new_h = int(w * ratio), int(h * ratio)
+    # ── Lazy page loading (issue #389) ────────────────────────────────
+    # Opening a chapter only indexes it (page order + header sizes).
+    # Pages are decoded and scaled on the loader's worker threads, and
+    # only around the reading position: the visible pages first, then
+    # PAGE_PREFETCH_AHEAD ahead and PAGE_PREFETCH_BEHIND behind. Pages
+    # that leave that window drop their pixmap; a byte-bounded cache
+    # keeps recent ones for quick revisits. Every chapter load starts a
+    # new loader token, so late results from the previous chapter are
+    # ignored.
+
+    def _page_label(self, index: int, target_w: int) -> QLabel:
+        """Placeholder label for one page, sized like the final pixmap
+        and filled at once when the page is already cached."""
+        lbl = QLabel()
+        lbl.setFixedSize(self._placeholder_size(self._images[index],
+                                                target_w))
+        self._page_slots[index] = lbl
+        cached = self._page_cache.get((index, target_w, self._zoom_level))
+        if cached is not None:
+            self._set_page_pixmap(index, lbl, cached)
+        elif index in self._failed_pages:
+            self._show_page_failed(lbl, index)
+        return lbl
+
+    def _placeholder_size(self, ref: PageRef, target_w: int) -> QSize:
+        # A page over the pixel limit is never shown, so its declared size
+        # mustn't stretch the layout either.
+        if (ref.width > 0 and ref.height > 0
+                and not exceeds_pixel_limit(ref.width, ref.height)):
+            return display_size(ref.width, ref.height, target_w,
+                                self._zoom_level)
+        # No usable header size: reserve a typical page shape until
+        # the decoded page sets the real one.
+        return QSize(target_w, int(target_w * 1.5))
+
+    def _resize_continuous_pages(self) -> bool:
+        """Resize the continuous-mode placeholders for a new zoom or
+        fit-width without recreating them; the scroll offset is kept,
+        as with a rebuild. False when the continuous layout isn't built
+        (e.g. coming from a paged layout), so the caller rebuilds it."""
+        if (not self._page_offsets
+                or len(self._page_labels) != len(self._images)):
+            return False
+        max_w = self._page_width_budget()
+        self._page_target_w = max_w
+        self._shown_pages.clear()
+        spacing = max(0, self._image_layout.spacing())
+        top = self._page_offsets[0]
+        try:
+            for index, lbl in enumerate(self._page_labels):
+                lbl.clear()
+                lbl.setFixedSize(self._placeholder_size(self._images[index],
+                                                        max_w))
+                self._page_offsets[index] = top
+                cached = self._page_cache.get(
+                    (index, max_w, self._zoom_level))
+                if cached is not None:
+                    self._set_page_pixmap(index, lbl, cached)
+                elif index in self._failed_pages:
+                    self._show_page_failed(lbl, index)
+                top += lbl.height() + spacing
+        except RuntimeError:
+            return False  # a label is already gone: rebuild instead
+        self._update_page_window()
+        return True
+
+    def _visible_page_range(self) -> Optional[Tuple[int, int, int]]:
+        """(first, last, step) of the pages on screen; step is the page
+        count of one paging move, so prefetch walks whole spreads."""
+        total = len(self._images)
+        if self._view_mode in self.PAGED_MODES:
+            first = self._current_page
+            last = first + (1 if self._view_mode == "double" else 0)
+            return first, min(total - 1, last), last - first + 1
+        if not self._page_offsets or self._scroll is None:
+            return None
+        try:
+            top = self._scroll.verticalScrollBar().value()
+            bottom = top + max(1, self._scroll.viewport().height())
+        except RuntimeError:
+            return None  # scroll area torn down
+        first = max(0, bisect_right(self._page_offsets, top) - 1)
+        last = max(first, bisect_left(self._page_offsets, bottom) - 1)
+        return first, min(total - 1, last), 1
+
+    def _update_page_window(self):
+        """Request the pages around the reading position (visible ones
+        first) and release the pixmaps of pages far from it."""
+        if not self._images or not self._page_slots:
+            return
+        visible = self._visible_page_range()
+        if visible is None:
+            return
+        first, last, step = visible
+        total = len(self._images)
+        ahead_end = min(total, last + 1 + self.PAGE_PREFETCH_AHEAD * step)
+        behind_start = max(0, first - self.PAGE_PREFETCH_BEHIND * step)
+        order = (list(range(first, last + 1))
+                 + list(range(last + 1, ahead_end))
+                 + list(range(first - 1, behind_start - 1, -1)))
+
+        target_w, zoom = self._page_target_w, self._zoom_level
+        wanted = []
+        for index in order:
+            if index in self._failed_pages or index in self._shown_pages:
+                continue
+            key = (index, target_w, zoom)
+            wanted.append(key)
+            cached = self._page_cache.get(key)
+            if cached is not None:
+                label = self._page_slots.get(index)
+                if label is not None:
+                    self._set_page_pixmap(index, label, cached)
+                continue
+            self._page_loader.request(index, self._images[index],
+                                      target_w, zoom)
+        self._page_loader.cancel_outside(wanted)
+
+        # One extra step of slack on each side, so a page sitting on the
+        # window edge doesn't flip between loaded and released.
+        keep_lo = max(0, behind_start - step)
+        keep_hi = ahead_end - 1 + step
+        self._page_keep = (keep_lo, keep_hi)
+        for index in [i for i in self._shown_pages
+                      if not keep_lo <= i <= keep_hi]:
+            self._shown_pages.discard(index)
+            label = self._page_slots.get(index)
+            if label is not None:
+                try:
+                    label.clear()
+                except RuntimeError:
+                    pass  # deleted by a rebuild
+
+    def _on_page_ready(self, token: int, index: int, target_w: int,
+                       zoom: float, image):
+        """A worker finished a page (GUI thread, via queued signal)."""
+        key = (index, target_w, zoom)
+        if not self._page_loader.finish(token, key):
+            return  # from a previous chapter
+        current = (target_w == self._page_target_w
+                   and zoom == self._zoom_level)
+        label = self._page_slots.get(index) if current else None
+        if image.isNull():
+            self._failed_pages.add(index)
+            if label is not None:
+                self._show_page_failed(label, index)
+            return
+        pixmap = QPixmap.fromImage(image)
+        self._page_cache.put(key, pixmap)
+        keep_lo, keep_hi = self._page_keep
+        if label is not None and keep_lo <= index <= keep_hi:
+            self._set_page_pixmap(index, label, pixmap)
+
+    def _set_page_pixmap(self, index: int, label: QLabel, pixmap: QPixmap):
+        try:
+            if label.size() != pixmap.size():
+                # Header size was missing or off: take the real one.
+                label.setFixedSize(pixmap.size())
+                self._recompute_page_offsets()
+            label.setPixmap(pixmap)
+        except RuntimeError:
+            return  # deleted by a rebuild
+        self._shown_pages.add(index)
+
+    def _recompute_page_offsets(self):
+        if self._view_mode != "continuous" or not self._page_offsets:
+            return
+        spacing = max(0, self._image_layout.spacing())
+        top = self._page_offsets[0]
+        for index in range(len(self._page_offsets)):
+            self._page_offsets[index] = top
+            label = self._page_slots.get(index)
+            top += (label.height() if label is not None else 0) + spacing
+
+    def _show_page_failed(self, label: QLabel, index: int):
+        try:
+            label.setStyleSheet(
+                f"color: {T.FG_MUTED}; font-size: {T.FONT_SIZE_SM}pt;")
+            label.setWordWrap(True)
+            ref = (self._images[index] if 0 <= index < len(self._images)
+                   else None)
+            if ref is not None and exceeds_pixel_limit(ref.width, ref.height):
+                label.setText(f"Page {index + 1} is too large to show "
+                              f"({ref.width} x {ref.height} pixels).")
             else:
-                new_w = int(w * self._zoom_level)
-                new_h = int(h * self._zoom_level)
-            return QPixmap.fromImage(qimg).scaled(
-                new_w, new_h,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+                label.setText(f"Page {index + 1} couldn't be loaded.")
+            # A small page's slot can be too small for the message: grow
+            # it until the message fits, wrapped to the page width.
+            label.ensurePolished()
+            metrics = label.fontMetrics()
+            pad = 16
+            width = max(label.width(), min(
+                metrics.horizontalAdvance(label.text()) + pad,
+                max(label.width(), self._page_target_w)))
+            text = metrics.boundingRect(
+                QRect(0, 0, max(1, width - pad), 10000),
+                Qt.TextFlag.TextWordWrap, label.text())
+            height = max(label.height(), text.height() + pad)
+            if (width, height) != (label.width(), label.height()):
+                label.setFixedSize(width, height)
+                self._recompute_page_offsets()
+        except RuntimeError:
+            pass  # deleted by a rebuild
+
+    def _reset_page_loading(self):
+        """Drop the open chapter's decode jobs, cache and pixmaps."""
+        self._page_loader.reset()
+        self._page_cache.clear()
+        for label in self._page_slots.values():
+            try:
+                label.clear()
+            except RuntimeError:
+                pass
+        self._page_slots.clear()
+        self._shown_pages.clear()
+        self._failed_pages.clear()
+        self._page_offsets = []
+        self._page_keep = (0, -1)
+
+    def _finish_pending_removal(
+            self, reopening: Optional[Tuple[str, str]] = None):
+        """Run the remove-after-read that _mark_current_read deferred,
+        now that the reader is letting go of that chapter. Callers cancel
+        its page jobs first; a decode still reading the file gets up to
+        REMOVAL_WAIT_S to finish. The file is only deleted once no decode
+        reads it; past the deadline the removal stays queued and the
+        retry timer finishes it. Runs at most once per finished chapter.
+
+        *reopening* is the (title, chapter) about to be opened: a queued
+        removal for it is handed back to _pending_removal first, so the
+        file stays until that chapter is left again."""
+        pending, self._pending_removal = self._pending_removal, None
+        if pending is not None and pending not in self._removal_queue:
+            self._removal_queue.append(pending)
+        if reopening is not None:
+            for item in list(self._removal_queue):
+                if (item[0], item[1]) == reopening:
+                    self._removal_queue.remove(item)
+                    self._pending_removal = item
+        self._process_removal_queue(self.REMOVAL_WAIT_S, leaving=True)
+
+    def _retry_pending_removals(self):
+        """Retry timer (GUI thread): never blocks, only checks."""
+        self._process_removal_queue(0, leaving=False)
+
+    def _process_removal_queue(self, wait: float, leaving: bool):
+        deadline = time.monotonic() + wait
+        for item in list(self._removal_queue):
+            title, chapter, path = item
+            if not leaving and self._images and path == self._artifact_path:
+                # Opened again since: it goes when the reader leaves it.
+                self._removal_queue.remove(item)
+                if self._pending_removal is None:
+                    self._pending_removal = item
+                continue
+            remaining = max(0.0, deadline - time.monotonic())
+            if not self._page_loader.wait_idle(remaining, path):
+                continue  # still being read: keep it for the retry
+            self._removal_queue.remove(item)
+            self._remove_after_read(title, chapter, path)
+        if not self._removal_queue:
+            self._removal_timer.stop()
+        elif not self._removal_timer.isActive():
+            self._removal_timer.start()
+
+    def shutdown_page_loader(self):
+        """Stop the page decode workers and finish a deferred
+        remove-after-read (app close)."""
+        self._page_loader.shutdown()
+        self._finish_pending_removal()
+        self._removal_timer.stop()
+        # Nothing can retry after the app closes: the chapter stays on
+        # disk and downloaded (state matches disk), and the user is told.
+        for title, chapter, _path in self._removal_queue:
+            self.app.app_state.add_notification(
+                "error",
+                f"Couldn't move {title} Chapter {chapter} to the "
+                f"{trash.trash_name()} after reading: the file was still "
+                "in use, so it was kept.",
             )
-
-        # Paged layouts center the (short) content in the viewport;
-        # continuous keeps everything pinned to the top of the scroll.
-        if self._image_layout is not None:
-            if self._view_mode in self.PAGED_MODES:
-                self._image_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            else:
-                self._image_layout.setAlignment(
-                    Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-
-        if self._view_mode == "continuous":
-            # ── Continuous (default): all pages stacked vertically ──
-            for qimg in self._images:
-                lbl = QLabel()
-                lbl.setPixmap(_scaled_pixmap(qimg, max_w))
-                lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                self._image_layout.addWidget(lbl)
-                self._page_labels.append(lbl)
-            return
-
-        # ── Paged layouts (issue #32): only the current page/spread ──
-        self._current_page = max(0, min(len(self._images) - 1,
-                                        self._current_page))
-        if self._view_mode == "double":
-            self._current_page -= self._current_page % 2
-
-        if self._view_mode == "single":
-            lbl = QLabel()
-            lbl.setPixmap(_scaled_pixmap(self._images[self._current_page], max_w))
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._image_layout.addWidget(lbl)
-            self._page_labels.append(lbl)
-            return
-
-        # ── Two-up (issues #24, #32): one spread, two pages side-by-side
-        # (or one if the chapter ends on an odd page). Allocate half
-        # max_w per side so the spread as a whole stays inside the
-        # viewport.
-        per_side = max(120, (max_w - 8) // 2)
-        i = self._current_page
-        spread = QHBoxLayout()
-        spread.setSpacing(4)
-        spread.setContentsMargins(0, 0, 0, 0)
-        spread.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-
-        for j in (0, 1):
-            if i + j >= len(self._images):
-                break
-            lbl = QLabel()
-            lbl.setPixmap(_scaled_pixmap(self._images[i + j], per_side))
-            lbl.setAlignment(Qt.AlignmentFlag.AlignTop | (
-                Qt.AlignmentFlag.AlignRight if j == 0 else Qt.AlignmentFlag.AlignLeft
-            ))
-            spread.addWidget(lbl)
-            self._page_labels.append(lbl)
-
-        self._image_layout.addLayout(spread)
+        self._removal_queue.clear()
 
     def _load_chapter(self):
+        # Issue #389: no decode job or pixmap of the previous chapter
+        # survives into this one, and its deferred remove-after-read runs
+        # now that nothing reads its file any more. The chapter being
+        # opened keeps its file even when its removal was still queued.
+        self._reset_page_loading()
+        self._finish_pending_removal(reopening=(
+            (self._manga or {}).get("title", ""), str(self._chapter)))
         # Tear down previous content
         if self._content:
             self._content.deleteLater()
@@ -973,9 +854,14 @@ class ReaderPage(BasePage):
         top_layout.setContentsMargins(24, 12, 24, 12)
         top_layout.setSpacing(10)
 
+        # Issue #396: the reader buttons take focus from Tab only. A
+        # click leaves focus on the page, so Space, arrows and the
+        # other reader keys keep working instead of going to the button
+        # just clicked.
         back_btn = QPushButton("‹ Back")
         back_btn.setProperty("variant", "ghost")
         back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        back_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         back_btn.clicked.connect(lambda: self.app.show_page("detail", manga=self._manga))
         top_layout.addWidget(back_btn)
 
@@ -997,6 +883,7 @@ class ReaderPage(BasePage):
         if prev_ch is not None:
             prev_btn = QPushButton("‹ Prev")
             prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            prev_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             prev_btn.clicked.connect(lambda checked=False, c=prev_ch: self._navigate_chapter(c))
             top_layout.addWidget(prev_btn)
 
@@ -1006,6 +893,7 @@ class ReaderPage(BasePage):
         # It resolves its target on click, so no chapter is captured.
         self._next_btn = QPushButton("Next ›")
         self._next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._next_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._next_btn.clicked.connect(
             lambda checked=False: self._go_next_chapter())
         self._next_btn.setVisible(next_ch is not None)
@@ -1016,15 +904,20 @@ class ReaderPage(BasePage):
         # continuous scroll, single page, two-up. The active layout's
         # icon is accent-tinted in _refresh_mode_btns.
         self._mode_btns = {}
-        for mode, icon_name, tip in (
-            ("continuous", "view_continuous", "Continuous vertical scroll"),
-            ("single", "view_single", "Single page at a time"),
-            ("double", "view_dual", "Two-page spreads"),
+        for mode, icon_name, label, tip in (
+            ("continuous", "view_continuous", "Continuous scroll",
+             "Continuous vertical scroll"),
+            ("single", "view_single", "Single page", "Single page at a time"),
+            ("double", "view_dual", "Two-page spread", "Two-page spreads"),
         ):
             btn = QPushButton()
             btn.setFixedSize(36, 28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             btn.setToolTip(tip)
+            # Icon-only: the tooltip alone ends up as the description,
+            # leaving no name (issue #394).
+            btn.setAccessibleName(label)
             btn.clicked.connect(lambda checked=False, m=mode: self._set_view_mode(m))
             self._mode_btns[mode] = (btn, icon_name)
             top_layout.addWidget(btn)
@@ -1032,8 +925,11 @@ class ReaderPage(BasePage):
 
         # Zoom chip
         zoom_minus = QPushButton("−")
+        zoom_minus.setToolTip("Zoom out")
+        zoom_minus.setAccessibleName("Zoom out")
         zoom_minus.setFixedSize(28, 28)
         zoom_minus.setCursor(Qt.CursorShape.PointingHandCursor)
+        zoom_minus.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         zoom_minus.clicked.connect(self._zoom_out)
         top_layout.addWidget(zoom_minus)
 
@@ -1045,8 +941,11 @@ class ReaderPage(BasePage):
         top_layout.addWidget(self._zoom_label)
 
         zoom_plus = QPushButton("+")
+        zoom_plus.setToolTip("Zoom in")
+        zoom_plus.setAccessibleName("Zoom in")
         zoom_plus.setFixedSize(28, 28)
         zoom_plus.setCursor(Qt.CursorShape.PointingHandCursor)
+        zoom_plus.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         zoom_plus.clicked.connect(self._zoom_in)
         top_layout.addWidget(zoom_plus)
 
@@ -1121,6 +1020,11 @@ class ReaderPage(BasePage):
         # ── Scrollable image area (reader_body) ──
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
+        # Issue #396: the page keeps keyboard focus and does all the
+        # scrolling and page turning itself. A focused scroll area
+        # (after a click on the page) would take the arrow keys and
+        # scroll instead of turning pages.
+        self._scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         # Issue #21: allow horizontal scrollbar when zoomed images
         # overflow the viewport. AsNeeded keeps it hidden at fit-width.
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -1145,6 +1049,10 @@ class ReaderPage(BasePage):
         self._scroll.verticalScrollBar().rangeChanged.connect(
             lambda *_: self._scroll.viewport().setCursor(self._idle_cursor())
         )
+        # Issue #389: the layout settling or the window resizing changes
+        # which pages are on screen.
+        self._scroll.verticalScrollBar().rangeChanged.connect(
+            lambda *_: self._update_page_window())
 
         scroll_content = QWidget()
         self._image_layout = QVBoxLayout(scroll_content)
@@ -1170,6 +1078,7 @@ class ReaderPage(BasePage):
             next_chapter_btn.setFixedHeight(40)
             next_chapter_btn.setFixedWidth(250)
             next_chapter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            next_chapter_btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             next_chapter_btn.clicked.connect(
                 lambda checked=False: self._go_next_chapter()
             )
@@ -1203,6 +1112,7 @@ class ReaderPage(BasePage):
         self._progress_track.setValue(0)
         self._progress_track.setTextVisible(False)
         self._progress_track.setFixedHeight(4)
+        self._progress_track.setAccessibleName("Reading progress")
         pb_l.addWidget(self._progress_track, 1)
 
         self._progress_pct = QLabel("0%")
@@ -1227,13 +1137,16 @@ class ReaderPage(BasePage):
         # next one for manual-mode manga (setting-gated, cache-first).
         self._maybe_prefetch_next()
 
-    def _find_and_load_chapter(self) -> List[QImage]:
+    def _find_and_load_chapter(self) -> List[PageRef]:
         # Issue #111: the downloader saves under the *sanitized* title
-        # folder and formats chapter labels for sorting ("2 Part 1" ->
-        # "2.01"), so the lookup must mirror those exact conventions.
-        # Raw title/label locations are kept as fallbacks for downloads
-        # that predate this fix.
-        from ...downloader import _format_chapter_number, _sanitize_filename
+        # folder and formats chapter labels for sorting ("2" -> "0002.000",
+        # "2 Part 1" -> "0002_Part 01"), so the lookup must mirror those
+        # exact conventions. Raw title locations and older label forms
+        # ("2", "2.01") are kept as fallbacks for earlier downloads.
+        from ...downloader import _sanitize_filename
+        from ...downloader.naming import (DEFAULT_NAMING_TEMPLATE,
+                                          _chapter_base_name,
+                                          _chapter_filename_labels)
 
         # Reset before resolving so a failed load can't leave a stale path
         # pointing at the previous chapter (issue #104).
@@ -1242,10 +1155,7 @@ class ReaderPage(BasePage):
         ch = str(self._chapter)
         download_dir = Path(self.app.config.download_dir)
 
-        labels = []
-        for label in (_format_chapter_number(ch), ch, f"{ch}.0"):
-            if label not in labels:
-                labels.append(label)
+        labels = _chapter_filename_labels(ch)
 
         manga_dirs = []
         for d in (download_dir / _sanitize_filename(title), download_dir / title):
@@ -1258,15 +1168,24 @@ class ReaderPage(BasePage):
 
         for manga_dir in manga_dirs:
             for label in labels:
-                # Sanitize the full base name, not just the title — the
-                # downloader builds "{title} - Chapter {chapter}" first
-                # and sanitizes the result (incl. the length cap).
-                base = _sanitize_filename(f"{title} - Chapter {label}")
-                for ext in [".pdf", ".epub", ".cbz", ".zip"]:
-                    filepath = manga_dir / f"{base}{ext}"
-                    if filepath.exists():
-                        self._artifact_path = filepath
-                        return _extract_images_from_file(filepath)
+                # Current downloads shorten a long title so the chapter
+                # text stays whole (labels[0] is the current form). Older
+                # versions sanitized the full "{title} - Chapter {label}"
+                # and cut its end at the length cap; keep that for the
+                # older label forms (and the raw label it shares).
+                bases = []
+                if label == labels[0]:
+                    bases.append(_chapter_base_name(
+                        DEFAULT_NAMING_TEMPLATE, title, label))
+                if label != labels[0] or label == ch:
+                    bases.append(
+                        _sanitize_filename(f"{title} - Chapter {label}"))
+                for base in dict.fromkeys(bases):
+                    for ext in [".pdf", ".epub", ".cbz", ".zip"]:
+                        filepath = manga_dir / f"{base}{ext}"
+                        if filepath.exists():
+                            self._artifact_path = filepath
+                            return index_chapter_file(filepath)
 
                 # The downloader only writes a single-component
                 # "Chapter <label>" folder, so require that exact shape
@@ -1278,7 +1197,7 @@ class ReaderPage(BasePage):
                     and folder.is_dir()
                 ):
                     self._artifact_path = folder
-                    return _extract_images_from_folder(folder)
+                    return index_chapter_folder(folder)
 
         # Fallback: scan directories for anything chapter-shaped
         for manga_dir in manga_dirs:
@@ -1287,311 +1206,9 @@ class ReaderPage(BasePage):
                     f"chapter {label.lower()}" in f.stem.lower() for label in labels
                 ):
                     self._artifact_path = f
-                    return _extract_images_from_file(f)
+                    return index_chapter_file(f)
                 if f.is_dir() and any(label in f.name for label in labels):
                     self._artifact_path = f
-                    return _extract_images_from_folder(f)
+                    return index_chapter_folder(f)
 
         return []
-
-    def _navigate_chapter(self, chapter):
-        # Issue #106: keep the outgoing chapter's resume point before the
-        # cursor moves on — Prev/Next never goes through on_hide.
-        self.save_reading_position()
-        self._chapter = chapter
-        if self._manga:
-            title = self._manga.get("title", "")
-            if title:
-                self.app.app_state.set_reading_progress(title, str(chapter))
-        self._load_chapter()
-        self.setFocus()
-
-    def _go_next_chapter(self):
-        if not self._manga:
-            return
-        title = self._manga.get("title", "")
-        next_ch = self._navigation_neighbor(+1, title)
-        if next_ch is not None:
-            self._navigate_chapter(next_ch)
-
-    def _go_prev_chapter(self):
-        if not self._manga:
-            return
-        title = self._manga.get("title", "")
-        prev_ch = self._navigation_neighbor(-1, title)
-        if prev_ch is not None:
-            self._navigate_chapter(prev_ch)
-
-    def _sync_navigation_chapters(self, title: str) -> List[str]:
-        """Return the reader-local chapter order for Prev/Next.
-
-        When the current chapter is still in downloaded-state, the live
-        downloaded list is authoritative. If remove-after-read has already
-        dropped the visible chapter, keep the previous reader-local order as
-        the anchor and merge in any newly downloaded/prefetched chapters.
-        """
-        downloaded = [
-            str(ch) for ch in self.app.app_state.get_downloaded_chapters(title)
-        ]
-        current = str(self._chapter)
-        if current in downloaded:
-            self._navigation_chapters = downloaded
-            return self._navigation_chapters
-
-        merged = []
-        for chapter in self._navigation_chapters:
-            chapter = str(chapter)
-            if chapter not in merged:
-                merged.append(chapter)
-        if current not in merged:
-            self._insert_navigation_chapter(merged, current)
-        for chapter in downloaded:
-            chapter = str(chapter)
-            if chapter not in merged:
-                self._insert_navigation_chapter(merged, chapter)
-        self._navigation_chapters = merged
-        return self._navigation_chapters
-
-    def _insert_navigation_chapter(self, sequence: List[str], chapter: str):
-        """Insert a newly discovered chapter into reader-local order."""
-        key = _chapter_sort_key(chapter)
-        if key is None:
-            sequence.append(chapter)
-            return
-
-        for idx, existing in enumerate(sequence):
-            existing_key = _chapter_sort_key(existing)
-            if existing_key is not None and existing_key > key:
-                sequence.insert(idx, chapter)
-                return
-        sequence.append(chapter)
-
-    def _navigation_neighbor(self, direction: int,
-                             title: Optional[str] = None) -> Optional[str]:
-        """Find the nearest downloaded neighbor in the local navigation
-        sequence. Removed stale entries are skipped, but the current chapter
-        itself may remain as the anchor after remove-after-read."""
-        if not self._manga or self._chapter is None:
-            return None
-        title = title if title is not None else self._manga.get("title", "")
-        sequence = self._sync_navigation_chapters(title)
-        current = str(self._chapter)
-        try:
-            idx = sequence.index(current)
-        except ValueError:
-            return None
-
-        downloaded = set(
-            str(ch) for ch in self.app.app_state.get_downloaded_chapters(title)
-        )
-        step = 1 if direction > 0 else -1
-        i = idx + step
-        while 0 <= i < len(sequence):
-            chapter = sequence[i]
-            if chapter in downloaded:
-                return chapter
-            i += step
-        return None
-
-    # -- Reader prefetch (issue #107) ------------------------------------
-    def _maybe_prefetch_next(self):
-        """Quietly queue the immediate next available chapter for a
-        manual-mode manga so Next keeps working without leaving the
-        reader. Setting-gated and cache-first; every failure path is a
-        silent no-op so it can never block or disrupt reading."""
-        try:
-            if not self.app.config.reader_prefetch_enabled:
-                return
-            if not self._manga or self._chapter is None:
-                return
-            # Manual mode only. Auto-mode manga already queue ahead on
-            # their own schedule, so prefetch here would be redundant.
-            if (self._manga.get("mode") or "auto") != "manual":
-                return
-            title = self._manga.get("title", "")
-            if not title:
-                return
-            # Never fire background network requests while the app knows
-            # it is offline -- download_chapter would only surface a
-            # download_error the user did not ask for.
-            worker = self.app.worker
-            if getattr(worker, "_is_offline", None) and worker._is_offline():
-                return
-            entry = self._resolve_next_chapter_entry()
-            if entry is _PREFETCH_SKIP:
-                return
-            if entry is None:
-                # Missing cache: optionally force one bounded lookup.
-                self._maybe_prefetch_fallback(title)
-                return
-            self._queue_prefetch(entry)
-        except Exception:
-            # Best-effort: a prefetch failure must never interrupt reading.
-            pass
-
-    def _resolve_next_chapter_entry(self):
-        """Return the cached available-chapters entry for the immediate
-        next chapter after the current one, or None. Skips when that
-        chapter is already downloaded (Next already works)."""
-        title = self._manga.get("title", "")
-        available = self.app.app_state.get_available_chapters(title)
-        if not available:
-            return None
-        current = _chapter_sort_key(self._chapter)
-        if current is None:
-            return _PREFETCH_SKIP
-        downloaded = set(self.app.app_state.get_downloaded_chapters(title))
-        best_key = None
-        best_entry = None
-        for entry in available:
-            key = _chapter_sort_key(entry.get("number"))
-            if key is None or key <= current:
-                continue
-            if best_key is None or key < best_key:
-                best_key = key
-                best_entry = entry
-        if best_entry is None:
-            # A cached list that stops at/before the current chapter may be
-            # stale, so let the bounded fallback refresh it once.
-            return None
-        # The immediate next chapter is already on disk -- nothing to do.
-        if str(best_entry.get("number")) in downloaded:
-            return _PREFETCH_SKIP
-        return best_entry
-
-    def _queue_prefetch(self, entry):
-        """Route a cached chapter entry through the shared download queue,
-        mirroring the manual Detail-page flow so output format, Kindle
-        delivery, naming, post-processing and partial tolerance all match.
-        The worker dedups the task id, so a queued/active chapter is a
-        no-op there too."""
-        try:
-            from ...downloader import ChapterWithSource
-            from ...scrapers.base import Chapter
-        except Exception:
-            return
-        number = str(entry.get("number", ""))
-        if not number:
-            return
-        title = self._manga.get("title", "")
-        # Guard the double-check race: a completion could have landed
-        # between resolve and here.
-        if self.app.app_state.is_chapter_downloaded(title, number):
-            return
-        url = entry.get("url") or entry.get("source_url") or ""
-        if not url:
-            return
-        source = entry.get("source", "")
-        source_url = entry.get("source_url") or url
-        is_backup = bool(entry.get("is_backup", False))
-        ch_title = entry.get("title") or ""
-        base = Chapter(number=number, title=ch_title, url=url, date=None)
-        chapter = ChapterWithSource(base, source, source_url, is_backup=is_backup)
-
-        cfg = self.app.config
-        kindle_cfg = None
-        global_email_on = (cfg.delivery_mode == "email" and cfg.email_enabled)
-        if global_email_on and self._manga.get("send_to_kindle", True):
-            try:
-                from ...config import get_app_password
-                kindle_cfg = dict(
-                    kindle_email=cfg.get("email.kindle_email"),
-                    sender_email=cfg.get("email.sender_email"),
-                    app_password=get_app_password(cfg),
-                    smtp_server=cfg.get("email.smtp_server", "smtp.gmail.com"),
-                    smtp_port=cfg.get("email.smtp_port", 587),
-                )
-            except Exception:
-                kindle_cfg = None
-
-        self.app.worker.download_chapter(
-            manga=self._manga, chapter=chapter,
-            output_dir=cfg.download_dir,
-            output_format=cfg.output_format,
-            state=self.app.app_state, kindle_cfg=kindle_cfg,
-            naming_template=cfg.get("delivery.naming_template"),
-            post_processing=cfg.get("delivery.post_processing"),
-            allow_partial=cfg.partial_enabled,
-            partial_threshold=cfg.partial_threshold,
-        )
-
-    def _maybe_prefetch_fallback(self, title):
-        """Missing-cache fallback: kick off one forced check so the next
-        chapter metadata can be populated, then retry on the matching
-        completion. The per-chapter attempt key bounds source failures to
-        one lookup for each reader load."""
-        key = "%s:%s" % (title, self._chapter)
-        if (self._prefetch_fallback_key is not None
-                or self._prefetch_fallback_attempted_key == key):
-            return
-        worker = self.app.worker
-        if getattr(worker, "_is_offline", None) and worker._is_offline():
-            return
-        self._prefetch_fallback_key = key
-        self._prefetch_fallback_attempted_key = key
-        try:
-            worker.check_updates(
-                [self._manga], self.app.app_state, self.app.config, force=True,
-                request_id=key)
-        except Exception:
-            self._prefetch_fallback_key = None
-
-    def _on_check_complete(self, data):
-        """A fallback check we started finished -- its results are cached
-        now, so retry the prefetch and reveal Next if a successor
-        appeared. Ignores checks we did not initiate."""
-        if (self._prefetch_fallback_key is None
-                or data.get("request_id") != self._prefetch_fallback_key):
-            return
-        self._prefetch_fallback_key = None
-        if not self._manga:
-            return
-        self._refresh_next_controls()
-        entry = self._resolve_next_chapter_entry()
-        if entry is not None and entry is not _PREFETCH_SKIP:
-            self._queue_prefetch(entry)
-
-    def _on_download_complete(self, data):
-        """A background download finished. If it belongs to the manga we
-        are reading, refresh the Next controls so a chapter prefetched
-        mid-read becomes navigable without reloading the current one."""
-        if not self._manga:
-            return
-        if data.get("title") != self._manga.get("title", ""):
-            return
-        self._refresh_next_controls()
-
-    def _next_footer_label(self, next_chapter):
-        """Caption for the continuous-mode footer button, resolved from
-        reader navigation at build/refresh time -- never captured -- so
-        a chapter prefetched mid-read shows its real number once
-        _refresh_next_controls reveals the button (issue #107)."""
-        if next_chapter is not None:
-            return f"Next: Chapter {next_chapter} >>"
-        return "Next Chapter >>"
-
-    def _refresh_next_controls(self):
-        """Re-evaluate whether a next downloaded chapter exists and
-        show/hide the Next controls accordingly. Safe to call after a
-        background download completes -- it never rebuilds the reader and
-        tolerates widgets already torn down by a reload."""
-        if not self._manga or self._chapter is None:
-            return
-        title = self._manga.get("title", "")
-        next_ch = self._navigation_neighbor(+1, title)
-        has_next = next_ch is not None
-        if self._next_footer_btn is not None:
-            try:
-                self._next_footer_btn.setText(
-                    self._next_footer_label(next_ch))
-            except RuntimeError:
-                pass
-        for widget in (self._next_btn, self._next_footer):
-            if widget is None:
-                continue
-            try:
-                widget.setVisible(has_next)
-            except RuntimeError:
-                # Widget was deleted by a chapter reload; the fresh build
-                # will re-evaluate visibility itself.
-                pass

@@ -3,13 +3,18 @@ Background worker for long-running operations.
 Wraps ThreadPoolExecutor; publishes events to the EventBus.
 """
 
+import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
 
+from ..email_settings import EmailSettings
 from .events import EventBus
+
+logger = logging.getLogger(__name__)
 
 
 # Relevance filter and popularity ranking are shared with the CLI's
@@ -17,6 +22,7 @@ from .events import EventBus
 # Re-imported under the historical names so existing callers (and
 # tests) keep working.
 from ..search import (  # noqa: E402
+    CHAPTER_COUNT_WORKERS,
     result_matches_query as _result_matches_query,
     source_rank,
     sort_sources_by_popularity,
@@ -27,7 +33,7 @@ from ..scrapers import POPULAR_SOURCES as SOURCE_POPULARITY  # noqa: E402,F401
 # caching a non-image body (an HTML block page served with 200) would
 # leave the cover permanently blank — the disk cache file exists, so
 # the URL is never refetched.
-from ..scrapers.base import looks_like_image  # noqa: E402,F401
+from ..scrapers.base import looks_like_image, BROWSER_USER_AGENT_SHORT  # noqa: E402,F401
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -54,7 +60,11 @@ _COVER_REFERERS = (
     ("fmcdn.mangahere.com", "https://www.mangahere.cc/"),
 )
 
-_COVER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+_COVER_USER_AGENT = BROWSER_USER_AGENT_SHORT
+
+# Parallel cover downloads. Covers are small and come from many hosts;
+# a few at a time fills a library quickly without a burst on any site.
+COVER_WORKERS = 4
 
 
 def cover_request_headers(url: str) -> Dict[str, str]:
@@ -92,10 +102,17 @@ class BackgroundWorker:
         self._search_lock = threading.Lock()
         # Dedicated pool for chapter-count probes — separate from
         # the 3-slot shared pool so a busy download queue doesn't
-        # block chips from appearing, and they don't serialise
-        # excessively behind each other either.
+        # block chips from appearing. Same bound as the CLI's
+        # `memanga search` (issue #405).
         self._count_pool = ThreadPoolExecutor(
-            max_workers=6, thread_name_prefix="chapter-count",
+            max_workers=CHAPTER_COUNT_WORKERS,
+            thread_name_prefix="chapter-count",
+        )
+        # Covers get their own small pool too: on the shared one a cover
+        # waited behind running downloads and checks, so a new library
+        # stayed on placeholders until the queue drained.
+        self._cover_pool = ThreadPoolExecutor(
+            max_workers=COVER_WORKERS, thread_name_prefix="cover-fetch",
         )
         # Optional NetworkMonitor — wired up by MeMangaApp after both
         # the worker and the monitor exist. When set, network-bound
@@ -114,10 +131,11 @@ class BackgroundWorker:
         """Clean up the thread pool."""
         self._shutdown = True
         self._pool.shutdown(wait=False)
-        try:
-            self._count_pool.shutdown(wait=False, cancel_futures=True)
-        except Exception:
-            pass
+        for pool in (self._count_pool, self._cover_pool):
+            try:
+                pool.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
         # Tear down any in-flight search so its threads don't outlive
         # the app and try to publish into a destroyed event bus.
         with self._search_lock:
@@ -190,7 +208,12 @@ class BackgroundWorker:
                     cache.mark_failed(url)
                 self._events.publish("cover_loaded", {"url": url, "error": True})
 
-        self._safe_submit(_task)
+        if getattr(self, "_shutdown", False):
+            return None
+        try:
+            return self._cover_pool.submit(_task)
+        except RuntimeError:
+            return None  # pool already shut down
 
     # ------------------------------------------------------------------
     # Chapter checking
@@ -214,8 +237,6 @@ class BackgroundWorker:
         chapters for every manga regardless of mode — manual-mode manga
         are otherwise only surfaced, never auto-queued.
         """
-        import sys as _sys
-
         def _complete_payload(results, **extra):
             payload = {"results": results, **extra}
             if request_id is not None:
@@ -246,32 +267,28 @@ class BackgroundWorker:
                 "Offline", "Can't check for updates while offline."))
             self._events.publish("check_complete", _complete_payload([]))
             return
-        print(f"[Check] check_updates called with {len(manga_list)} manga", flush=True)
+        logger.info("Checking %d manga for updates", len(manga_list))
         for m in manga_list:
-            print(f"[Check]   - '{m.get('title')}' source={m.get('source', '')} status={m.get('status', 'reading')}", flush=True)
+            logger.debug("  '%s' source=%s status=%s", m.get('title'),
+                         m.get('source', ''), m.get('status', 'reading'))
 
         def _task():
-            import traceback
-            print(f"[Check] Background task started", flush=True)
             try:
                 from ..downloader import check_for_updates
             except Exception as e:
-                print(f"[Check] FATAL: Failed to import downloader: {e}", flush=True)
-                traceback.print_exc()
-                _sys.stdout.flush()
+                logger.exception("Failed to import downloader: %s", e)
                 self._events.publish(
                     "check_error", _error_payload("Import Error", str(e)))
                 self._events.publish("check_complete", _complete_payload([]))
                 return
             results = []
-            _sys.stdout.flush()
             for i, manga in enumerate(manga_list):
                 status = manga.get("status", "reading")
                 if not force and status != "reading":
-                    print(f"[Check] Skipping '{manga.get('title')}' — status={status}", flush=True)
+                    logger.debug("Skipping '%s' — status=%s", manga.get('title'), status)
                     continue
                 title = manga.get("title", "")
-                print(f"[Check] Checking '{title}' ({i+1}/{len(manga_list)})", flush=True)
+                logger.info("Checking '%s' (%d/%d)", title, i + 1, len(manga_list))
                 self._events.publish(
                     "check_progress",
                     _progress_payload(i + 1, len(manga_list), title),
@@ -280,16 +297,15 @@ class BackgroundWorker:
                 # Determine source domain for health tracking
                 sources = manga.get("sources", [])
                 domain = sources[0].get("source", "") if sources else manga.get("source", "")
-                print(f"[Check]   Source domain: {domain}", flush=True)
+                logger.debug("Source domain: %s", domain)
 
                 try:
                     new_chapters, all_chapters = check_for_updates(
                         manga, state, return_all=True,
                     )
-                    print(
-                        f"[Check]   Found {len(new_chapters)} new chapter(s) "
-                        f"(total {len(all_chapters)} available on primary)",
-                        flush=True,
+                    logger.info(
+                        "'%s': %d new chapter(s) (total %d available on primary)",
+                        title, len(new_chapters), len(all_chapters),
                     )
                     # Always include the result so the GUI can cache the full
                     # chapter list (used by Detail page for Read/Download UI).
@@ -303,15 +319,13 @@ class BackgroundWorker:
                     if domain:
                         state.update_source_health(domain, success=True)
                 except Exception as e:
-                    print(f"[Check]   ERROR: {e}", flush=True)
-                    traceback.print_exc()
-                    _sys.stdout.flush()
+                    logger.exception("Check failed for '%s': %s", title, e)
                     # Mark source unhealthy
                     if domain:
                         state.update_source_health(domain, success=False, error_msg=str(e))
                     self._events.publish(
                         "check_error", _error_payload(title, str(e)))
-            print(f"[Check] Done. Total results: {len(results)} manga with new chapters", flush=True)
+            logger.info("Check done: %d manga checked", len(results))
             self._events.publish(
                 "check_complete",
                 _complete_payload(results, queue_all=queue_all),
@@ -324,15 +338,22 @@ class BackgroundWorker:
     # ------------------------------------------------------------------
 
     def download_chapter(self, manga, chapter, output_dir, output_format, state,
-                         kindle_cfg=None, naming_template=None,
+                         kindle_cfg: Optional[EmailSettings] = None,
+                         naming_template=None,
                          post_processing=None, allow_partial=False,
-                         partial_threshold=0.0):
+                         partial_threshold=0.0, delete_after_send=False):
         """Queue a chapter download.
 
         ``allow_partial``/``partial_threshold`` carry the partial-chapter
         tolerance settings (issue #86) from config through to the
         downloader. Off by default so behavior is unchanged unless the
-        caller opts in.
+        caller opts in. ``kindle_cfg`` (from
+        :func:`~memanga.email_settings.kindle_delivery_settings`) sends
+        the chapter to Kindle; None keeps it local. ``delete_after_send``
+        removes the local file once it has been sent.
+
+        ``state`` receives the chapter's records (downloaded, partial,
+        failed) before the matching event is published.
         """
         task_id = f"{manga['title']}:{chapter.number}"
         # Issue #107: drop duplicate requests for a chapter that is
@@ -375,6 +396,7 @@ class BackgroundWorker:
                 "cancel": cancel,
                 "allow_partial": allow_partial,
                 "partial_threshold": partial_threshold,
+                "delete_after_send": delete_after_send,
             }
             paused = self._paused
             if (not paused) and self._active_downloads < self._max_concurrent_downloads:
@@ -395,19 +417,100 @@ class BackgroundWorker:
         if task_id in self._cancel_flags:
             self._cancel_flags[task_id].set()
 
-    def _run_download(self, item):
-        """Execute a single download task."""
-        import traceback
+    def send_pending(self, manga, chapter_number, state,
+                     kindle_cfg: Optional[EmailSettings],
+                     delete_after_send=False):
+        """Send a saved chapter whose Kindle delivery failed again
+        (issue #360).
+
+        Runs :meth:`ChapterPipeline.redeliver`, the step behind `memanga
+        send --pending`: the undelivered record is cleared once the
+        chapter is sent and kept when it fails again, and
+        ``delete_after_send`` only removes a file that was sent. Publishes
+        ``kindle_sent`` or ``kindle_error`` like a download, then
+        ``kindle_resend_done`` with ``sent``.
+        """
+        title = manga["title"]
+        number = str(chapter_number)
+        task_id = f"{title}:{number}"
+        if self._is_offline():
+            self._events.publish("kindle_error", {
+                "task_id": task_id, "title": title, "chapter": number,
+                "error": "Offline — connect to the internet and try again.",
+            })
+            self._events.publish("kindle_resend_done", {
+                "task_id": task_id, "title": title, "chapter": number,
+                "sent": False,
+            })
+            return None
+        return self._safe_submit(self._run_send_pending, manga, number,
+                                 state, kindle_cfg, delete_after_send)
+
+    def _run_send_pending(self, manga, number, state, kindle_cfg,
+                          delete_after_send):
+        title = manga["title"]
+        task_id = f"{title}:{number}"
+        sent = False
         try:
-            from ..downloader import (
-                download_chapter,
-                DownloaderError,
-                ChapterWithSource,
-                _get_sources_from_manga,
+            from .. import emailer
+            from ..chapter_pipeline import (
+                ChapterPipeline,
+                DeliveryStatus,
+                PipelineOptions,
+            )
+            from ..chapters import Chapter
+            from .download_events import GuiChapterReporter
+
+            options = PipelineOptions(
+                # Nothing is downloaded: the recorded file is sent.
+                download_dir=Path(),
+                output_format="",
+                delivery_mode="email" if kindle_cfg is not None else "local",
+                email=kindle_cfg or EmailSettings(),
+                delete_after_send=delete_after_send,
+            )
+            pipeline = ChapterPipeline(
+                options=options,
+                state=state,
+                reporter=GuiChapterReporter(
+                    self._events, task_id, manga, Chapter(number=number),
+                    threading.Event(), delete_after_send=delete_after_send,
+                ),
+                send=emailer.send_to_kindle,
+                app_password=lambda: options.email.app_password,
+            )
+            sent = pipeline.redeliver(title, number, manga) is DeliveryStatus.SENT
+        except Exception as e:
+            logger.exception("Resending %s Ch.%s to Kindle failed: %s",
+                             title, number, e)
+            self._events.publish("kindle_error", {
+                "task_id": task_id, "title": title, "chapter": number,
+                "error": str(e),
+            })
+        finally:
+            self._events.publish("kindle_resend_done", {
+                "task_id": task_id, "title": title, "chapter": number,
+                "sent": sent,
+            })
+
+    def _run_download(self, item):
+        """Execute a single download task through the shared chapter
+        pipeline (issue #295), so recovery, delivery and state records
+        match `memanga check` and `failed retry`."""
+        try:
+            from .. import downloader, emailer
+            from ..chapter_pipeline import (
+                ChapterPipeline,
+                PipelineOptions,
+                chapter_source,
+            )
+            from .download_events import (
+                GuiChapterReporter,
+                download_complete_payload,
+                download_error_payload,
             )
         except Exception as e:
-            print(f"[Download] FATAL: Failed to import downloader: {e}", flush=True)
-            traceback.print_exc()
+            logger.exception("Failed to import downloader: %s", e)
             self._events.publish("download_error", {
                 "task_id": item["task_id"], "error": f"Import error: {e}",
                 "title": item["manga"]["title"], "chapter": "?",
@@ -421,265 +524,78 @@ class BackgroundWorker:
         manga = item["manga"]
         chapter = item["chapter"]
 
-        print(f"[Download] Starting: {manga['title']} Ch.{chapter.number}", flush=True)
-        print(f"[Download]   Output: {item['output_dir']} format={item['output_format']}", flush=True)
-        self._events.publish("download_started", {
-            "task_id": task_id,
-            "title": manga["title"],
-            "chapter": chapter.number,
-        })
+        logger.info("Downloading %s Ch.%s", manga['title'], chapter.number)
+        logger.debug("Output: %s format=%s", item['output_dir'], item['output_format'])
 
-        def progress_cb(current, total):
-            if item["cancel"].is_set():
-                raise InterruptedError("Download cancelled")
-            try:
-                self._events.publish("download_progress", {
-                    "task_id": task_id,
-                    "current": current,
-                    "total": total,
-                })
-            except Exception:
-                pass
-
-        # Captures partial-download detail (issue #86) so the completion
-        # event can surface which pages are missing without parsing logs.
-        partial_info = {}
-
-        def on_partial(failed_pages, total):
-            partial_info["failed_pages"] = failed_pages
-            partial_info["total"] = total
-
-        def _finish(path, from_backup, source=None):
-            """Deliver to Kindle (if configured) and publish
-            download_complete, carrying any accepted partial detail."""
-            # Kindle delivery
-            if item["kindle_cfg"] and path:
-                try:
-                    from ..emailer import send_to_kindle
-                    from ..config import get_app_password
-                    send_to_kindle(
-                        pdf_path=path,
-                        kindle_email=item["kindle_cfg"]["kindle_email"],
-                        sender_email=item["kindle_cfg"]["sender_email"],
-                        app_password=item["kindle_cfg"]["app_password"],
-                        smtp_server=item["kindle_cfg"].get("smtp_server", "smtp.gmail.com"),
-                        smtp_port=item["kindle_cfg"].get("smtp_port", 587),
-                    )
-                    self._events.publish("kindle_sent", {"task_id": task_id, "path": str(path)})
-                except Exception as e:
-                    self._events.publish("kindle_error", {"task_id": task_id, "error": str(e)})
-
-            complete_payload = {
-                "task_id": task_id,
-                "path": str(path) if path else None,
-                "title": manga["title"],
-                "chapter": chapter.number,
-                "from_backup": from_backup,
-                "source": source or getattr(chapter, "source", None) or manga.get("source", "?"),
-            }
-            if partial_info:
-                complete_payload["partial"] = dict(partial_info)
-                print(
-                    f"[Download] Partial kept{' from backup' if from_backup else ''}: "
-                    f"{manga['title']} Ch.{chapter.number} "
-                    f"— {len(partial_info['failed_pages'])}/{partial_info['total']} "
-                    f"page(s) missing {partial_info['failed_pages']}",
-                    flush=True,
-                )
-            elif from_backup:
-                print(
-                    f"[Download] Completed from backup: "
-                    f"{manga['title']} Ch.{chapter.number}",
-                    flush=True,
-                )
-            self._events.publish("download_complete", complete_payload)
-
-        allow_partial = item.get("allow_partial", False)
-        partial_threshold = item.get("partial_threshold", 0.0)
-
-        # Backup-first parity with the CLI (issue #86): when the chapter is
-        # from the primary source and the manga has a backup configured,
-        # prefer a *complete* backup download over keeping a primary
-        # partial. Only accept a primary partial straight away when there
-        # is no backup to try first.
-        is_from_backup = isinstance(chapter, ChapterWithSource) and chapter.is_backup
-        has_backup = (not is_from_backup) and len(_get_sources_from_manga(manga)) > 1
-        primary_allow_partial = allow_partial and not has_backup
+        # Kindle delivery is opted into per job: the page passes a
+        # kindle_cfg only when email delivery applies to this manga.
+        kindle_cfg = item.get("kindle_cfg")
+        options = PipelineOptions(
+            download_dir=Path(item["output_dir"]),
+            output_format=item["output_format"],
+            post_processing=item.get("post_processing"),
+            allow_partial=item.get("allow_partial", False),
+            partial_threshold=item.get("partial_threshold", 0.0),
+            delivery_mode="email" if kindle_cfg is not None else "local",
+            email=kindle_cfg or EmailSettings(),
+            delete_after_send=item.get("delete_after_send", False),
+            naming_template=item.get("naming_template"),
+        )
+        # Collaborators are looked up when the job runs, not bound at
+        # import, so they can be replaced on their own modules.
+        pipeline = ChapterPipeline(
+            options=options,
+            state=item["state"],
+            reporter=GuiChapterReporter(
+                self._events, task_id, manga, chapter, item["cancel"],
+                delete_after_send=options.delete_after_send,
+            ),
+            download=downloader.download_chapter,
+            find_backup=downloader._find_chapter_on_backup,
+            send=emailer.send_to_kindle,
+            app_password=lambda: options.email.app_password,
+            cancel_event=item["cancel"],
+        )
 
         try:
-            partial_info.clear()
-            path = download_chapter(
-                manga=manga,
-                chapter=chapter,
-                output_dir=item["output_dir"],
-                output_format=item["output_format"],
-                state=item["state"],
-                progress_callback=progress_cb,
-                naming_template=item.get("naming_template"),
-                cancel_event=item["cancel"],
-                post_processing=item.get("post_processing"),
-                allow_partial=primary_allow_partial,
-                partial_threshold=partial_threshold,
-                on_partial=on_partial,
-            )
-            _finish(
-                path,
-                from_backup=False,
-                source=getattr(chapter, "source", None) or manga.get("source", "?"),
-            )
+            outcome = pipeline.process(manga, chapter)
         except InterruptedError:
             self._events.publish("download_cancelled", {"task_id": task_id})
-        except DownloaderError as e:
-            # Primary source couldn't deliver a complete chapter. Try the
-            # backup first (complete), then salvage the best partial within
-            # threshold (backup, then primary) if tolerance is enabled.
-            try:
-                self._recover_via_backup(
-                    item, chapter, manga, e, on_partial, partial_info,
-                    _finish, allow_partial, partial_threshold,
-                    primary_allow_partial, is_from_backup,
-                    progress_callback=progress_cb,
-                )
-            except InterruptedError:
-                self._events.publish("download_cancelled", {"task_id": task_id})
         except Exception as e:
-            print(f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {e}", flush=True)
-            traceback.print_exc()
+            # Not a download failure the pipeline knows how to record
+            # (those come back as a FAILED outcome): keep a record anyway
+            # so the chapter shows up as failed and can be retried.
+            logger.exception("Download failed: %s Ch.%s: %s",
+                             manga['title'], chapter.number, e)
             state = item.get("state")
-            if state is not None and hasattr(state, "add_failed_chapter"):
-                source = getattr(chapter, "source", None) or manga.get("source", "?")
+            if state is not None:
                 try:
                     state.add_failed_chapter(
                         manga["title"],
                         chapter.number,
-                        source,
+                        chapter_source(manga, chapter),
                         str(e),
                     )
                 except Exception:
-                    traceback.print_exc()
+                    logger.exception("Could not record the failed chapter")
             self._events.publish("download_error", {
                 "task_id": task_id, "error": str(e),
                 "title": manga["title"], "chapter": chapter.number,
             })
+        else:
+            if outcome.saved:
+                self._events.publish(
+                    "download_complete",
+                    download_complete_payload(task_id, manga, outcome),
+                )
+            else:
+                self._events.publish(
+                    "download_error",
+                    download_error_payload(task_id, manga, outcome),
+                )
         finally:
             self._cancel_flags.pop(task_id, None)
             self._start_next_download()
-
-    def _recover_via_backup(self, item, chapter, manga, primary_err,
-                            on_partial, partial_info, finish,
-                            allow_partial, partial_threshold,
-                            primary_allow_partial, is_from_backup,
-                            progress_callback=None):
-        """Backup-first recovery after a primary DownloaderError.
-
-        Mirrors the CLI (issue #86): 1) try a *complete* download from the
-        backup source; 2) if that also fails and partial tolerance is on,
-        keep the best partial within threshold, preferring the backup
-        partial over the primary partial; 3) otherwise publish
-        download_error. ``InterruptedError`` (cancellation) is allowed to
-        propagate so the caller can report a cancelled download.
-
-        ``progress_callback`` mirrors the primary attempt so backup and
-        salvage downloads still emit ``download_progress`` events (and,
-        because the same callback raises ``InterruptedError`` on a set
-        cancel flag, keep honouring cancellation).
-        """
-        from ..downloader import (
-            download_chapter,
-            DownloaderError,
-            _find_chapter_on_backup,
-        )
-
-        task_id = item["task_id"]
-
-        backup_ch = None
-        if not is_from_backup:
-            backup_ch = _find_chapter_on_backup(manga, chapter.number)
-
-        def _dl(cand, allow_partial_flag):
-            return download_chapter(
-                manga=manga,
-                chapter=cand,
-                output_dir=item["output_dir"],
-                output_format=item["output_format"],
-                state=item["state"],
-                progress_callback=progress_callback,
-                naming_template=item.get("naming_template"),
-                cancel_event=item["cancel"],
-                post_processing=item.get("post_processing"),
-                allow_partial=allow_partial_flag,
-                partial_threshold=partial_threshold,
-                on_partial=on_partial,
-            )
-
-        backup_err = None
-
-        # 1) Complete download from the backup source.
-        if backup_ch:
-            print(
-                f"[Download] Primary failed ({primary_err}), trying backup "
-                f"({backup_ch.source}) for {manga['title']} Ch.{chapter.number}",
-                flush=True,
-            )
-            partial_info.clear()
-            try:
-                path = _dl(backup_ch, False)
-                finish(path, from_backup=True, source=getattr(backup_ch, "source", None))
-                return
-            except DownloaderError as be:
-                backup_err = be
-                print(f"[Download] Backup also failed: {be}", flush=True)
-
-        # 2) Salvage the best partial within threshold (backup first, then
-        #    primary), only if partial tolerance is enabled.
-        if allow_partial:
-            salvage = []
-            if backup_ch:
-                salvage.append((backup_ch, True))
-            # Skip the primary here if it was already attempted with partial
-            # enabled above (the no-backup case).
-            if not primary_allow_partial:
-                salvage.append((chapter, False))
-            for cand, from_backup in salvage:
-                partial_info.clear()
-                try:
-                    path = _dl(cand, True)
-                except DownloaderError:
-                    continue
-                finish(path, from_backup=from_backup, source=getattr(cand, "source", None))
-                return
-
-        # 3) Nothing worked — surface the failure.
-        if backup_ch and backup_err is not None:
-            error_msg = f"Primary: {primary_err}; Backup: {backup_err}"
-            source = f"{getattr(chapter, 'source', None) or manga.get('source', '?')}+{backup_ch.source}"
-        else:
-            error_msg = str(primary_err)
-            source = getattr(chapter, "source", None) or manga.get("source", "?")
-        print(
-            f"[Download] ERROR: {manga['title']} Ch.{chapter.number}: {error_msg}",
-            flush=True,
-        )
-        state = item.get("state")
-        if state is not None and hasattr(state, "add_failed_chapter"):
-            try:
-                failed_pages = getattr(primary_err, "failed_pages", None)
-                if failed_pages is not None:
-                    state.add_failed_chapter(
-                        manga["title"], chapter.number, source, error_msg,
-                        failed_pages=failed_pages,
-                    )
-                else:
-                    state.add_failed_chapter(
-                        manga["title"], chapter.number, source, error_msg,
-                    )
-            except Exception:
-                import traceback
-                traceback.print_exc()
-        self._events.publish("download_error", {
-            "task_id": task_id, "error": error_msg,
-            "title": manga["title"], "chapter": chapter.number,
-        })
 
     def _start_next_download(self):
         """Release the finished download's slot, then refill from the queue.
@@ -783,9 +699,13 @@ class BackgroundWorker:
             except Exception as e:
                 if cancel.is_set():
                     return 0
+                # Issue #342: the whole cause; the Search page summarises
+                # and shows it on request.
+                logger.warning("Search on %s failed: no scraper: %s",
+                               source_domain, e)
                 self._events.publish("search_source_failed", {
                     "source": source_domain, "seq": seq,
-                    "error": f"no scraper: {e}"[:160],
+                    "error": f"no scraper: {e}",
                 })
                 return 0
             try:
@@ -793,9 +713,11 @@ class BackgroundWorker:
             except Exception as e:
                 if cancel.is_set():
                     return 0
+                logger.warning("Search on %s failed: %s: %s",
+                               source_domain, type(e).__name__, e)
                 self._events.publish("search_source_failed", {
                     "source": source_domain, "seq": seq,
-                    "error": f"{type(e).__name__}: {e}"[:160],
+                    "error": f"{type(e).__name__}: {e}",
                 })
                 return 0
             if cancel.is_set():
@@ -908,7 +830,7 @@ class BackgroundWorker:
         ``{source, url, count}`` once known (count = -1 if every retry
         attempt failed; the row drops the chip).
 
-        - Runs on a dedicated 6-slot pool (`_count_pool`) so it doesn't
+        - Runs on a dedicated pool (`_count_pool`) so it doesn't
           compete with downloads for the shared 3-slot worker pool.
         - **Not** tied to the search seq. The UI matches incoming
           events to result rows by URL, so a late-arriving chip for
@@ -930,11 +852,7 @@ class BackgroundWorker:
             # a full scraper.get_chapters() — for plain-requests
             # sources that's ~1 s, for JSON-API sources (Comick/...)
             # usually <1 s, for Playwright browser-driven sources
-            # (WeebCentral/MangaKatana) 3-10 s. MangaFire is the odd
-            # one out: its API is plain HTTP but each call carries a
-            # vrf token minted in a browser, so the first call in a
-            # process pays a one-off browser start and later ones are
-            # back under a second.
+            # (WeebCentral/MangaKatana) 3-10 s.
             for i, delay in enumerate((0.0,) + self._COUNT_RETRY_DELAYS):
                 if delay > 0:
                     import time as _t
@@ -1022,7 +940,7 @@ class BackgroundWorker:
             except requests.RequestException as e:
                 latency = int((time.perf_counter() - t0) * 1000)
                 state.update_source_health(
-                    domain, False, error_msg=str(e)[:80], latency_ms=latency,
+                    domain, False, error_msg=str(e), latency_ms=latency,
                 )
 
         def _task():

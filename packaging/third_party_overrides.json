@@ -1,0 +1,38 @@
+{
+  "about": [
+    "Curated license texts for files bundled into the desktop release that",
+    "neither an installed Python distribution nor the build system's package",
+    "manager (dpkg, Homebrew) owns, such as the DLLs the python.org Windows",
+    "build ships next to the interpreter. Each entry lists the file name",
+    "patterns it covers (case-insensitive) and ships the component's own",
+    "license text from packaging/licenses/; 'source' says where that text",
+    "comes from. A bundled file that nothing covers stops the build."
+  ],
+  "components": [
+    {
+      "name": "OpenSSL",
+      "files": ["libssl-*.dll", "libcrypto-*.dll", "libssl.*.dylib", "libcrypto.*.dylib"],
+      "license": "Apache-2.0",
+      "homepage": "https://www.openssl.org/",
+      "source": "https://github.com/openssl/openssl/blob/openssl-3.0/LICENSE.txt",
+      "license_files": ["OPENSSL-LICENSE.txt"]
+    },
+    {
+      "name": "libffi",
+      "files": ["libffi-*.dll", "libffi.*.dylib"],
+      "license": "MIT",
+      "homepage": "https://sourceware.org/libffi/",
+      "source": "https://github.com/libffi/libffi/blob/v3.4.4/LICENSE",
+      "license_files": ["LIBFFI-LICENSE.txt"]
+    },
+    {
+      "name": "Microsoft Visual C++ runtime",
+      "files": ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll",
+                "msvcp140_1.dll", "msvcp140_2.dll", "concrt140.dll"],
+      "license": "Microsoft Software License Terms for Visual Studio (Distributable Code)",
+      "homepage": "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist",
+      "source": "https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution",
+      "license_files": ["MSVC-RUNTIME-NOTICE.txt"]
+    }
+  ]
+}

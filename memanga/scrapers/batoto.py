@@ -5,10 +5,14 @@ https://bato.to
 Community-driven manga site with API.
 """
 
+import logging
 import re
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
+
+logger = logging.getLogger(__name__)
 
 
 class BatoToScraper(BaseScraper):
@@ -21,7 +25,7 @@ class BatoToScraper(BaseScraper):
         """Search for manga by title."""
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/search?word={query.replace(' ', '+')}"
+        url = f"{self.base_url}/search?word={quote_plus(query)}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         
@@ -129,7 +133,7 @@ class BatoToScraper(BaseScraper):
         """Download image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": f"{self.base_url}/",
             }
             response = self.session.get(url, headers=headers, timeout=30)
@@ -138,5 +142,5 @@ class BatoToScraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

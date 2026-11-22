@@ -5,7 +5,8 @@ Replaces the old modal NotificationPanel for browsing. The panel still
 exists for ad-hoc popups; this page is the persistent log.
 
 Data: pulls from app_state.get_notifications() (already wired). Each
-notification has `type`, `message`, `timestamp`, `read`.
+notification has `type`, `message`, `timestamp`, `read`, and errors may
+carry `details` (the full, redacted error opened from the row).
 
 Filter chips and the per-row "more" action are UI-only stubs — the data
 layer doesn't currently support per-category filtering, per-notification
@@ -21,6 +22,7 @@ from PySide6.QtCore import Qt
 
 from .base import BasePage
 from .. import theme as T
+from ..components.error_details import ErrorDetailsDialog, has_more_detail
 
 
 # Map state notification "type" → notification_row icon variant in spec.
@@ -225,8 +227,9 @@ class NotificationsPage(BasePage):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        loader = self.app.app_state.notifications.full_details
         for i, n in enumerate(rows):
-            row = NotificationRow(n)
+            row = NotificationRow(n, details_loader=loader)
             if i > 0:
                 row.setProperty("role", "row")
                 row.style().unpolish(row)
@@ -275,8 +278,11 @@ class NotificationsPage(BasePage):
 class NotificationRow(QFrame):
     """Single notification row — icon + body + time."""
 
-    def __init__(self, notif: dict):
+    def __init__(self, notif: dict, details_loader=None):
         super().__init__()
+        self._notif = notif
+        # Reads a long error's side file only when Details is pressed.
+        self._details_loader = details_loader
         n_type = notif.get("type", "check")
         variant = TYPE_TO_VARIANT.get(n_type, "new")
         unread = not notif.get("read", False)
@@ -303,10 +309,33 @@ class NotificationRow(QFrame):
         title.setStyleSheet("font-weight: 600; font-size: 12pt;")
         body.addWidget(title)
 
-        msg = QLabel(notif.get("message", ""))
+        message = notif.get("message", "")
+        msg = QLabel(message)
+        # Error text comes from sites and the OS: never render it as HTML.
+        msg.setTextFormat(Qt.TextFormat.PlainText)
         msg.setProperty("role", "t2")
         msg.setWordWrap(True)
+        msg.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         body.addWidget(msg)
+
+        # Issue #342: the full error behind a shortened message.
+        self._details = notif.get("details", "")
+        self._details_btn = None
+        if (has_more_detail(message, self._details)
+                or notif.get("details_chars")):
+            btn = QPushButton("Details")
+            btn.setProperty("variant", "ghost")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip("Show the full error")
+            btn.setAccessibleName("Show full error details")
+            btn.setAccessibleDescription(message)
+            btn.clicked.connect(lambda: self._show_details(message))
+            details_row = QHBoxLayout()
+            details_row.setContentsMargins(0, 4, 0, 0)
+            details_row.addWidget(btn)
+            details_row.addStretch(1)
+            body.addLayout(details_row)
+            self._details_btn = btn
         layout.addLayout(body, 1)
 
         # ── Time ──
@@ -321,6 +350,17 @@ class NotificationRow(QFrame):
             self.setStyleSheet(
                 f"NotificationRow {{ border-left: 2px solid {accent}; }}"
             )
+
+    def _show_details(self, summary: str):
+        if self._details_loader is not None:
+            text, complete = self._details_loader(self._notif)
+        else:
+            text = self._details
+            complete = not self._notif.get("details_chars")
+        ErrorDetailsDialog(
+            self, text, summary=summary, complete=complete,
+            total_chars=self._notif.get("details_chars"),
+        ).exec()
 
     @staticmethod
     def _icon_colors(variant: str):

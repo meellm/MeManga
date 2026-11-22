@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 from typing import List, Optional
 from urllib.parse import urljoin
 
-from .base import BaseScraper, Manga, Chapter
+from .base import BaseScraper, Manga, Chapter, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class ReadSNKMangaScraper(BaseScraper):
     def __init__(self):
         super().__init__()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': BROWSER_USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Referer': self.base_url,
@@ -83,7 +83,7 @@ class ReadSNKMangaScraper(BaseScraper):
             
             # Sort by chapter number
             chapters.sort(key=lambda x: x.numeric)
-            logger.info(f"Found {len(chapters)} chapters")
+            logger.debug("Found %s chapters", len(chapters))
             
         except Exception as e:
             logger.error(f"Error getting chapters: {e}")
@@ -112,7 +112,7 @@ class ReadSNKMangaScraper(BaseScraper):
                     if src not in pages:
                         pages.append(src)
             
-            logger.info(f"Found {len(pages)} pages in chapter")
+            logger.debug("Found %s pages in chapter", len(pages))
             
         except Exception as e:
             logger.error(f"Error getting pages from {chapter_url}: {e}")
@@ -123,7 +123,7 @@ class ReadSNKMangaScraper(BaseScraper):
         """Download an image with proper headers."""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': BROWSER_USER_AGENT_SHORT,
                 'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
                 'Referer': self.base_url,
             }
@@ -136,5 +136,5 @@ class ReadSNKMangaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

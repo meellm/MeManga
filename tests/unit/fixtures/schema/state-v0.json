@@ -1,0 +1,21 @@
+{
+  "manga": {
+    "One Piece": {
+      "downloaded": ["1130", "1131", "1132"],
+      "last_chapter": "1132",
+      "last_updated": "2026-05-27T12:00:00",
+      "created": "2026-01-01T00:00:00",
+      "reading_progress": {"last_chapter": "1131", "last_read": "2026-05-27T12:05:00"},
+      "new_chapters_available": 1,
+      "available_chapters": [],
+      "read_chapters": ["1130", "1131"]
+    }
+  },
+  "last_check": "2026-05-27T12:00:00",
+  "check_history": [
+    {"timestamp": "2026-05-27T12:00:00", "new_chapters": 1, "downloaded": 1}
+  ],
+  "notifications": [],
+  "download_history": [],
+  "source_health": {}
+}

@@ -1,0 +1,9 @@
+Microsoft Visual C++ runtime (vcruntime140.dll and related DLLs)
+
+Copyright (c) Microsoft Corporation. All rights reserved.
+
+These DLLs are Microsoft's Visual C++ runtime. They are bundled unmodified,
+as installed with the Python interpreter the release is built with.
+Microsoft lists the Visual C++ runtime files as Distributable Code under the
+Microsoft Software License Terms for Visual Studio:
+https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution

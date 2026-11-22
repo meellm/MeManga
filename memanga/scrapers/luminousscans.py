@@ -4,11 +4,14 @@ Website: https://luminousscans.com
 Uses WordPress with Madara/MangaReader theme
 """
 
+import logging
 import re
 from typing import List, Optional
 from urllib.parse import urljoin, quote
 
 from .base import BaseScraper, Manga, Chapter
+
+logger = logging.getLogger(__name__)
 
 
 class LuminousScansScraper(BaseScraper):
@@ -27,7 +30,7 @@ class LuminousScansScraper(BaseScraper):
         try:
             html = self._get_html(search_url)
         except Exception as e:
-            print(f"Search request failed: {e}")
+            logger.warning("Search request failed: %s", e)
             return []
         
         soup = BeautifulSoup(html, 'html.parser')
@@ -81,7 +84,7 @@ class LuminousScansScraper(BaseScraper):
         try:
             html = self._get_html(manga_url)
         except Exception as e:
-            print(f"Failed to get manga page: {e}")
+            logger.warning("Failed to get manga page: %s", e)
             return []
         
         soup = BeautifulSoup(html, 'html.parser')
@@ -125,7 +128,7 @@ class LuminousScansScraper(BaseScraper):
         try:
             html = self._get_html(chapter_url)
         except Exception as e:
-            print(f"Failed to get chapter page: {e}")
+            logger.warning("Failed to get chapter page: %s", e)
             return []
         
         soup = BeautifulSoup(html, 'html.parser')

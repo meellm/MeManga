@@ -7,11 +7,13 @@ JJK (Jujutsu Kaisen) dedicated manga site.
 - All 271 chapters of JJK manga
 """
 
+import logging
 import re
-import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
+
+logger = logging.getLogger(__name__)
 
 
 class ReadJJKComScraper(BaseScraper):
@@ -20,9 +22,9 @@ class ReadJJKComScraper(BaseScraper):
     def __init__(self):
         super().__init__()
         self.base_url = "https://read-jjk.com"
-        self.session = cloudscraper.create_scraper()
+        self._use_cloudscraper()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": BROWSER_USER_AGENT,
             "Referer": self.base_url,
         })
     
@@ -115,7 +117,7 @@ class ReadJJKComScraper(BaseScraper):
         """Download image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": BROWSER_USER_AGENT,
                 "Referer": self.base_url,
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
             }
@@ -128,5 +130,5 @@ class ReadJJKComScraper(BaseScraper):
                 f.write(resp.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

@@ -1,7 +1,8 @@
-"""Static checks for the Docker image workflow smoke gate.
+"""Static checks for the Docker image workflow audit and smoke gates.
 
-The built image must be loaded and run before any multi-platform
-build or publish step, for both tag pushes and manual dispatches.
+No job may build or publish unless the dependency audit passed. The
+built image must be loaded and run before any multi-platform build or
+publish step, for both tag pushes and manual dispatches.
 """
 from __future__ import annotations
 
@@ -14,10 +15,19 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-image.yml"
 
 SMOKE_TAG = "memanga:smoke"
 
+# The image entrypoint is already ``memanga``; arguments start at ``doctor``.
+BROWSER_SMOKE_COMMAND = (
+    "docker run --rm memanga:smoke "
+    "doctor --check browsers --launch-browsers --json"
+)
+
+
+def _jobs():
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
 
 def _steps():
-    data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return data["jobs"]["build"]["steps"]
+    return _jobs()["build"]["steps"]
 
 
 def _index(predicate):
@@ -37,6 +47,10 @@ def _is_smoke_build(step):
 
 def _is_smoke_run(step):
     return "docker run --rm memanga:smoke --help" in str(step.get("run", ""))
+
+
+def _is_browser_smoke_run(step):
+    return str(step.get("run", "")).strip() == BROWSER_SMOKE_COMMAND
 
 
 def _publish_build_indices():
@@ -66,6 +80,22 @@ def test_smoke_run_follows_smoke_build_unconditionally():
     assert "if" not in _steps()[run]
 
 
+def test_browser_smoke_follows_help_smoke_unconditionally():
+    help_run = _index(_is_smoke_run)
+    browser = _index(_is_browser_smoke_run)
+    assert help_run != -1 and browser != -1
+    assert help_run < browser
+    assert "if" not in _steps()[browser]
+
+
+def test_browser_smoke_gate_precedes_every_publish_build():
+    browser = _index(_is_browser_smoke_run)
+    publish = _publish_build_indices()
+    assert browser != -1
+    assert len(publish) == 2
+    assert all(browser < i for i in publish)
+
+
 def test_smoke_gate_precedes_every_publish_build():
     run = _index(_is_smoke_run)
     publish = _publish_build_indices()
@@ -78,3 +108,23 @@ def test_publish_steps_keep_multi_platform_targets():
     platforms = [steps[i]["with"]["platforms"] for i in _publish_build_indices()]
     assert "${{ inputs.platforms }}" in platforms
     assert "${{ inputs.platforms || 'linux/amd64,linux/arm64' }}" in platforms
+
+
+def test_audit_is_the_read_only_reusable_workflow():
+    audit = _jobs()["audit"]
+    assert audit["uses"] == "./.github/workflows/dependency-audit.yml"
+    # The workflow grants packages: write; the audit must not inherit it.
+    assert audit["permissions"] == {"contents": "read"}
+    assert "if" not in audit
+
+
+def test_every_image_job_waits_for_a_passing_audit():
+    jobs = _jobs()
+    del jobs["audit"]
+    assert jobs
+    for name, job in jobs.items():
+        needs = job.get("needs", [])
+        needs = [needs] if isinstance(needs, str) else needs
+        assert "audit" in needs, name
+        # always() or failure() would run the job after a failed audit.
+        assert "if" not in job, name

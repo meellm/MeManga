@@ -11,7 +11,9 @@ Everything every test needs lives here:
 
 from __future__ import annotations
 
+import gc
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -55,8 +57,147 @@ def isolated_home(monkeypatch, tmp_path) -> Path:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / ".config"))
     # A developer's MEMANGA_CONFIG_DIR would point the CLI elsewhere.
     monkeypatch.delenv("MEMANGA_CONFIG_DIR", raising=False)
+    # Nor may their log level or NO_COLOR change what the CLI prints.
+    monkeypatch.delenv("MEMANGA_LOG_LEVEL", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    # Nor may an injected SMTP password replace the stored one (#247).
+    monkeypatch.delenv("MEMANGA_SMTP_PASSWORD", raising=False)
+    monkeypatch.delenv("MEMANGA_SMTP_PASSWORD_FILE", raising=False)
+    # Issue #249: the default root is the platform config folder. Pin it
+    # to the isolated ~/.config/memanga on every OS so the suite behaves
+    # the same on Windows and macOS as on Linux.
+    from memanga import config as config_mod
+    monkeypatch.setattr(config_mod, "platform_config_dir",
+                        lambda *args, **kwargs: tmp_path / ".config" / "memanga")
     (tmp_path / ".config" / "memanga").mkdir(parents=True, exist_ok=True)
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def _reset_output_setup():
+    """Undo what a `cli.main()` run set up for output (issue #226).
+
+    main() installs logging handlers and may swap the CLI consoles for
+    plain ones; neither may leak into the next test.
+    """
+    cli = sys.modules.get("memanga.cli")
+    saved = (cli.console, cli.err_console) if cli is not None else None
+    yield
+    output = sys.modules.get("memanga.output")
+    if output is not None:
+        output.reset_logging()
+    cli = sys.modules.get("memanga.cli")
+    if cli is None:
+        return
+    if saved is None:
+        from rich.console import Console
+        saved = (Console(), Console(stderr=True))
+    cli.console, cli.err_console = saved
+
+
+@pytest.fixture(scope="session")
+def _empty_root(tmp_path_factory) -> Path:
+    return tmp_path_factory.mktemp("empty-root")
+
+
+@pytest.fixture(autouse=True)
+def _not_in_container(monkeypatch, _empty_root):
+    """Run every test as if outside a container, so a suite run in Docker
+    or Podman still covers `cron install` (issue #335). Only the root the
+    real container markers are looked up under moves, to an empty
+    directory; tests that need a container create a marker under their
+    own root."""
+    from memanga import cron
+    monkeypatch.setattr(cron, "CONTAINER_ROOT", str(_empty_root))
+
+
+@pytest.fixture(autouse=True)
+def _reset_scraper_cache():
+    """get_scraper() reuses instances and request spacing is shared per
+    scraper class (issue #254); neither may carry over to the next test."""
+    yield
+    scrapers = sys.modules.get("memanga.scrapers")
+    if scrapers is not None:
+        scrapers.clear_scraper_cache()
+    base = sys.modules.get("memanga.scrapers.base")
+    if base is not None:
+        base.reset_request_spacing()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Config directory lock (issue #244): a real second process holds it
+# ─────────────────────────────────────────────────────────────────────────
+
+_HOLD_LOCK = """
+import sys
+from memanga.process_lock import ConfigDirLock
+ConfigDirLock(sys.argv[1]).acquire()
+print("locked", flush=True)
+sys.stdin.readline()
+"""
+
+_TRY_LOCK = """
+import sys
+from memanga.process_lock import ConfigDirBusy, ConfigDirLock
+try:
+    ConfigDirLock(sys.argv[1]).acquire()
+except ConfigDirBusy:
+    sys.exit(3)
+"""
+
+
+class LockHolder:
+    """Holds config directory locks from separate Python processes."""
+
+    def __init__(self):
+        self._procs = []
+
+    def _python(self, code, config_dir, **kwargs):
+        return [sys.executable, "-c", code, str(config_dir)], dict(
+            cwd=str(_REPO_ROOT), text=True, **kwargs)
+
+    def hold(self, config_dir) -> subprocess.Popen:
+        """Start a process that holds the lock until release()/kill()."""
+        cmd, kwargs = self._python(_HOLD_LOCK, config_dir)
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, **kwargs)
+        self._procs.append(proc)
+        if proc.stdout.readline().strip() != "locked":
+            proc.kill()
+            _, err = proc.communicate(timeout=30)
+            raise RuntimeError(f"lock holder failed: {err}")
+        return proc
+
+    def release(self, proc):
+        """Let the holder exit normally, releasing its lock."""
+        proc.stdin.close()
+        proc.wait(timeout=30)
+
+    def can_lock(self, config_dir) -> bool:
+        """True when another process could take the lock right now."""
+        cmd, kwargs = self._python(_TRY_LOCK, config_dir)
+        result = subprocess.run(cmd, capture_output=True, timeout=60, **kwargs)
+        if result.returncode not in (0, 3):
+            raise RuntimeError(f"lock probe failed: {result.stderr}")
+        return result.returncode == 0
+
+    def close(self):
+        for proc in self._procs:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=30)
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                pipe.close()
+
+
+@pytest.fixture
+def lock_holder() -> Iterator[LockHolder]:
+    holder = LockHolder()
+    try:
+        yield holder
+    finally:
+        holder.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -79,8 +220,45 @@ def qapp_session():
 
 
 @pytest.fixture
-def qapp(qapp_session, isolated_home):
-    """Per-test alias that pulls in HOME isolation automatically."""
+def fake_trash(monkeypatch, tmp_path) -> Path:
+    """Stand in for the system trash (issue #393) so GUI tests never move
+    anything into the developer's real Trash or Recycle Bin. Files moved
+    to the trash land in the returned folder instead. Mirrors the QFile
+    member API: moveToTrash() returns a bool and, on success, fileName()
+    becomes the path in the trash."""
+    from memanga.gui import trash
+    trash_dir = tmp_path / "fake-trash"
+
+    class _FakeQFile:
+        def __init__(self, path: str):
+            self._path = path
+
+        def fileName(self) -> str:
+            return self._path
+
+        def moveToTrash(self) -> bool:
+            trash_dir.mkdir(exist_ok=True)
+            target = trash_dir / Path(self._path).name
+            os.replace(self._path, target)
+            self._path = str(target)
+            return True
+
+    monkeypatch.setattr(trash, "QFile", _FakeQFile)
+    return trash_dir
+
+
+@pytest.fixture
+def qapp(qapp_session, isolated_home, fake_trash):
+    """Per-test alias that pulls in HOME and trash isolation
+    automatically.
+
+    Widgets an earlier test left in a reference cycle are freed here,
+    before the test applies the theme. Otherwise the cyclic garbage
+    collector frees them at an arbitrary moment, which can be inside
+    one of Qt's loops over every widget (an application style sheet or
+    palette change, with a Python event filter running per widget), and
+    the process then crashes on the widget it just freed."""
+    gc.collect()
     return qapp_session
 
 
@@ -110,7 +288,13 @@ def theme(qapp, fresh_settings):
     default dark theme. Returns the module so tests can call
     `theme.set_theme()`, `theme.tokens()` etc."""
     from memanga.gui import theme as T
-    T._current = None
+    # Not None, which would read the persisted theme: Qt fixes the
+    # QSettings location the first time a process uses it, so a theme an
+    # earlier test on the same worker saved would leak in.
+    T._current = T.DEFAULT_THEME
+    # The legacy colour constants (T.BG, T.ACCENT, ...) follow the active
+    # theme only through a theme switch; repoint them too.
+    T._refresh_legacy_constants()
     T.apply(qapp)
     return T
 
@@ -222,7 +406,8 @@ def patch_get_scraper(monkeypatch, mock_scraper):
     import memanga.scrapers as scrapers_pkg
     import memanga.downloader as dl
     monkeypatch.setattr(scrapers_pkg, "get_scraper", lambda d: mock_scraper)
-    monkeypatch.setattr(dl, "get_scraper", lambda d: mock_scraper)
+    monkeypatch.setattr(dl.updates, "get_scraper", lambda d: mock_scraper)
+    monkeypatch.setattr(dl.chapter, "get_scraper", lambda d: mock_scraper)
     return mock_scraper
 
 
@@ -270,4 +455,32 @@ def make_cbz(tmp_path):
                 Image.new("RGB", (400, 600), "white").save(buf, "JPEG")
                 zf.writestr(f"page{i:03d}.jpg", buf.getvalue())
         return out
+    return _make
+
+
+@pytest.fixture
+def declared_png():
+    """Factory: PNG bytes whose header declares *width* x *height* pixels
+    with no image data behind it, the shape of a decompression bomb. Only
+    the header is real, so building one costs nothing. With
+    ``filled=True`` it is a real, white RGB image instead, compressed row
+    by row so even a huge one is cheap to build."""
+    import struct, zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data)))
+
+    def _make(width: int, height: int, filled: bool = False) -> bytes:
+        colour_type = 2 if filled else 0
+        ihdr = struct.pack(">IIBBBBB", width, height, 8, colour_type, 0, 0, 0)
+        if filled:
+            comp = zlib.compressobj(9)
+            row = b"\x00" + b"\xff" * (width * 3)
+            idat = b"".join(comp.compress(row) for _ in range(height))
+            idat += comp.flush()
+        else:
+            idat = zlib.compress(b"")
+        return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr)
+                + chunk(b"IDAT", idat) + chunk(b"IEND", b""))
     return _make

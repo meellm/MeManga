@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from .base import BasePage
 from .. import theme as T
+from ..components.error_details import summarize_error
 from ..components.progress_item import ProgressItem
 from ..components.toast import Toast
 
@@ -255,8 +256,29 @@ class DownloadsPage(BasePage):
             size_label.setFixedWidth(55)
             row_layout.addWidget(size_label)
 
+            # Issue #338: whether the chapter went to the Kindle and its
+            # local copy was deleted afterwards.
+            status, status_tip = self._history_delivery(h)
+            status_label = QLabel(status)
+            status_label.setObjectName("history_delivery")
+            status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
+            status_label.setFixedWidth(90)
+            if status_tip:
+                status_label.setToolTip(status_tip)
+                status_label.setAccessibleName(status_tip)
+            row_layout.addWidget(status_label)
+
             self._history_layout.addWidget(row)
             self._history_widgets.append(row)
+
+    @staticmethod
+    def _history_delivery(entry) -> tuple:
+        """Short delivery status for a history row and its full wording."""
+        if not entry.get("kindle_sent"):
+            return "", ""
+        if entry.get("deleted_after_send"):
+            return "Sent · deleted", "Sent to Kindle; local copy deleted"
+        return "Sent", "Sent to Kindle"
 
     def on_show(self, **kwargs):
         if self._current_tab == "history":
@@ -519,7 +541,10 @@ class DownloadsPage(BasePage):
             return
         title = data.get("title", "")
         error = data.get("error", "Unknown error")
-        Toast(self, f"Error: {title}: {error[:50]}", kind="error")
+        # Issue #342: the app records the full error in Notifications.
+        Toast(self, f"Error: {summarize_error(title, 40)}: "
+                    f"{summarize_error(error, 50)} (details in Notifications)",
+              kind="error")
 
     def _on_check_complete(self, data):
         if data.get("request_id") is not None:
@@ -529,6 +554,8 @@ class DownloadsPage(BasePage):
         # Such a request must queue the resolved chapters regardless of mode;
         # the background sweep only auto-queues auto-mode manga.
         queue_all = data.get("queue_all", False)
+        # One mode policy for the CLI and the app (#341).
+        from ...chapter_pipeline import manga_auto_downloads
 
         # Manual-mode manga surface their badge + per-chapter Download buttons
         # on the Detail page and are not auto-queued by the background sweep —
@@ -538,7 +565,7 @@ class DownloadsPage(BasePage):
         else:
             to_queue = [
                 r for r in results
-                if r["manga"].get("mode", "auto") == "auto" and r.get("chapters")
+                if manga_auto_downloads(r["manga"]) and r.get("chapters")
             ]
 
         if not to_queue:
@@ -551,7 +578,7 @@ class DownloadsPage(BasePage):
             # waiting for the user to download from the Detail page".
             manual_with_new = sum(
                 len(r["chapters"]) for r in results
-                if r["manga"].get("mode", "auto") == "manual" and r.get("chapters")
+                if not manga_auto_downloads(r["manga"]) and r.get("chapters")
             )
             if manual_with_new:
                 Toast(
@@ -566,9 +593,12 @@ class DownloadsPage(BasePage):
         total = sum(len(r["chapters"]) for r in to_queue)
         Toast(self, f"Found {total} new chapter(s), downloading...", kind="success")
 
-        global_kindle = self.app.config.delivery_mode == "email" and self.app.config.email_enabled
-        naming_template = self.app.config.get("delivery.naming_template")
+        from ...email_settings import kindle_delivery_settings
+        delivery = self.app.config.delivery
+        naming_template = delivery.naming_template
+        # The live section: turning the hook off also stops queued chapters.
         post_processing = self.app.config.get("delivery.post_processing")
+        delete_after_send = delivery.delete_after_send
 
         skipped = 0
         jobs = []
@@ -576,7 +606,7 @@ class DownloadsPage(BasePage):
         for r in to_queue:
             manga = r["manga"]
             m_title = manga.get("title", "")
-            is_auto = manga.get("mode", "auto") == "auto"
+            is_auto = manga_auto_downloads(manga)
             for ch in r["chapters"]:
                 # Issue #15: never re-queue a chapter that's already on
                 # disk. Belt-and-suspenders against any caller that
@@ -591,21 +621,10 @@ class DownloadsPage(BasePage):
                         batch["resolved"] += 1
                     continue
 
-                kindle_cfg = None
-                if global_kindle and manga.get("send_to_kindle", True):
-                    from ...config import get_app_password
-                    kindle_cfg = {
-                        "kindle_email": self.app.config.get("email.kindle_email"),
-                        "sender_email": self.app.config.get("email.sender_email"),
-                        "app_password": get_app_password(self.app.config),
-                        "smtp_server": self.app.config.get("email.smtp_server", "smtp.gmail.com"),
-                        "smtp_port": self.app.config.get("email.smtp_port", 587),
-                    }
-
                 jobs.append({
                     "manga": manga,
                     "chapter": ch,
-                    "kindle_cfg": kindle_cfg,
+                    "kindle_cfg": kindle_delivery_settings(self.app.config, manga),
                     "task_id": f"{m_title}:{ch.number}",
                 })
 
@@ -635,6 +654,7 @@ class DownloadsPage(BasePage):
                 post_processing=post_processing,
                 allow_partial=self.app.config.partial_enabled,
                 partial_threshold=self.app.config.partial_threshold,
+                delete_after_send=delete_after_send,
             )
         if skipped:
             Toast(self, f"Skipped {skipped} chapter(s) already on disk", kind="info")

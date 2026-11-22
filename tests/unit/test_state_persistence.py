@@ -62,6 +62,9 @@ class TestAtomicSave:
 
         def controlled_replace(src, dst):
             nonlocal replace_count
+            if str(dst) != str(state.state_path):
+                # Backup rotation (issue #243) is not a publication.
+                return original_replace(src, dst)
             with count_lock:
                 replace_count += 1
                 call_number = replace_count
@@ -85,7 +88,7 @@ class TestAtomicSave:
                 assert release_first_replace.wait(timeout=5)
             original_replace(src, dst)
 
-        monkeypatch.setattr("memanga.state.os.replace", controlled_replace)
+        monkeypatch.setattr("memanga.persist.os.replace", controlled_replace)
 
         def capture_errors(fn, *args):
             try:
@@ -518,3 +521,623 @@ class TestFlushMutationStress:
         assert len(data["download_history"]) == self.N_MANGA * self.N_CHAPTERS
         assert len(data["notifications"]) == self.N_NOTIFICATIONS
         assert len(data["source_health"]) == self.N_SOURCES
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Issue #243 — a damaged state.json is kept, never replaced by defaults
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestCorruptStateRecovery:
+    @pytest.fixture
+    def cfg_dir(self, isolated_home):
+        d = isolated_home / ".config" / "memanga"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _preserved(cfg_dir):
+        return sorted(cfg_dir.glob("state.json.corrupt-*"))
+
+    @pytest.mark.parametrize("content", [
+        "{this is not json", '{"manga": {"A": {"downloaded": ["1"', "",
+        "[]", "null", b"\xff\xfe\x00bad".decode("latin-1"),
+    ])
+    def test_damaged_file_is_preserved_and_later_save_keeps_it(
+            self, cfg_dir, content):
+        from memanga.state import State
+        (cfg_dir / "state.json").write_text(content, encoding="latin-1")
+        original = (cfg_dir / "state.json").read_bytes()
+
+        s = State(config_dir=cfg_dir)
+        preserved = self._preserved(cfg_dir)
+        assert preserved == [s.preserved_path]
+        assert preserved[0].read_bytes() == original
+        assert s.load_error is None
+        assert "No usable backup" in s.recovery_notice
+        assert str(s.preserved_path) in s.recovery_notice
+        assert s.get_notifications() == []
+
+        s.add_notification("info", "after recovery")
+        s.save()
+        assert preserved[0].read_bytes() == original
+        assert json.loads((cfg_dir / "state.json").read_text())["notifications"]
+
+    def test_valid_backup_is_restored_and_written_back(self, cfg_dir):
+        from memanga.state import State
+        good = {"manga": {"Berserk": {"downloaded": ["1", "2"]}},
+                "notifications": []}
+        (cfg_dir / "state.json.bak").write_text(json.dumps(good))
+        (cfg_dir / "state.json").write_text("{truncated")
+
+        s = State(config_dir=cfg_dir)
+        assert s.get_downloaded_chapters("Berserk") == ["1", "2"]
+        assert "Restored the previous copy" in s.recovery_notice
+        assert json.loads((cfg_dir / "state.json").read_text()) == good
+        assert self._preserved(cfg_dir)[0].read_text() == "{truncated"
+        # Restoring does not rotate the damaged file into the backup.
+        assert json.loads((cfg_dir / "state.json.bak").read_text()) == good
+        # The next start loads the restored file without any notice.
+        again = State(config_dir=cfg_dir)
+        assert again.recovery_notice is None
+        assert again.get_downloaded_chapters("Berserk") == ["1", "2"]
+
+    @pytest.mark.parametrize("backup", [None, '{"manga": {}}'])
+    def test_without_recovery_damaged_file_is_left_alone(self, cfg_dir, backup):
+        """Issue #244: an unlocked reader never preserves, removes or
+        restores; it refuses and leaves every file as it was."""
+        from memanga.state import State, StateError
+        (cfg_dir / "state.json").write_text("{truncated")
+        if backup is not None:
+            (cfg_dir / "state.json.bak").write_text(backup)
+        before = sorted((p.name, p.read_bytes()) for p in cfg_dir.iterdir())
+
+        s = State(config_dir=cfg_dir, recover=False)
+        assert s.needs_recovery
+        assert "nothing was changed" in s.load_error
+        assert s.recovery_notice is None and s.preserved_path is None
+        with pytest.raises(StateError):
+            s.save()
+        assert sorted((p.name, p.read_bytes()) for p in cfg_dir.iterdir()) == before
+
+    def test_without_recovery_healthy_file_loads(self, cfg_dir):
+        from memanga.state import State
+        good = {"manga": {"Berserk": {"downloaded": ["1"]}}}
+        (cfg_dir / "state.json").write_text(json.dumps(good))
+        s = State(config_dir=cfg_dir, recover=False)
+        assert not s.needs_recovery and s.load_error is None
+        assert s.get_downloaded_chapters("Berserk") == ["1"]
+
+    def test_invalid_backup_falls_back_to_defaults(self, cfg_dir):
+        from memanga.state import State
+        (cfg_dir / "state.json.bak").write_text("[1, 2]")
+        (cfg_dir / "state.json").write_text("{bad")
+        s = State(config_dir=cfg_dir)
+        assert "No usable backup" in s.recovery_notice
+        assert s.get("manga") == {}
+        assert (cfg_dir / "state.json.bak").read_text() == "[1, 2]"
+
+    def test_missing_file_starts_fresh_without_restoring_backup(self, cfg_dir):
+        """Deleting state.json on purpose must still give a fresh start."""
+        from memanga.state import State
+        (cfg_dir / "state.json.bak").write_text(json.dumps(
+            {"manga": {"Old": {"downloaded": ["9"]}}}))
+        s = State(config_dir=cfg_dir)
+        assert s.recovery_notice is None and s.load_error is None
+        assert s.get("manga") == {}
+
+    def _fail_state_replace(self, monkeypatch, cfg_dir):
+        import os
+        original_replace = self._real_replace = os.replace
+
+        def replace(src, dst):
+            if str(dst) == str(cfg_dir / "state.json"):
+                raise OSError("No space left on device")
+            return original_replace(src, dst)
+        monkeypatch.setattr("memanga.persist.os.replace", replace)
+
+    def test_failed_restore_write_back_blocks_and_keeps_backup(
+            self, cfg_dir, monkeypatch):
+        from memanga.state import State, StateError
+        good = json.dumps({"manga": {"Berserk": {"downloaded": ["1"]}}})
+        (cfg_dir / "state.json.bak").write_text(good)
+        (cfg_dir / "state.json").write_text("{truncated")
+        self._fail_state_replace(monkeypatch, cfg_dir)
+
+        s = State(config_dir=cfg_dir)
+        assert "could not be written back" in s.load_error
+        assert "left as it is" in s.load_error
+        assert s.recovery_notice is None
+        # The damaged file never left its place, so the next start retries.
+        assert (cfg_dir / "state.json").read_text() == "{truncated"
+        assert [p.read_text() for p in self._preserved(cfg_dir)] == ["{truncated"]
+        assert (cfg_dir / "state.json.bak").read_text() == good
+        with pytest.raises(StateError):
+            s.save()
+        assert (cfg_dir / "state.json.bak").read_text() == good
+        assert [p for p in cfg_dir.iterdir() if p.suffix == ".tmp"] == []
+
+        # A second failing start reuses the identical preserved copy.
+        retry = State(config_dir=cfg_dir)
+        assert "could not be written back" in retry.load_error
+        assert retry.preserved_path == s.preserved_path
+        assert [p.read_text() for p in self._preserved(cfg_dir)] == ["{truncated"]
+
+        monkeypatch.setattr("memanga.persist.os.replace", self._real_replace)
+        again = State(config_dir=cfg_dir)
+        assert again.load_error is None
+        assert again.get_downloaded_chapters("Berserk") == ["1"]
+        assert json.loads((cfg_dir / "state.json").read_text()) == json.loads(good)
+        assert len(self._preserved(cfg_dir)) == 1
+
+    def test_failed_recovery_never_becomes_a_fresh_start(
+            self, cfg_dir, monkeypatch):
+        """Across restarts: a start whose restore write fails, then one
+        whose copy aside also fails, both refuse instead of loading empty
+        state, and keep the damaged file and the backup. The first start
+        that can write recovers the backup."""
+        from memanga import state as state_mod
+        good = json.dumps({"manga": {"Berserk": {"downloaded": ["1"]}}})
+        (cfg_dir / "state.json.bak").write_text(good)
+        (cfg_dir / "state.json").write_text("{truncated")
+        self._fail_state_replace(monkeypatch, cfg_dir)
+
+        first = state_mod.State(config_dir=cfg_dir)
+        assert "could not be written back" in first.load_error
+
+        def deny(path):
+            raise OSError("No space left on device")
+        monkeypatch.setattr(state_mod, "preserve_corrupt", deny)
+        second = state_mod.State(config_dir=cfg_dir)
+        assert "could not be copied for recovery" in second.load_error
+        with pytest.raises(state_mod.StateError):
+            second.save()
+
+        assert (cfg_dir / "state.json").read_text() == "{truncated"
+        assert (cfg_dir / "state.json.bak").read_text() == good
+        assert [p.read_text() for p in self._preserved(cfg_dir)] == ["{truncated"]
+
+        from memanga.persist import preserve_corrupt
+        monkeypatch.setattr(state_mod, "preserve_corrupt", preserve_corrupt)
+        monkeypatch.setattr("memanga.persist.os.replace", self._real_replace)
+        third = state_mod.State(config_dir=cfg_dir)
+        assert third.load_error is None
+        assert "Restored the previous copy" in third.recovery_notice
+        assert third.get_downloaded_chapters("Berserk") == ["1"]
+        assert json.loads((cfg_dir / "state.json").read_text()) == json.loads(good)
+        assert (cfg_dir / "state.json.bak").read_text() == good
+        assert len(self._preserved(cfg_dir)) == 1
+
+    def test_uncopyable_damaged_file_blocks_saves(self, cfg_dir, monkeypatch):
+        from memanga import state as state_mod
+        (cfg_dir / "state.json").write_text("{bad")
+
+        def deny(path):
+            raise PermissionError("denied")
+        monkeypatch.setattr(state_mod, "preserve_corrupt", deny)
+
+        s = state_mod.State(config_dir=cfg_dir)
+        assert "could not be copied for recovery" in s.load_error
+        s.add_notification("info", "x")  # only marks state dirty
+        with pytest.raises(state_mod.StateError):
+            s.save()
+        assert (cfg_dir / "state.json").read_text() == "{bad"
+        assert not (cfg_dir / "state.json.bak").exists()
+
+    def test_unreadable_backup_refuses_instead_of_starting_empty(self, cfg_dir):
+        from memanga.state import State, StateError
+        (cfg_dir / "state.json").write_text("{bad")
+        # A directory in the backup's place: it exists but open() fails
+        # with an OSError, like a permission or I/O error would.
+        (cfg_dir / "state.json.bak").mkdir()
+        s = State(config_dir=cfg_dir)
+        assert "could not be read" in s.load_error
+        assert s.recovery_notice is None
+        # The damaged primary stays (and is copied); nothing is replaced.
+        assert (cfg_dir / "state.json").read_text() == "{bad"
+        assert [p.read_text() for p in self._preserved(cfg_dir)] == ["{bad"]
+        assert (cfg_dir / "state.json.bak").is_dir()
+        with pytest.raises(StateError):
+            s.save()
+        assert (cfg_dir / "state.json").read_text() == "{bad"
+
+    def test_unreadable_file_is_left_in_place(self, cfg_dir):
+        from memanga.state import State, StateError
+        # A directory in its place makes open() fail with an OSError.
+        (cfg_dir / "state.json").mkdir()
+        s = State(config_dir=cfg_dir)
+        assert s.load_error and "cannot read" in s.load_error
+        assert s.recovery_notice is None
+        assert self._preserved(cfg_dir) == []
+        with pytest.raises(StateError):
+            s.save()
+        assert (cfg_dir / "state.json").is_dir()
+
+
+class TestSaveBackup:
+    def test_first_save_has_no_backup(self, state):
+        state.set("k", 1)
+        assert not state.backup_path.exists()
+
+    def test_save_keeps_one_previous_generation(self, state):
+        state.set("k", 1)
+        state.set("k", 2)
+        assert json.loads(state.backup_path.read_text())["k"] == 1
+        state.set("k", 3)
+        assert json.loads(state.backup_path.read_text())["k"] == 2
+        assert json.loads(state.state_path.read_text())["k"] == 3
+        names = sorted(p.name for p in state.config_dir.iterdir()
+                       if p.name.startswith("state.json"))
+        assert names == ["state.json", "state.json.bak"]
+
+    def test_copy_fallback_without_hard_links(self, state, monkeypatch):
+        def no_link(*a, **k):
+            raise OSError("hard links not supported")
+        monkeypatch.setattr("memanga.persist.os.link", no_link)
+        state.set("k", 1)
+        state.set("k", 2)
+        assert json.loads(state.backup_path.read_text())["k"] == 1
+
+    def test_copy_fallback_is_fsynced_before_publication(
+            self, state, monkeypatch):
+        import os
+        import stat as stat_mod
+        real_fsync = os.fsync
+        synced = []
+
+        def spy(fd):
+            if stat_mod.S_ISREG(os.fstat(fd).st_mode):
+                synced.append(fd)
+            return real_fsync(fd)
+        state.set("k", 1)
+        monkeypatch.setattr("memanga.persist.os.fsync", spy)
+        state.set("k", 2)
+        with_links = len(synced)
+
+        def no_link(*a, **k):
+            raise OSError("hard links not supported")
+        monkeypatch.setattr("memanga.persist.os.link", no_link)
+        synced.clear()
+        state.set("k", 3)
+        # The primary's temp file plus the backup copy.
+        assert len(synced) == with_links + 1
+        assert self._k(state.backup_path) == 2
+
+    @pytest.mark.skipif(__import__("os").name == "nt",
+                        reason="POSIX permission bits")
+    def test_config_backup_copy_keeps_private_mode(self, config, monkeypatch):
+        import os
+        import stat as stat_mod
+
+        def no_link(*a, **k):
+            raise OSError("hard links not supported")
+        monkeypatch.setattr("memanga.persist.os.link", no_link)
+        config.save()
+        # A mode mkstemp never produces, so a copy that only gets its bits
+        # afterwards (or keeps the umask's) cannot pass by accident.
+        os.chmod(config.config_path, 0o640)
+        real_open = os.open
+        created = []
+
+        def spy_open(path, flags, mode=0o777, *a, **k):
+            if flags & os.O_CREAT and str(path).startswith(
+                    str(config.config_dir / "config.yaml.bak")):
+                created.append(mode)
+            return real_open(path, flags, mode, *a, **k)
+        monkeypatch.setattr("memanga.persist.os.open", spy_open)
+        config.set("delivery.mode", "email")
+        config.save()
+        backup = config.config_dir / "config.yaml.bak"
+        # Created with the source's bits from the start, not after writing.
+        assert created == [0o640]
+        assert stat_mod.S_IMODE(backup.stat().st_mode) == 0o640
+
+    def test_interrupted_backup_swap_still_syncs_the_folder(
+            self, state, monkeypatch):
+        import os
+        state.set("k", 1)
+        state.set("k", 2)
+        real_replace = os.replace
+        synced = []
+
+        def replace(src, dst):
+            if str(dst) == str(state.backup_path):
+                raise KeyboardInterrupt
+            return real_replace(src, dst)
+        monkeypatch.setattr("memanga.persist.os.replace", replace)
+        monkeypatch.setattr("memanga.persist._fsync_dir", synced.append)
+        with pytest.raises(KeyboardInterrupt):
+            state.set("k", 3)
+        assert synced == [state.config_dir]
+        assert self._k(state.state_path) == 3
+        assert self._k(state.backup_path) == 1
+        assert self._tmp_files(state) == []
+
+    def test_directory_fsync_failure_does_not_fail_save(
+            self, state, monkeypatch):
+        import os
+        import stat as stat_mod
+        real_fsync = os.fsync
+        dir_syncs = []
+
+        def fsync(fd):
+            if stat_mod.S_ISDIR(os.fstat(fd).st_mode):
+                dir_syncs.append(fd)
+                raise OSError("fsync not supported on this directory")
+            return real_fsync(fd)
+        monkeypatch.setattr("memanga.persist.os.fsync", fsync)
+        state.set("k", 1)
+        assert self._k(state.state_path) == 1
+        if os.name != "nt":
+            assert dir_syncs  # attempted where the platform allows it
+
+    @staticmethod
+    def _k(path):
+        return json.loads(path.read_text())["k"]
+
+    @staticmethod
+    def _tmp_files(state):
+        return [p.name for p in state.config_dir.iterdir() if p.suffix == ".tmp"]
+
+    def test_backup_preparation_failure_fails_save_and_keeps_old_backup(
+            self, state, monkeypatch):
+        import errno
+        from memanga.persist import SaveError
+        state.set("k", 1)
+        state.set("k", 2)
+
+        def fail(*a, **k):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        monkeypatch.setattr("memanga.persist.os.link", fail)
+        monkeypatch.setattr("memanga.persist._copy_durable", fail)
+        with pytest.raises(SaveError) as exc:
+            state.set("k", 3)
+        # Still an OSError for existing handlers, with the cause kept.
+        assert isinstance(exc.value, OSError)
+        assert exc.value.errno == errno.ENOSPC
+        assert exc.value.path == state.state_path
+        assert str(exc.value) == (
+            f"could not save {state.state_path}: No space left on device")
+        assert self._k(state.state_path) == 2
+        assert self._k(state.backup_path) == 1
+        assert self._tmp_files(state) == []
+
+    def test_partial_backup_copy_is_removed(self, state, monkeypatch):
+        state.set("k", 1)
+        state.set("k", 2)
+
+        def no_link(*a, **k):
+            raise OSError("hard links not supported")
+
+        def torn_copy(src, dst):
+            dst.write(b"{torn")
+            raise OSError("disk full")
+        monkeypatch.setattr("memanga.persist.os.link", no_link)
+        monkeypatch.setattr("memanga.persist.shutil.copyfileobj", torn_copy)
+        with pytest.raises(OSError):
+            state.set("k", 3)
+        assert self._k(state.state_path) == 2
+        assert self._k(state.backup_path) == 1
+        assert self._tmp_files(state) == []
+
+    def test_failed_write_leaves_file_and_backup(self, state, monkeypatch):
+        state.set("k", 1)
+        state.set("k", 2)
+
+        def fail_replace(src, dst):
+            raise OSError("disk full")
+        monkeypatch.setattr("memanga.persist.os.replace", fail_replace)
+        with pytest.raises(OSError):
+            state.set("k", 3)
+        assert self._k(state.state_path) == 2
+        assert self._k(state.backup_path) == 1
+        assert self._tmp_files(state) == []
+
+    def test_failed_backup_swap_after_save_keeps_old_backup(
+            self, state, monkeypatch):
+        state.set("k", 1)
+        state.set("k", 2)
+        original_replace = __import__("os").replace
+
+        def replace(src, dst):
+            if str(dst) == str(state.backup_path):
+                raise OSError("I/O error")
+            return original_replace(src, dst)
+        monkeypatch.setattr("memanga.persist.os.replace", replace)
+        state.set("k", 3)
+        assert self._k(state.state_path) == 3
+        assert self._k(state.backup_path) == 1
+        assert self._tmp_files(state) == []
+
+    def test_config_save_keeps_backup(self, config):
+        config.set("delivery.mode", "local")
+        config.save()
+        first = config.config_path.read_text(encoding="utf-8")
+        config.set("delivery.mode", "email")
+        config.save()
+        backup = config.config_dir / "config.yaml.bak"
+        assert backup.read_text(encoding="utf-8") == first
+        assert "email" in config.config_path.read_text(encoding="utf-8")
+
+
+class TestPreserveCorrupt:
+    @staticmethod
+    def _copies(directory):
+        return sorted(directory.glob("state.json.corrupt-*"))
+
+    def test_symlink_to_primary_is_not_taken_as_the_copy(self, isolated_home):
+        """A ``state.json.corrupt-*`` symlink pointing at state.json hashes
+        identical; reusing it and then removing state.json (no backup)
+        would leave only a dangling link."""
+        import os
+        from memanga.state import State
+        cfg = isolated_home / ".config" / "memanga"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "state.json").write_text("{bad")
+        link = cfg / "state.json.corrupt-20260101T000000"
+        try:
+            os.symlink(cfg / "state.json", link)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not available")
+
+        s = State(config_dir=cfg)
+        assert s.preserved_path != link
+        assert not s.preserved_path.is_symlink()
+        assert s.preserved_path.read_text() == "{bad"
+        assert not (cfg / "state.json").exists()  # removed: no backup
+
+    def test_hard_link_to_primary_is_not_taken_as_the_copy(self, tmp_path):
+        import os
+        from memanga.persist import preserve_corrupt
+        target = tmp_path / "state.json"
+        target.write_text("{bad")
+        alias = tmp_path / "state.json.corrupt-20260101T000000"
+        try:
+            os.link(target, alias)
+        except OSError:
+            pytest.skip("hard links not available")
+        copy = preserve_corrupt(target)
+        assert copy != alias
+        assert os.stat(copy).st_ino != os.stat(target).st_ino
+        assert copy.read_text() == "{bad"
+
+    def test_copy_still_being_written_is_never_reused(
+            self, isolated_home, monkeypatch):
+        """Process A has written every byte of its copy but fails before
+        it is durable (fsync/mode, e.g. ENOSPC) and removes it. Process B
+        starts in between, finds no usable backup and removes state.json
+        once it has a copy, so that copy must be B's own: reusing A's
+        would leave nothing after A cleans up."""
+        import os
+        import shutil
+        from memanga.state import State
+        cfg = isolated_home / ".config" / "memanga"
+        cfg.mkdir(parents=True, exist_ok=True)
+        (cfg / "state.json").write_text("{damaged bytes")
+        real_copy = shutil.copyfileobj
+        states = {}
+
+        def copy_then_fail(src, dst, *a, **k):
+            real_copy(src, dst, *a, **k)
+            if "b" in states:  # B's own copy: no interference
+                return
+            states["b"] = None
+            # A's copy is complete in size and bytes; B starts now.
+            assert self._copies(cfg) == []  # A's copy is not visible
+            states["b"] = State(config_dir=cfg)
+            raise OSError(28, "No space left on device")
+        monkeypatch.setattr("memanga.persist.shutil.copyfileobj", copy_then_fail)
+
+        a = State(config_dir=cfg)
+        b = states["b"]
+        assert "could not be copied for recovery" in a.load_error
+        assert b.load_error is None and b.recovery_notice
+        assert self._copies(cfg) == [b.preserved_path]
+        assert b.preserved_path.read_text() == "{damaged bytes"
+        if os.name != "nt":  # Windows cannot remove a file A still has open
+            assert not (cfg / "state.json").exists()
+        assert [p.name for p in cfg.iterdir() if p.suffix == ".tmp"] == []
+
+    @pytest.mark.parametrize("hard_links", [True, False])
+    def test_copy_is_published_only_when_complete(
+            self, tmp_path, monkeypatch, hard_links):
+        import os
+        from memanga.persist import preserve_corrupt
+        target = tmp_path / "state.json"
+        target.write_text("{bad")
+        real_link, real_rename = os.link, os.rename
+        seen = []
+
+        def publish_check(src, dst):
+            # Before publication the copy holds every byte, under a name
+            # the reuse scan does not look at.
+            seen.append((open(src).read(), str(dst)))
+            assert self._copies(tmp_path) == []
+
+        def link(src, dst, *a, **k):
+            if not hard_links:
+                raise PermissionError("hard links not supported")
+            publish_check(src, dst)
+            return real_link(src, dst, *a, **k)
+
+        def rename(src, dst, *a, **k):
+            publish_check(src, dst)
+            return real_rename(src, dst, *a, **k)
+        monkeypatch.setattr("memanga.persist.os.link", link)
+        monkeypatch.setattr("memanga.persist.os.rename", rename)
+        try:
+            copy = preserve_corrupt(target)
+        except OSError:
+            if hard_links:
+                pytest.skip("hard links not available")
+            raise
+        assert seen == [("{bad", str(copy))]
+        assert copy.read_text() == "{bad"
+        assert target.read_text() == "{bad"
+        assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []
+
+    def test_publication_never_replaces_an_existing_name(
+            self, tmp_path, monkeypatch):
+        """If the chosen name is somehow taken, publishing fails and the
+        existing file is left alone (link: EEXIST; fallback: checked)."""
+        from memanga import persist
+        target = tmp_path / "state.json"
+        target.write_text("{bad")
+        import types
+        monkeypatch.setattr(persist.secrets, "token_hex", lambda n: "fixed")
+        monkeypatch.setattr(persist, "datetime", types.SimpleNamespace(
+            now=lambda: types.SimpleNamespace(strftime=lambda f: "20260101T000000")))
+        for hard_links in (True, False):
+            taken = tmp_path / "state.json.corrupt-20260101T000000-fixed"
+            taken.write_text("someone else's copy")
+            if not hard_links:
+                def no_link(*a, **k):
+                    raise PermissionError("hard links not supported")
+                monkeypatch.setattr("memanga.persist.os.link", no_link)
+            monkeypatch.setattr(persist, "_identical_copy", lambda p: None)
+            with pytest.raises(FileExistsError):
+                persist.preserve_corrupt(target)
+            assert taken.read_text() == "someone else's copy"
+            assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []
+            taken.unlink()
+
+    def test_never_replaces_an_earlier_preserved_copy(self, tmp_path):
+        from memanga.persist import preserve_corrupt
+        target = tmp_path / "state.json"
+        target.write_text("first")
+        p1 = preserve_corrupt(target)
+        target.write_text("second")
+        p2 = preserve_corrupt(target)
+        assert p1 != p2
+        assert p1.read_text() == "first"
+        assert p2.read_text() == "second"
+        # The original stays in place for the caller to replace.
+        assert target.read_text() == "second"
+
+    def test_identical_bytes_reuse_the_existing_copy(self, tmp_path):
+        from memanga.persist import preserve_corrupt
+        target = tmp_path / "state.json"
+        target.write_text("{same")
+        p1 = preserve_corrupt(target)
+        p2 = preserve_corrupt(target)
+        assert p1 == p2
+        assert sorted(tmp_path.glob("state.json.corrupt-*")) == [p1]
+        # Same size, different bytes: a new copy, the old one untouched.
+        target.write_text("{diff")
+        p3 = preserve_corrupt(target)
+        assert p3 != p1
+        assert p1.read_text() == "{same" and p3.read_text() == "{diff"
+
+    def test_failed_copy_leaves_no_partial_file(self, tmp_path, monkeypatch):
+        from memanga.persist import preserve_corrupt
+        target = tmp_path / "state.json"
+        target.write_text("{bad")
+
+        def fail(src, dst):
+            dst.write(b"{b")
+            raise OSError("No space left on device")
+        monkeypatch.setattr("memanga.persist.shutil.copyfileobj", fail)
+        with pytest.raises(OSError):
+            preserve_corrupt(target)
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["state.json"]
+        assert target.read_text() == "{bad"

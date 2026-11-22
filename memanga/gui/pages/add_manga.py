@@ -156,6 +156,11 @@ class AddMangaDialog(ModalDialog):
             f"  background-color: {T.tokens()['accent.primary_2']};"
             f"  border-color: {T.tokens()['accent.primary_2']};"
             f"}}"
+            # Keyboard focus ring (issue #396), as for app primary buttons.
+            f"QPushButton[focusVisible=\"true\"]:focus {{"
+            f"  border: 2px solid {T.tokens()['text.t_1']};"
+            f"  padding: 5px 13px;"
+            f"}}"
         )
         add_btn.clicked.connect(self._add_manga)
         self.foot_layout.addWidget(add_btn)
@@ -210,6 +215,15 @@ class AddMangaDialog(ModalDialog):
         existing = self.app.config.get("manga", [])
         for m in existing:
             if m.get("title", "").lower() == title.lower():
+                return
+        # Titles that sanitize to one download folder ("A:B" and "AB")
+        # would overwrite each other's chapter files (issue #246).
+        from ...downloader import _download_folder_key
+        folder_key = _download_folder_key(title)
+        for m in existing:
+            if _download_folder_key(m.get("title", "")) == folder_key:
+                Toast(self, f"'{m.get('title', '')}' already uses this download "
+                            "folder; pick another title", kind="error")
                 return
 
         try:
@@ -267,20 +281,8 @@ class AddMangaDialog(ModalDialog):
         is_offline = net is not None and not net.is_online
         if not is_offline:
             def _fetch_cover():
-                cover = None
-                try:
-                    from ...scrapers import get_scraper
-                    scraper = get_scraper(domain)
-                    if hasattr(scraper, "get_cover_url"):
-                        cover = scraper.get_cover_url(url)
-                except Exception:
-                    cover = None
-                if not cover:
-                    try:
-                        from ..cover_fallback import fetch_mangadex_cover
-                        cover = fetch_mangadex_cover(title)
-                    except Exception:
-                        cover = None
+                from ..cover_fallback import find_cover
+                cover = find_cover(self.app.config, domain, url, title)
                 if cover:
                     manga_list = self.app.config.get("manga", [])
                     for m in manga_list:

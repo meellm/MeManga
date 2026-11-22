@@ -1,7 +1,26 @@
+# Runs the published MeManga image. No copy of the source code is needed:
+# this file alone is enough.
+#
+#   docker compose run --rm memanga list
+#   docker compose run --rm memanga check --dry-run
+#
+# Settings, in a file named .env next to this one or in your shell:
+#   MEMANGA_IMAGE  the image to run (default: the release pinned below)
+#   TZ             time zone inside the container, for example
+#                  Europe/Berlin (default: UTC)
+#
+# To build from the source code instead, with scheduled checks, use
+# compose.dev.yaml.
+
 services:
+  # One-off commands: docker compose run --rm memanga <command>
   memanga:
-    build: .
-    image: memanga:cli
+    image: ${MEMANGA_IMAGE:-meellm/memanga:0.4.4}
+    # The 0.4.4 image has no init process of its own. This one cleans up
+    # the helper processes that the browsers leave behind.
+    init: true
+    environment:
+      TZ: ${TZ:-UTC}
     volumes:
       - memanga-config:/home/memanga/.config/memanga
       - memanga-downloads:/home/memanga/Downloads/MeManga

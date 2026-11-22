@@ -35,6 +35,8 @@ class MangaDexScraper(BaseScraper):
     
     name = "mangadex"
     base_url = "https://api.mangadex.org"
+    engine = "api"
+    content_language = "en"  # the feed requests translatedLanguage "en"
     
     def __init__(self):
         super().__init__()

@@ -10,7 +10,7 @@ set "PYTHON=%PROJECT_DIR%\venv\Scripts\python.exe"
 
 if not exist "%PYTHON%" (
     echo Error: Virtual environment not found.
-    echo Please run: python setup.py
+    echo Please run: python scripts\bootstrap.py
     echo         or: scripts\windows\setup.bat
     exit /b 1
 )

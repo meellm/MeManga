@@ -25,6 +25,7 @@ class ComickScraper(BaseScraper):
 
     name = "comick"
     base_url = "https://comick.io"  # Redirects to comick.dev
+    engine = "api"
     api_url = "https://api.comick.dev"
     image_cdn = "https://meo.comick.pictures"
 

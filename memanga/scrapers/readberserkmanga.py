@@ -5,12 +5,15 @@ Content: Berserk by Kentaro Miura (383+ chapters)
 Architecture: WordPress + hot.planeptune.us CDN
 """
 
+import logging
 import re
 import requests
 from pathlib import Path
 from bs4 import BeautifulSoup
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ReadBerserkMangaScraper(BaseScraper):
@@ -21,7 +24,7 @@ class ReadBerserkMangaScraper(BaseScraper):
         self.base_url = "https://read-berserk-manga.com"
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'User-Agent': BROWSER_USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': 'https://read-berserk-manga.com/',
@@ -76,7 +79,7 @@ class ReadBerserkMangaScraper(BaseScraper):
             chapters.sort(key=lambda x: float(x.number), reverse=True)
             
         except Exception as e:
-            print(f"Error fetching chapters: {e}")
+            logger.warning("Error fetching chapters: %s", e)
         
         return chapters
 
@@ -108,7 +111,7 @@ class ReadBerserkMangaScraper(BaseScraper):
             return unique_images
             
         except Exception as e:
-            print(f"Error fetching pages: {e}")
+            logger.warning("Error fetching pages: %s", e)
         
         return images
 
@@ -116,7 +119,7 @@ class ReadBerserkMangaScraper(BaseScraper):
         """Download image from planeptune.us CDN"""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': BROWSER_USER_AGENT_SHORT,
                 'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
                 'Referer': 'https://read-berserk-manga.com/',
             }
@@ -129,5 +132,5 @@ class ReadBerserkMangaScraper(BaseScraper):
                 f.write(resp.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

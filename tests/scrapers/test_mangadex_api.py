@@ -12,6 +12,10 @@ from memanga.scrapers.base import BaseScraper
 
 from memanga.scrapers.mangadex import MangaDexScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaDexScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def scraper():
@@ -353,7 +357,8 @@ class TestImageReports:
     def test_mangadex_org_images_are_not_reported(self, scraper, monkeypatch, tmp_path):
         response = requests.Response()
         response.status_code = 200
-        response._content = b"image bytes"
+        # Goes through BaseScraper.download_image, which checks the body.
+        response._content = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
         monkeypatch.setattr(scraper.session, "get", lambda *a, **k: response)
         reports = []
         monkeypatch.setattr(requests, "post", lambda url, **k: reports.append(k))
@@ -417,14 +422,17 @@ def test_cover_fallback_uses_versioned_api_identity(monkeypatch):
 
 
 def test_removal_docs_match_built_in_list():
-    """README and Guide must not claim removal IDs ship while none do."""
+    """The sources reference must not claim removal IDs ship while none
+    do, and must show how to block a group."""
     from pathlib import Path
     from memanga.scrapers.mangadex import REMOVED_GROUP_IDS
 
     root = Path(__file__).resolve().parents[2]
-    for doc in ("README.md", "docs/Guide.md"):
+    for doc in ("docs/reference/sources.md",):
         text = " ".join((root / doc).read_text(encoding="utf-8").split())
         assert "ship with MeManga" not in text
         assert "MeManga ships those" not in text
         if not REMOVED_GROUP_IDS:
             assert "none are built in yet" in text, doc
+    reference = (root / "docs/reference/sources.md").read_text(encoding="utf-8")
+    assert "memanga config --mangadex-remove-group GROUP_ID" in reference

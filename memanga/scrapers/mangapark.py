@@ -35,6 +35,27 @@ _SYSTEM_CHROMIUM = ("chromium", "chromium-browser", "google-chrome")
 _CHALLENGE_TIMEOUT = 20
 
 
+class MangaParkSourceError(RuntimeError):
+    """mangapark1.com did not serve a page: an HTTP error status, no
+    response, or a Cloudflare challenge that did not clear."""
+
+
+def _is_fetch_failure(error: BaseException) -> bool:
+    """True when a page fetch failed because the site did not serve it.
+
+    That is a MangaParkSourceError or a timeout (the browser worker's
+    budget or a page load). Anything else, such as no Chromium being
+    installed or a bug, is not a site answer and is left to propagate.
+    """
+    if isinstance(error, (MangaParkSourceError, TimeoutError)):
+        return True
+    try:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+    except ImportError:
+        return False
+    return isinstance(error, PlaywrightTimeoutError)
+
+
 def _on_challenge(page) -> bool:
     """True while the page shows Cloudflare's interstitial."""
     try:
@@ -104,12 +125,13 @@ class MangaParkScraper(PlaywrightScraper):
                 while time.monotonic() < deadline and _on_challenge(page):
                     page.wait_for_timeout(500)
                 if _on_challenge(page):
-                    raise RuntimeError(f"Cloudflare challenge not cleared for {url}")
+                    raise MangaParkSourceError(
+                        f"Cloudflare challenge not cleared for {url}")
                 response = page.goto(url, wait_until="domcontentloaded", timeout=45000)
             if response is None:
-                raise RuntimeError(f"No response for {url}")
+                raise MangaParkSourceError(f"No response for {url}")
             if response.status >= 400:
-                raise RuntimeError(f"HTTP {response.status} for {url}")
+                raise MangaParkSourceError(f"HTTP {response.status} for {url}")
             return response.text()
         finally:
             page.close()
@@ -129,17 +151,35 @@ class MangaParkScraper(PlaywrightScraper):
         in Chromium while /manga/<slug> pages load fine, so when the filter
         page is blocked or yields no cards, try the slug derived from the
         query (e.g. "one piece" -> /manga/one-piece).
+
+        A /filter page that loads without cards means the site has no
+        match, so a slug miss then returns []. When the site did not serve
+        /filter and the slug finds nothing either, the search never ran:
+        that raises MangaParkSourceError rather than reporting no results.
         """
+        filter_error = None
         try:
             results = self._search_filter(query)
         except Exception as e:
+            if not _is_fetch_failure(e):
+                raise
             logger.debug(f"MangaPark /filter search failed for {query!r}: {e}")
+            filter_error = e
             results = []
         if results:
             return results
 
-        direct = self._search_direct(query)
-        return [direct] if direct else []
+        direct, direct_error = self._search_direct(query)
+        if direct:
+            return [direct]
+        if filter_error is not None:
+            detail = str(filter_error)
+            if direct_error is not None:
+                detail += f"; direct lookup: {direct_error}"
+            raise MangaParkSourceError(
+                f"MangaPark search unavailable for {query!r}: {detail}"
+            ) from filter_error
+        return []
 
     def _search_filter(self, query: str) -> List[Manga]:
         """Parse the /filter result cards."""
@@ -199,22 +239,27 @@ class MangaParkScraper(PlaywrightScraper):
         return re.sub(r"[^a-z0-9]+", "-", query.lower()).strip("-")
 
     def _search_direct(self, query: str):
-        """Load /manga/<slug> for the query and return it if it's a real page.
+        """Load /manga/<slug> for the query; return (manga, fetch error).
 
-        A missing slug either 404s (the fetch raises) or renders a page
-        without the manga's canonical URL and title heading; both give None.
+        The manga is set only when the page is that comic's own page. A
+        missing slug either 404s (the fetch raises) or renders a page
+        without the manga's canonical URL and title heading; both give no
+        manga. A fetch the site did not serve is returned as the error;
+        any other exception propagates.
         """
         from bs4 import BeautifulSoup
 
         slug = self._query_slug(query)
         if not slug:
-            return None
+            return None, None
         manga_url = f"{self.base_url}/manga/{slug}"
         try:
             html = self._get_html(manga_url)
         except Exception as e:
+            if not _is_fetch_failure(e):
+                raise
             logger.debug(f"MangaPark direct lookup failed for {manga_url}: {e}")
-            return None
+            return None, e
         soup = BeautifulSoup(html, "html.parser")
 
         canonical = soup.find("link", rel="canonical")
@@ -223,14 +268,14 @@ class MangaParkScraper(PlaywrightScraper):
             or (og_url.get("content") if og_url else "") or ""
         try:
             if self._slug_from_url(page_url.strip()) != slug:
-                return None
+                return None, None
         except ValueError:
-            return None
+            return None, None
 
         heading = soup.select_one('h1[itemprop="name"]') or soup.find("h1")
         title = heading.get_text(strip=True) if heading else ""
         if not title:
-            return None
+            return None, None
 
         # The comic's own poster is the image-thumb whose alt is its title;
         # the others on the page are "related" cards. og:image is a site
@@ -243,7 +288,7 @@ class MangaParkScraper(PlaywrightScraper):
         if cover_url and cover_url.startswith("/"):
             cover_url = f"{self.base_url}{cover_url}"
 
-        return Manga(title=title, url=manga_url, cover_url=cover_url)
+        return Manga(title=title, url=manga_url, cover_url=cover_url), None
 
     def _slug_from_url(self, manga_url: str) -> str:
         """Extract the comic slug from a /manga/<slug> URL."""

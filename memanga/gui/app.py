@@ -2,34 +2,53 @@
 MeManga GUI Application - PySide6 MainWindow with sidebar + QStackedWidget.
 """
 
+import logging
 from datetime import datetime
 
-from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QHBoxLayout, QStackedWidget,
+)
+from PySide6.QtCore import QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QShortcut, QKeySequence
 
 from .. import __version__
+from ..chapters import format_chapter_value
 from ..config import Config
 from ..state import State
 from .events import EventBus
 from .workers import BackgroundWorker
 from .cache import CoverCache
-from .network_status import NetworkMonitor
+from .network_status import NetworkMonitor, configured_endpoints, invalid_hosts
 from . import theme as T
 from .components.sidebar import Sidebar
 from .components.offline_banner import OfflineBanner
+from .components.error_details import notify_error
+from .focus import disable_scroll_area_focus, focus_into, install_focus_marker
 from .pages.base import BasePage
+
+logger = logging.getLogger(__name__)
 
 
 class MeMangaApp(QMainWindow):
     """Main application window."""
 
-    def __init__(self):
+    # Carries a page's keyboard focus handoff through Qt's posted-event
+    # queue (issue #396); connected queued in __init__, see show_page.
+    _focus_handoff_due = Signal(object)
+
+    def __init__(self, config=None, app_state=None, explicit_config_dir=None):
         super().__init__()
 
-        # Shared state
-        self.config = Config()
-        self.app_state = State()
+        # Directory chosen with --config-dir or $MEMANGA_CONFIG_DIR, or
+        # None for the default; the daily check set up in Settings keeps
+        # it (issues #221, #249).
+        self.explicit_config_dir = explicit_config_dir
+
+        # Shared state. launch_gui() passes the objects it already loaded
+        # and checked (issue #243).
+        self.config = config if config is not None else Config(explicit_config_dir)
+        self.app_state = (app_state if app_state is not None
+                          else State(self.config.config_dir))
         # Order matters: the repair only applies to configs that were
         # already seeded on an earlier launch, so it has to read the
         # flag before seeding sets it.
@@ -45,7 +64,13 @@ class MeMangaApp(QMainWindow):
             )
         except Exception:
             pass
-        self.cover_cache = CoverCache(self.config.config_dir, self.events)
+        self.cover_cache = CoverCache(
+            self.config.config_dir, self.events,
+            max_disk_mb=self.config.get("gui.cover_cache_max_mb"))
+        # Whether the Playwright browsers are installed: True/False from
+        # the launch check, None when nothing checked (issue #344).
+        # Settings → Advanced shows it and offers the install.
+        self.browsers_installed = None
         # Cover URLs we already tried to replace after a failed fetch —
         # once per URL per session, see _on_cover_load_failed.
         self._cover_fallback_attempted: set = set()
@@ -54,13 +79,21 @@ class MeMangaApp(QMainWindow):
         # Centralised network status — probes connectivity in a daemon
         # thread, publishes `network_online` / `network_offline` events.
         # Workers and pages subscribe to short-circuit / disable
-        # network-bound actions while offline.
-        self.network = NetworkMonitor(self.events)
+        # network-bound actions while offline. Settings → Advanced can
+        # turn the probes off or pick the hosts (issue #337); when off
+        # the monitor never runs and the app assumes it is online.
+        self.network = NetworkMonitor(
+            self.events, endpoints=configured_endpoints(self.config))
         # Hand the same monitor to the worker so its entry points
         # (search, check, download, cover fetch) can bail fast when
         # offline instead of timing out per-source.
         self.worker.network = self.network
-        self.network.start()
+        bad_hosts = invalid_hosts(self.config)
+        if bad_hosts:
+            logger.warning("gui.network_check_hosts: ignoring entries that "
+                           "are not host:port: %r", bad_hosts)
+        if self.config.get("gui.network_check", True):
+            self.network.start()  # no-op when no valid host is left
 
         # Wire up event handlers
         self.events.subscribe("cover_fetch_request", self._on_cover_fetch_request)
@@ -71,6 +104,8 @@ class MeMangaApp(QMainWindow):
         self.events.subscribe("check_complete", self._on_check_complete)
         self.events.subscribe("check_error", self._on_check_error)
         self.events.subscribe("kindle_sent", self._on_kindle_sent)
+        self.events.subscribe("kindle_skipped", self._on_kindle_skipped)
+        self.events.subscribe("kindle_error", self._on_kindle_error)
 
         # Window setup
         self.setWindowTitle(f"MeManga v{__version__}")
@@ -126,6 +161,11 @@ class MeMangaApp(QMainWindow):
         # Pages registry
         self._pages: dict[str, BasePage] = {}
         self._current_page: str = ""
+        # Page whose keyboard focus handoff is still waiting for the
+        # event loop (issue #396); see show_page.
+        self._focus_handoff = None
+        self._focus_handoff_due.connect(
+            self._finish_focus_handoff, Qt.ConnectionType.QueuedConnection)
         self._register_pages()
 
         # Library is home
@@ -163,6 +203,17 @@ class MeMangaApp(QMainWindow):
         self._search_shortcut = QShortcut(QKeySequence("Ctrl+K"), self)
         self._search_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self._search_shortcut.activated.connect(self._focus_search)
+        # Ctrl/Cmd+, → Settings, the usual preferences shortcut
+        # (issue #396).
+        self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
+        self._settings_shortcut.activated.connect(self._open_settings)
+
+        # Focus rings show for keyboard focus only (issue #396).
+        install_focus_marker(QApplication.instance())
+
+    def _open_settings(self):
+        self.show_page("settings")
+        focus_into(self._pages["settings"])
 
     def _focus_search(self):
         """Jump to the Search page and put focus in its input."""
@@ -196,10 +247,30 @@ class MeMangaApp(QMainWindow):
             page = cls(self._stack, app=self)
             self._stack.addWidget(page)
             self._pages[name] = page
+            # No invisible Tab stops on page scroll areas (issue #396).
+            disable_scroll_area_focus(page)
 
     def show_page(self, name: str, **kwargs):
         if name == self._current_page and not kwargs:
             return
+
+        # Issue #396: when focus is on the page being left (a card opened
+        # with Enter, a Back button), it follows into the new page, onto
+        # its first control. Focus is dropped first: otherwise the page
+        # stack hands it to a widget of the new page that on_show is about
+        # to replace, and it is lost when that widget is deleted. The
+        # handoff runs from the event loop (_finish_focus_handoff). A
+        # second page change before then (keys typed quickly, Enter then
+        # Alt+Left) finds no focus anywhere; the pending handoff moves on
+        # to the newer page instead of being lost.
+        old = self._pages.get(self._current_page)
+        focused = QApplication.focusWidget()
+        follow_focus = old is not None and focused is not None and (
+            focused is old or old.isAncestorOf(focused))
+        if follow_focus:
+            focused.clearFocus()
+        elif self._focus_handoff is not None and focused is None:
+            follow_focus = True
 
         if self._current_page and self._current_page in self._pages:
             self._pages[self._current_page].on_hide()
@@ -210,10 +281,30 @@ class MeMangaApp(QMainWindow):
             page.on_show(**kwargs)
             self._current_page = name
             self._sidebar.set_active(name)
+            if follow_focus:
+                # Queued, not a timer: on_show's rebuilt widgets are shown
+                # and laid out by events it has just posted, and posted
+                # events run in order, so the handoff sees them. A 0 ms
+                # timer's place relative to those depends on the event
+                # dispatcher (live, it could run first and miss the new
+                # "‹ Library").
+                self._focus_handoff = page
+                self._focus_handoff_due.emit(page)
+
+    @Slot(object)
+    def _finish_focus_handoff(self, page):
+        """Focus the first control of ``page`` once its rebuilt widgets
+        are shown, unless a later page change took over the handoff."""
+        if self._focus_handoff is not page:
+            return
+        self._focus_handoff = None
+        focus_into(page)
 
     def reload_data(self):
-        self.config = Config()
-        self.app_state = State()
+        # Same directory, never the default again (issue #249).
+        root = self.config.config_dir
+        self.config = Config(root)
+        self.app_state = State(root)
 
     # ---- Event Handlers ----
 
@@ -227,9 +318,13 @@ class MeMangaApp(QMainWindow):
         a permanent placeholder — `_backfill_missing_covers` only
         handles entries with no URL at all. Tried at most once per
         URL per session; repeated paints of the same broken cover
-        shouldn't re-query MangaDex.
+        shouldn't re-query MangaDex. Skipped entirely when the lookup
+        isn't allowed (issue #337), so allowing it later still works.
         """
         if not data.get("error") or data.get("offline"):
+            return
+        from .cover_fallback import mangadex_fallback_allowed
+        if not mangadex_fallback_allowed(self.config):
             return
         url = data.get("url") or ""
         if not url or url in self._cover_fallback_attempted:
@@ -245,6 +340,12 @@ class MeMangaApp(QMainWindow):
         def _task():
             from .cover_fallback import fetch_mangadex_cover
             for t in titles:
+                # Re-check per title: MangaDex may have been turned off
+                # since this task was queued (issue #337). Forget the
+                # attempt so allowing it again can still repair the URL.
+                if not mangadex_fallback_allowed(self.config):
+                    self._cover_fallback_attempted.discard(url)
+                    return
                 try:
                     cover = fetch_mangadex_cover(t)
                 except Exception:
@@ -268,44 +369,14 @@ class MeMangaApp(QMainWindow):
     def _on_download_complete(self, data):
         title = data.get("title", "")
         chapter = data.get("chapter", "")
-        path = data.get("path", "")
-        partial = data.get("partial")
 
-        if partial:
-            miss = partial.get("failed_pages", [])
-            total = partial.get("total", 0)
-            self.app_state.add_partial_chapter(
-                title,
-                str(chapter),
-                source=data.get("source", ""),
-                failed_pages=miss,
-                total_pages=total,
-                path=path,
-                from_backup=bool(data.get("from_backup")),
-            )
-            self.app_state.add_notification(
-                "warn",
-                f"Downloaded {title} Ch. {chapter} as partial: "
-                f"{len(miss)}/{total} page(s) missing (pages {miss}).",
-            )
-        else:
-            self.app_state.clear_partial_chapter(title, str(chapter))
+        # The worker's chapter pipeline has already recorded the chapter
+        # (downloaded, partial or failed records, the partial warning and
+        # the download history), the same way `memanga check` does
+        # (issues #295, #240).
+        if not data.get("partial"):
             self.app_state.add_notification("download", f"Downloaded {title} Ch. {chapter}")
         self.events.publish("notification_added", {})
-
-        size_mb = 0
-        if path:
-            try:
-                from pathlib import Path
-                size_mb = Path(path).stat().st_size / (1024 * 1024)
-            except Exception:
-                pass
-        self.app_state.add_download_history(
-            title=title, chapter=str(chapter),
-            fmt=self.config.output_format, path=path, size_mb=size_mb,
-        )
-        self.app_state.add_downloaded_chapter(title, str(chapter))
-        self.app_state.clear_failed_chapter(title, str(chapter))
 
         self._settle_new_chapter_download(
             title, data.get("task_id"), failed=False
@@ -398,11 +469,7 @@ class MeMangaApp(QMainWindow):
         # Format as int when whole-numbered ("47" not "47.0") to match how
         # chapter numbers come back from scrapers.
         if marked_max is not None:
-            if marked_max == int(marked_max):
-                last_str = str(int(marked_max))
-            else:
-                last_str = str(marked_max)
-            self.app_state.set_last_chapter(title, last_str)
+            self.app_state.set_last_chapter(title, format_chapter_value(marked_max))
 
         # One-shot: pop the sentinel from config so we don't redo this on
         # every subsequent check.
@@ -456,15 +523,15 @@ class MeMangaApp(QMainWindow):
             return
         title = data.get("title", "")
         error = data.get("error", "Unknown")
-        self.app_state.add_notification("error", f"Check failed: {title} - {error[:80]}")
-        self.events.publish("notification_added", {})
-        print(f"[Check Error] {title}: {error}", flush=True)
+        # Issue #342: a short line in the list, the full error behind
+        # its Details button.
+        notify_error(self, f"Check failed: {title}", error)
+        logger.error("Check failed: %s: %s", title, error)
 
     def _on_download_error(self, data):
         title = data.get("title", "")
         error = data.get("error", "Unknown")
-        self.app_state.add_notification("error", f"Failed: {title} - {error[:50]}")
-        self.events.publish("notification_added", {})
+        notify_error(self, f"Failed: {title}", error)
         self._settle_new_chapter_download(
             title, data.get("task_id"), failed=True
         )
@@ -549,7 +616,44 @@ class MeMangaApp(QMainWindow):
         self.events.publish("check_complete_silent", {})
 
     def _on_kindle_sent(self, data):
-        self.app_state.add_notification("kindle", f"Sent to Kindle: {data.get('path', '').split('/')[-1]}")
+        # Issue #338: with delete-after-send on, say what happened to the
+        # local copy. A copy that couldn't be deleted is a warning with
+        # the reason behind Details; the chapter was still sent.
+        local_copy = data.get("local_copy")
+        if local_copy == "kept":
+            # Title and chapter, like the send-failure notification: the
+            # short prefix leaves no room for a long file name.
+            label = f"{data.get('title', '')} Ch. {data.get('chapter', '')}"
+            notify_error(self, f"Sent to Kindle; local copy not deleted: {label}",
+                         data.get("delete_error") or "Unknown error",
+                         ntype="warn")
+            return
+        message = f"Sent to Kindle: {data.get('path', '').split('/')[-1]}"
+        if local_copy == "deleted":
+            message += " — local copy deleted"
+        self.app_state.add_notification("kindle", message)
+        self.events.publish("notification_added", {})
+
+    def _on_kindle_error(self, data):
+        # The chapter is saved but the e-mail failed (SMTP, auth, size);
+        # without this the failure was only in the log.
+        task_id = data.get("task_id", "")
+        title, _, chapter = task_id.rpartition(":")
+        label = f"{title} Ch. {chapter}" if title else task_id
+        error = data.get("error", "Unknown")
+        notify_error(self, f"Not sent to Kindle: {label}", error)
+        logger.error("Not sent to Kindle: %s: %s", label, error)
+
+    def _on_kindle_skipped(self, data):
+        # Issues #340, #362: Kindle doesn't accept the saved format (an
+        # image folder, CBZ or ZIP). The chapter is still downloaded;
+        # say why no book reaches the Kindle.
+        reason = data.get("reason") or "Its format can't be sent to Kindle."
+        self.app_state.add_notification(
+            "warn",
+            f"Not sent to Kindle: {data.get('title', '')} Ch. {data.get('chapter', '')} "
+            f"— {reason} Choose PDF or EPUB in Settings to send to Kindle.",
+        )
         self.events.publish("notification_added", {})
 
     # ---- First-launch source seeding ----
@@ -602,9 +706,15 @@ class MeMangaApp(QMainWindow):
         Guarded by `sources.first_run_seeded` so we ONLY run once,
         ever. Existing users with their own selection (or veteran
         users who liked the everything-on default) never get their
-        config overwritten by a future re-launch.
+        config overwritten by a future re-launch. A `sources.disabled`
+        list saved before the first launch is a selection too, so it
+        is kept and only the flag is set.
         """
         if self.config.get("sources.first_run_seeded"):
+            return
+        if self.config.get("sources.disabled") is not None:
+            self.config.set("sources.first_run_seeded", True)
+            self.config.save()
             return
         try:
             from ..scrapers import (
@@ -652,6 +762,11 @@ class MeMangaApp(QMainWindow):
         # `network_online` subscriber re-runs this when we come back.
         if hasattr(self, "network") and not self.network.is_online:
             return
+        # MangaDex off in Sources or the lookup off in Settings (issue
+        # #337): don't contact MangaDex and don't mark anything failed.
+        from .cover_fallback import mangadex_fallback_allowed
+        if not mangadex_fallback_allowed(self.config):
+            return
         manga_list = self.config.get("manga", [])
         # Skip entries that have a cover OR that we already tried and missed.
         missing = [
@@ -670,6 +785,11 @@ class MeMangaApp(QMainWindow):
             from .cover_fallback import fetch_mangadex_cover
 
             for t in titles:
+                # Re-check per title: MangaDex may have been turned off
+                # while this pass runs (issue #337). Stop without marking
+                # the remaining titles failed.
+                if not mangadex_fallback_allowed(self.config):
+                    return
                 try:
                     cover = fetch_mangadex_cover(t)
                 except Exception:
@@ -752,6 +872,11 @@ class MeMangaApp(QMainWindow):
         page = self._pages.get(self._current_page)
         if page is not None and hasattr(page, "save_reading_position"):
             page.save_reading_position()
+        # Issue #389: stop the reader's page workers and finish a deferred
+        # remove-after-read before the final flush records it.
+        reader = self._pages.get("reader")
+        if reader is not None:
+            reader.shutdown_page_loader()
         self.app_state.flush()
         self.worker.shutdown()
         if hasattr(self, "network"):

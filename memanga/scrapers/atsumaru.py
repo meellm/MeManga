@@ -8,14 +8,52 @@ This scraper uses the APIs directly:
 * search   -> GET /collections/manga/documents/search?q=...
 * chapters -> GET /api/manga/allChapters?mangaId=...
 * pages    -> GET /api/read/chapter?mangaId=...&chapterId=...
+
+A failed request or a response of the wrong shape is raised, never
+returned as an empty list: an empty list means the site answered and has
+nothing to list.
 """
 
+import logging
 import re
 from datetime import datetime, timezone
 from typing import List, Optional
 from urllib.parse import urlparse, parse_qs, urlencode
 
-from .base import BaseScraper, Chapter, Manga
+import requests
+
+from .base import BaseScraper, Chapter, Manga, CLOUDSCRAPER_CHROME_DESKTOP
+
+logger = logging.getLogger(__name__)
+
+
+class AtsumaruSourceError(RuntimeError):
+    """atsu.moe answered with a payload of the wrong shape."""
+
+
+def _cloudflare_refusal(response) -> bool:
+    """True for an HTTP 403 that Cloudflare's edge sent or passed on."""
+    if response is None or response.status_code != 403:
+        return False
+    headers = response.headers or {}
+    return (str(headers.get("server") or "").lower() == "cloudflare"
+            or "cf-ray" in headers or "cf-mitigated" in headers)
+
+
+def _refusal_facts(response) -> str:
+    """What a 403 says about itself, from its headers only. Cloudflare
+    marks a challenge response with ``cf-mitigated: challenge``."""
+    headers = (response.headers if response is not None else None) or {}
+    return (f"server={headers.get('server') or '-'}, "
+            f"cf-ray={'yes' if 'cf-ray' in headers else 'no'}, "
+            f"cf-mitigated={headers.get('cf-mitigated') or '-'}, "
+            f"content-type={headers.get('content-type') or '-'}")
+
+
+def _with_detail(error: requests.HTTPError, detail: str) -> requests.HTTPError:
+    """``error`` again, with ``detail`` appended; same type and response."""
+    return requests.HTTPError(f"{error} ({detail})", response=error.response,
+                              request=error.request)
 
 
 class AtsumaruScraper(BaseScraper):
@@ -23,6 +61,7 @@ class AtsumaruScraper(BaseScraper):
 
     name = "atsumaru"
     base_url = "https://atsu.moe"
+    engine = "api"
 
     # IDs are short randomly-generated identifiers whose alphabet can include
     # "-" and "_" (e.g. "9L82jefe"), so match those too. The class stops at
@@ -30,12 +69,103 @@ class AtsumaruScraper(BaseScraper):
     _MANGA_ID_RE = re.compile(r"/manga/([A-Za-z0-9_-]+)")
     _READ_RE = re.compile(r"/read/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)")
 
+    _HEADERS = {
+        "Accept": "application/json, text/plain, */*",
+        "Referer": base_url + "/",
+    }
+
     def __init__(self):
         super().__init__()
-        self.session.headers.update({
-            "Accept": "application/json, text/plain, */*",
-            "Referer": self.base_url + "/",
-        })
+        self.session.headers.update(self._HEADERS)
+        # Set once the plain session was refused and cloudscraper's took over.
+        self._cloudflare_session = False
+
+    # Transport
+
+    def _switch_to_cloudflare_session(self, user_agent: Optional[str] = None) -> None:
+        """Send this scraper's requests through cloudscraper from now on.
+
+        cloudscraper keeps its own User-Agent, which matches its TLS
+        profile; only the site's Accept and Referer are put back. Given
+        ``user_agent``, the session is built for that exact User-Agent
+        (cloudscraper's ``custom`` profile key), with the cipher suite of
+        its browser, instead of a randomly picked one.
+        """
+        profile = dict(CLOUDSCRAPER_CHROME_DESKTOP)
+        if user_agent:
+            profile["custom"] = user_agent
+        self._use_cloudscraper(profile)
+        self.session.headers.update(self._HEADERS)
+        self._cloudflare_session = True
+
+    def _request(self, url: str, **kwargs) -> requests.Response:
+        """The shared request policy, falling back to cloudscraper once.
+
+        A request refused with Cloudflare's 403 is sent again through a
+        cloudscraper session, which this scraper then keeps. Any other
+        error, and a refusal of the cloudscraper session as well, is
+        raised as before. A 403 that ends the request says which clients
+        were refused and what the refusal's headers show.
+        """
+        try:
+            return super()._request(url, **kwargs)
+        except requests.HTTPError as error:
+            if self._cloudflare_session:
+                raise
+            if not _cloudflare_refusal(error.response):
+                if error.response is not None and error.response.status_code == 403:
+                    raise _with_detail(error, (
+                        f"403 without Cloudflare markers; no cloudscraper retry; "
+                        f"{_refusal_facts(error.response)}")) from error
+                raise
+        logger.info("atsu.moe refused the plain HTTP client (Cloudflare 403); "
+                    "retrying through cloudscraper")
+        self._switch_to_cloudflare_session()
+        try:
+            return super()._request(url, **kwargs)
+        except requests.HTTPError as error:
+            if error.response is None or error.response.status_code != 403:
+                raise
+            headers = error.response.headers or {}
+            kind = ("Cloudflare challenge"
+                    if str(headers.get("cf-mitigated") or "").lower() == "challenge"
+                    else "403 with Cloudflare markers, no challenge header"
+                    if _cloudflare_refusal(error.response)
+                    else "403 without Cloudflare markers")
+            raise _with_detail(error, (
+                f"refused through the plain and cloudscraper clients; {kind}; "
+                f"{_refusal_facts(error.response)}")) from error
+
+    def worker_copy(self) -> "AtsumaruScraper":
+        """A copy for another thread; it keeps the cloudscraper session if
+        this scraper had to switch to it (the base copy rebuilds a plain
+        one).
+
+        Cloudflare pairs a clearance cookie with the client that earned
+        it, so the copy is built for this session's own User-Agent and
+        then given this session's exact headers and cookies. A freshly
+        generated cloudscraper session would pick a different
+        User-Agent.
+        """
+        clone = super().worker_copy()
+        if self._cloudflare_session:
+            parent = self.session
+            clone._switch_to_cloudflare_session(
+                user_agent=parent.headers.get("User-Agent"))
+            clone.session.headers = parent.headers.copy()
+            clone.session.cookies.update(parent.cookies)
+        return clone
+
+    @staticmethod
+    def _require(data, key: str, url: str, kind: type = list):
+        """``data[key]`` when the payload has the expected shape, else
+        ``AtsumaruSourceError``."""
+        value = data.get(key) if isinstance(data, dict) else None
+        if not isinstance(value, kind):
+            raise AtsumaruSourceError(
+                f"Atsumaru returned an unexpected response for {url} "
+                f"(no {key!r} {kind.__name__})")
+        return value
 
     def _abs_static_url(self, path: str) -> str:
         """Absolutize a static/CDN path, using cdn.atsu.moe directly."""
@@ -69,10 +199,9 @@ class AtsumaruScraper(BaseScraper):
             "per_page": "20",
         })
         url = f"{self.base_url}/collections/manga/documents/search?{params}"
-        try:
-            data = self._get_json(url)
-        except Exception:
-            return []
+        data = self._get_json(url)
+        # An empty hits list is a search that matched nothing.
+        self._require(data, "hits", url)
         return self._parse_search(data)
 
     def _parse_search(self, data: dict) -> List[Manga]:
@@ -108,10 +237,8 @@ class AtsumaruScraper(BaseScraper):
             return []
 
         url = f"{self.base_url}/api/manga/allChapters?mangaId={manga_id}"
-        try:
-            data = self._get_json(url)
-        except Exception:
-            return []
+        data = self._get_json(url)
+        self._require(data, "chapters", url)
         return self._parse_chapters(data, manga_id)
 
     def _parse_chapters(self, data: dict, manga_id: str) -> List[Chapter]:
@@ -181,10 +308,8 @@ class AtsumaruScraper(BaseScraper):
             return []
 
         url = f"{self.base_url}/api/read/chapter?mangaId={manga_id}&chapterId={chapter_id}"
-        try:
-            data = self._get_json(url)
-        except Exception:
-            return []
+        data = self._get_json(url)
+        self._require(self._require(data, "readChapter", url, dict), "pages", url)
         return self._parse_pages(data)
 
     def _parse_pages(self, data: dict) -> List[str]:

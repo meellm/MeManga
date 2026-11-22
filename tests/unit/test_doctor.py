@@ -5,7 +5,6 @@ are replaced with fakes so the suite stays offline and deterministic.
 """
 
 import json
-import smtplib
 import sys
 import types
 from pathlib import Path
@@ -13,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from memanga import doctor
+from memanga.emailer import EmailAuthError, EmailTimeoutError
 
 
 def _run_result(returncode=0, stdout=""):
@@ -177,11 +177,88 @@ class TestLocalPathChecks:
         config.config_path.write_text("- just\n- a list\n", encoding="utf-8")
         assert doctor.check_config(config).status == doctor.FAIL
 
+    def test_invalid_setting_warns_without_its_value(self, config):
+        # Issue #293.
+        from memanga.config import Config
+        config.config_path.write_text(
+            "email:\n  smtp_port: bad-port-value\n  app_password: 987654321\n",
+            encoding="utf-8")
+        loaded = Config(config.config_dir, tolerate_errors=True)
+        result = doctor.check_config(loaded)
+        assert result.status == doctor.WARNING
+        assert "email.smtp_port" in result.message
+        assert "email.app_password" in result.message
+        shown = repr(result.to_dict())
+        assert "bad-port-value" not in shown
+        assert "987654321" not in shown
+
+    def test_section_that_is_not_a_mapping_fails(self, config):
+        # Issue #293: loading it would lose the section on the next save.
+        from memanga.config import Config
+        config.config_path.write_text("email: oops\n", encoding="utf-8")
+        loaded = Config(config.config_dir, tolerate_errors=True)
+        result = doctor.check_config(loaded)
+        assert result.status == doctor.FAIL
+        assert "email: expected a section" in result.message
+
+    def test_newer_config_schema_fails(self, config):
+        """Issue #409: valid YAML that Config refuses to load is not OK."""
+        from memanga.config import Config
+        config.config_path.write_text("schema_version: 99\n", encoding="utf-8")
+        loaded = Config(config.config_dir, tolerate_errors=True)
+        result = doctor.check_config(loaded)
+        assert result.status == doctor.FAIL
+        assert "newer" in result.message
+        assert "update MeManga" in result.message
+
+    def test_newer_state_schema_fails(self, config, isolated_home):
+        from memanga.state import State
+        cfg_dir = isolated_home / ".config" / "memanga"
+        (cfg_dir / "state.json").write_text('{"schema_version": 99}', encoding="utf-8")
+        result = doctor.check_state(config, State(config_dir=cfg_dir))
+        assert result.status == doctor.FAIL
+        assert "newer" in result.message
+
     def test_corrupt_state_fails(self, config, state):
         state.state_path.write_text("{not json", encoding="utf-8")
         result = doctor.check_state(config, state)
         assert result.status == doctor.FAIL
         assert "JSON" in result.message
+
+    def test_state_recovered_on_load_warns(self, config, isolated_home):
+        from memanga.state import State
+        cfg_dir = isolated_home / ".config" / "memanga"
+        (cfg_dir / "state.json").write_text("{not json", encoding="utf-8")
+        state = State(config_dir=cfg_dir)
+        result = doctor.check_state(config, state)
+        assert result.status == doctor.WARNING
+        assert result.details["preserved_copy"] == str(state.preserved_path)
+        assert "kept as" in result.message
+
+    def test_failed_restore_reports_load_error_first(
+            self, config, isolated_home, monkeypatch):
+        """The damaged file is still in place after a failed restore;
+        doctor reports State's own message, not a generic JSON error."""
+        import os
+        from memanga.state import State
+        cfg_dir = isolated_home / ".config" / "memanga"
+        (cfg_dir / "state.json.bak").write_text('{"manga": {}}', encoding="utf-8")
+        (cfg_dir / "state.json").write_text("{not json", encoding="utf-8")
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if str(dst) == str(cfg_dir / "state.json"):
+                raise OSError(28, "No space left on device")
+            return real_replace(src, dst)
+        monkeypatch.setattr("memanga.persist.os.replace", replace)
+        state = State(config_dir=cfg_dir)
+
+        result = doctor.check_state(config, state)
+        assert result.status == doctor.FAIL
+        assert result.message.startswith("State file could not be loaded:")
+        assert "could not be written back" in result.message
+        assert "not valid JSON" not in result.message
+        assert (cfg_dir / "state.json").read_text(encoding="utf-8") == "{not json"
 
     def test_download_path_that_is_a_file_fails(self, config, tmp_path):
         target = tmp_path / "not-a-dir"
@@ -222,6 +299,30 @@ class TestEmailAndKeyring:
         assert result.status == doctor.OK
         assert "secret-pw" not in repr(result.to_dict())
 
+    @pytest.mark.parametrize("fmt, status", [
+        ("pdf", doctor.OK), ("epub", doctor.OK),
+        ("cbz", doctor.WARNING), ("zip", doctor.WARNING),
+        ("jpg", doctor.WARNING),
+    ])
+    def test_email_mode_warns_on_format_kindle_rejects(
+            self, config, monkeypatch, fmt, status):
+        # Issue #362: chapters in these formats are saved but not sent.
+        config.set("delivery.mode", "email")
+        config.set("delivery.output_format", fmt)
+        config.set("email.kindle_email", "me@kindle.com")
+        config.set("email.sender_email", "me@gmail.com")
+        monkeypatch.setattr(doctor, "get_app_password", lambda cfg: "secret-pw")
+        result = doctor.check_email(config)
+        assert result.status == status
+        assert result.details["output_format"] == fmt
+        if status == doctor.WARNING:
+            assert "can't be sent to Kindle" in result.message
+            assert "pdf or epub" in result.message
+
+    def test_local_mode_ignores_output_format(self, config):
+        config.set("delivery.output_format", "cbz")
+        assert doctor.check_email(config).status == doctor.SKIP
+
     def test_plaintext_password_in_config_warns(self, config):
         config.set("email.app_password", "secret-pw")
         result = doctor.check_keyring(config)
@@ -230,6 +331,29 @@ class TestEmailAndKeyring:
 
     def test_keyring_not_needed_for_local_delivery(self, config):
         assert doctor.check_keyring(config).status == doctor.SKIP
+
+    def test_unusable_password_file_fails_email_check(self, config, monkeypatch,
+                                                      tmp_path):
+        # Issue #247: say why instead of "app password missing".
+        config.set("delivery.mode", "email")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(tmp_path / "missing"))
+        result = doctor.check_email(config)
+        assert result.status == doctor.FAIL
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in result.message
+        assert "cannot read" in result.message
+        # Log redaction must leave the actionable message readable.
+        from memanga.output import redact
+        assert redact(result.message) == result.message
+
+    def test_env_password_does_not_need_keyring(self, config, monkeypatch):
+        config.set("delivery.mode", "email")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "secret-pw")
+        monkeypatch.setattr(doctor, "_keyring_backend", lambda: dict(
+            available=False, backend="keyring.backends.fail.Keyring", plaintext=False))
+        result = doctor.check_keyring(config)
+        assert result.status == doctor.OK
+        assert result.details["password_source"] == "MEMANGA_SMTP_PASSWORD"
+        assert "secret-pw" not in repr(result.to_dict())
 
     @pytest.mark.parametrize("backend, expected", [
         (dict(available=True, backend="keyring.backends.SecretService.Keyring", plaintext=False), doctor.OK),
@@ -248,7 +372,7 @@ class TestSmtp:
         monkeypatch.setattr(doctor, "get_app_password", lambda cfg: password)
 
     def test_skipped_unless_live(self, config, monkeypatch):
-        def boom(*a):
+        def boom(*a, **k):
             raise AssertionError("must not touch the network")
         monkeypatch.setattr(doctor, "_smtp_login", boom)
         assert doctor.check_smtp(config).status == doctor.SKIP
@@ -256,16 +380,42 @@ class TestSmtp:
     def test_live_login_ok(self, config, monkeypatch):
         self._email_config(config, monkeypatch)
         calls = []
-        monkeypatch.setattr(doctor, "_smtp_login", lambda *a: calls.append(a))
+        monkeypatch.setattr(doctor, "_smtp_login",
+                            lambda *a, **k: calls.append((a, k)))
         result = doctor.check_smtp(config, live=True)
         assert result.status == doctor.OK
-        assert calls == [("smtp.gmail.com", 587, "me@gmail.com", "secret-pw")]
+        assert calls == [(("smtp.gmail.com", 587, "me@gmail.com", "secret-pw"),
+                          {"timeout": 60, "smtp_tls": "auto"})]
+
+    def test_live_login_uses_the_tls_setting(self, config, monkeypatch):
+        # Issue #366: the login is secured the way delivery is.
+        self._email_config(config, monkeypatch)
+        config.set("email.smtp_port", 465)
+        config.set("email.smtp_tls", "implicit")
+        calls = []
+        monkeypatch.setattr(doctor, "_smtp_login",
+                            lambda *a, **k: calls.append((a, k)))
+        result = doctor.check_smtp(config, live=True)
+        assert result.status == doctor.OK
+        assert calls[0][0][1] == 465
+        assert calls[0][1]["smtp_tls"] == "implicit"
+        assert result.details["smtp_tls"] == "implicit"
+
+    def test_smtp_login_reaches_implicit_tls(self):
+        from unittest.mock import MagicMock, patch
+        with patch("smtplib.SMTP_SSL", return_value=MagicMock()) as factory, \
+                patch("smtplib.SMTP") as plain:
+            doctor._smtp_login("smtp.example.invalid", 465,
+                               "sender@example.invalid", "test-app-password",
+                               timeout=5, smtp_tls="auto")
+        plain.assert_not_called()
+        assert factory.call_args.args == ("smtp.example.invalid", 465)
 
     def test_auth_failure(self, config, monkeypatch):
         self._email_config(config, monkeypatch)
 
-        def fail(*a):
-            raise smtplib.SMTPAuthenticationError(535, b"bad credentials")
+        def fail(*a, **k):
+            raise EmailAuthError("SMTP authentication failed")
         monkeypatch.setattr(doctor, "_smtp_login", fail)
         result = doctor.check_smtp(config, live=True)
         assert result.status == doctor.FAIL
@@ -274,16 +424,32 @@ class TestSmtp:
     def test_error_message_masks_password(self, config, monkeypatch):
         self._email_config(config, monkeypatch)
 
-        def fail(*a):
+        def fail(*a, **k):
             raise OSError("connection reset while sending secret-pw")
         monkeypatch.setattr(doctor, "_smtp_login", fail)
         result = doctor.check_smtp(config, live=True)
         assert result.status == doctor.FAIL
         assert "secret-pw" not in result.message
 
+    def test_timeout_is_configurable_and_reported(self, config, monkeypatch):
+        # Issue #361: the login uses email.smtp_timeout and says it timed out.
+        self._email_config(config, monkeypatch)
+        config.set("email.smtp_timeout", 7)
+        seen = []
+
+        def stall(*a, timeout=None, **k):
+            seen.append(timeout)
+            raise EmailTimeoutError(
+                "SMTP server smtp.gmail.com:587 did not respond within 7 seconds")
+        monkeypatch.setattr(doctor, "_smtp_login", stall)
+        result = doctor.check_smtp(config, live=True)
+        assert seen == [7]
+        assert result.status == doctor.FAIL
+        assert "did not respond within 7 seconds" in result.message
+
     def test_missing_credentials_fail_without_network(self, config, monkeypatch):
         monkeypatch.setattr(doctor, "get_app_password", lambda cfg: "")
-        monkeypatch.setattr(doctor, "_smtp_login", lambda *a: pytest.fail("network"))
+        monkeypatch.setattr(doctor, "_smtp_login", lambda *a, **k: pytest.fail("network"))
         assert doctor.check_smtp(config, live=True).status == doctor.FAIL
 
 
@@ -464,6 +630,60 @@ class TestBrowsers:
         assert result.status == doctor.FAIL
         assert result.details["browsers"]["chromium"]["error"] == "crashed"
 
+    def test_missing_browser_points_to_setup(self, monkeypatch):
+        probe = dict(firefox=dict(installed=False, executable="/y", launched=None, error=None),
+                     chromium=self._installed())
+        monkeypatch.setattr(doctor, "_probe_browsers", lambda launch: probe)
+        assert "memanga setup" in doctor.check_browsers().message
+
+    def test_probe_records_missing_system_libraries(self, monkeypatch, tmp_path):
+        # Issue #217: the reason sits below Playwright's bare first line,
+        # so the probe must read the whole error, not just `error`.
+        executable = tmp_path / "browser"
+        executable.write_text("")
+        deps = RuntimeError(
+            "BrowserType.launch: \n"
+            "║ Host system is missing dependencies to run browsers. ║")
+
+        class _Type:
+            def __init__(self, error):
+                self.executable_path = str(executable)
+                self._error = error
+
+            def launch(self, **kwargs):
+                raise self._error
+
+        class _PW:
+            firefox = _Type(deps)
+            chromium = _Type(RuntimeError("crashed"))
+
+        class _Manager:
+            def __enter__(self):
+                return _PW()
+
+            def __exit__(self, *exc):
+                return False
+
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: _Manager())
+        probe = doctor._probe_browsers(launch=True)
+        assert probe["firefox"]["launched"] is False
+        # Only the bare first line survives in `error`.
+        assert probe["firefox"]["error"].strip() == "BrowserType.launch:"
+        assert probe["firefox"]["missing_dependencies"] is True
+        assert probe["chromium"]["missing_dependencies"] is False
+
+    def test_missing_system_libraries_named(self, monkeypatch):
+        # Issue #217: Playwright's first line is only "BrowserType.launch:".
+        broken = dict(self._installed(launched=False, error="BrowserType.launch:"),
+                      missing_dependencies=True)
+        probe = dict(firefox=broken, chromium=self._installed(launched=True))
+        monkeypatch.setattr(doctor, "_probe_browsers", lambda launch: probe)
+        result = doctor.check_browsers(launch=True)
+        assert result.status == doctor.FAIL
+        assert "system libraries" in result.message
+        assert "memanga setup" in result.message
+
 
 class TestRunnerAndReport:
     def test_selection_keeps_canonical_order(self, config, state):
@@ -497,3 +717,132 @@ class TestRunnerAndReport:
     def test_all_skipped_is_ok(self):
         results = [doctor.CheckResult("smtp", doctor.SKIP, "not run")]
         assert doctor.overall_status(results) == doctor.OK
+
+
+class TestAbout:
+    """Settings → About summary (#343): an allowlist with no paths,
+    names or error text, safe to paste into a bug report."""
+
+    BASICS_KEYS = {"version", "install_mode", "frozen", "python", "os",
+                   "machine", "qt", "playwright"}
+
+    def _info(self, **overrides):
+        info = {
+            "version": "1.2.3", "install_mode": "frozen", "frozen": True,
+            "python": "3.12.1 (CPython)", "os": "Linux-6.1-x86_64-with-glibc2.36",
+            "machine": "x86_64", "qt": "6.7.2 (PySide6 6.7.2)",
+            "playwright": "1.48.0",
+            "keyring": {"available": True, "plaintext": False,
+                        "backend": "keyring.backends.SecretService.Keyring"},
+            "browsers": {"status": "ok",
+                         "installed": {"firefox": True, "chromium": False}},
+        }
+        info.update(overrides)
+        return info
+
+    def test_basics_are_allowlisted_and_pathless(self, monkeypatch):
+        monkeypatch.delattr(sys, "frozen", raising=False)
+        basics = doctor.about_basics()
+        assert set(basics) == self.BASICS_KEYS
+        from memanga import __version__
+        assert basics["version"] == __version__
+        assert basics["frozen"] is False
+        package_dir = str(Path(doctor.__file__).resolve().parent)
+        for value in basics.values():
+            text = str(value)
+            assert sys.executable not in text
+            assert package_dir not in text
+            assert str(Path.home()) not in text
+
+    def test_basics_report_frozen_build(self, monkeypatch):
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        basics = doctor.about_basics()
+        assert basics["frozen"] is True
+        assert basics["install_mode"] == "frozen"
+
+    def test_checks_drop_paths_and_error_text(self, monkeypatch):
+        monkeypatch.setattr(doctor, "_keyring_backend", lambda: dict(
+            available=False, backend=None, plaintext=False,
+            error="cannot open /home/alice/.local/share/keyrings"))
+        monkeypatch.setattr(doctor, "_probe_browsers", lambda launch: dict(
+            firefox=dict(installed=True, executable="/home/alice/ms-playwright/ff",
+                         launched=None, error=None),
+            chromium=dict(installed=False, executable=None, launched=None,
+                          error="missing at /home/alice/ms-playwright")))
+        checks = doctor.about_checks()
+        assert checks == {
+            "keyring": {"available": False, "backend": None, "plaintext": False},
+            "browsers": {"status": "ok",
+                         "installed": {"firefox": True, "chromium": False}},
+        }
+
+    def test_checks_never_raise(self, monkeypatch):
+        def no_playwright(launch):
+            raise ImportError("playwright")
+
+        def broken_keyring():
+            raise RuntimeError("/home/alice boom")
+        monkeypatch.setattr(doctor, "_probe_browsers", no_playwright)
+        monkeypatch.setattr(doctor, "_keyring_backend", broken_keyring)
+        checks = doctor.about_checks()
+        assert checks["browsers"] == {"status": "playwright_missing", "installed": {}}
+        assert checks["keyring"] == {"available": False, "backend": None,
+                                     "plaintext": False}
+
+        def driver_crash(launch):
+            raise RuntimeError("driver died in /home/alice/app")
+        monkeypatch.setattr(doctor, "_probe_browsers", driver_crash)
+        assert doctor.about_checks()["browsers"] == {"status": "error", "installed": {}}
+
+    def test_format_lists_every_row(self):
+        assert doctor.format_about(self._info()).splitlines() == [
+            "MeManga: 1.2.3",
+            "Install: packaged app",
+            "Frozen: yes",
+            "Python: 3.12.1 (CPython)",
+            "OS: Linux-6.1-x86_64-with-glibc2.36",
+            "Architecture: x86_64",
+            "Qt: 6.7.2 (PySide6 6.7.2)",
+            "Playwright: 1.48.0",
+            "Browsers: firefox installed, chromium missing",
+            "Keyring: keyring.backends.SecretService.Keyring (available)",
+        ]
+
+    def test_rows_before_checks_finish(self):
+        info = self._info()
+        del info["keyring"], info["browsers"]
+        rows = dict(doctor.about_rows(info))
+        assert rows["Browsers"] == doctor.CHECKING
+        assert rows["Keyring"] == doctor.CHECKING
+        assert dict(doctor.about_rows({}))["MeManga"] == "unknown"
+
+    @pytest.mark.parametrize("browsers, expected", [
+        ({"status": "playwright_missing", "installed": {}}, "Playwright is not installed"),
+        ({"status": "error", "installed": {}}, "could not be checked"),
+    ])
+    def test_browser_failures(self, browsers, expected):
+        assert dict(doctor.about_rows(self._info(browsers=browsers)))["Browsers"] == expected
+
+    @pytest.mark.parametrize("keyring_info, expected", [
+        ({"available": False, "backend": "keyring.backends.fail.Keyring",
+          "plaintext": False}, "keyring.backends.fail.Keyring (unavailable)"),
+        ({"available": True, "backend": "keyrings.alt.file.PlaintextKeyring",
+          "plaintext": True}, "keyrings.alt.file.PlaintextKeyring (plain text file)"),
+        ({"available": False, "backend": None, "plaintext": False}, "none (unavailable)"),
+    ])
+    def test_keyring_states(self, keyring_info, expected):
+        assert dict(doctor.about_rows(self._info(keyring=keyring_info)))["Keyring"] == expected
+
+    def test_missing_optional_packages(self):
+        rows = dict(doctor.about_rows(self._info(qt=None, playwright=None,
+                                                 install_mode="source", frozen=False)))
+        assert rows["Qt"] == "not installed"
+        assert rows["Playwright"] == "not installed"
+        assert rows["Install"] == "source checkout"
+        assert rows["Frozen"] == "no"
+
+    def test_format_redacts_as_a_safety_net(self):
+        home = str(Path.home())
+        text = doctor.format_about(self._info(os=f"{home}/odd", machine="me@example.com"))
+        assert home not in text
+        assert "me@example.com" not in text

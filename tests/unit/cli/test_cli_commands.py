@@ -10,6 +10,7 @@ import io
 import json
 import os
 import pytest
+import re
 import shlex
 import sys
 import types
@@ -82,6 +83,23 @@ class TestTopLevel:
         rc = run_cli("not-a-real-command")
         assert rc != 0
 
+    def test_help_has_no_issue_numbers(self):
+        """Help text is for users; tracker numbers stay in comments (#376)."""
+        import argparse
+        from memanga import cli
+
+        def texts(parser):
+            yield parser.description or ""
+            yield parser.epilog or ""
+            for action in parser._actions:
+                yield action.help or ""
+                if isinstance(action, argparse._SubParsersAction):
+                    for sub in action.choices.values():
+                        yield from texts(sub)
+
+        for text in texts(cli.build_parser()):
+            assert not re.search(r"issue #\d", text, re.IGNORECASE), text
+
 
 class TestCliIdentity:
     """--version and a stable program name (#248)."""
@@ -135,8 +153,8 @@ class TestCompletionCommand:
         tokens = set(captured.out.translate(str.maketrans('"|)', "   ")).split())
         for name in ("list", "ls", "add", "remove", "rm", "update",
                      "edit", "check", "status", "config", "cron", "sources",
-                     "search", "export", "import", "failed", "doctor", "tui",
-                     "completion", "path", "open"):
+                     "search", "export", "import", "failed", "send", "doctor",
+                     "tui", "completion", "path", "open"):
             assert name in tokens, name
         for option in ("--config-dir", "--version"):
             assert option in tokens
@@ -258,6 +276,28 @@ class TestAddCommand:
         titles = [m["title"] for m in config.get("manga", []) or []]
         assert "Added One" in titles
 
+    @pytest.mark.parametrize("flags", [(), ("--force",)])
+    @pytest.mark.parametrize("existing, title", [
+        ("Re:Zero", "ReZero"),
+        ("Cafe\u0301", "Caf\u00e9"),
+    ])
+    def test_title_sharing_download_folder_rejected(
+            self, run_cli, isolated_home, config, capsys, flags, existing, title):
+        # Issue #246: both titles would write to one folder and overwrite
+        # each other's chapter files, so even --force refuses.
+        assert run_cli("add", "--title", existing, "--url",
+                       "https://mangadex.org/title/a/x") == 0
+        path = isolated_home / ".config" / "memanga" / "config.yaml"
+        before = path.read_bytes()
+        capsys.readouterr()
+
+        rc = run_cli("add", "--title", title, "--url",
+                     "https://mangadex.org/title/b/x", *flags)
+
+        assert rc == 1
+        assert "same download folder" in capsys.readouterr().err
+        assert path.read_bytes() == before
+
     def test_add_dedupes(self, run_cli, config):
         run_cli("add", "--url", "https://mangadex.org/title/a/x",
                 "--title", "Dup")
@@ -307,6 +347,17 @@ class TestAddFallbackDays:
             assert path.read_bytes() == before
         else:
             assert not path.exists()
+
+    def test_delay_without_backup_rejected(self, run_cli, isolated_home,
+                                           config, capsys):
+        # Issue #246: the delay used to be silently ignored without --backup.
+        path = isolated_home / ".config" / "memanga" / "config.yaml"
+        rc = run_cli("add", "--title", "Delay Test",
+                     "--url", "https://mangadex.org/title/a/x",
+                     "--fallback-days", "3")
+        assert rc == 1
+        assert "--fallback-days needs a backup source" in capsys.readouterr().err
+        assert not path.exists() or not config.get("manga")
 
     @pytest.mark.parametrize(("flags", "expected"), [
         (("--fallback-days", "0"), 0),
@@ -585,6 +636,37 @@ class TestUpdatePolicyFields:
         assert run_cli("update", "Legacy", flag) == 0
         assert self._entry(config, "Legacy")["send_to_kindle"] is expected
 
+    def test_kindle_under_selected_scope(self, run_cli, config, seed):
+        # Issue #345: an entry without a choice is off under "selected",
+        # so --kindle turns it on.
+        config.set("email.kindle_scope", "selected")
+        seed(LEGACY)
+        assert run_cli("update", "Legacy", "--kindle") == 0
+        assert self._entry(config, "Legacy")["send_to_kindle"] is True
+
+    @pytest.mark.parametrize(("scope", "flag", "expected"), [
+        ("selected", "--no-kindle", False),
+        (None, "--kindle", True),
+        ("all", "--kindle", True),
+    ])
+    def test_kindle_choice_matching_the_scope_is_stored(
+            self, run_cli, config, seed, capsys, scope, flag, expected):
+        # Issue #345: the scope already gives this value, but the
+        # explicit choice is stored so it holds when the scope changes.
+        if scope is not None:
+            config.set("email.kindle_scope", scope)
+        seed(LEGACY)
+        assert run_cli("update", "Legacy", flag) == 0
+        assert self._entry(config, "Legacy")["send_to_kindle"] is expected
+        assert "Kindle →" in capsys.readouterr().out
+
+    def test_stored_kindle_choice_writes_nothing(self, run_cli, seed, capsys):
+        path = seed(dict(LEGACY, send_to_kindle=True))
+        before = path.read_bytes()
+        assert run_cli("update", "Legacy", "--kindle") == 0
+        assert "No changes" in capsys.readouterr().out
+        assert path.read_bytes() == before
+
     @pytest.mark.parametrize("days", [0, 7])
     def test_fallback_days_with_existing_backup(self, run_cli, config, seed, days):
         seed(MULTI)
@@ -693,6 +775,30 @@ class TestUpdatePolicyFields:
         assert reloaded.get_downloaded_chapters("Renamed") == ["4"]
         assert reloaded.get_downloaded_chapters("Multi") == []
 
+    def test_rename_to_title_sharing_download_folder_rejected(
+            self, run_cli, config, seed, capsys):
+        # Issue #246: "Multi:" sanitizes to Multi's folder.
+        path = seed(LEGACY, MULTI)
+        before = path.read_bytes()
+        capsys.readouterr()
+        assert run_cli("update", "Legacy", "--title", "Multi:") == 1
+        assert "same download folder as 'Multi'" in capsys.readouterr().err
+        assert path.read_bytes() == before
+
+    def test_rename_to_title_with_kept_history_rejected(
+            self, run_cli, config, seed, cli_state, capsys):
+        # Issue #392: a removed manga's kept history under that title
+        # could not be told apart from this manga's later.
+        path = seed(LEGACY)
+        cli_state.add_downloaded_chapter("Gone", "1")
+        cli_state.save()
+        before = path.read_bytes()
+        capsys.readouterr()
+        assert run_cli("update", "Legacy", "--title", "Gone") == 1
+        assert "still has history from an earlier manga" in capsys.readouterr().err
+        assert path.read_bytes() == before
+        assert cli_state.get_downloaded_chapters("Gone") == ["1"]
+
     def test_title_case_only_rename(self, run_cli, config, seed):
         seed(LEGACY)
         assert run_cli("update", "Legacy", "--title", "LEGACY") == 0
@@ -701,7 +807,6 @@ class TestUpdatePolicyFields:
     @pytest.mark.parametrize("flags", [
         ("--status", "reading"),
         ("--mode", "auto"),
-        ("--kindle",),
         ("--no-backup",),
         ("--url", PRIMARY, "--title", "Legacy"),
     ])
@@ -849,6 +954,102 @@ class TestCheckCommand:
         # Either returns 0 (success) or a small int — should not crash.
         assert rc in (0, 1)
 
+    def test_unsupported_source_error_is_short(self, run_cli, config, capsys):
+        # Issue #233: one short error pointing at `memanga sources`, not
+        # every supported domain.
+        config.set("manga", [{
+            "title": "Lost", "source": "unsupported-example.invalid",
+            "url": "https://unsupported-example.invalid/m",
+            "status": "reading",
+        }])
+        config.save()
+        capsys.readouterr()
+
+        assert run_cli("check", "--dry-run") == 1
+        err = capsys.readouterr().err
+        assert ("No scraper available for: unsupported-example.invalid. "
+                "Run 'memanga sources' to list supported sources.") in err
+        assert "Supported:" not in err
+        assert "mangadex.org" not in err
+        assert len(err) < 2000
+
+    def _kindle_check(self, run_cli, config, monkeypatch, tmp_path, capsys,
+                      output_format, *argv):
+        """`check --download` in email mode with two new chapters; returns
+        (exit code, files sent, stderr seen before the first download,
+        stderr after it)."""
+        from memanga import cli
+
+        config.set("delivery.mode", "email")
+        config.set("delivery.output_format", output_format)
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [{"title": "Vinland Saga", "status": "reading",
+                              "source": "primary.test",
+                              "url": "https://primary.test/vs"}])
+        config.save()
+        chapters = [types.SimpleNamespace(
+            number=n, title="", url=f"https://primary.test/c/{n}",
+            source="primary.test", is_backup=False) for n in ("71", "72")]
+        sent, before = [], []
+
+        def fake_download(manga, chapter, output_dir, fmt, **kwargs):
+            if not before:
+                before.append(capsys.readouterr().err)
+            if fmt in ("jpg", "png", "webp"):
+                path = tmp_path / f"Chapter {chapter.number}"
+                path.mkdir()
+                return path
+            path = tmp_path / f"{chapter.number}.{fmt}"
+            path.write_bytes(b"data")
+            return path
+
+        monkeypatch.setattr(cli, "check_for_updates", lambda *a, **k: chapters)
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+        monkeypatch.setattr(cli, "send_to_kindle",
+                            lambda **kw: sent.append(kw["pdf_path"].name))
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+        rc = run_cli("check", "--download", *argv)
+        return rc, sent, before[0], capsys.readouterr().err
+
+    @pytest.mark.parametrize("fmt", ["cbz", "zip", "jpg"])
+    def test_kindle_unsupported_format_warns_once_before_download(
+            self, run_cli, config, monkeypatch, tmp_path, capsys, fmt):
+        # Issue #362: chapters are saved, never emailed, and the run says
+        # why before anything is downloaded.
+        from memanga import cli
+
+        rc, sent, before, after = self._kindle_check(
+            run_cli, config, monkeypatch, tmp_path, capsys, fmt)
+
+        assert rc == 0
+        assert sent == []
+        assert before.count("can't be sent to Kindle; only PDF and EPUB can.") == 1
+        assert "Chapters are saved but not sent to Kindle" in before
+        assert "--format pdf or epub" in before
+        assert "Chapters are saved but not sent to Kindle" not in after
+        assert cli.state.is_chapter_downloaded("Vinland Saga", "72")
+        assert cli.state.failures.get_all_undelivered() == {}
+
+    def test_kindle_format_override_is_checked_too(
+            self, run_cli, config, monkeypatch, tmp_path, capsys):
+        rc, sent, before, _ = self._kindle_check(
+            run_cli, config, monkeypatch, tmp_path, capsys, "pdf",
+            "--format", "cbz")
+        assert rc == 0
+        assert sent == []
+        assert "CBZ files can't be sent to Kindle" in before
+
+    @pytest.mark.parametrize("fmt", ["pdf", "epub"])
+    def test_kindle_format_sends_without_warning(
+            self, run_cli, config, monkeypatch, tmp_path, capsys, fmt):
+        rc, sent, before, after = self._kindle_check(
+            run_cli, config, monkeypatch, tmp_path, capsys, fmt)
+        assert rc == 0
+        assert sent == [f"71.{fmt}", f"72.{fmt}"]
+        assert "can't be sent to Kindle" not in before + after
+
     def test_backup_success_in_email_mode_sends_before_marking_downloaded(
             self, run_cli, config, monkeypatch, tmp_path):
         """Issue #86 regression: backup recovery must still run Kindle
@@ -902,6 +1103,10 @@ class TestCheckCommand:
         assert rc == 0
         assert sent == [backup_path]
         assert cli.state.is_chapter_downloaded("Vinland Saga", "71")
+        [entry] = cli.state.get_download_history()
+        assert (entry["chapter"], entry["source"]) == ("71", "backup.test")
+        assert entry["from_backup"] and entry["kindle_sent"]
+        assert not entry["partial"]
 
     def test_backup_partial_in_email_mode_sends_and_warns(
             self, run_cli, config, monkeypatch, tmp_path):
@@ -965,6 +1170,9 @@ class TestCheckCommand:
         assert cli.state.get_partial_chapter("Vinland Saga", "71")["failed_pages"] == [7]
         notifications = cli.state.get("notifications", [])
         assert any("saved as partial" in n["message"] for n in notifications)
+        [entry] = cli.state.get_download_history()
+        assert entry["source"] == "backup.test"
+        assert entry["from_backup"] and entry["partial"]
 
     def test_over_threshold_backup_failure_records_failure_not_downloaded(
             self, run_cli, config, monkeypatch):
@@ -1009,6 +1217,52 @@ class TestCheckCommand:
         assert not cli.state.is_chapter_downloaded("Vinland Saga", "71")
         failed = cli.state.get_failed_chapters("Vinland Saga")
         assert "71" in failed
+        assert cli.state.get_download_history() == []
+
+    def test_check_download_records_history_the_guard_learns_from(
+            self, run_cli, config, monkeypatch, tmp_path):
+        """Issue #240: CLI downloads are logged to the download history,
+        so the suspicious-batch guard learns this manga's batch size."""
+        from memanga import cli
+        from memanga.suspicion import estimate_typical_batch_size
+
+        config.set("delivery.output_format", "cbz")
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "status": "reading",
+            "source": "primary.test",
+            "url": "https://primary.test/vs",
+        }])
+        config.save()
+
+        chapters = [
+            types.SimpleNamespace(
+                number=n, title="", url=f"https://primary.test/c/{n}",
+                source="primary.test", is_backup=False)
+            for n in ("71", "72")
+        ]
+
+        def fake_download(manga, chapter, output_dir, output_format, **kwargs):
+            path = tmp_path / f"{chapter.number}.{output_format}"
+            path.write_bytes(b"PK")
+            return path
+
+        monkeypatch.setattr(cli, "check_for_updates", lambda *a, **k: chapters)
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+
+        rc = run_cli("check", "--auto", "--quiet")
+
+        assert rc == 0
+        history = cli.state.get_download_history()
+        assert [(h["title"], h["chapter"]) for h in history] == [
+            ("Vinland Saga", "72"), ("Vinland Saga", "71")]
+        for entry in history:
+            assert entry["format"] == "cbz"
+            assert entry["path"] == str(tmp_path / f"{entry['chapter']}.cbz")
+            assert entry["source"] == "primary.test"
+            assert not (entry["from_backup"] or entry["partial"]
+                        or entry["kindle_sent"])
+        assert estimate_typical_batch_size(cli.state, "Vinland Saga") == 2.0
 
     def test_failed_retry_includes_accepted_partials(
             self, run_cli, config, state, monkeypatch, tmp_path):
@@ -1226,6 +1480,26 @@ class TestConfigActions:
         assert "Current Configuration" in action_out
         assert "file-secret" not in action_out
 
+    def test_show_masks_email_addresses(self, run_cli, config, capsys):
+        # Issue #247: config output is often pasted into issue reports.
+        config.set("email.kindle_email", "reader@kindle.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.save()
+        assert run_cli("config", "show") == 0
+        text_out = capsys.readouterr().out
+        assert run_cli("config", "show", "--json") == 0
+        json_out = capsys.readouterr().out
+        for out in (text_out, json_out):
+            assert "reader@" not in out and "sender@" not in out
+        payload = json.loads(json_out)
+        assert payload["email"]["kindle_email"] == "***@kindle.com"
+        assert payload["email"]["sender_email"] == "***@example.com"
+        assert "hidden" in text_out
+        # The real value stays one explicit command away.
+        assert run_cli("config", "get", "email.kindle_email") == 0
+        assert capsys.readouterr().out == "reader@kindle.com\n"
+        assert config.get("email.kindle_email") == "reader@kindle.com"
+
     # ── set ──
 
     def test_set_persists_typed_value(self, run_cli, config, capsys):
@@ -1239,10 +1513,71 @@ class TestConfigActions:
         assert run_cli("config", "get", "email.smtp_port") == 0
         assert capsys.readouterr().out == "465\n"
 
+    def test_set_smtp_tls(self, run_cli, config, capsys):
+        # Issue #366.
+        assert run_cli("config", "get", "email.smtp_tls") == 0
+        assert capsys.readouterr().out == "auto\n"
+        assert run_cli("config", "set", "email.smtp_tls", "IMPLICIT") == 0
+        assert config.get("email.smtp_tls") == "implicit"
+
+    def test_set_warns_when_kindle_and_format_conflict(self, run_cli, config,
+                                                       capsys):
+        # Issue #362: the value is saved (it works for local downloads),
+        # with a warning that such chapters won't be sent to Kindle.
+        assert run_cli("config", "set", "delivery.output_format", "cbz") == 0
+        assert "Kindle" not in capsys.readouterr().err  # local mode
+        assert run_cli("config", "set", "delivery.mode", "email") == 0
+        err = capsys.readouterr().err
+        assert "CBZ files can't be sent to Kindle; only PDF and EPUB can." in err
+        assert "set delivery.output_format to pdf or epub" in err
+        assert run_cli("config", "set", "delivery.output_format", "zip") == 0
+        assert "ZIP files can't be sent to Kindle" in capsys.readouterr().err
+        assert config.get("delivery.output_format") == "zip"
+        assert run_cli("config", "set", "delivery.output_format", "epub") == 0
+        assert "Kindle" not in capsys.readouterr().err
+
+    def test_set_email_mode_chooses_selected_manga(self, run_cli, config,
+                                                   capsys):
+        # Issue #345: no one to ask, so only manga turned on are sent,
+        # and the output says how to send every manga.
+        assert config.get("email.kindle_scope") is None
+        assert run_cli("config", "set", "delivery.mode", "email") == 0
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+        assert config.get("email.kindle_scope") == "selected"
+        assert "only manga with Kindle turned on" in output
+        assert "config set email.kindle_scope all" in output
+
+    def test_set_email_mode_keeps_a_chosen_scope(self, run_cli, config,
+                                                 capsys):
+        assert run_cli("config", "set", "email.kindle_scope", "all") == 0
+        assert run_cli("config", "set", "delivery.mode", "email") == 0
+        captured = capsys.readouterr()
+        assert config.get("email.kindle_scope") == "all"
+        assert ("every manga unless its Kindle toggle is off"
+                in captured.out + captured.err)
+
+    def test_set_email_mode_again_leaves_legacy_config_alone(
+            self, run_cli, config, capsys):
+        # A config already on email delivery keeps sending every manga.
+        config.set("delivery.mode", "email")
+        config.save()
+        assert run_cli("config", "set", "delivery.mode", "email") == 0
+        assert config.get("email.kindle_scope") is None
+        assert "kindle_scope" not in capsys.readouterr().out
+
+    def test_config_email_shows_the_scope(self, run_cli, config, capsys):
+        config.set("email.kindle_scope", "selected")
+        config.save()
+        assert run_cli("config", "email") == 0
+        assert "only manga with Kindle turned on" in capsys.readouterr().out
+
     @pytest.mark.parametrize("key,value", [
         ("delivery.output_format", "mobi"),
         ("email.smtp_port", "abc"),
         ("email.smtp_port", "0"),
+        ("email.smtp_tls", "none"),
+        ("email.kindle_scope", "some"),
         ("partial_chapters.threshold_percent", "150"),
         ("delivery.mode", "fax"),
     ])
@@ -1302,10 +1637,133 @@ class TestConfigActions:
         monkeypatch.setattr(sys, "stdin", io.StringIO("plain-pw\n"))
         assert run_cli("config", "set", "email.app_password", "-") == 0
         assert config.get("email.app_password") == "plain-pw"
+        set_err = capsys.readouterr().err
+        # Issue #247: the plaintext fallback is never silent.
+        assert "plain text" in set_err
+        assert "config.yaml" in set_err
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in set_err
         assert run_cli("config", "get", "email.app_password") == 0
         captured = capsys.readouterr()
-        assert "plain-pw" not in captured.out + captured.err
+        assert "plain-pw" not in captured.out + captured.err + set_err
         assert captured.out.endswith("****\n")
+
+    def _run_wizard_setting_password(self, run_cli, monkeypatch, password):
+        """Drive the interactive `config` wizard: email mode, new app
+        password, every other answer left at its default."""
+        from memanga import cli
+        answers = {"Select mode": "2", "App password": password,
+                   "Update app password?": True}
+
+        def ask(prompt, *a, **k):
+            for start, answer in answers.items():
+                if prompt.startswith(start):
+                    return answer
+            return k.get("default", "")
+        monkeypatch.setattr(cli.Prompt, "ask", ask)
+        monkeypatch.setattr(cli.Confirm, "ask", lambda prompt, *a, **k: bool(
+            answers.get(prompt, k.get("default", False))))
+        return run_cli("config")
+
+    def test_wizard_password_without_keyring_warns(self, run_cli, monkeypatch,
+                                                   capsys, config, tty):
+        # Issue #247: the wizard reports the plaintext fallback too.
+        import keyring
+
+        def broken(*a):
+            raise RuntimeError("no backend")
+        monkeypatch.setattr(keyring, "set_password", broken)
+        monkeypatch.setattr(keyring, "get_password", broken)
+        assert self._run_wizard_setting_password(run_cli, monkeypatch, "wizard-pw") == 0
+        captured = capsys.readouterr()
+        assert "plain text" in captured.err
+        assert "config.yaml" in captured.err
+        assert "wizard-pw" not in captured.out + captured.err
+        assert config.get("email.app_password") == "wizard-pw"
+
+    def test_wizard_password_in_keyring_does_not_warn(self, run_cli, monkeypatch,
+                                                      capsys, keyring_store, tty):
+        assert self._run_wizard_setting_password(run_cli, monkeypatch, "wizard-pw") == 0
+        captured = capsys.readouterr()
+        assert "plain text" not in captured.err
+        assert "wizard-pw" not in captured.out + captured.err
+        assert keyring_store == {("memanga", "app_password"): "wizard-pw"}
+
+    def _run_wizard_email(self, run_cli, monkeypatch, scope_answer=None):
+        """Drive the `config` wizard to email mode; record the prompts.
+        ``scope_answer`` None takes the proposed default."""
+        from memanga import cli
+        prompts = []
+
+        def ask(prompt, *a, **k):
+            prompts.append((prompt, k.get("default")))
+            if prompt.startswith("Select mode"):
+                return "2"
+            if prompt.startswith("Send which manga") and scope_answer:
+                return scope_answer
+            return k.get("default", "")
+        monkeypatch.setattr(cli.Prompt, "ask", ask)
+        monkeypatch.setattr(cli.Confirm, "ask",
+                            lambda prompt, *a, **k: bool(k.get("default", False)))
+        assert run_cli("config") == 0
+        return dict(prompts)
+
+    def test_wizard_turning_email_on_proposes_selected(
+            self, run_cli, monkeypatch, capsys, config, tty):
+        # Issue #345: the library is not sent in full unless chosen.
+        config.set("manga", [
+            {"title": t, "source": "mangadex.org", "url": f"https://mangadex.org/t/{t}"}
+            for t in ("A", "B")])
+        config.save()
+        prompts = self._run_wizard_email(run_cli, monkeypatch)
+        assert prompts["Send which manga"] == "1"
+        assert config.get("email.kindle_scope") == "selected"
+        out = capsys.readouterr().out
+        assert "Your library has 2 manga" in out
+        assert "keeps that" in out
+
+    def test_wizard_can_choose_every_manga(self, run_cli, monkeypatch,
+                                           config, tty):
+        self._run_wizard_email(run_cli, monkeypatch, scope_answer="2")
+        assert config.get("email.kindle_scope") == "all"
+
+    def test_wizard_on_legacy_email_config_proposes_all(
+            self, run_cli, monkeypatch, config, tty):
+        # Pressing Enter keeps what a library on email delivery does now.
+        config.set("delivery.mode", "email")
+        config.save()
+        prompts = self._run_wizard_email(run_cli, monkeypatch)
+        assert prompts["Send which manga"] == "2"
+        assert config.get("email.kindle_scope") == "all"
+
+    def test_set_secret_reports_unusable_override(self, run_cli, monkeypatch,
+                                                  capsys, keyring_store, tmp_path):
+        # Issue #247: the saved password is not used while the variable
+        # is set, so say what is wrong with it.
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(tmp_path / "missing"))
+        monkeypatch.setattr(sys, "stdin", io.StringIO("s3cret-pw\n"))
+        assert run_cli("config", "set", "email.app_password", "-") == 0
+        captured = capsys.readouterr()
+        # The redacted stderr a user reads keeps the reason intact.
+        assert ("App password from the environment is unusable: cannot read "
+                "MEMANGA_SMTP_PASSWORD_FILE file") in captured.err
+        assert "***" not in captured.err
+        assert "s3cret-pw" not in captured.out + captured.err
+        assert keyring_store == {("memanga", "app_password"): "s3cret-pw"}
+
+    def test_set_secret_in_keyring_does_not_warn(self, run_cli, monkeypatch, capsys):
+        monkeypatch.setattr(sys, "stdin", io.StringIO("s3cret-pw\n"))
+        assert run_cli("config", "set", "email.app_password", "-") == 0
+        assert "plain text" not in capsys.readouterr().err
+
+    def test_set_secret_notes_env_override(self, run_cli, monkeypatch, capsys,
+                                           keyring_store):
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "env-pw")
+        monkeypatch.setattr(sys, "stdin", io.StringIO("s3cret-pw\n"))
+        assert run_cli("config", "set", "email.app_password", "-") == 0
+        captured = capsys.readouterr()
+        assert "MEMANGA_SMTP_PASSWORD is set" in captured.err
+        assert "env-pw" not in captured.out + captured.err
+        assert keyring_store == {("memanga", "app_password"): "s3cret-pw"}
 
     def test_secret_on_command_line_is_refused(self, run_cli, capsys, keyring_store):
         assert run_cli("config", "set", "email.app_password", "argv-pw") == 1
@@ -1392,6 +1850,8 @@ class TestConfigActions:
          "delivery.post_processing: expected a section"),
         ("delivery: 5\n", "delivery: expected a section"),
         ("email: []\n", "email: expected a section"),
+        # Loads, but an edit that blanks a section is still reported.
+        ("delivery:\n", "delivery: expected a section"),
     ])
     def test_edit_reports_invalid_result(self, run_cli, config_path, capsys,
                                          editor, text, needle):
@@ -1403,10 +1863,75 @@ class TestConfigActions:
         # Left in place so the user can run `config edit` again.
         assert config_path.read_text(encoding="utf-8") == text
 
+    def test_invalid_value_warns_and_the_command_runs(self, run_cli,
+                                                      config_path, capsys):
+        # Issue #293.
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        text = "email:\n  smtp_port: bad-port-value\n  app_password: 987654321\n"
+        config_path.write_text(text, encoding="utf-8")
+        assert run_cli("status", "--json") == 0
+        err = capsys.readouterr().err
+        assert "warning:" in err
+        assert "email.smtp_port" in err
+        assert "bad-port-value" not in err
+        assert "987654321" not in err
+        assert config_path.read_text(encoding="utf-8") == text
+
+    def test_section_that_is_not_a_mapping_stops_the_command(
+            self, run_cli, config_path, capsys):
+        # Issue #293.
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("email: oops\n", encoding="utf-8")
+        assert run_cli("status") == 1
+        assert "email: expected a section" in capsys.readouterr().err
+        assert config_path.read_text(encoding="utf-8") == "email: oops\n"
+
     def test_edit_editor_failure(self, run_cli, capsys, editor):
         editor(returncode=3)
         assert run_cli("config", "edit") == 1
         assert "status 3" in capsys.readouterr().err
+
+    # Issue #345: turning email on by hand asks nothing, so it takes the
+    # safe choice; a config already on email is left as it was.
+
+    def test_edit_turning_email_on_chooses_selected(self, run_cli, config,
+                                                    capsys, editor):
+        editor("delivery:\n  mode: email\n")
+        assert run_cli("config", "edit") == 0
+        assert config.get("delivery.mode") == "email"
+        assert config.get("email.kindle_scope") == "selected"
+        assert ("only manga with Kindle turned on"
+                in capsys.readouterr().out)
+
+    @pytest.mark.parametrize("scope", ["all", "selected"])
+    def test_edit_turning_email_on_keeps_an_explicit_scope(
+            self, run_cli, config, capsys, editor, scope):
+        editor(f"delivery:\n  mode: email\nemail:\n  kindle_scope: {scope}\n")
+        assert run_cli("config", "edit") == 0
+        assert config.get("email.kindle_scope") == scope
+
+    def test_edit_of_email_config_leaves_scope_unset(self, run_cli, config,
+                                                     config_path, capsys,
+                                                     editor):
+        config.set("delivery.mode", "email")
+        config.save()
+        editor("delivery:\n  mode: email\n  output_format: epub\n")
+        assert run_cli("config", "edit") == 0
+        assert config.get("delivery.output_format") == "epub"
+        assert config.get("email.kindle_scope") is None
+        assert "kindle_scope" not in config_path.read_text(encoding="utf-8")
+        assert "Kindle delivery applies" not in capsys.readouterr().out
+
+    def test_edit_fixing_an_unreadable_config_leaves_scope_unset(
+            self, run_cli, config, config_path, editor):
+        # Its mode before the edit is unknown: it may already have been
+        # sending every manga.
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("delivery: [unclosed\n", encoding="utf-8")
+        editor("delivery:\n  mode: email\n")
+        assert run_cli("config", "edit") == 0
+        assert config.get("delivery.mode") == "email"
+        assert config.get("email.kindle_scope") is None
 
     # ── email ──
 
@@ -1424,6 +1949,27 @@ class TestConfigActions:
         assert "sender@example.com" in out
         assert "file-secret" not in out
         assert "--test" in out
+        assert "--send-test" in out
+        # Issue #363: the default email size limit and the file size it allows.
+        assert "25 MB (files up to 18.0 MB)" in out
+        # Issue #366: the default picks STARTTLS for port 587.
+        assert "auto (STARTTLS on port 587)" in out
+
+    @pytest.mark.parametrize("port, tls, shown", [
+        (465, "auto", "auto (implicit TLS on port 465)"),
+        (2465, "implicit", "implicit TLS"),
+        (465, "starttls", "STARTTLS"),
+        (587, "ssl", "ssl (invalid; use auto, starttls or implicit)"),
+    ])
+    def test_email_shows_tls_mode(self, run_cli, config, capsys, port, tls,
+                                  shown):
+        # "ssl" can only come from a hand edit; `config set` refuses it.
+        config.set("email.smtp_port", port)
+        config.set("email.smtp_tls", tls)
+        config.save()
+        assert run_cli("config", "email") == 0
+        out = " ".join(capsys.readouterr().out.split())
+        assert f"SMTP security {shown}" in out
 
     @pytest.mark.parametrize("status,rc", [("ok", 0), ("fail", 1)])
     def test_email_test_uses_smtp_check(self, run_cli, monkeypatch, capsys,
@@ -1439,6 +1985,115 @@ class TestConfigActions:
         assert seen == {"live": True}
         captured = capsys.readouterr()
         assert "stub result" in (captured.out if rc == 0 else captured.err)
+
+    @pytest.fixture
+    def fake_smtp(self, monkeypatch):
+        """smtplib.SMTP replaced so nothing is sent; records each call."""
+        import smtplib
+        calls = []
+
+        class FakeSMTP:
+            def __init__(self, host, port, timeout=None):
+                calls.append(("connect", host, port, timeout))
+
+            def starttls(self, **k):
+                calls.append(("starttls",))
+
+            def login(self, user, password):
+                calls.append(("login", user, password))
+
+            def send_message(self, msg):
+                calls.append(("send", msg))
+
+            def quit(self):
+                calls.append(("quit",))
+
+            def close(self):
+                pass
+        monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+        return calls
+
+    def _configure_email(self, config, monkeypatch):
+        from memanga import cli
+        config.set("email.kindle_email", "reader@kindle.example.invalid")
+        config.set("email.sender_email", "sender@example.invalid")
+        config.set("email.smtp_server", "smtp.example.invalid")
+        config.set("email.smtp_port", 2525)
+        config.set("email.smtp_timeout", 9)
+        config.save()
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "send-test-pw")
+
+    def test_email_send_test_sends_a_pdf_to_the_kindle(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp):
+        # Issue #365: a real delivery test with the configured settings.
+        self._configure_email(config, monkeypatch)
+        assert run_cli("config", "email", "--send-test") == 0
+
+        assert fake_smtp[0] == ("connect", "smtp.example.invalid", 2525, 9)
+        assert ("login", "sender@example.invalid", "send-test-pw") in fake_smtp
+        (msg,) = [c[1] for c in fake_smtp if c[0] == "send"]
+        assert msg["To"] == "reader@kindle.example.invalid"
+        (attachment,) = msg.get_payload()
+        assert attachment.get_content_type() == "application/pdf"
+        assert attachment.get_payload(decode=True).startswith(b"%PDF-")
+        out = " ".join(capsys.readouterr().out.split())
+        assert "MeManga test document" in out
+        assert "does not prove it reached your Kindle" in out
+        assert "send-test-pw" not in out
+
+    def test_email_send_test_uses_implicit_tls_on_port_465(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp):
+        # Issue #366: the test PDF is sent the way delivery would send it.
+        from unittest.mock import MagicMock
+        import smtplib
+        self._configure_email(config, monkeypatch)
+        config.set("email.smtp_port", 465)
+        config.save()
+        factory = MagicMock()
+        monkeypatch.setattr(smtplib, "SMTP_SSL", factory)
+        assert run_cli("config", "email", "--send-test") == 0
+        assert fake_smtp == []  # no plain connection, no STARTTLS
+        assert factory.call_args.args == ("smtp.example.invalid", 465)
+        assert factory.call_args.kwargs["timeout"] == 9
+        factory.return_value.login.assert_called_once_with(
+            "sender@example.invalid", "send-test-pw")
+        factory.return_value.send_message.assert_called_once()
+
+    def test_email_send_test_reports_smtp_failure(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp):
+        import smtplib
+        self._configure_email(config, monkeypatch)
+
+        def refuse(self, msg):
+            raise smtplib.SMTPRecipientsRefused(
+                {"reader@kindle.example.invalid": (550, b"5.1.1 no such user")})
+        monkeypatch.setattr(smtplib.SMTP, "send_message", refuse)
+        assert run_cli("config", "email", "--send-test") == 1
+        err = capsys.readouterr().err
+        assert "Test PDF not sent" in err
+        assert "550 5.1.1 no such user" in err
+
+    def test_email_send_test_needs_settings(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp):
+        from memanga import cli
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "")
+        assert run_cli("config", "email", "--send-test") == 1
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Missing Kindle email, sender email, app password" in err
+        assert fake_smtp == []
+
+    def test_email_send_test_reports_unusable_override(
+            self, run_cli, config, monkeypatch, capsys, fake_smtp, tmp_path):
+        self._configure_email(config, monkeypatch)
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE",
+                           str(tmp_path / "missing"))
+        assert run_cli("config", "email", "--send-test") == 1
+        assert "unusable" in capsys.readouterr().err
+        assert fake_smtp == []
+
+    def test_email_test_and_send_test_are_exclusive(self, run_cli, capsys):
+        assert run_cli("config", "email", "--test", "--send-test") == 2
+        assert "not allowed with" in capsys.readouterr().err
 
     # ── compatibility ──
 
@@ -1469,6 +2124,261 @@ class TestSourcesCommand:
         out = capsys.readouterr().out
         # Should mention at least a couple known sources.
         assert "mangadex.org" in out or "mangafire.to" in out
+        assert "All tested and working" not in out
+
+    def test_json_exposes_catalog(self, run_cli, capsys):
+        assert run_cli("sources", "--json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["schema_version"] == 1
+        domains = {source["domain"] for source in payload["sources"]}
+        assert "mangadex.org" in domains
+        assert "nhentai.net" in domains
+        rows = {source["domain"]: source for source in payload["sources"]}
+        assert rows["mangadex.org"]["search_status"] == "Included in search"
+        assert rows["bato.to"]["search_status"] == "Not searched (unreliable)"
+        assert rows["bato.to"]["search_skip"]["reason"] == "unreliable"
+        assert rows["bato.to"]["searchable"] is False
+        assert rows["manga18fx.com"]["template"]
+        assert rows["manga18fx.com"]["searchable"] is False
+        assert rows["manga18fx.com"]["search_status"] == "Not searched (template)"
+        assert rows["nhentai.net"]["nsfw"] is True
+        aliases = rows["asurascans.com"]["domain_search_skips"]
+        assert aliases["asuracomic.net"]["reason"] == "alias"
+        assert aliases["asuratoon.com"]["reason"] == "alias"
+
+    # Issue #236: saved health and filters.
+
+    @staticmethod
+    def _json(run_cli, capsys, *argv):
+        assert run_cli("sources", "--json", *argv) == 0
+        return {s["domain"]: s for s in json.loads(capsys.readouterr().out)["sources"]}
+
+    @pytest.fixture
+    def seeded_health(self, state):
+        state.update_source_health("mangadex.org", True, latency_ms=120)
+        # Saved under an alias, as a library entry on an old domain would.
+        for _ in range(3):
+            state.update_source_health("asuracomic.net", False, error_msg="HTTP 503")
+        state.update_source_health("bato.to", False, error_msg="timed out")
+        state.save()
+
+    def test_json_reports_saved_health(self, run_cli, capsys, seeded_health):
+        rows = self._json(run_cli, capsys)
+        assert rows["mangadex.org"]["health"]["status"] == "ok"
+        assert rows["mangadex.org"]["health"]["latency_ms"] == 120
+        assert rows["mangadex.org"]["health"]["last_success"]
+        asura = rows["asurascans.com"]["health"]
+        assert asura["status"] == "error"
+        assert asura["domain"] == "asuracomic.net"
+        assert asura["error_count"] == 3
+        assert rows["bato.to"]["health"]["status"] == "warning"
+        assert rows["nhentai.net"]["health"] is None
+        # Existing keys stay as they were.
+        assert rows["mangadex.org"]["search_status"] == "Included in search"
+
+    def test_json_without_saved_health_is_null(self, run_cli, capsys):
+        rows = self._json(run_cli, capsys)
+        assert all(row["health"] is None for row in rows.values())
+
+    def test_health_filter(self, run_cli, capsys, seeded_health):
+        assert set(self._json(run_cli, capsys, "--health", "ok")) == {"mangadex.org"}
+        assert set(self._json(run_cli, capsys, "--health", "error",
+                              "--health", "warning")) == {"asurascans.com", "bato.to"}
+        unknown = self._json(run_cli, capsys, "--health", "unknown")
+        assert "nhentai.net" in unknown
+        assert not {"mangadex.org", "asurascans.com", "bato.to"} & set(unknown)
+
+    def test_search_filter(self, run_cli, capsys):
+        included = self._json(run_cli, capsys, "--search", "included")
+        skipped = self._json(run_cli, capsys, "--search", "not-searched")
+        assert "mangadex.org" in included and "mangadex.org" not in skipped
+        assert "bato.to" in skipped and "bato.to" not in included
+        assert all(r["searchable"] for r in included.values())
+        assert not any(r["searchable"] for r in skipped.values())
+
+    def test_query_matches_domain_or_alias(self, run_cli, capsys):
+        assert "asurascans.com" in self._json(run_cli, capsys, "ASURACOMIC")
+        assert set(self._json(run_cli, capsys, "mangadex")) == {"mangadex.org"}
+
+    def test_filters_combine(self, run_cli, capsys, seeded_health):
+        assert self._json(run_cli, capsys, "bato", "--search", "included") == {}
+        assert set(self._json(run_cli, capsys, "bato", "--health", "warning",
+                              "--search", "not-searched")) == {"bato.to"}
+
+    def test_bad_filter_value_is_usage_error(self, run_cli):
+        assert run_cli("sources", "--health", "broken") == 2
+        assert run_cli("sources", "--search", "maybe") == 2
+
+    def test_table_shows_health_honestly(self, run_cli, capsys, seeded_health):
+        assert run_cli("sources") == 0
+        out = capsys.readouterr().out
+        assert "Health" in out
+        assert "not a live test" in out
+        assert "1 ok, 1 warning, 1 error" in out
+        assert "Total:" in out
+
+    def test_table_filtered_and_empty(self, run_cli, capsys):
+        assert run_cli("sources", "mangadex") == 0
+        out = capsys.readouterr().out
+        assert "Showing 1 of" in out
+        assert run_cli("sources", "no-such-source-xyz") == 0
+        assert "No sources match these filters." in capsys.readouterr().out
+
+    def test_newest_saved_health_wins_across_aliases(self):
+        from memanga.cli import _source_health
+        from memanga.scrapers.catalog import source_catalog
+        asura = next(s for s in source_catalog() if s.domain == "asurascans.com")
+        health = _source_health(asura, {
+            "asurascans.com": {"status": "ok", "last_success": "2026-01-02T00:00:00"},
+            "asuracomic.net": {"status": "error", "error_count": 4,
+                               "last_error": "2026-01-01T00:00:00"},
+        })
+        assert health["status"] == "ok"
+        assert health["domain"] == "asurascans.com"
+        assert health["error_count"] == 0
+
+    # Issue #266: parser test and live probe facts.
+
+    OLD_KEYS = {"domain", "aliases", "scraper", "engine", "template",
+                "language", "nsfw", "note", "popularity", "default_enabled",
+                "searchable", "search_status", "search_skip",
+                "domain_search_skips", "health"}
+
+    def test_json_adds_coverage_and_keeps_the_contract(self, run_cli, capsys):
+        from memanga.scrapers.catalog import source_coverage
+        assert run_cli("sources", "--json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert set(payload) == {"schema_version", "sources"}
+        assert payload["schema_version"] == 1
+        for row in payload["sources"]:
+            assert set(row) == self.OLD_KEYS | {"parser_tests", "live_probe"}
+            tests = row["parser_tests"]
+            assert set(tests) == {"own", "shared"}
+            assert isinstance(tests["own"], list)
+            assert isinstance(tests["shared"], list)
+            assert row["live_probe"] is None or isinstance(row["live_probe"], list)
+            assert {k: row[k] for k in ("parser_tests", "live_probe")} == \
+                source_coverage(row["domain"])
+        rows = {row["domain"]: row for row in payload["sources"]}
+        assert rows["mangadex.org"]["parser_tests"]["own"]
+        assert rows["mangadex.org"]["live_probe"]
+
+    def test_json_for_a_source_without_coverage(self, run_cli, capsys):
+        from memanga.scrapers import coverage_data
+        from memanga.scrapers.catalog import source_catalog
+        bare = next(s.domain for s in source_catalog()
+                    if s.domain not in coverage_data.PARSER_TESTS
+                    and s.domain not in coverage_data.LIVE_PROBE)
+        row = self._json(run_cli, capsys, bare)[bare]
+        assert row["parser_tests"] == {"own": [], "shared": []}
+        assert row["live_probe"] is None
+        assert row["health"] is None
+
+    def test_coverage_flag_does_not_change_json(self, run_cli, capsys):
+        plain = self._json(run_cli, capsys)
+        assert self._json(run_cli, capsys, "--coverage") == plain
+
+    @staticmethod
+    def _blocks(out):
+        """{domain: {label: value}} from `sources --coverage` output."""
+        blocks, current = {}, None
+        for line in out.splitlines():
+            if not line.strip():
+                current = None
+            elif not line.startswith(" ") and current is None and "." in line \
+                    and " " not in line.strip():
+                current = blocks.setdefault(line.strip(), {})
+            elif current is not None and line.startswith("  "):
+                label, _, value = line.strip().partition(":")
+                current[label] = value.strip()
+        return blocks
+
+    def test_coverage_view(self, run_cli, capsys, seeded_health):
+        assert run_cli("sources", "--coverage", "mangadex") == 0
+        out = capsys.readouterr().out
+        block = self._blocks(out)["mangadex.org"]
+        assert block["Search"] == "Included in search"
+        assert block["Health"].startswith("ok, checked ")
+        assert block["Parser tests"].startswith("own ")
+        assert block["Live probe"]
+        assert block["Notes"].startswith("default · ")
+        assert "Engine" not in out
+        assert "not a live test" in out
+        assert "being in it is not a result." in out
+        assert "Showing 1 of" in out
+
+    def test_coverage_view_fits_80_columns_when_plain(self, run_cli, capsys,
+                                                      seeded_health):
+        from memanga.scrapers.catalog import source_catalog, source_coverage
+        from memanga.cli import _live_probe_text, _parser_tests_text
+        assert run_cli("sources", "--coverage") == 0
+        out = capsys.readouterr().out
+        assert max(len(line) for line in out.splitlines()) <= 80
+        blocks = self._blocks(out)
+        assert set(blocks) == {s.domain for s in source_catalog()}
+        for domain, block in blocks.items():
+            facts = source_coverage(domain)
+            assert block["Parser tests"] == _parser_tests_text(facts["parser_tests"])
+            assert block["Live probe"] == _live_probe_text(facts["live_probe"])
+            assert "Health" in block and "Search" in block
+
+    def test_coverage_view_in_an_80_column_terminal(self, run_cli, monkeypatch,
+                                                    seeded_health):
+        from rich.console import Console
+        from memanga import cli
+        buffer = io.StringIO()
+        terminal = Console(file=buffer, width=80, force_terminal=True,
+                           color_system=None, legacy_windows=False)
+        monkeypatch.setattr(cli, "console", terminal)
+        monkeypatch.setattr(cli, "stream_is_plain", lambda *a, **k: False)
+        assert run_cli("sources", "--coverage", "asura") == 0
+        out = buffer.getvalue()
+        assert max(len(line) for line in out.splitlines()) <= 80
+        block = self._blocks(out)["asurascans.com"]
+        # Each fact stays whole on its own labelled line.
+        assert block["Health"].startswith("error, checked ")
+        assert block["Parser tests"] == "own search, chapters, pages"
+        assert block["Live probe"] == "search, chapters, pages, image"
+
+    @pytest.mark.parametrize("note, joiner", [
+        ("Serves [bold]every[/bold] chapter through a reader whose address "
+         "changes, so add a series by its direct URL", " "),
+        ("世界" * 40, ""),
+    ], ids=["words-and-markup", "wide-unbroken"])
+    def test_coverage_block_wraps_a_long_note_under_itself(self, note, joiner):
+        from types import SimpleNamespace
+        from rich.cells import cell_len
+        from rich.text import Text
+        from memanga.cli import _source_coverage_block
+        source = SimpleNamespace(domain="example.test", search_status="x",
+                                 note=note, nsfw=False, default_enabled=False)
+        facts = {"parser_tests": {"own": [], "shared": []}, "live_probe": None}
+        lines = [Text.from_markup(line).plain
+                 for line in _source_coverage_block(source, None, facts)]
+        label = "  Notes:        "
+        notes = lines[5:]
+        assert len(notes) > 1
+        assert notes[0].startswith(label)
+        assert all(line.startswith(" " * len(label)) for line in notes[1:])
+        assert all(cell_len(line) <= 80 for line in notes)
+        # The brackets stay literal and no text is lost.
+        assert joiner.join(line[len(label):] for line in notes) == note
+
+    def test_default_table_points_to_coverage(self, run_cli, capsys):
+        assert run_cli("sources", "mangadex") == 0
+        out = capsys.readouterr().out
+        assert "Engine" in out and "Parser tests" not in out
+        assert "--coverage" in out
+
+    def test_coverage_texts(self):
+        from memanga.cli import _live_probe_text, _parser_tests_text
+        assert _parser_tests_text(
+            {"own": ["search"], "shared": ["chapters", "pages"]}) == \
+            "own search; shared chapters, pages"
+        assert _parser_tests_text({"own": [], "shared": []}) == "none"
+        assert _live_probe_text(["search", "chapters"]) == "search, chapters"
+        assert _live_probe_text([]) == "home page only"
+        assert _live_probe_text(None) == "not in the probe"
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -1609,6 +2519,26 @@ class TestExportImport:
         assert manga_state["stateful"]["downloaded"] == ["2"]
         assert manga_state["stateful"]["failed_chapters"]["5"]["error"] == "backup"
 
+    @pytest.mark.parametrize("replace", [False, True])
+    def test_import_keeps_delivery_settings_and_kindle_choices(
+            self, run_cli, config, tmp_path, replace):
+        # Issue #345: a backup holds manga and state, never settings, so
+        # an import cannot turn email on; manga keep their own choices.
+        backup = tmp_path / "x.json"
+        backup.write_text(json.dumps({"version": 1, "manga": [
+            {"title": "Off", "url": "https://mangadex.org/title/1/x",
+             "source": "mangadex.org", "send_to_kindle": False},
+            {"title": "On", "url": "https://mangadex.org/title/2/x",
+             "source": "mangadex.org", "send_to_kindle": True},
+        ]}))
+        args = ["import", str(backup)] + (["--replace", "--yes"] if replace else [])
+        assert run_cli(*args) == 0
+        assert config.get("delivery.mode") == "local"
+        assert config.get("email.kindle_scope") is None
+        choices = {m["title"]: m.get("send_to_kindle")
+                   for m in config.get("manga", [])}
+        assert choices == {"Off": False, "On": True}
+
     def test_import_roundtrip(self, run_cli, config, tmp_path):
         """An export produced by the CLI must import cleanly (issue #42)."""
         config.set("manga", [{"title": "RoundTrip", "url": "u",
@@ -1727,6 +2657,78 @@ class TestImportExportStreams:
 
     def _titles(self, config):
         return [m["title"] for m in config.get("manga", []) or []]
+
+    # ── download-folder collisions (issue #246) ──
+
+    @staticmethod
+    def _backup(*titles):
+        return json.dumps({"version": 1, "manga": [
+            {"title": t, "url": f"https://mangadex.org/title/{i}",
+             "source": "mangadex.org"} for i, t in enumerate(titles)]})
+
+    @pytest.mark.parametrize("mode", [
+        ("--replace", "--yes"), ("--replace", "--dry-run")])
+    @pytest.mark.parametrize("titles", [("A:B", "AB"), ("Fresh", "fresh")])
+    def test_replace_with_shared_download_folder_rejected(
+            self, run_cli, seeded, monkeypatch, capsys, mode, titles):
+        before = seeded()
+        self._stdin(monkeypatch, self._backup(*titles))
+        capsys.readouterr()
+        assert run_cli("import", "-", *mode) == 1
+        err = capsys.readouterr().err
+        assert "same download folder" in err
+        assert "Cannot import" in err
+        assert seeded() == before
+
+    @pytest.mark.parametrize("dry_run", [(), ("--dry-run",)])
+    @pytest.mark.parametrize("titles", [("Local:",), ("New", "NEW:")])
+    def test_merge_with_shared_download_folder_rejected(
+            self, run_cli, seeded, monkeypatch, capsys, dry_run, titles):
+        # "Local:" is a new title for the merge but writes to the existing
+        # "Local" folder; "New" and "NEW:" clash with each other.
+        before = seeded()
+        self._stdin(monkeypatch, self._backup(*titles))
+        capsys.readouterr()
+        assert run_cli("import", "-", *dry_run) == 1
+        assert "same download folder" in capsys.readouterr().err
+        assert seeded() == before
+
+    def test_merge_case_only_duplicate_is_merged_not_rejected(
+            self, run_cli, seeded, config, monkeypatch):
+        self._stdin(monkeypatch, self._backup("LOCAL", "Other"))
+        assert run_cli("import", "-") == 0
+        assert self._titles(config) == ["Local", "Other"]
+
+    def test_merge_ignores_clash_already_in_library(
+            self, run_cli, seeded, config, monkeypatch):
+        # Entries tracked before this check existed don't block imports.
+        config.set("manga", [
+            {"title": "A:B", "url": "https://mangadex.org/title/1"},
+            {"title": "AB", "url": "https://mangadex.org/title/2"},
+        ])
+        config.save()
+        self._stdin(monkeypatch, self._backup("Other"))
+        assert run_cli("import", "-") == 0
+        assert self._titles(config) == ["A:B", "AB", "Other"]
+
+    def test_import_file_is_read_as_utf8_with_bom(
+            self, run_cli, seeded, config, tmp_path):
+        # Issue #246: a backup re-saved by an editor that adds a BOM, with
+        # non-ASCII titles, imports the same on every platform.
+        backup = tmp_path / "bom.json"
+        backup.write_text(json.dumps({
+            "version": 1,
+            "manga": [{"title": "\u9032\u6483 Caf\u00e9", "url": "u",
+                       "source": "mangadex.org"}],
+        }, ensure_ascii=False), encoding="utf-8-sig")
+        assert run_cli("import", str(backup)) == 0
+        assert "\u9032\u6483 Caf\u00e9" in self._titles(config)
+
+    def test_export_file_is_utf8(self, run_cli, seeded, tmp_path):
+        out = tmp_path / "out.json"
+        assert run_cli("export", str(out)) == 0
+        data = json.loads(out.read_bytes().decode("utf-8"))
+        assert [m["title"] for m in data["manga"]] == ["Local"]
 
     # ── export - ──
 
@@ -1889,6 +2891,8 @@ class TestImportExportStreams:
         (json.dumps({"version": 1, "manga": [], "state": {"T": []}}),
          "state for 'T' must be an object"),
         (json.dumps({"version": 2, "manga": []}), "newer"),
+        (json.dumps({"version": 1, "manga": [{"title": "Ok", "sources": "u"}]}),
+         "sources must be a list"),
     ])
     @pytest.mark.parametrize("replace", [False, True])
     def test_invalid_backup_rejected_before_any_write(
@@ -2171,7 +3175,20 @@ class TestSearchCommand:
         rc = run_cli("search", "Blue Lock",
                      "--source", "not-a-real-source.example")
         assert rc == 1
-        assert "Unknown source" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "Unknown source" in err
+        assert "memanga sources" in err
+        assert "mangadex.org" not in err  # no supported-domain dump
+
+    def test_scraper_value_error_is_not_unknown_source(self, run_cli,
+                                                       monkeypatch, capsys):
+        # Issue #233: only a failed lookup means an unknown source.
+        def _broken(domain):
+            raise ValueError("bad scraper setup")
+        monkeypatch.setattr("memanga.cli.get_scraper", _broken)
+        with pytest.raises(ValueError, match="bad scraper setup"):
+            run_cli("search", "Blue Lock", "--source", "fake.test")
+        assert "Unknown source" not in capsys.readouterr().err
 
     def test_irrelevant_results_filtered(self, run_cli, fake_search_scraper,
                                          capsys):
@@ -2202,39 +3219,42 @@ class TestSearchCommand:
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def _capture_crontab(monkeypatch, existing=None):
+def _capture_crontab(monkeypatch, existing=None, write_rc=0):
     """Fake a crontab on Linux (empty, or ``existing`` text); return the
     dict that receives the text `cron install` submits under
-    ``"crontab"`` and records a `crontab -r` under ``"removed"``."""
+    ``"crontab"`` and records a `crontab -r` under ``"removed"``.
+    Writes exit with ``write_rc``."""
     from memanga import cli
 
     submitted = {}
 
-    def _run(argv, *a, **k):
+    def _run(argv, *a, input=None, **k):
+        if argv == ["crontab", "-"]:
+            submitted["crontab"] = input
+            return types.SimpleNamespace(returncode=write_rc, stdout="",
+                                         stderr="")
         if argv == ["crontab", "-r"]:
             submitted["removed"] = True
+            return types.SimpleNamespace(returncode=write_rc, stdout="",
+                                         stderr="")
         if existing is None:
             return types.SimpleNamespace(returncode=1, stdout="",
                                          stderr="no crontab for tester\n")
         return types.SimpleNamespace(returncode=0, stdout=existing, stderr="")
 
-    class _FakePopen:
-        returncode = 0
-
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def communicate(self, input=None):
-            submitted["crontab"] = input
-            return ("", "")
-
-    monkeypatch.setattr(cli.platform, "system", lambda: "Linux")
+    monkeypatch.setattr("memanga.cron.platform.system", lambda: "Linux")
     monkeypatch.setattr(cli.subprocess, "run", _run)
-    monkeypatch.setattr(cli.subprocess, "Popen", _FakePopen)
     return submitted
 
 
 _THIS_CHECKOUT = object()
+
+
+def _posix(path):
+    """A path as the crontab line holds it: POSIX, also when the line is
+    built on Windows (build_cron_line uses as_posix)."""
+    from pathlib import Path
+    return Path(path).as_posix()
 
 
 def _expected_cron_line(config_dir=None, runtime_dir=None,
@@ -2324,13 +3344,13 @@ class TestCronCommand:
 
         line, = [l for l in submitted["crontab"].splitlines() if l]
         assert line == _expected_cron_line(root, source_root=None)
-        assert str(site) not in line
-        assert str(site / "venv") not in line
+        assert _posix(site) not in line
+        assert _posix(site / "venv") not in line
         command = shlex.split(line.split("* * * ", 1)[1], comments=True)
-        assert command[:2] == ["cd", str(root)]
+        assert command[:2] == ["cd", _posix(root)]
         assert command[3:9] == [python, "-m", "memanga",
-                                "--config-dir", str(root), "check"]
-        assert command[-3:] == [">>", str(root / "memanga.log"), "2>&1"]
+                                "--config-dir", _posix(root), "check"]
+        assert command[-3:] == [">>", _posix(root / "memanga.log"), "2>&1"]
 
     def test_cron_install_windows_uses_running_interpreter(
             self, isolated_home, monkeypatch, tmp_path):
@@ -2349,7 +3369,7 @@ class TestCronCommand:
             calls.append(argv)
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Windows")
         monkeypatch.setattr(cli.subprocess, "run", _run)
         monkeypatch.setattr(sys, "argv", [
             "memanga", "--config-dir", str(root),
@@ -2388,10 +3408,10 @@ class TestCronCommand:
         line, = [l for l in submitted["crontab"].splitlines() if l]
         assert line == _expected_cron_line(root, source_root=checkout)
         command = shlex.split(line.split("* * * ", 1)[1], comments=True)
-        assert command[:3] == ["cd", str(checkout), "&&"]
-        assert command[3:9] == [python, "-m", "memanga",
-                                "--config-dir", str(root), "check"]
-        assert command[-3:] == [">>", str(root / "memanga.log"), "2>&1"]
+        assert command[:3] == ["cd", _posix(checkout), "&&"]
+        assert command[3:9] == [_posix(python), "-m", "memanga",
+                                "--config-dir", _posix(root), "check"]
+        assert command[-3:] == [">>", _posix(root / "memanga.log"), "2>&1"]
 
     def test_cron_install_windows_source_checkout_changes_dir(
             self, isolated_home, monkeypatch, tmp_path):
@@ -2411,7 +3431,7 @@ class TestCronCommand:
             calls.append(argv)
             return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
-        monkeypatch.setattr(cli.platform, "system", lambda: "Windows")
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Windows")
         monkeypatch.setattr(cli.subprocess, "run", _run)
         monkeypatch.setattr(sys, "argv",
                             ["memanga", "cron", "install", "--time", "06:00"])
@@ -2518,19 +3538,8 @@ class TestCronOwnership:
 
         config.set("cron.enabled", True)
         config.save()
-        submitted = _capture_crontab(monkeypatch, f"{_USER_CRONTAB}{self._managed()}\n")
-
-        class _FailingPopen:
-            returncode = 1
-
-            def __init__(self, *args, **kwargs):
-                pass
-
-            def communicate(self, input=None):
-                submitted["crontab"] = input
-                return ("", "")
-
-        monkeypatch.setattr(cli.subprocess, "Popen", _FailingPopen)
+        _capture_crontab(monkeypatch, f"{_USER_CRONTAB}{self._managed()}\n",
+                         write_rc=1)
         assert run_cli("cron", "remove") == 1
         assert config.get("cron.enabled") is True
 
@@ -2538,6 +3547,259 @@ class TestCronOwnership:
         _capture_crontab(monkeypatch, f"{_USER_CRONTAB}{self._managed()}\n")
         run_cli("cron", "status")
         assert "Cron job is installed" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("action", ["status", "remove"])
+    def test_unreadable_crontab_is_an_error(self, run_cli, monkeypatch,
+                                            config, capsys, action):
+        """#297: status and remove share install's read check, so a
+        permission error is never reported as "no cron job"."""
+        from memanga import cli
+
+        config.set("cron.enabled", True)
+        config.save()
+        calls = []
+
+        def _run(argv, *a, **k):
+            calls.append(argv)
+            return types.SimpleNamespace(returncode=1, stdout="",
+                                         stderr="crontab: Permission denied\n")
+
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Linux")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        assert run_cli("cron", action) == 1
+
+        assert ["crontab", "-l"] in calls
+        assert ["crontab", "-"] not in calls
+        assert ["crontab", "-r"] not in calls
+        assert config.get("cron.enabled") is True
+        err = capsys.readouterr().err
+        assert "Could not read" in err
+        assert "Permission denied" in err
+
+    def test_undecodable_crontab_is_an_error(self, run_cli, monkeypatch,
+                                             config, capsys):
+        """#297: undecodable `crontab -l` output is reported, not a
+        traceback, and nothing is written."""
+        from memanga import cli
+
+        calls = []
+
+        def _run(argv, *a, **k):
+            calls.append(argv)
+            if argv[:1] == ["crontab"]:
+                raise UnicodeDecodeError("utf-8", b"\xe9", 0, 1,
+                                         "invalid continuation byte")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Linux")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        assert run_cli("cron", "install", "--time", "06:00") == 1
+
+        assert ["crontab", "-"] not in calls
+        assert not config.get("cron.enabled")
+        err = capsys.readouterr().err
+        assert "Could not read the current crontab" in err
+        assert "not valid utf-8 text" in err
+
+    @pytest.mark.parametrize("time_str", ["24:00", "06:60", "6", "aa:bb"])
+    def test_install_rejects_invalid_time(self, run_cli, monkeypatch, config,
+                                          capsys, time_str):
+        """#297: the CLI uses the same HH:MM check as the Settings page."""
+        submitted = _capture_crontab(monkeypatch, _USER_CRONTAB)
+        assert run_cli("cron", "install", "--time", time_str) == 1
+
+        assert submitted == {}
+        assert not config.get("cron.enabled")
+        assert "Invalid time format" in capsys.readouterr().err
+
+
+class TestCronInContainer:
+    """#335: no cron daemon runs in a container, so `cron install` refuses
+    and points to `memanga watch` (#327)."""
+
+    @pytest.fixture(autouse=True)
+    def _in_container(self, monkeypatch, tmp_path):
+        from memanga import cli, cron
+        marker = tmp_path / ".dockerenv"
+        marker.write_text("")
+        monkeypatch.setattr(cron, "CONTAINER_ROOT", str(tmp_path))
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Linux")
+        self.calls = []
+
+        def _run(argv, *a, **k):
+            self.calls.append(argv)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+
+    @staticmethod
+    def _assert_refused(capsys):
+        err = " ".join(capsys.readouterr().err.split())
+        assert "does not work inside a container" in err
+        assert "memanga watch" in err
+        assert "compose.dev.yaml" in err
+        assert "MeManga/guide/docker#check-on-a-schedule" in err
+
+    def test_install_refuses_without_touching_crontab(self, run_cli, config,
+                                                      capsys):
+        assert run_cli("cron", "install", "--time", "06:00") == 1
+
+        assert self.calls == []
+        assert not config.get("cron.enabled")
+        self._assert_refused(capsys)
+
+    def test_refusal_comes_before_the_time_prompt(self, run_cli, monkeypatch,
+                                                  config, capsys):
+        """Without --time and without a terminal the container is still
+        the reason given, not the missing time."""
+        monkeypatch.setattr("memanga.cli._stdin_is_tty", lambda: False)
+        assert run_cli("cron", "install") == 1
+
+        assert self.calls == []
+        self._assert_refused(capsys)
+
+    def test_status_and_remove_still_read_crontab(self, run_cli):
+        """An entry from an earlier version can still be found and removed."""
+        run_cli("cron", "status")
+        run_cli("cron", "remove")
+        assert self.calls == [["crontab", "-l"], ["crontab", "-l"]]
+
+
+class TestCronWindows:
+    """#297: Task Scheduler results come from the shared service."""
+
+    @staticmethod
+    def _fake_schtasks(monkeypatch, delete_rc=0, create_rc=0, tn_rc=0,
+                       tn_out="", query_rc=0, listing=""):
+        """Fake schtasks. ``tn_*`` answer ``/query /tn`` (by name);
+        ``query_rc``/``listing`` the CSV task list ``/query /fo csv``."""
+        from memanga import cli
+
+        calls = []
+
+        def _run(argv, *a, **k):
+            if argv[:1] == ["schtasks"]:
+                calls.append(argv[:2])
+            if argv[:3] == ["schtasks", "/query", "/tn"]:
+                rc, stdout = tn_rc, tn_out
+            elif argv[:2] == ["schtasks", "/query"]:
+                rc, stdout = query_rc, listing
+            else:
+                rc = {("schtasks", "/delete"): delete_rc,
+                      ("schtasks", "/create"): create_rc}.get(tuple(argv[:2]), 0)
+                stdout = ""
+            return types.SimpleNamespace(returncode=rc, stdout=stdout,
+                                         stderr="ERROR: Access is denied.\n")
+
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Windows")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        return calls
+
+    def test_install_pads_start_time(self, run_cli, monkeypatch, config):
+        from memanga import cli
+
+        calls = []
+
+        def _run(argv, *a, **k):
+            calls.append(argv)
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr("memanga.cron.platform.system", lambda: "Windows")
+        monkeypatch.setattr(cli.subprocess, "run", _run)
+        assert run_cli("cron", "install", "--time", "6:5") == 0
+
+        create, = [c for c in calls if c[1] == "/create"]
+        assert create[create.index("/st") + 1] == "06:05"
+        assert config.get("cron.enabled") is True
+
+    def test_failed_reinstall_keeps_task_and_config(self, run_cli, monkeypatch,
+                                                    config, capsys):
+        """#297: a failed /create must not follow a /delete, and the
+        existing schedule settings stay as they were."""
+        config.set("cron.enabled", True)
+        config.set("cron.time", "05:15")
+        config.save()
+        calls = self._fake_schtasks(monkeypatch, create_rc=1)
+        assert run_cli("cron", "install", "--time", "06:30") == 1
+
+        assert calls == [["schtasks", "/create"]]
+        assert config.get("cron.enabled") is True
+        assert config.get("cron.time") == "05:15"
+        assert "Failed to create scheduled task" in capsys.readouterr().err
+
+    def test_remove_disables_config(self, run_cli, monkeypatch, config,
+                                    capsys):
+        config.set("cron.enabled", True)
+        config.save()
+        self._fake_schtasks(monkeypatch, delete_rc=0)
+        assert run_cli("cron", "remove") == 0
+
+        assert config.get("cron.enabled") is False
+        assert "Scheduled task removed" in capsys.readouterr().out
+
+    def test_remove_missing_task_keeps_config(self, run_cli, monkeypatch,
+                                              config, capsys):
+        config.set("cron.enabled", True)
+        config.save()
+        calls = self._fake_schtasks(
+            monkeypatch, delete_rc=1,
+            listing='"\\Backup","10/26/2026 2:30:00 AM","Ready"\n')
+        assert run_cli("cron", "remove") == 0
+
+        assert calls == [["schtasks", "/delete"], ["schtasks", "/query"]]
+        assert config.get("cron.enabled") is True
+        assert "No MeManga scheduled task found" in capsys.readouterr().out
+
+    def test_remove_failure_with_task_present_is_an_error(
+            self, run_cli, monkeypatch, config, capsys):
+        config.set("cron.enabled", True)
+        config.save()
+        self._fake_schtasks(monkeypatch, delete_rc=1,
+                            listing='"\\MeManga_AutoCheck","N/A","Ready"\n')
+        assert run_cli("cron", "remove") == 1
+
+        assert config.get("cron.enabled") is True
+        err = capsys.readouterr().err
+        assert "Failed to remove scheduled task" in err
+        assert "Access is denied" in err
+
+    def test_remove_with_unreadable_task_list_keeps_config(
+            self, run_cli, monkeypatch, config, capsys):
+        """Delete and query both denied: no proof the task is gone, so it
+        is an error and cron.enabled stays on."""
+        config.set("cron.enabled", True)
+        config.save()
+        self._fake_schtasks(monkeypatch, delete_rc=1, query_rc=1)
+        assert run_cli("cron", "remove") == 1
+
+        assert config.get("cron.enabled") is True
+        assert "Failed to remove scheduled task" in capsys.readouterr().err
+
+    def test_status_installed(self, run_cli, monkeypatch, capsys):
+        calls = self._fake_schtasks(
+            monkeypatch, tn_out="TaskName  Next Run Time  Status\n"
+                                "MeManga_AutoCheck  N/A  Ready\n")
+        assert run_cli("cron", "status") == 0
+        assert calls == [["schtasks", "/query"]]
+        out = capsys.readouterr().out
+        assert "Scheduled task is installed" in out
+        assert "MeManga_AutoCheck  N/A  Ready" in out
+
+    def test_status_absent(self, run_cli, monkeypatch, capsys):
+        self._fake_schtasks(
+            monkeypatch, tn_rc=1, listing='"\\Backup","N/A","Ready"\n')
+        assert run_cli("cron", "status") == 0
+        assert "No scheduled task found" in capsys.readouterr().out
+
+    def test_status_unreadable_task_list_is_an_error(self, run_cli,
+                                                     monkeypatch, capsys):
+        """#297: a denied or failing query is never shown as "no task"."""
+        self._fake_schtasks(monkeypatch, tn_rc=1, query_rc=1)
+        assert run_cli("cron", "status") == 1
+        captured = capsys.readouterr()
+        assert "No scheduled task found" not in captured.out
+        assert "Could not query the scheduled task" in captured.err
+        assert "Access is denied" in captured.err
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -2615,6 +3877,22 @@ class TestListJson:
         assert multi["last_chapter"] == "2"
         assert multi["downloaded_count"] == 2
         assert multi["backup_count"] == 1
+
+
+class TestListJsonKindleScope:
+    def test_selected_scope(self, run_cli, config, cli_state, capsys):
+        # Issue #345: an entry without its own choice follows the scope.
+        config.set("email.kindle_scope", "selected")
+        config.set("manga", [
+            {"title": "Unset", "source": "mangadex.org", "url": "https://mangadex.org/t/1"},
+            {"title": "On", "source": "mangadex.org", "url": "https://mangadex.org/t/2",
+             "send_to_kindle": True},
+        ])
+        config.save()
+        capsys.readouterr()
+        assert run_cli("list", "--json") == 0
+        unset, on = _stdout_json(capsys)["manga"]
+        assert (unset["send_to_kindle"], on["send_to_kindle"]) == (False, True)
 
 
 class TestListFilterSort:
@@ -2746,16 +4024,19 @@ class TestListFilterSort:
         out = capsys.readouterr().out
         for header in ("Status", "Mode", "Kindle"):
             assert header in out
+        # Issue #226: captured stdout is not a terminal, so the table is
+        # plain text without borders; columns are separated by spaces.
+        assert not any("\u2500" <= ch <= "\u257f" for ch in out)
         lines = out.splitlines()
         # Mode and Kindle are stacked in one column: mode, then on/off below.
         i = next(i for i, line in enumerate(lines) if "beta" in line)
         assert "completed" in lines[i] and "manual" in lines[i]
-        assert lines[i].split("│")[1].strip() == "1"
+        assert lines[i].split()[0] == "1"
         assert "off" in lines[i + 1]
         assert "(+2)" in out  # backup count, in the Source column
         i = next(i for i, line in enumerate(lines) if "Alpha" in line)
         assert "auto" in lines[i] and " on " in lines[i + 1]
-        assert lines[i].split("│")[1].strip() == "2"
+        assert lines[i].split()[0] == "2"
         assert out.index("Alpha") < out.index("beta") < out.index("Delta")
         assert "gamma" not in out
 
@@ -2783,6 +4064,7 @@ class TestStatusJson:
         assert payload["delivery"]["mode"] == "email"
         assert payload["email"]["kindle_email"] == "me@kindle.com"
         assert payload["email"]["sender_email"] is None
+        assert payload["email"]["smtp_tls"] == "auto"  # issue #366
         assert payload["cron"] == {"enabled": True, "time": "07:30"}
         assert payload["post_processing"]["enabled"] is False
         assert payload["last_check"] is None
@@ -2855,14 +4137,55 @@ class TestConfigDir:
         paths = self._status_paths(monkeypatch, capsys)
         assert paths["config_dir"] == str(isolated_home / ".config" / "memanga")
 
-    def test_rejected_with_gui(self, isolated_home, monkeypatch, tmp_path):
+    @staticmethod
+    def _launch_gui(monkeypatch, lock_holder, root, *argv):
+        """Run `memanga [argv] --gui` with a fake GUI; return what it got
+        and whether ``root`` was locked while it ran."""
         from memanga import cli
         monkeypatch.delenv("MEMANGA_CLI_ONLY", raising=False)
-        monkeypatch.setattr(sys, "argv", ["memanga", "--config-dir",
-                                          str(tmp_path / "x"), "--gui"])
-        with pytest.raises(SystemExit) as exc:
-            cli.main()
-        assert exc.value.code == 2
+        monkeypatch.setattr(sys, "argv", ["memanga", *argv, "--gui"])
+        seen = []
+        fake_gui = types.SimpleNamespace(launch_gui=lambda **kwargs: seen.append(
+            dict(kwargs, root_locked=not lock_holder.can_lock(root))))
+        monkeypatch.setitem(sys.modules, "memanga.gui", fake_gui)
+        cli.main()
+        return seen[0]
+
+    def test_gui_uses_flag_dir(self, isolated_home, monkeypatch, tmp_path,
+                               lock_holder):
+        """#249: `--config-dir DIR --gui` hands DIR to the GUI."""
+        root = tmp_path / "portable"
+        got = self._launch_gui(monkeypatch, lock_holder, root,
+                               "--config-dir", str(root))
+        assert got["config"].config_dir == got["state"].config_dir == root
+        assert got["explicit_config_dir"] == root
+        assert got["root_locked"]
+
+    def test_gui_uses_env_dir(self, isolated_home, monkeypatch, tmp_path,
+                              lock_holder):
+        root = tmp_path / "from-env"
+        monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(root))
+        got = self._launch_gui(monkeypatch, lock_holder, root)
+        assert got["config"].config_dir == got["state"].config_dir == root
+        assert got["explicit_config_dir"] == root
+        assert got["root_locked"]
+
+    def test_gui_flag_overrides_env(self, isolated_home, monkeypatch, tmp_path,
+                                    lock_holder):
+        monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(tmp_path / "from-env"))
+        root = tmp_path / "from-flag"
+        got = self._launch_gui(monkeypatch, lock_holder, root,
+                               "--config-dir", str(root))
+        assert got["config"].config_dir == root
+        assert got["explicit_config_dir"] == root
+        assert not (tmp_path / "from-env").exists()
+
+    def test_gui_default_has_no_explicit_dir(self, isolated_home, monkeypatch,
+                                             lock_holder):
+        root = isolated_home / ".config" / "memanga"
+        got = self._launch_gui(monkeypatch, lock_holder, root)
+        assert got["config"].config_dir == root
+        assert got["explicit_config_dir"] is None
 
     def test_cron_install_keeps_config_dir(self, isolated_home, monkeypatch,
                                            tmp_path):
@@ -2875,7 +4198,7 @@ class TestConfigDir:
         line, = [l for l in submitted["crontab"].splitlines() if l]
         command = shlex.split(line.split("* * * ", 1)[1])
         i = command.index("memanga")
-        assert command[i + 1:i + 4] == ["--config-dir", str(root), "check"]
+        assert command[i + 1:i + 4] == ["--config-dir", _posix(root), "check"]
 
 
 class TestFailedJson:
@@ -2923,6 +4246,17 @@ class TestFailedJson:
         assert (entry["status"], entry["source"], entry["error"]) == (
             "failed", "mangadex.org", "timeout")
         assert entry["total_pages"] is None
+
+    def test_labelled_chapters_list_in_chapter_order(self, run_cli, cli_state, capsys):
+        # Issue #227: labelled chapters sort by their chapter number, not
+        # as chapter 0; non-numeric labels still come first.
+        for number in ["11", "10 Part 1", "2", "Extra", "2.5", "10"]:
+            cli_state.add_failed_chapter("Berserk", number, "mangadex.org", "x")
+
+        assert run_cli("failed", "--json") == 0
+        payload = _stdout_json(capsys)
+        assert [c["chapter"] for c in payload["chapters"]] == [
+            "Extra", "2", "2.5", "10", "10 Part 1", "11"]
 
     def test_title_filter(self, run_cli, cli_state, capsys):
         cli_state.add_failed_chapter("Vinland Saga", "10", "mangadex.org", "x")
@@ -3119,6 +4453,8 @@ class TestFailedSubcommands:
         assert "1/2 chapters recovered" in captured.out
         assert "Failed: chapter 10 broke" in captured.err
         assert _disk_state().get_failed_chapters("Vinland Saga")["10"]["attempts"] == 2
+        # The record keeps the primary source name, as before #222.
+        assert _disk_state().get_failed_chapters("Vinland Saga")["10"]["source"] == "mangadex.org"
         assert _disk_state().get_partial_chapter("Vinland Saga", "9") is None
 
     def test_retry_uses_check_pipeline_for_backup_and_email(
@@ -3203,6 +4539,131 @@ class TestFailedSubcommands:
         assert "0/1 chapters recovered" in capsys.readouterr().out
         assert _disk_state().get_partial_chapter("Berserk", "5")["failed_pages"] == [3]
 
+    def test_retry_lists_primary_source_once_per_manga(
+            self, run_cli, records, downloads, cli_state, monkeypatch, capsys):
+        """Issue #222: several failed chapters of one manga share one
+        primary chapter listing."""
+        from memanga import cli
+        from memanga.scrapers.base import Chapter
+
+        calls, _ = downloads
+        cli_state.add_failed_chapter("Berserk", "9", "mangadex.org", "timeout")
+        cli_state.add_failed_chapter("Berserk", "10", "mangadex.org", "timeout")
+        cli_state.save()
+        listings = []
+
+        class CountingScraper:
+            def get_chapters(self, url):
+                listings.append(url)
+                return [Chapter(number=n) for n in ("1", "9", "10")]
+
+        monkeypatch.setattr(cli, "get_scraper", lambda source: CountingScraper())
+        capsys.readouterr()
+
+        assert run_cli("failed", "retry") == 0
+        assert "5/5 chapters recovered" in capsys.readouterr().out
+        assert sorted(listings) == ["https://mangadex.org/title/0/x",
+                                    "https://mangadex.org/title/1/x"]
+        assert len(calls) == 5
+        assert _disk_state().get_failed_chapters("Berserk") == {}
+
+    def test_retry_primary_listing_failure_uses_backup(
+            self, run_cli, config, cli_state, monkeypatch, tmp_path, capsys):
+        """A primary listing that fails is tried once for the manga; each
+        chapter is then looked up on the backup source."""
+        from memanga import cli
+
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "sources": [
+                {"source": "primary.test", "url": "https://primary.test/vs"},
+                {"source": "backup.test", "url": "https://backup.test/vs"},
+            ],
+        }])
+        config.save()
+        for n in ("71", "72"):
+            cli_state.add_failed_chapter("Vinland Saga", n, "primary.test", "timeout")
+        cli_state.save()
+        listings, downloaded = [], []
+
+        class BrokenScraper:
+            def get_chapters(self, url):
+                listings.append(url)
+                raise RuntimeError("listing down")
+
+        def _backup(manga, number, state=None):
+            return types.SimpleNamespace(
+                number=number, title="", url=f"https://backup.test/c/{number}",
+                source="backup.test", is_backup=True)
+
+        def _download(manga, ch, *a, **k):
+            downloaded.append((ch.source, ch.number))
+            path = tmp_path / f"{ch.number}.pdf"
+            path.write_bytes(b"pdf")
+            return path
+
+        monkeypatch.setattr(cli, "get_scraper", lambda source: BrokenScraper())
+        monkeypatch.setattr(cli, "_find_chapter_on_backup", _backup)
+        monkeypatch.setattr(cli, "download_chapter", _download)
+        capsys.readouterr()
+
+        assert run_cli("failed", "retry") == 0
+        captured = capsys.readouterr()
+        assert listings == ["https://primary.test/vs"]
+        assert downloaded == [("backup.test", "71"), ("backup.test", "72")]
+        assert "Could not find Chapter 71 of Vinland Saga on primary source" in captured.err
+        assert "2/2 chapters recovered" in captured.out
+        assert _disk_state().get_failed_chapters("Vinland Saga") == {}
+
+    def test_retry_dict_chapter_listing_falls_back_to_backup(
+            self, run_cli, config, cli_state, monkeypatch, tmp_path, capsys):
+        """Some scrapers list chapters as dicts, not Chapter objects. Retry
+        treats that listing as unusable and still reaches the backup,
+        instead of crashing on the entries."""
+        from memanga import cli
+
+        config.set("manga", [{
+            "title": "Vinland Saga",
+            "sources": [
+                {"source": "primary.test", "url": "https://primary.test/vs"},
+                {"source": "backup.test", "url": "https://backup.test/vs"},
+            ],
+        }])
+        config.save()
+        cli_state.add_failed_chapter("Vinland Saga", "71", "primary.test", "timeout")
+        cli_state.save()
+        backup_lookups, downloaded = [], []
+
+        class DictScraper:
+            def get_chapters(self, url):
+                return [{"chapter": "71", "title": "",
+                         "url": "https://primary.test/c/71"}]
+
+        def _backup(manga, number, state=None):
+            backup_lookups.append(number)
+            return types.SimpleNamespace(
+                number=number, title="", url=f"https://backup.test/c/{number}",
+                source="backup.test", is_backup=True)
+
+        def _download(manga, ch, *a, **k):
+            downloaded.append((ch.source, ch.number))
+            path = tmp_path / f"{ch.number}.pdf"
+            path.write_bytes(b"pdf")
+            return path
+
+        monkeypatch.setattr(cli, "get_scraper", lambda source: DictScraper())
+        monkeypatch.setattr(cli, "_find_chapter_on_backup", _backup)
+        monkeypatch.setattr(cli, "download_chapter", _download)
+        capsys.readouterr()
+
+        assert run_cli("failed", "retry") == 0
+        captured = capsys.readouterr()
+        assert backup_lookups == ["71"]
+        assert downloaded == [("backup.test", "71")]
+        assert "Could not find Chapter 71 of Vinland Saga on primary source" in captured.err
+        assert "1/1 chapters recovered" in captured.out
+        assert _disk_state().is_chapter_downloaded("Vinland Saga", "71")
+
     @pytest.mark.parametrize("argv", [
         ("failed", "--json", "retry"),
         ("failed", "--json", "clear"),
@@ -3239,7 +4700,800 @@ class TestFailedSubcommands:
             assert text in out
 
 
+class TestSendPending:
+    """Issue #360: `send --pending [TARGET]` sends chapters whose Kindle
+    delivery failed again; `--list` only lists, `--clear` forgets."""
+
+    @pytest.fixture(autouse=True)
+    def wide_console(self, monkeypatch):
+        from rich.console import Console
+        from memanga import cli
+        monkeypatch.setattr(cli, "console", Console(width=250))
+        monkeypatch.setattr(cli, "err_console", Console(width=250, stderr=True))
+
+    @pytest.fixture
+    def email(self, config, monkeypatch):
+        from memanga import cli
+        config.set("delivery.mode", "email")
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [
+            {"title": t, "source": "mangadex.org",
+             "url": f"https://mangadex.org/title/{i}/x", "status": "reading"}
+            for i, t in enumerate(("Berserk", "Vinland Saga"))
+        ])
+        config.save()
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+    @pytest.fixture
+    def pending(self, cli_state, tmp_path):
+        """One undelivered chapter per manga; returns their files."""
+        files = {}
+        for title, chapter in (("Berserk", "1"), ("Vinland Saga", "10")):
+            path = tmp_path / f"{title}-{chapter}.pdf"
+            path.write_bytes(b"pdf")
+            cli_state.add_downloaded_chapter(title, chapter)
+            cli_state.failures.add_undelivered(title, chapter, str(path), "SMTP down")
+            files[title] = path
+        cli_state.save()
+        return files
+
+    @pytest.fixture
+    def sends(self, monkeypatch):
+        """Fake sender; paths in `fail` raise. Returns (sent, fail)."""
+        from memanga import cli
+        from memanga.emailer import EmailError
+        sent, fail = [], set()
+
+        def _send(**kwargs):
+            if kwargs["pdf_path"] in fail:
+                raise EmailError("Mailbox full")
+            sent.append(kwargs["pdf_path"])
+
+        monkeypatch.setattr(cli, "send_to_kindle", _send)
+        return sent, fail
+
+    def test_list_only_lists(self, run_cli, email, pending, sends, capsys):
+        sent, _ = sends
+        assert run_cli("send", "--pending", "--list") == 0
+        out = capsys.readouterr().out
+        assert "Berserk" in out and "Vinland Saga" in out
+        assert "SMTP down" in out
+        assert sent == []
+        assert len(_disk_state().failures.get_all_undelivered()) == 2
+
+    def test_sends_every_pending_chapter_and_clears_records(
+            self, run_cli, email, pending, sends, capsys):
+        sent, _ = sends
+        assert run_cli("send", "--pending") == 0
+        assert sorted(sent) == sorted(pending.values())
+        assert _disk_state().failures.get_all_undelivered() == {}
+        assert "2/2 chapters sent" in capsys.readouterr().out
+        # Without delete-after-send the files stay.
+        assert all(p.exists() for p in pending.values())
+
+    def test_delete_after_send_only_removes_sent_files(
+            self, run_cli, config, email, pending, sends):
+        sent, fail = sends
+        config.set("delivery.delete_after_send", True)
+        config.save()
+        fail.add(pending["Berserk"])
+
+        assert run_cli("send", "--pending") == 3
+        assert sent == [pending["Vinland Saga"]]
+        assert not pending["Vinland Saga"].exists()
+        assert pending["Berserk"].exists()
+        records = _disk_state().failures.get_all_undelivered()
+        assert list(records) == ["Berserk"]
+        assert records["Berserk"]["1"]["attempts"] == 2
+        assert records["Berserk"]["1"]["error"] == "Mailbox full"
+
+    def test_sends_with_the_configured_smtp_settings(
+            self, run_cli, config, email, pending, monkeypatch):
+        # Issue #296: the CLI reads delivery settings through the shared
+        # EmailSettings, and looks the password up only when sending.
+        from memanga import cli
+        config.set("email.smtp_server", "smtp.example.test")
+        config.set("email.smtp_port", 2525)
+        config.set("email.smtp_timeout", 9)
+        config.save()
+        lookups, calls = [], []
+        monkeypatch.setattr(cli, "get_app_password",
+                            lambda cfg: lookups.append(cfg) or "pw")
+        monkeypatch.setattr(cli, "send_to_kindle",
+                            lambda **kw: calls.append(kw))
+
+        assert run_cli("send", "--pending", "vinland saga") == 0
+
+        (call,) = calls
+        assert (call["kindle_email"], call["sender_email"],
+                call["smtp_server"], call["smtp_port"], call["timeout"],
+                call["app_password"]) == (
+            "reader@example.com", "sender@example.com",
+            "smtp.example.test", 2525, 9, "pw")
+        assert len(lookups) == 1
+
+    def test_target_limits_to_one_manga(self, run_cli, email, pending, sends):
+        sent, _ = sends
+        assert run_cli("send", "--pending", "vinland saga") == 0
+        assert sent == [pending["Vinland Saga"]]
+        assert list(_disk_state().failures.get_all_undelivered()) == ["Berserk"]
+
+    def test_unknown_target_is_an_error(self, run_cli, email, pending, sends, capsys):
+        sent, _ = sends
+        assert run_cli("send", "--pending", "Nope") == 1
+        assert sent == []
+
+    def test_clear_forgets_records_and_keeps_files(
+            self, run_cli, email, pending, sends):
+        sent, _ = sends
+        assert run_cli("send", "--pending", "--clear", "Berserk") == 0
+        assert sent == []
+        assert list(_disk_state().failures.get_all_undelivered()) == ["Vinland Saga"]
+        assert pending["Berserk"].exists()
+        assert _disk_state().is_chapter_downloaded("Berserk", "1")
+
+    def test_email_delivery_not_set_up_is_an_error(
+            self, run_cli, config, email, pending, sends, capsys):
+        sent, _ = sends
+        config.set("delivery.mode", "local")
+        config.save()
+        assert run_cli("send", "--pending") == 1
+        assert "not set up" in capsys.readouterr().err
+        assert sent == []
+        assert len(_disk_state().failures.get_all_undelivered()) == 2
+
+    def test_nothing_pending(self, run_cli, email, sends, capsys):
+        assert run_cli("send", "--pending") == 0
+        assert "No chapters are waiting" in capsys.readouterr().out
+
+    def test_kindle_opt_out_is_skipped_and_kept(
+            self, run_cli, config, email, pending, sends, capsys):
+        """#341: a manga with `send_to_kindle: false` is never emailed by
+        the retry path; its record stays and the others still go out."""
+        sent, _ = sends
+        manga = config.get("manga")
+        manga[0]["send_to_kindle"] = False  # Berserk
+        config.set("manga", manga)
+        config.save()
+        capsys.readouterr()
+
+        assert run_cli("send", "--pending") == 0
+
+        assert sent == [pending["Vinland Saga"]]
+        out = capsys.readouterr().out
+        assert "Skipped Berserk: Kindle delivery is off" in out
+        assert "memanga update Berserk --kindle" in out
+        assert "1/1 chapters sent" in out
+        records = _disk_state().failures.get_all_undelivered()
+        assert list(records) == ["Berserk"]
+        assert records["Berserk"]["1"]["attempts"] == 1
+        assert pending["Berserk"].exists()
+
+    def test_kindle_opt_out_matches_title_in_any_case(
+            self, run_cli, config, email, cli_state, sends, tmp_path, capsys):
+        """A record saved as "berserk" belongs to the tracked "Berserk";
+        its opt-out applies and nothing is sent."""
+        sent, _ = sends
+        manga = config.get("manga")
+        manga[0]["send_to_kindle"] = False  # Berserk
+        config.set("manga", manga)
+        config.save()
+        path = tmp_path / "berserk-1.pdf"
+        path.write_bytes(b"pdf")
+        cli_state.failures.add_undelivered("berserk", "1", str(path), "SMTP down")
+        cli_state.save()
+        capsys.readouterr()
+
+        assert run_cli("send", "--pending") == 0
+
+        assert sent == []
+        assert "Skipped berserk: Kindle delivery is off" in capsys.readouterr().out
+        records = _disk_state().failures.get_all_undelivered()
+        assert list(records) == ["berserk"]
+        assert records["berserk"]["1"]["attempts"] == 1
+        assert records["berserk"]["1"]["path"] == str(path)
+        assert path.exists()
+
+    def test_untracked_title_keeps_legacy_delivery(
+            self, run_cli, config, email, pending, sends):
+        """A record whose manga is no longer tracked has no policy to
+        honor; it is sent as before."""
+        sent, _ = sends
+        config.set("manga", [m for m in config.get("manga")
+                             if m["title"] != "Berserk"])
+        config.save()
+
+        assert run_cli("send", "--pending") == 0
+
+        assert sorted(sent) == sorted(pending.values())
+
+    def test_untracked_title_is_not_sent_under_selected_scope(
+            self, run_cli, config, email, pending, sends, capsys):
+        """Issue #345: a manga no longer tracked was never turned on, so
+        with only chosen manga sent its record is kept, not sent."""
+        sent, _ = sends
+        # Read before setting: config.get() reloads from disk and would
+        # drop a set() that was not saved yet.
+        tracked = [dict(m, send_to_kindle=True) for m in config.get("manga")
+                   if m["title"] != "Berserk"]
+        config.set("email.kindle_scope", "selected")
+        config.set("manga", tracked)
+        config.save()
+        assert config.get("email.kindle_scope") == "selected"
+
+        assert run_cli("send", "--pending") == 0
+
+        assert sent == [pending["Vinland Saga"]]
+        assert list(_disk_state().failures.get_all_undelivered()) == ["Berserk"]
+        out = capsys.readouterr().out
+        assert "Skipped Berserk: not in the library" in out
+        assert "config set email.kindle_scope all" in out
+
+    @pytest.mark.parametrize("resolve", [["send", "--pending"],
+                                         ["send", "--pending", "--clear"]])
+    def test_old_backup_does_not_requeue_resolved_delivery(
+            self, run_cli, email, pending, sends, tmp_path, resolve):
+        """fail -> export -> send (or clear) -> import the old backup: the
+        chapter is not pending again and is not sent a second time."""
+        sent, _ = sends
+        backup = tmp_path / "before.json"
+        assert run_cli("export", str(backup)) == 0
+
+        assert run_cli(*resolve) == 0
+        sent_before = list(sent)
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+        assert run_cli("import", str(backup)) == 0
+        state = _disk_state()
+        assert state.failures.get_all_undelivered() == {}
+        assert state.is_chapter_downloaded("Berserk", "1")
+        assert run_cli("send", "--pending") == 0
+        assert sent == sent_before
+
+    def test_unordered_resolution_blocks_a_later_old_backup(
+            self, run_cli, email, pending, sends, tmp_path):
+        """Import a legacy (naive) resolution newer than the local one,
+        then a backup with a UTC failure between the two: the chapter
+        stays resolved and `send --pending` offers nothing."""
+        from datetime import datetime, timedelta
+        sent, _ = sends
+        assert run_cli("send", "--pending", "--clear", "Berserk") == 0
+        resolved_at = datetime.fromisoformat(
+            _disk_state().get_manga_state("Berserk")["resolved_deliveries"]["1"]["resolved_at"])
+
+        backup = tmp_path / "backup.json"
+        assert run_cli("export", str(backup)) == 0
+        data = json.loads(backup.read_text())
+        entry = data["state"]["Berserk"]
+        entry.pop("undelivered_chapters", None)
+        entry["resolved_deliveries"] = {"1": {
+            "resolved_at": (resolved_at + timedelta(hours=2)).replace(tzinfo=None).isoformat(),
+            "reason": "sent"}}
+        backup.write_text(json.dumps(data))
+        assert run_cli("import", str(backup)) == 0
+
+        entry.pop("resolved_deliveries")
+        entry["undelivered_chapters"] = {"1": {
+            "failed_at": (resolved_at + timedelta(hours=1)).isoformat(timespec="microseconds"),
+            "path": str(pending["Berserk"]), "error": "SMTP down", "attempts": 1}}
+        backup.write_text(json.dumps(data))
+        assert run_cli("import", str(backup)) == 0
+
+        assert list(_disk_state().failures.get_all_undelivered()) == ["Vinland Saga"]
+        assert run_cli("send", "--pending", "Berserk") == 0
+        assert sent == []
+
+    def test_pending_is_required(self, run_cli, email):
+        assert run_cli("send") == 2
+
+    def test_list_and_clear_are_exclusive(self, run_cli, email):
+        assert run_cli("send", "--pending", "--list", "--clear") == 2
+
+    def test_check_records_failed_delivery_and_exits_partial(
+            self, run_cli, email, monkeypatch, tmp_path, capsys):
+        """The baseline of #360: the chapter is saved but not sent. It
+        must stay visible and retryable instead of a silent success."""
+        from memanga import cli
+        from memanga.emailer import EmailError
+
+        path = tmp_path / "Berserk-2.pdf"
+        path.write_bytes(b"pdf")
+        chapter = types.SimpleNamespace(
+            number="2", title="", url="https://mangadex.org/c/2",
+            source="mangadex.org", is_backup=False)
+        monkeypatch.setattr(
+            cli, "check_for_updates",
+            lambda manga, *a, **k: [chapter] if manga["title"] == "Berserk" else [])
+        monkeypatch.setattr(cli, "download_chapter", lambda *a, **k: path)
+
+        def _fail(**kwargs):
+            raise EmailError("SMTP down")
+
+        monkeypatch.setattr(cli, "send_to_kindle", _fail)
+
+        assert run_cli("check", "--download") == cli.EXIT_PARTIAL
+        captured = capsys.readouterr()
+        assert "memanga send --pending" in captured.out + captured.err
+        state = _disk_state()
+        assert state.is_chapter_downloaded("Berserk", "2")
+        assert state.failures.get_undelivered("Berserk")["2"]["path"] == str(path)
+        assert path.exists()
+
+        # The retry route then delivers it.
+        sent = []
+        monkeypatch.setattr(cli, "send_to_kindle",
+                            lambda **kw: sent.append(kw["pdf_path"]))
+        assert run_cli("send", "--pending") == 0
+        assert sent == [path]
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+
+class TestSendChapters:
+    """Issue #355: `send TARGET CHAPTER...` sends downloaded chapters to
+    Kindle again from their saved files."""
+
+    @pytest.fixture(autouse=True)
+    def wide_console(self, monkeypatch):
+        from rich.console import Console
+        from memanga import cli
+        monkeypatch.setattr(cli, "console", Console(width=250))
+        monkeypatch.setattr(cli, "err_console", Console(width=250, stderr=True))
+
+    @pytest.fixture
+    def downloads(self, tmp_path):
+        return tmp_path / "downloads"
+
+    @pytest.fixture
+    def email(self, config, downloads, monkeypatch):
+        from memanga import cli
+        config.set("delivery.mode", "email")
+        config.set("delivery.download_dir", str(downloads))
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [
+            {"title": t, "source": "mangadex.org",
+             "url": f"https://mangadex.org/title/{i}/x", "status": "reading"}
+            for i, t in enumerate(("Berserk", "Berserk Deluxe", "Vinland Saga"))
+        ])
+        config.save()
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+
+    @pytest.fixture
+    def saved(self, cli_state, downloads):
+        """Save Berserk chapters as downloads do; returns a function
+        ``save(chapter, suffix=".pdf", history=True)`` -> path."""
+        def save(chapter, suffix=".pdf", history=True):
+            from memanga.downloader.naming import _format_chapter_number
+            path = (downloads / "Berserk"
+                    / f"Berserk - Chapter {_format_chapter_number(chapter)}{suffix}")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"data")
+            cli_state.add_downloaded_chapter("Berserk", chapter)
+            if history:
+                cli_state.add_download_history("Berserk", chapter, suffix[1:],
+                                               path=str(path))
+            cli_state.save()
+            return path
+        return save
+
+    @pytest.fixture
+    def sends(self, monkeypatch):
+        """Fake sender; paths in `fail` raise. Returns (sent, fail)."""
+        from memanga import cli
+        from memanga.emailer import EmailError
+        sent, fail = [], set()
+
+        def _send(**kwargs):
+            if kwargs["pdf_path"] in fail:
+                raise EmailError("Mailbox full")
+            sent.append(kwargs["pdf_path"])
+
+        monkeypatch.setattr(cli, "send_to_kindle", _send)
+        return sent, fail
+
+    def test_sends_one_chapter_with_configured_settings(
+            self, run_cli, config, email, saved, monkeypatch, capsys):
+        from memanga import cli
+        config.set("email.smtp_server", "smtp.example.test")
+        config.set("email.smtp_port", 2525)
+        config.save()
+        path = saved("1")
+        calls = []
+        monkeypatch.setattr(cli, "send_to_kindle", lambda **kw: calls.append(kw))
+
+        assert run_cli("send", "Berserk", "1") == 0
+
+        (call,) = calls
+        assert (call["pdf_path"], call["kindle_email"], call["smtp_server"],
+                call["smtp_port"], call["app_password"]) == (
+            path, "reader@example.com", "smtp.example.test", 2525, "pw")
+        assert "1/1 chapters sent" in capsys.readouterr().out
+        assert path.exists()
+        state = _disk_state()
+        assert state.get_download_history()[0]["kindle_sent"] is True
+        assert state.failures.get_all_undelivered() == {}
+
+    def test_already_sent_chapter_is_sent_again(self, run_cli, email, saved, sends):
+        sent, _ = sends
+        path = saved("1")
+        assert run_cli("send", "Berserk", "1") == 0
+        assert run_cli("send", "Berserk", "1") == 0
+        assert sent == [path, path]
+        assert len(_disk_state().get_download_history()) == 1
+
+    def test_found_without_history_and_number_forms_match(
+            self, run_cli, email, saved, sends):
+        sent, _ = sends
+        path = saved("2.5", history=False)
+        assert run_cli("send", "#1", "2.50") == 0
+        assert sent == [path]
+
+    def test_delete_after_send(self, run_cli, config, email, saved, sends):
+        config.set("delivery.delete_after_send", True)
+        config.save()
+        path = saved("1")
+        assert run_cli("send", "Berserk", "1") == 0
+        assert not path.exists()
+        assert _disk_state().get_download_history()[0]["deleted_after_send"] is True
+
+    def test_dry_run_sends_and_writes_nothing(
+            self, run_cli, email, saved, sends, capsys):
+        from pathlib import Path
+        sent, _ = sends
+        path = saved("1")
+        saved("2")
+        state_file = Path.home() / ".config" / "memanga" / "state.json"
+        before = state_file.read_bytes()
+        capsys.readouterr()
+
+        assert run_cli("send", "Berserk", "1", "2", "--dry-run") == 0
+
+        out = capsys.readouterr().out
+        assert path.name in out
+        assert "Dry run: 2/2 chapter(s) would be sent" in out
+        assert sent == []
+        assert state_file.read_bytes() == before
+        assert path.exists()
+
+    def test_dry_run_takes_no_config_lock(self):
+        from memanga import cli
+        parser = cli.build_parser()
+        args = parser.parse_args(["send", "Berserk", "1", "--dry-run"])
+        assert cli._needs_config_lock(args) is False
+        assert cli._needs_config_lock(parser.parse_args(["send", "Berserk", "1"]))
+
+    def test_dry_run_reports_problems_with_exit_3(
+            self, run_cli, email, cli_state, sends, capsys):
+        sent, _ = sends
+        cli_state.add_downloaded_chapter("Berserk", "1")
+        cli_state.save()
+        assert run_cli("send", "Berserk", "1", "--dry-run") == 3
+        assert "No saved file was found" in capsys.readouterr().out
+        assert sent == []
+
+    @pytest.mark.parametrize("target", ["Nope", "Bers"])
+    def test_unknown_or_ambiguous_target_sends_nothing(
+            self, run_cli, email, saved, sends, target):
+        sent, _ = sends
+        saved("1")
+        assert run_cli("send", target, "1") == 1
+        assert sent == []
+
+    def test_any_unknown_chapter_sends_nothing(
+            self, run_cli, email, saved, sends, capsys):
+        sent, _ = sends
+        saved("1")
+        assert run_cli("send", "Berserk", "1", "9", "--yes") == 1
+        err = capsys.readouterr().err
+        assert "Not downloaded:" in err and "9" in err
+        assert "Nothing was sent" in err
+        assert sent == []
+
+    def test_ambiguous_chapter_sends_nothing(
+            self, run_cli, email, cli_state, sends, capsys):
+        sent, _ = sends
+        for chapter in ("5", "5.0"):
+            cli_state.add_downloaded_chapter("Berserk", chapter)
+        cli_state.save()
+        assert run_cli("send", "Berserk", "05") == 1
+        assert "Ambiguous chapter:" in capsys.readouterr().err
+        assert sent == []
+
+    def test_missing_file_is_reported_and_others_still_sent(
+            self, run_cli, email, saved, cli_state, sends, capsys):
+        sent, _ = sends
+        path = saved("1")
+        cli_state.add_downloaded_chapter("Berserk", "2")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "1", "2", "--yes") == 3
+
+        assert sent == [path]
+        captured = capsys.readouterr()
+        assert "No saved file was found" in captured.out + captured.err
+        assert "1/2 chapters sent" in captured.out
+        # A chapter that couldn't be sent here is not queued as pending.
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+    def test_kindle_format_is_preferred_and_cbz_only_is_refused(
+            self, run_cli, email, saved, sends, capsys):
+        sent, _ = sends
+        saved("1", ".cbz")
+        pdf = saved("1", ".pdf")
+        saved("2", ".cbz")
+
+        assert run_cli("send", "Berserk", "1") == 0
+        assert sent == [pdf]
+
+        capsys.readouterr()
+        assert run_cli("send", "Berserk", "2") == 3
+        assert sent == [pdf]
+        assert "CBZ" in capsys.readouterr().out
+
+    def test_history_path_outside_the_manga_folder_is_ignored(
+            self, run_cli, email, cli_state, sends, tmp_path):
+        sent, _ = sends
+        outside = tmp_path / "elsewhere" / "Berserk - Chapter 0001.000.pdf"
+        outside.parent.mkdir()
+        outside.write_bytes(b"data")
+        cli_state.add_downloaded_chapter("Berserk", "1")
+        cli_state.add_download_history("Berserk", "1", "pdf", path=str(outside))
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "1") == 3
+        assert sent == []
+
+    def test_symlinked_manga_folder_is_refused(
+            self, run_cli, email, cli_state, downloads, sends, tmp_path, capsys):
+        sent, _ = sends
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "Berserk - Chapter 0001.000.pdf").write_bytes(b"data")
+        downloads.mkdir()
+        try:
+            (downloads / "Berserk").symlink_to(real, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks are not available")
+        cli_state.add_downloaded_chapter("Berserk", "1")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "1") == 1
+        assert "Refusing to send" in capsys.readouterr().err
+        assert sent == []
+
+    def test_send_failure_exits_3_and_is_recorded_pending(
+            self, run_cli, config, email, saved, sends):
+        sent, fail = sends
+        config.set("delivery.delete_after_send", True)
+        config.save()
+        path = saved("1")
+        fail.add(path)
+
+        assert run_cli("send", "Berserk", "1") == 3
+
+        assert path.exists()
+        state = _disk_state()
+        record = state.failures.get_undelivered("Berserk")["1"]
+        assert (record["path"], record["error"], record["attempts"]) == (
+            str(path), "Mailbox full", 1)
+        assert state.get_download_history()[0]["kindle_sent"] is False
+
+    def test_split_pdf_retry_skips_the_accepted_part(
+            self, run_cli, email, saved, monkeypatch):
+        """#364 through `send TARGET CHAPTER`: part 1 is accepted, part 2
+        fails; the next send of the chapter only sends parts 2 and 3."""
+        from memanga import cli
+        from memanga.emailer import EmailPartError
+        saved("1")
+        calls, mailed = [], []
+
+        def transport(**kwargs):
+            """Mails parts 1-3, skipping accepted ones; the first call
+            fails at part 2."""
+            progress = kwargs["progress"] or {"total": 3, "accepted": []}
+            accepted = list(progress["accepted"])
+            calls.append(list(accepted))
+            for part in (1, 2, 3):
+                if part in accepted:
+                    continue
+                if part == 2 and len(calls) == 1:
+                    raise EmailPartError(2, 3, {"total": 3, "accepted": accepted},
+                                         "554 rejected")
+                mailed.append(part)
+                accepted.append(part)
+                kwargs["on_part_sent"](part, 3)
+
+        monkeypatch.setattr(cli, "send_to_kindle", transport)
+
+        assert run_cli("send", "Berserk", "1") == 3
+        assert mailed == [1]
+        record = _disk_state().failures.get_undelivered("Berserk")["1"]
+        assert record["parts"] == {"total": 3, "accepted": [1]}
+
+        assert run_cli("send", "Berserk", "1") == 0
+        assert calls == [[], [1]]
+        assert mailed == [1, 2, 3]
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+    @pytest.mark.parametrize("chapter,other,name", [
+        ("2", "2.0", "Berserk - Chapter 2.0.pdf"),
+        ("2.0", "2", "Berserk - Chapter 2.0.pdf"),
+        ("12 Part 1", "12.01", "Berserk - Chapter 12.01.pdf"),
+        ("12.01", "12 Part 1", "Berserk - Chapter 12.01.pdf"),
+    ])
+    def test_name_shared_with_another_chapter_is_not_sent(
+            self, run_cli, email, cli_state, downloads, sends, capsys, caplog,
+            chapter, other, name):
+        """The preferred file of `chapter` is missing; an older name that
+        `other` could have been saved under is not sent for it."""
+        sent, _ = sends
+        shared = downloads / "Berserk" / name
+        shared.parent.mkdir(parents=True)
+        shared.write_bytes(b"data")
+        for label in (chapter, other):
+            cli_state.add_downloaded_chapter("Berserk", label)
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", chapter) == 3
+
+        assert sent == []
+        # The table shows the file; its status cell is cut to the column
+        # width, so the reason is checked in the per-chapter diagnostic.
+        assert name in capsys.readouterr().out
+        assert [r.getMessage() for r in caplog.records
+                if r.name == "memanga.cli" and r.levelname == "ERROR"] == [
+            f"Chapter {chapter} of Berserk not sent: The saved file's name "
+            "could also belong to another chapter, so it is not sent"]
+
+    def test_shared_name_is_sent_when_the_history_says_whose(
+            self, run_cli, email, cli_state, downloads, sends):
+        sent, _ = sends
+        shared = downloads / "Berserk" / "Berserk - Chapter 2.0.pdf"
+        shared.parent.mkdir(parents=True)
+        shared.write_bytes(b"data")
+        cli_state.add_downloaded_chapter("Berserk", "2")
+        cli_state.add_downloaded_chapter("Berserk", "2.0")
+        cli_state.add_download_history("Berserk", "2", "pdf", path=str(shared))
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "2.0") == 3
+        assert sent == []
+        assert run_cli("send", "Berserk", "2") == 0
+        assert sent == [shared]
+
+    def test_older_name_is_used_when_no_other_chapter_shares_it(
+            self, run_cli, email, cli_state, downloads, sends):
+        sent, _ = sends
+        legacy = downloads / "Berserk" / "Berserk - Chapter 2.0.pdf"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"data")
+        cli_state.add_downloaded_chapter("Berserk", "2")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "2") == 0
+        assert sent == [legacy]
+
+    def test_pending_chapter_goes_through_its_record(
+            self, run_cli, email, cli_state, sends, tmp_path):
+        """A chapter on the undelivered list is sent from its recorded
+        file, like `send --pending`, and its record is cleared."""
+        sent, _ = sends
+        path = tmp_path / "recorded.pdf"
+        path.write_bytes(b"pdf")
+        cli_state.add_downloaded_chapter("Berserk", "3")
+        cli_state.failures.add_undelivered("berserk", "3", str(path), "SMTP down")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "3") == 0
+
+        assert sent == [path]
+        assert _disk_state().failures.get_all_undelivered() == {}
+
+    def test_pending_chapter_failure_counts_the_attempt(
+            self, run_cli, email, cli_state, sends, tmp_path):
+        sent, fail = sends
+        path = tmp_path / "recorded.pdf"
+        path.write_bytes(b"pdf")
+        fail.add(path)
+        cli_state.add_downloaded_chapter("Berserk", "3")
+        cli_state.failures.add_undelivered("Berserk", "3", str(path), "SMTP down")
+        cli_state.save()
+
+        assert run_cli("send", "Berserk", "3") == 3
+
+        record = _disk_state().failures.get_undelivered("Berserk")["3"]
+        assert (record["attempts"], record["error"]) == (2, "Mailbox full")
+
+    def test_several_chapters_need_yes_without_a_terminal(
+            self, run_cli, email, saved, sends, capsys):
+        sent, _ = sends
+        one, two = saved("1"), saved("2")
+
+        assert run_cli("send", "Berserk", "1", "2") == 1
+        assert "pass --yes" in capsys.readouterr().err
+        assert sent == []
+
+        assert run_cli("send", "Berserk", "2", "1", "--yes") == 0
+        assert sent == [two, one]
+
+    @pytest.mark.parametrize("answer,expected", [(True, 2), (False, 0)])
+    def test_several_chapters_ask_on_a_terminal(
+            self, run_cli, email, saved, sends, monkeypatch, answer, expected):
+        from memanga import cli
+        sent, _ = sends
+        saved("1")
+        saved("2")
+        prompts = []
+        monkeypatch.setattr("memanga.cli._stdin_is_tty", lambda: True)
+        monkeypatch.setattr(cli.Confirm, "ask",
+                            lambda prompt, *a, **k: prompts.append(prompt) or answer)
+
+        assert run_cli("send", "Berserk", "1", "2") == 0
+
+        assert len(prompts) == 1 and "Send 2 chapters" in prompts[0]
+        assert len(sent) == expected
+
+    def test_one_chapter_never_asks(self, run_cli, email, saved, sends, monkeypatch):
+        from memanga import cli
+        sent, _ = sends
+        saved("1")
+        monkeypatch.setattr("memanga.cli._stdin_is_tty", lambda: True)
+        monkeypatch.setattr(cli.Confirm, "ask", lambda *a, **k: pytest.fail("asked"))
+        assert run_cli("send", "Berserk", "1") == 0
+        assert len(sent) == 1
+
+    def test_local_delivery_is_an_error(
+            self, run_cli, config, email, saved, sends, capsys):
+        sent, _ = sends
+        config.set("delivery.mode", "local")
+        config.save()
+        saved("1")
+        assert run_cli("send", "Berserk", "1", "--dry-run") == 1
+        assert "not set up" in capsys.readouterr().err
+        assert sent == []
+
+    def test_kindle_opt_out_is_an_error(
+            self, run_cli, config, email, saved, sends, capsys):
+        sent, _ = sends
+        manga = config.get("manga")
+        manga[0]["send_to_kindle"] = False  # Berserk
+        config.set("manga", manga)
+        config.save()
+        path = saved("1")
+        assert run_cli("send", "Berserk", "1") == 1
+        assert "memanga update Berserk --kindle" in capsys.readouterr().err
+        assert sent == []
+        assert path.exists()
+
+    @pytest.mark.parametrize("argv", [
+        ["send", "Berserk"],
+        ["send", "--list", "Berserk", "1"],
+        ["send", "--clear", "Berserk", "1"],
+        ["send", "--pending", "Berserk", "1"],
+        ["send", "--pending", "--dry-run"],
+        ["send", "--pending", "--yes"],
+        ["send", "Berserk", "1", "--list", "--dry-run"],
+    ])
+    def test_usage_errors(self, run_cli, email, argv):
+        assert run_cli(*argv) == 2
+
+
 class TestDoctorCommand:
+    def test_unusable_password_variable_is_readable(self, run_cli, config, cli_state,
+                                                    monkeypatch, tmp_path, capsys):
+        # Issue #247: the reason is shown as is, not masked by redaction.
+        config.set("delivery.mode", "email")
+        config.save()
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(tmp_path / "missing"))
+        capsys.readouterr()
+        assert run_cli("doctor", "--json", "--check", "email") == 1
+        captured = capsys.readouterr()
+        message = json.loads(captured.out)["checks"][0]["message"]
+        assert message.startswith("App password from the environment is unusable: "
+                                  "cannot read MEMANGA_SMTP_PASSWORD_FILE file")
+        assert "***" not in captured.out + captured.err
+
     def test_json_report(self, run_cli, cli_state, capsys):
         assert run_cli("doctor", "--json", "--check", "config", "--check", "state") == 0
         payload = _stdout_json(capsys)
@@ -3262,11 +5516,30 @@ class TestDoctorCommand:
         assert payload["checks"][0]["details"]["install_mode"] == "source"
 
     def test_failed_check_exits_1(self, run_cli, cli_state, capsys):
-        cli_state.state_path.write_text("{broken", encoding="utf-8")
+        # A state file that cannot be read stays in place and fails.
+        cli_state.state_path.mkdir()
         assert run_cli("doctor", "--json", "--check", "state") == 1
         payload = _stdout_json(capsys)
         assert payload["status"] == "fail"
         assert payload["checks"][0]["status"] == "fail"
+
+    def test_recovered_state_warns_and_fails_only_when_strict(
+            self, run_cli, cli_state, capsys):
+        # Issue #243: a damaged state.json is copied aside on load, so
+        # doctor warns about it (exit 0, or 1 with --strict).
+        path = cli_state.state_path
+        path.write_text("{broken", encoding="utf-8")
+        assert run_cli("doctor", "--json", "--check", "state") == 0
+        payload = _stdout_json(capsys)
+        assert payload["status"] == "warning"
+        check = payload["checks"][0]
+        assert check["status"] == "warning"
+        preserved = check["details"]["preserved_copy"]
+        assert open(preserved, encoding="utf-8").read() == "{broken"
+
+        path.write_text("{broken", encoding="utf-8")
+        assert run_cli("doctor", "--json", "--check", "state", "--strict") == 1
+        assert _stdout_json(capsys)["checks"][0]["status"] == "warning"
 
     def test_warning_exits_0_unless_strict(self, run_cli, config, cli_state, capsys):
         config.set("email.app_password", "secret-pw")
@@ -3304,6 +5577,88 @@ class TestDoctorCommand:
 
     def test_unknown_check_is_usage_error(self, run_cli):
         assert run_cli("doctor", "--check", "nope") == 2
+
+
+class TestSetupCommand:
+    """Issue #217: `memanga setup` prepares a first run on request."""
+
+    @staticmethod
+    def _probe(installed):
+        def probe(launch):
+            return {name: dict(installed=name in installed, executable="/x",
+                               launched=(name in installed) if launch else None,
+                               error=None)
+                    for name in ("firefox", "chromium")}
+        return probe
+
+    @pytest.fixture
+    def no_installer(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(first_run_module(), "run_installer",
+                            lambda *a, **k: calls.append(a) or pytest.fail("installer ran"))
+        return calls
+
+    def test_creates_config_and_download_dir(self, run_cli, isolated_home,
+                                             monkeypatch, capsys, no_installer):
+        from memanga import doctor
+        monkeypatch.setattr(doctor, "_probe_browsers", self._probe({"firefox", "chromium"}))
+        root = isolated_home / ".config" / "memanga"
+        assert run_cli("setup") == 0
+        out = capsys.readouterr().out
+        assert (root / "config.yaml").is_file()
+        assert (isolated_home / "Downloads" / "MeManga").is_dir()
+        assert "Setup complete" in out
+        assert "memanga add -i" in out
+
+        # Repeatable: the existing file is kept as it is.
+        before = (root / "config.yaml").read_text(encoding="utf-8")
+        assert run_cli("setup") == 0
+        assert (root / "config.yaml").read_text(encoding="utf-8") == before
+        assert "Using existing" in capsys.readouterr().out
+
+    def test_missing_browsers_without_terminal_exit_1(self, run_cli, monkeypatch,
+                                                      capsys, no_installer):
+        from memanga import doctor
+        monkeypatch.setattr(doctor, "_probe_browsers", self._probe({"firefox"}))
+        assert run_cli("setup") == 1
+        out = capsys.readouterr().out
+        assert "--install-browsers" in out
+        assert "Setup is not complete" in out
+        assert no_installer == []
+
+    def test_install_flag_runs_installer(self, run_cli, monkeypatch, capsys):
+        from memanga import doctor
+        installed = {"firefox"}
+        monkeypatch.setattr(doctor, "_probe_browsers",
+                            lambda launch: self._probe(set(installed))(launch))
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            installed.add("chromium")
+            return types.SimpleNamespace(returncode=0)
+        monkeypatch.setattr(first_run_module(), "run_installer", fake_run)
+        assert run_cli("setup", "--install-browsers") == 0
+        assert calls == [[sys.executable, "-m", "playwright", "install", "chromium"]]
+        assert "Downloaded and started" in capsys.readouterr().out
+
+    def test_no_install_flag(self, run_cli, monkeypatch, capsys, no_installer):
+        from memanga import doctor
+        monkeypatch.setattr(doctor, "_probe_browsers", self._probe(set()))
+        assert run_cli("setup", "--no-install-browsers") == 1
+        assert no_installer == []
+
+    def test_broken_config_refused_and_kept(self, run_cli, isolated_home, capsys):
+        path = isolated_home / ".config" / "memanga" / "config.yaml"
+        path.write_text("manga: [unclosed\n", encoding="utf-8")
+        assert run_cli("setup") == 1
+        assert "memanga doctor" in capsys.readouterr().err
+        assert path.read_text(encoding="utf-8") == "manga: [unclosed\n"
+
+
+def first_run_module():
+    from memanga import first_run
+    return first_run
 
 
 class TestInvalidConfigFile:
@@ -3346,6 +5701,198 @@ class TestInvalidConfigFile:
         assert "cannot load config file" in err
         assert "memanga doctor" in err
         assert path.read_text(encoding="utf-8") == self.BROKEN
+
+
+class TestNewerSchemaFiles:
+    """Config or state from a newer MeManga is refused and left as it
+    is; files from before schema versions keep working (issue #409)."""
+
+    def _root(self, home):
+        return home / ".config" / "memanga"
+
+    def test_newer_config_refuses_commands(self, run_cli, isolated_home, capsys):
+        path = self._root(isolated_home) / "config.yaml"
+        path.write_text("schema_version: 99\nmanga: []\n", encoding="utf-8")
+        assert run_cli("list") == 1
+        err = capsys.readouterr().err
+        assert "cannot load config file" in err
+        assert "update MeManga" in err
+        assert path.read_text(encoding="utf-8") == "schema_version: 99\nmanga: []\n"
+
+    def test_newer_state_refuses_commands(self, run_cli, isolated_home, capsys):
+        path = self._root(isolated_home) / "state.json"
+        newer = json.dumps({"schema_version": 99, "manga": {}})
+        path.write_text(newer, encoding="utf-8")
+        assert run_cli("list") == 1
+        err = capsys.readouterr().err
+        assert "cannot load state file" in err
+        assert "update MeManga" in err
+        assert path.read_text(encoding="utf-8") == newer
+
+    def test_unversioned_config_upgraded_on_save(self, run_cli, isolated_home):
+        import yaml
+        root = self._root(isolated_home)
+        (root / "config.yaml").write_text(
+            "manga:\n- title: Berserk\n  url: https://example.com/berserk\n",
+            encoding="utf-8")
+        assert run_cli("config", "set", "delivery.output_format", "cbz") == 0
+        config = yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8"))
+        assert config["schema_version"] == 1
+        assert config["manga"][0]["title"] == "Berserk"
+        assert config["delivery"]["output_format"] == "cbz"
+
+
+class TestDamagedStateFile:
+    """A damaged state.json is copied aside with a warning; one that cannot
+    be loaded, copied or restored makes commands refuse (issue #243)."""
+
+    def _root(self, home):
+        return home / ".config" / "memanga"
+
+    def test_damaged_state_is_kept_and_reported(self, run_cli, isolated_home,
+                                                capsys):
+        root = self._root(isolated_home)
+        (root / "state.json").write_text("{truncated", encoding="utf-8")
+        assert run_cli("list") == 0
+        err = capsys.readouterr().err
+        assert err.startswith("warning: ")
+        assert "kept as" in err
+        preserved = list(root.glob("state.json.corrupt-*"))
+        assert len(preserved) == 1
+        assert preserved[0].read_text(encoding="utf-8") == "{truncated"
+        # Later runs neither warn again nor touch the preserved copy.
+        assert run_cli("list") == 0
+        assert "warning" not in capsys.readouterr().err
+        assert preserved[0].read_text(encoding="utf-8") == "{truncated"
+
+    def test_damaged_state_restored_from_backup(self, run_cli, isolated_home,
+                                                capsys):
+        root = self._root(isolated_home)
+        good = {"manga": {"Berserk": {"downloaded": ["1"]}}}
+        (root / "state.json.bak").write_text(json.dumps(good), encoding="utf-8")
+        (root / "state.json").write_text("", encoding="utf-8")
+        assert run_cli("list") == 0
+        assert "Restored the previous copy" in capsys.readouterr().err
+        assert json.loads((root / "state.json").read_text(encoding="utf-8")) == good
+
+    def test_failed_restore_refuses_commands(self, run_cli, isolated_home,
+                                             monkeypatch, capsys):
+        import os
+        root = self._root(isolated_home)
+        good = json.dumps({"manga": {"Berserk": {"downloaded": ["1"]}}})
+        (root / "state.json.bak").write_text(good, encoding="utf-8")
+        (root / "state.json").write_text("{truncated", encoding="utf-8")
+        original_replace = os.replace
+
+        def replace(src, dst):
+            if str(dst) == str(root / "state.json"):
+                raise OSError("No space left on device")
+            return original_replace(src, dst)
+        monkeypatch.setattr("memanga.persist.os.replace", replace)
+        # Every run refuses while the write fails; none starts empty.
+        for _ in range(2):
+            assert run_cli("list") == 1
+            err = capsys.readouterr().err
+            assert "cannot load state file" in err
+            assert "could not be written back" in err
+            assert (root / "state.json").read_text(encoding="utf-8") == "{truncated"
+            assert (root / "state.json.bak").read_text(encoding="utf-8") == good
+
+        monkeypatch.setattr("memanga.persist.os.replace", original_replace)
+        assert run_cli("list") == 0
+        assert "Restored the previous copy" in capsys.readouterr().err
+        assert json.loads((root / "state.json").read_text(encoding="utf-8")) == \
+            json.loads(good)
+        assert (root / "state.json.bak").read_text(encoding="utf-8") == good
+
+    def test_failed_save_reports_error_without_traceback(
+            self, run_cli, isolated_home, monkeypatch, capsys):
+        import errno
+        root = self._root(isolated_home)
+        failed = {"source": "x", "error": "e", "attempts": 1}
+        current = json.dumps(
+            {"manga": {"Demo": {"failed_chapters": {"1": failed}}}})
+        old_backup = json.dumps({"manga": {"Keep": {"downloaded": ["9"]}}})
+        (root / "state.json").write_text(current, encoding="utf-8")
+        (root / "state.json.bak").write_text(old_backup, encoding="utf-8")
+
+        def no_space(*a, **k):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        monkeypatch.setattr("memanga.persist.os.link", no_space)
+        monkeypatch.setattr("memanga.persist._copy_durable", no_space)
+        capsys.readouterr()
+
+        assert run_cli("failed", "clear") == 1
+        # Rich may wrap the long line; compare with whitespace collapsed.
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Could not save state.json: No space left on device" in err
+        assert "its backup were not changed by this save" in err
+        assert "Traceback" not in err
+        assert (root / "state.json").read_text(encoding="utf-8") == current
+        assert (root / "state.json.bak").read_text(encoding="utf-8") == old_backup
+        assert [p for p in root.iterdir() if p.suffix == ".tmp"] == []
+
+    def test_failed_config_save_reports_error_without_traceback(
+            self, run_cli, isolated_home, monkeypatch, capsys):
+        import errno
+        root = self._root(isolated_home)
+        assert run_cli("config", "set", "delivery.mode", "local") == 0
+        config_path = root / "config.yaml"
+        before = config_path.read_bytes()
+        real_replace = os.replace
+
+        def replace(src, dst):
+            if str(dst) == str(config_path):
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return real_replace(src, dst)
+        monkeypatch.setattr("memanga.persist.os.replace", replace)
+        capsys.readouterr()
+
+        assert run_cli("config", "set", "delivery.mode", "email") == 1
+        err = " ".join(capsys.readouterr().err.split())
+        assert "Could not save config.yaml: No space left on device" in err
+        assert "its backup were not changed by this save" in err
+        assert "Traceback" not in err
+        assert config_path.read_bytes() == before
+        assert [p for p in root.iterdir() if p.suffix == ".tmp"] == []
+
+    def test_unreadable_backup_refuses_commands(self, run_cli, isolated_home,
+                                                capsys):
+        root = self._root(isolated_home)
+        (root / "state.json").write_text("{bad", encoding="utf-8")
+        (root / "state.json.bak").mkdir()
+        assert run_cli("list") == 1
+        err = " ".join(capsys.readouterr().err.split())
+        assert "cannot load state file" in err
+        assert "could not be read" in err
+        assert (root / "state.json").read_text(encoding="utf-8") == "{bad"
+
+    def test_unreadable_state_refuses_commands(self, run_cli, isolated_home,
+                                               capsys):
+        root = self._root(isolated_home)
+        (root / "state.json").mkdir()
+        assert run_cli("list") == 1
+        err = capsys.readouterr().err
+        assert "cannot load state file" in err
+        assert "memanga doctor" in err
+        assert (root / "state.json").is_dir()
+        assert run_cli("doctor", "--check", "state") == 1
+        out = " ".join(capsys.readouterr().out.split())
+        assert "State file could not be loaded: cannot read" in out
+
+    def test_gui_receives_loaded_state(self, monkeypatch, isolated_home):
+        monkeypatch.delenv("MEMANGA_CLI_ONLY", raising=False)
+        root = self._root(isolated_home)
+        (root / "state.json").write_text("{bad", encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["memanga", "--gui"])
+        from memanga import cli
+        seen = []
+        fake_gui = types.SimpleNamespace(
+            launch_gui=lambda **kwargs: seen.append(kwargs))
+        monkeypatch.setitem(sys.modules, "memanga.gui", fake_gui)
+        cli.main()
+        assert seen[0]["state"].recovery_notice
+        assert seen[0]["config"] is cli.config
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -3609,6 +6156,64 @@ class TestNonInteractive:
             assert "error:" in proc.stderr, argv
 
 
+class TestStdinIsTty:
+    """#258: only a stdin someone can type into counts as interactive. On
+    Windows the NUL device a scheduled task gets also reports isatty()."""
+
+    class _Stdin:
+        def __init__(self, tty, has_fd=True):
+            self._tty = tty
+            self._has_fd = has_fd
+
+        def isatty(self):
+            return self._tty
+
+        def fileno(self):
+            if not self._has_fd:
+                raise io.UnsupportedOperation("fileno")
+            return 0
+
+    def _check(self, monkeypatch, *, tty, platform, console=None, has_fd=True):
+        from memanga import cli
+        monkeypatch.setattr(sys, "stdin", self._Stdin(tty, has_fd))
+        monkeypatch.setattr(sys, "platform", platform)
+
+        def is_console(fd):
+            if isinstance(console, Exception):
+                raise console
+            if console is None:
+                pytest.fail("the console check runs only on Windows")
+            return console
+
+        monkeypatch.setattr(cli, "_is_windows_console", is_console)
+        return cli._stdin_is_tty()
+
+    def test_windows_nul_device_is_not_interactive(self, monkeypatch):
+        assert self._check(monkeypatch, tty=True, platform="win32",
+                           console=False) is False
+
+    def test_windows_console_is_interactive(self, monkeypatch):
+        assert self._check(monkeypatch, tty=True, platform="win32",
+                           console=True) is True
+
+    def test_windows_terminal_without_descriptor_is_interactive(self, monkeypatch):
+        # An IDE's shell (or the scripted stdin of these tests) has no OS
+        # handle, so it cannot be the NUL device; no console check runs.
+        assert self._check(monkeypatch, tty=True, platform="win32",
+                           has_fd=False) is True
+
+    def test_windows_console_check_error_is_not_interactive(self, monkeypatch):
+        assert self._check(monkeypatch, tty=True, platform="win32",
+                           console=OSError("bad handle")) is False
+
+    def test_posix_terminal_is_interactive(self, monkeypatch):
+        assert self._check(monkeypatch, tty=True, platform="linux") is True
+
+    @pytest.mark.parametrize("platform", ["linux", "win32"])
+    def test_redirected_stdin_is_not_interactive(self, monkeypatch, platform):
+        assert self._check(monkeypatch, tty=False, platform=platform) is False
+
+
 class TestInteractiveStillPrompts:
     """A real terminal keeps the confirmation flows (#258)."""
 
@@ -3808,7 +6413,7 @@ class TestExitCodes:
     def test_console_script_targets_wrapped_main(self):
         # Issue #234: the installed `memanga` script must enter through
         # main(), which owns the Ctrl-C handling, not _main().
-        # Plain-text parse: tomllib is stdlib only on 3.11+ and we support 3.10.
+        # Plain-text parse of the [project.scripts] table.
         import re
         from pathlib import Path
 
@@ -4019,6 +6624,317 @@ class TestCheckExitCodes:
         err = capsys.readouterr().err
         assert "Could not save state: disk full" in err
         assert "Interrupted" in err
+
+
+class TestChapterCheckpoint:
+    """Each finished chapter reaches state.json before the next one starts,
+    and SIGTERM saves state like Ctrl-C (issue #230)."""
+
+    TITLE = "Vinland Saga"
+
+    @pytest.fixture
+    def library(self, config):
+        config.set("delivery.mode", "email")
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [{
+            "title": self.TITLE,
+            "status": "reading",
+            "sources": [
+                {"source": "primary.test", "url": "https://primary.test/vs"},
+                {"source": "backup.test", "url": "https://backup.test/vs"},
+            ],
+        }])
+        config.save()
+        return config
+
+    @pytest.fixture
+    def sent(self, monkeypatch):
+        from memanga import cli
+        sent = []
+        monkeypatch.setattr(cli, "send_to_kindle",
+                            lambda **kw: sent.append(kw["pdf_path"].name))
+        monkeypatch.setattr(cli, "get_app_password", lambda cfg: "pw")
+        return sent
+
+    @staticmethod
+    def _on_disk(isolated_home):
+        from memanga.state import State
+        return State(isolated_home / ".config" / "memanga")
+
+    @staticmethod
+    def _chapter(number, source="primary.test", is_backup=False):
+        return types.SimpleNamespace(
+            number=number, title="", url=f"https://{source}/c/{number}",
+            source=source, is_backup=is_backup)
+
+    def _two_new_chapters(self, monkeypatch):
+        from memanga import cli
+        chapters = [self._chapter("71"), self._chapter("72")]
+        monkeypatch.setattr(cli, "check_for_updates", lambda *a, **k: chapters)
+        monkeypatch.setattr(
+            cli, "_find_chapter_on_backup",
+            lambda manga, number, *a, **k: self._chapter(
+                number, "backup.test", is_backup=True))
+
+    @pytest.mark.parametrize("route", ["primary", "backup", "partial"])
+    def test_check_records_each_chapter_before_the_next(
+            self, run_cli, library, sent, isolated_home, monkeypatch,
+            tmp_path, route):
+        from memanga import cli
+        from memanga.downloader import DownloaderError
+
+        if route == "partial":
+            library.set("partial_chapters.enabled", True)
+            library.set("partial_chapters.threshold_percent", 10)
+            library.save()
+        self._two_new_chapters(monkeypatch)
+        seen = []
+
+        def fake_download(manga, chapter, *a, **k):
+            path = tmp_path / f"{chapter.source}-{chapter.number}.pdf"
+            path.write_bytes(b"%PDF")
+            if chapter.number == "72":
+                seen.append(self._on_disk(isolated_home))
+                return path
+            if route == "primary":
+                return path
+            if not chapter.is_backup:
+                raise DownloaderError("primary incomplete",
+                                      failed_pages=[13], total_pages=40)
+            if route == "backup":
+                return path
+            if not k.get("allow_partial"):
+                raise DownloaderError("backup incomplete",
+                                      failed_pages=[7], total_pages=40)
+            k["on_partial"]([7], 40)
+            return path
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+
+        assert run_cli("check", "--auto", "--quiet") == 0
+
+        # While chapter 72 downloads, chapter 71 is already sent and on disk.
+        [disk] = seen
+        assert sent[0].endswith("-71.pdf")
+        assert disk.is_chapter_downloaded(self.TITLE, "71")
+        assert not disk.is_chapter_downloaded(self.TITLE, "72")
+        [entry] = disk.get_download_history()
+        assert entry["chapter"] == "71" and entry["kindle_sent"]
+        assert entry["from_backup"] == (route != "primary")
+        assert entry["partial"] == (route == "partial")
+        partial = disk.get_partial_chapter(self.TITLE, "71")
+        assert (partial is not None) is (route == "partial")
+        assert disk.get_failed_chapters(self.TITLE) == {}
+
+    def test_failed_retry_records_each_chapter_before_the_next(
+            self, run_cli, config, state, isolated_home, monkeypatch,
+            tmp_path):
+        from memanga import cli
+        from memanga.scrapers.base import Chapter
+
+        config.set("manga", [{
+            "title": self.TITLE, "status": "reading",
+            "source": "primary.test", "url": "https://primary.test/vs",
+        }])
+        config.save()
+        for number in ("71", "72"):
+            state.add_failed_chapter(self.TITLE, number, "primary.test",
+                                     "timeout")
+
+        class FakeScraper:
+            def get_chapters(self, url):
+                return [Chapter(number=n, title="", url=f"{url}/{n}", date=None)
+                        for n in ("71", "72")]
+        monkeypatch.setattr(cli, "get_scraper", lambda source: FakeScraper())
+        seen = []
+
+        def fake_download(manga, chapter, *a, **k):
+            if chapter.number == "72":
+                seen.append(self._on_disk(isolated_home))
+            path = tmp_path / f"{chapter.number}.pdf"
+            path.write_bytes(b"%PDF")
+            return path
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+
+        assert run_cli("failed", "--retry") == 0
+
+        [disk] = seen
+        assert disk.is_chapter_downloaded(self.TITLE, "71")
+        assert list(disk.get_failed_chapters(self.TITLE)) == ["72"]
+        assert self._on_disk(isolated_home).get_failed_chapters(self.TITLE) == {}
+
+    def test_checkpoint_failure_stops_before_more_downloads(
+            self, run_cli, config, sent, isolated_home, monkeypatch,
+            tmp_path, capsys):
+        # A per-manga `except Exception` must not swallow it: the next
+        # chapter and the next manga are never downloaded or sent.
+        from memanga import cli
+        from memanga.state import State
+
+        config.set("delivery.mode", "email")
+        config.set("email.kindle_email", "reader@example.com")
+        config.set("email.sender_email", "sender@example.com")
+        config.set("manga", [
+            {"title": t, "source": "primary.test",
+             "url": f"https://primary.test/{t}", "status": "reading"}
+            for t in ("Alpha", "Beta")
+        ])
+        config.save()
+        monkeypatch.setattr(
+            cli, "check_for_updates",
+            lambda *a, **k: [self._chapter("1"), self._chapter("2")])
+        downloaded = []
+
+        def fake_download(manga, chapter, *a, **k):
+            downloaded.append((manga["title"], chapter.number))
+            path = tmp_path / f"{manga['title']}-{chapter.number}.pdf"
+            path.write_bytes(b"%PDF")
+            return path
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+
+        def _disk_full(self):
+            raise OSError("disk full")
+        monkeypatch.setattr(State, "save", _disk_full)
+        capsys.readouterr()
+
+        assert run_cli("check", "--auto", "--quiet") == 1
+
+        assert downloaded == [("Alpha", "1")]
+        assert sent == ["Alpha-1.pdf"]
+        err = capsys.readouterr().err
+        assert "Could not save state: disk full" in err
+        assert "Stopped" in err
+        # The run ended before the end-of-check record.
+        assert self._on_disk(isolated_home).get("last_check") is None
+
+    def test_chapter_error_still_checkpoints_what_was_recorded(
+            self, run_cli, config, isolated_home, monkeypatch, tmp_path,
+            capsys):
+        # Alpha's chapter is marked downloaded, then the pipeline raises;
+        # the record must be on disk before Beta is checked.
+        from memanga import cli
+        from memanga.state import State
+
+        config.set("manga", [
+            {"title": t, "source": "primary.test",
+             "url": f"https://primary.test/{t}", "status": "reading"}
+            for t in ("Alpha", "Beta")
+        ])
+        config.save()
+        seen = []
+
+        def _updates(manga, *a, **k):
+            if manga["title"] == "Beta":
+                seen.append(self._on_disk(isolated_home))
+                return []
+            return [self._chapter("1")]
+        monkeypatch.setattr(cli, "check_for_updates", _updates)
+
+        def fake_download(manga, chapter, *a, **k):
+            path = tmp_path / "Alpha-1.pdf"
+            path.write_bytes(b"%PDF")
+            return path
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+
+        def _broken_history(self, *a, **k):
+            raise RuntimeError("history broke")
+        monkeypatch.setattr(State, "add_download_history", _broken_history)
+        capsys.readouterr()
+
+        assert run_cli("check", "--auto", "--quiet") == 3
+        assert "Unexpected error: history broke" in capsys.readouterr().err
+        [disk] = seen
+        assert disk.is_chapter_downloaded("Alpha", "1")
+
+    @pytest.mark.skipif(sys.platform == "win32",
+                        reason="SIGTERM can't be raised and caught in-process on Windows")
+    def test_sigterm_saves_state_and_exits_143(
+            self, run_cli, library, sent, isolated_home, monkeypatch,
+            tmp_path, capsys):
+        import signal
+        from memanga import cli
+
+        self._two_new_chapters(monkeypatch)
+
+        def fake_download(manga, chapter, *a, **k):
+            if chapter.number == "72":
+                # Marked dirty only; the SIGTERM path must write it.
+                cli.state.add_notification("info", "before SIGTERM")
+                signal.raise_signal(signal.SIGTERM)
+                raise AssertionError("SIGTERM did not stop the download")
+            path = tmp_path / f"{chapter.number}.pdf"
+            path.write_bytes(b"%PDF")
+            return path
+        monkeypatch.setattr(cli, "download_chapter", fake_download)
+        before = signal.getsignal(signal.SIGTERM)
+        capsys.readouterr()
+
+        assert run_cli("check", "--auto", "--quiet") == 143
+
+        assert "Terminated" in capsys.readouterr().err
+        assert sent == ["71.pdf"]
+        disk = self._on_disk(isolated_home)
+        assert disk.is_chapter_downloaded(self.TITLE, "71")
+        assert not disk.is_chapter_downloaded(self.TITLE, "72")
+        assert any(n["message"] == "before SIGTERM"
+                   for n in disk.get_notifications())
+        assert disk.get("last_check") is None
+        assert signal.getsignal(signal.SIGTERM) == before
+
+    def test_sigterm_handler_is_restored_after_a_command(
+            self, run_cli, monkeypatch):
+        import signal
+        from memanga import cli
+
+        seen = []
+
+        def _list(args):
+            seen.append(signal.getsignal(signal.SIGTERM))
+        monkeypatch.setattr(cli, "cmd_list", _list)
+
+        def previous(signum, frame):
+            pass
+        old = signal.signal(signal.SIGTERM, previous)
+        try:
+            assert run_cli("list") == 0
+            assert signal.getsignal(signal.SIGTERM) is previous
+        finally:
+            signal.signal(signal.SIGTERM, old)
+        assert seen == [cli._raise_termination]
+
+    def test_sigterm_handler_not_installed_off_the_main_thread(self):
+        import signal
+        import threading
+        from memanga import cli
+
+        before = signal.getsignal(signal.SIGTERM)
+        result = []
+
+        def _run():
+            try:
+                with cli._sigterm_as_shutdown():
+                    result.append(signal.getsignal(signal.SIGTERM))
+            except Exception as e:  # signal.signal() raises off-main-thread
+                result.append(e)
+        worker = threading.Thread(target=_run)
+        worker.start()
+        worker.join(timeout=10)
+        assert result == [before]
+
+    def test_gui_launch_does_not_take_over_sigterm(
+            self, monkeypatch, isolated_home):
+        import signal
+        from memanga import cli
+
+        monkeypatch.delenv("MEMANGA_CLI_ONLY", raising=False)
+        monkeypatch.setattr(sys, "argv", ["memanga", "--gui"])
+        before = signal.getsignal(signal.SIGTERM)
+        seen = []
+        fake_gui = types.SimpleNamespace(
+            launch_gui=lambda **kwargs: seen.append(signal.getsignal(signal.SIGTERM)))
+        monkeypatch.setitem(sys.modules, "memanga.gui", fake_gui)
+        cli.main()
+        assert seen == [before]
 
 
 class TestCheckModes:
@@ -4249,6 +7165,124 @@ class TestCheckModes:
         self._stdin(monkeypatch, False)
         assert cli.cmd_check(argparse.Namespace(title="Alpha")) == 1
         assert calls["download"] == []
+
+    @staticmethod
+    def _policy(config, title, **fields):
+        """Set desktop-app policy fields on one seeded manga."""
+        manga = config.get("manga")
+        for entry in manga:
+            if entry["title"] == title:
+                entry.update(fields)
+        config.set("manga", manga)
+        config.save()
+
+    @pytest.mark.parametrize("tty", [False, True])
+    @pytest.mark.parametrize("flags", [
+        ["--auto", "--quiet"], ["--download"], ["--yes", "--all"],
+    ])
+    def test_auto_run_lists_but_never_downloads_manual_manga(
+            self, run_cli, config, seeded, calls, monkeypatch, capsys,
+            flags, tty):
+        """#341: the scheduled `check --auto --quiet` honors the desktop
+        app's manual mode; auto-mode manga still download."""
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, tty)
+        capsys.readouterr()
+
+        assert run_cli("check", *flags) == 0
+
+        assert calls["download"] == [("Beta", "5"), ("Beta", "6")]
+        assert len(calls["email"]) == 2
+        assert calls["prompt"] == []
+        captured = capsys.readouterr()
+        assert "manual mode, not downloaded" in captured.out
+        assert "memanga check Alpha --download" in captured.out
+        assert ("Summary: 2/2 chapters downloaded, 0 failed; checked 2 manga, "
+                "0 could not be checked, 2 chapter(s) of manual-mode manga "
+                "not downloaded") in captured.out
+        assert captured.err == ""
+        assert _disk_state().get_failed_chapters("Alpha") == {}
+
+    def test_only_manual_manga_is_not_a_failure(
+            self, run_cli, config, seeded, calls, monkeypatch, capsys):
+        self._policy(config, "Alpha", mode="manual")
+        self._policy(config, "Beta", mode="manual")
+        self._stdin(monkeypatch, False)
+        capsys.readouterr()
+
+        assert run_cli("check", "--auto", "--quiet") == 0
+
+        assert calls["download"] == calls["email"] == []
+        out = capsys.readouterr().out
+        assert "Summary: no chapters to download" in out
+        assert "4 chapter(s) of manual-mode manga not downloaded" in out
+
+    def test_unconfirmed_count_leaves_out_manual_manga(
+            self, run_cli, config, seeded, calls, monkeypatch, capsys):
+        """`--download` would not fetch them either, so they are not
+        reported as needing confirmation."""
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, False)
+        capsys.readouterr()
+
+        assert run_cli("check") == 1
+
+        assert calls["download"] == []
+        assert "skipped 2 chapter(s) that need confirmation" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("argv", [("Alpha",), ("-t", "Alpha"), ("#1",)])
+    def test_named_manual_manga_downloads(self, run_cli, config, seeded,
+                                          calls, monkeypatch, argv):
+        """Naming the manga is an explicit request."""
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, False)
+
+        assert run_cli("check", *argv, "--download") == 0
+
+        assert calls["download"] == [("Alpha", "5"), ("Alpha", "6")]
+
+    def test_prompt_still_offers_manual_manga(self, run_cli, config, seeded,
+                                              calls, monkeypatch):
+        """Asking per chapter on a terminal is an explicit request too."""
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, True)
+
+        assert run_cli("check") == 0
+
+        assert len(calls["prompt"]) == 4
+        assert sorted(calls["download"]) == [
+            ("Alpha", "5"), ("Alpha", "6"), ("Beta", "5"), ("Beta", "6")]
+
+    def test_dry_run_previews_manual_hold(self, run_cli, config, seeded,
+                                          calls, monkeypatch, capsys):
+        self._policy(config, "Alpha", mode="manual")
+        self._stdin(monkeypatch, False)
+        capsys.readouterr()
+
+        assert run_cli("check", "--dry-run") == 0
+
+        out = capsys.readouterr().out
+        assert out.count("[DRY RUN]") == 2
+        assert "Dry run: 2 chapter(s) available for download" in out
+        assert "2 chapter(s) of manual-mode manga not downloaded" in out
+        assert calls["download"] == []
+
+    def test_kindle_opt_out_saves_without_sending(
+            self, run_cli, config, seeded, calls, monkeypatch, capsys):
+        """#341: `send_to_kindle: false` wins over global email delivery;
+        the chapter is saved and nothing is left to resend."""
+        self._policy(config, "Alpha", send_to_kindle=False)
+        self._stdin(monkeypatch, False)
+
+        assert run_cli("check", "--auto", "--quiet") == 0
+
+        assert sorted(calls["download"]) == [
+            ("Alpha", "5"), ("Alpha", "6"), ("Beta", "5"), ("Beta", "6")]
+        assert sorted(p.name for p in calls["email"]) == [
+            "Beta-5.pdf", "Beta-6.pdf"]
+        state = _disk_state()
+        assert state.failures.get_all_undelivered() == {}
+        assert state.is_chapter_downloaded("Alpha", "5")
 
     def test_help_describes_modes(self, run_cli, capsys):
         assert run_cli("check", "--help") == 0
@@ -4491,6 +7525,21 @@ class TestRemoveHistoryAndFiles:
         assert (self._history(history) == ["1"]) is history_kept
         assert (downloads / "Goner").exists() is files_kept
         self._untouched(downloads)
+
+    @pytest.mark.parametrize("flags, logged", [
+        ((), ["Keeper", "Goner"]),
+        (("--purge-history",), ["Keeper"]),
+    ])
+    def test_purge_history_also_clears_download_log(
+            self, run_cli, config, downloads, history, flags, logged):
+        # Issue #392: Downloads History rows are history too.
+        history.add_download_history("Goner", "1", "cbz")
+        history.add_download_history("Keeper", "1", "cbz")
+        history.save()
+        assert run_cli("rm", "Goner", "--yes", *flags) == 0
+        from memanga.state import State
+        reloaded = State(config_dir=history.state_path.parent)
+        assert [e["title"] for e in reloaded.get_download_history()] == logged
 
     def test_keep_and_delete_files_conflict_changes_nothing(
             self, run_cli, config, downloads, history):
@@ -5066,3 +8115,385 @@ class TestPathOpen:
         out = capsys.readouterr().out
         assert "Print the download folder of a manga" in out
         assert "Open the download folder of a manga" in out
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Issue #244 — one state-changing process per config directory
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestConfigDirLock:
+    BUSY = "another MeManga process is using"
+
+    @pytest.fixture
+    def root(self, isolated_home):
+        from memanga.config import Config
+        from memanga.state import State
+        root = isolated_home / ".config" / "memanga"
+        cfg = Config(root)
+        cfg.set("manga", [{"title": "Berserk", "source": "mangadex.org",
+                           "url": "https://mangadex.org/t/1",
+                           "status": "reading"}])
+        cfg.save()
+        st = State(root)
+        st.add_failed_chapter("Berserk", "1", "mangadex.org", "timeout")
+        st.save()
+        return root
+
+    @staticmethod
+    def _files(root):
+        return {name: (root / name).read_bytes()
+                for name in ("config.yaml", "state.json")}
+
+    @pytest.mark.parametrize("argv", [
+        ("failed", "clear"),
+        ("failed", "--retry"),
+        ("check", "--dry-run"),
+        ("rm", "Berserk", "--keep-files"),
+        ("import", "-"),
+        ("config", "set", "partial_chapters.enabled", "true"),
+        ("cron", "install", "--time", "07:00"),
+        ("tui",),
+    ])
+    def test_state_changing_command_refused_while_locked(
+            self, run_cli, root, lock_holder, capsys, argv):
+        before = self._files(root)
+        lock_holder.hold(root)
+        capsys.readouterr()
+        assert run_cli(*argv) == 1
+        captured = capsys.readouterr()
+        assert self.BUSY in captured.err
+        assert str(root) in captured.err
+        assert captured.out == ""
+        assert self._files(root) == before
+
+    @pytest.mark.parametrize("argv", [
+        ("list",),
+        ("status",),
+        ("failed",),
+        ("failed", "list"),
+        ("config", "show"),
+        ("config", "path"),
+        ("config", "--show"),
+        ("export", "-"),
+        ("sources",),
+    ])
+    def test_read_only_command_runs_while_locked(
+            self, run_cli, root, lock_holder, capsys, argv):
+        lock_holder.hold(root)
+        capsys.readouterr()
+        assert run_cli(*argv) == 0
+        assert self.BUSY not in capsys.readouterr().err
+
+    @pytest.mark.parametrize("argv, locked", [
+        (["search", "x", "--json"], False),
+        (["search", "x", "--json", "--add", "1"], True),
+        (["search", "x"], True),
+        (["cron", "status"], False),
+        (["cron", "remove"], True),
+        (["config"], True),
+        (["config", "email"], True),
+        (["config", "edit"], True),
+        (["import", "-", "--dry-run"], True),
+        (["read", "Berserk", "1"], True),
+        (["--gui"], True),
+        ([], True),
+    ])
+    def test_which_commands_lock(self, argv, locked):
+        from memanga import cli
+        args = cli.build_parser().parse_args(argv)
+        assert cli._needs_config_lock(args) is locked
+
+    def test_runs_again_once_holder_exits(self, run_cli, root, lock_holder,
+                                          capsys):
+        proc = lock_holder.hold(root)
+        assert run_cli("failed", "clear") == 1
+        lock_holder.release(proc)
+        assert run_cli("failed", "clear") == 0
+        from memanga.state import State
+        assert State(root).get_all_failed_chapters() == {}
+
+    def test_command_holds_lock_and_releases_it(self, run_cli, root,
+                                                lock_holder, monkeypatch):
+        from memanga import cli
+        seen = []
+        monkeypatch.setattr(cli, "cmd_check",
+                            lambda args: seen.append(lock_holder.can_lock(root)))
+        assert run_cli("check") == 0
+        assert seen == [False]
+        assert lock_holder.can_lock(root)
+
+    def test_interrupt_saves_state_before_releasing(self, run_cli, root,
+                                                    lock_holder, monkeypatch):
+        from memanga import cli
+
+        def _interrupt(args):
+            raise KeyboardInterrupt
+        seen = []
+        monkeypatch.setattr(cli, "cmd_check", _interrupt)
+        monkeypatch.setattr(cli, "_flush_state_on_interrupt",
+                            lambda: seen.append(lock_holder.can_lock(root)))
+        assert run_cli("check") == 130
+        assert seen == [False]
+        assert lock_holder.can_lock(root)
+
+    def test_env_config_dir_is_locked(self, monkeypatch, tmp_path, lock_holder,
+                                      isolated_home, capsys):
+        from memanga import cli
+        other = tmp_path / "other"
+        monkeypatch.setenv("MEMANGA_CONFIG_DIR", str(other))
+        lock_holder.hold(other)
+        monkeypatch.setattr(sys, "argv", ["memanga", "failed", "clear"])
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+        assert self.BUSY in capsys.readouterr().err
+
+    def test_gui_holds_lock_for_its_window(self, monkeypatch, root, lock_holder):
+        monkeypatch.delenv("MEMANGA_CLI_ONLY", raising=False)
+        monkeypatch.setattr(sys, "argv", ["memanga", "--gui"])
+        from memanga import cli
+        seen = []
+        fake_gui = types.SimpleNamespace(
+            launch_gui=lambda **kwargs: seen.append(lock_holder.can_lock(root)))
+        monkeypatch.setitem(sys.modules, "memanga.gui", fake_gui)
+        cli.main()
+        assert seen == [False]
+
+    def test_gui_refused_while_locked(self, monkeypatch, root, lock_holder,
+                                      capsys):
+        monkeypatch.delenv("MEMANGA_CLI_ONLY", raising=False)
+        monkeypatch.setattr(sys, "argv", ["memanga", "--gui"])
+        from memanga import cli
+        launched = []
+        fake_gui = types.SimpleNamespace(
+            launch_gui=lambda **kwargs: launched.append(kwargs))
+        monkeypatch.setitem(sys.modules, "memanga.gui", fake_gui)
+        lock_holder.hold(root)
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 1
+        assert launched == []
+        assert self.BUSY in capsys.readouterr().err
+
+    @staticmethod
+    def _damage(root):
+        good = (root / "state.json").read_text(encoding="utf-8")
+        (root / "state.json.bak").write_text(good, encoding="utf-8")
+        (root / "state.json").write_text("{truncated", encoding="utf-8")
+
+    @staticmethod
+    def _dir_files(root):
+        def content(path):
+            try:
+                return path.read_bytes()
+            except PermissionError:
+                # Windows enforces msvcrt locks: the held memanga.lock
+                # cannot be read, so it is compared by size.
+                return ("locked", path.stat().st_size)
+        return sorted((p.name, content(p)) for p in root.iterdir()
+                      if p.is_file())
+
+    @pytest.mark.parametrize("argv", [
+        ("list",), ("status",), ("failed",), ("export", "-"),
+        ("doctor", "--check", "state"),
+    ])
+    def test_damaged_state_untouched_while_locked(
+            self, run_cli, root, lock_holder, capsys, argv):
+        self._damage(root)
+        lock_holder.hold(root)  # creates memanga.lock
+        before = self._dir_files(root)
+        capsys.readouterr()
+        assert run_cli(*argv) == 1
+        captured = capsys.readouterr()
+        assert "nothing was changed" in " ".join(
+            (captured.err + captured.out).split())
+        assert self._dir_files(root) == before
+        assert not list(root.glob("state.json.corrupt-*"))
+
+    def test_damaged_state_recovered_once_lock_is_free(
+            self, run_cli, root, lock_holder, capsys, monkeypatch):
+        from memanga import cli
+        from memanga.state import State
+        self._damage(root)
+        backup = json.loads((root / "state.json.bak").read_text(encoding="utf-8"))
+        proc = lock_holder.hold(root)
+        assert run_cli("list") == 1
+        lock_holder.release(proc)
+
+        seen = []
+        real_list = cli.cmd_list
+        monkeypatch.setattr(cli, "cmd_list", lambda args: (
+            seen.append(lock_holder.can_lock(root)), real_list(args))[1])
+        capsys.readouterr()
+        assert run_cli("list") == 0
+        assert seen == [False]  # recovery holds the lock for the command
+        assert "Restored the previous copy" in capsys.readouterr().err
+        assert json.loads((root / "state.json").read_text(encoding="utf-8")) == backup
+        assert [p.read_text(encoding="utf-8")
+                for p in root.glob("state.json.corrupt-*")] == ["{truncated"]
+        assert State(root).get_failed_chapters("Berserk")
+        assert lock_holder.can_lock(root)
+
+    def test_healthy_read_only_command_does_not_take_lock(
+            self, run_cli, root, lock_holder, monkeypatch):
+        from memanga import cli
+        seen = []
+        monkeypatch.setattr(cli, "cmd_list",
+                            lambda args: seen.append(lock_holder.can_lock(root)))
+        assert run_cli("list") == 0
+        assert seen == [True]
+
+    @pytest.mark.parametrize("name", [
+        "state.json", "config.yaml", "memanga.lock", "state.json.bak",
+        "config.yaml.bak", "STATE.JSON", "state.json.corrupt-x",
+    ])
+    def test_export_refuses_own_files(self, run_cli, root, lock_holder,
+                                      capsys, name):
+        lock_holder.hold(root)
+        before = self._dir_files(root)
+        capsys.readouterr()
+        assert run_cli("export", str(root / name)) == 1
+        assert "own files" in " ".join(capsys.readouterr().err.split())
+        assert self._dir_files(root) == before
+
+    @pytest.mark.skipif(os.name == "nt", reason="symlinks need privileges on Windows")
+    @pytest.mark.parametrize("alias", ["file", "dangling", "dir"])
+    def test_export_refuses_symlink_aliases(self, run_cli, root, lock_holder,
+                                            tmp_path, capsys, alias):
+        if alias == "file":
+            target = tmp_path / "out.json"
+            target.symlink_to(root / "state.json")
+        elif alias == "dangling":
+            target = tmp_path / "out.json"
+            target.symlink_to(root / "state.json.bak")
+        else:
+            (tmp_path / "cfg-alias").symlink_to(root, target_is_directory=True)
+            target = tmp_path / "cfg-alias" / "config.yaml"
+        lock_holder.hold(root)
+        before = self._dir_files(root)
+        assert run_cli("export", str(target)) == 1
+        assert "own files" in " ".join(capsys.readouterr().err.split())
+        assert self._dir_files(root) == before
+
+    def test_export_refuses_hard_link_to_state(self, run_cli, root, tmp_path,
+                                               lock_holder, capsys):
+        target = tmp_path / "out.json"
+        try:
+            os.link(root / "state.json", target)
+        except OSError as e:
+            pytest.skip(f"hard links not supported: {e}")
+        lock_holder.hold(root)
+        before = (root / "state.json").read_bytes()
+        assert run_cli("export", str(target)) == 1
+        assert "own files" in " ".join(capsys.readouterr().err.split())
+        assert (root / "state.json").read_bytes() == before
+
+    @pytest.mark.parametrize("name", [
+        "state.json.bak", "config.yaml.bak",
+        "state.json.corrupt-20261019T120000-0123456789abcdef",
+    ])
+    def test_export_refuses_hard_link_to_backup_or_recovery_copy(
+            self, run_cli, root, tmp_path, lock_holder, capsys, name):
+        protected = root / name
+        protected.write_text('{"manga": {}}', encoding="utf-8")
+        target = tmp_path / "out.json"
+        try:
+            os.link(protected, target)
+        except OSError as e:
+            pytest.skip(f"hard links not supported: {e}")
+        lock_holder.hold(root)
+        before = self._dir_files(root)
+        assert run_cli("export", str(target)) == 1
+        assert "own files" in " ".join(capsys.readouterr().err.split())
+        assert self._dir_files(root) == before
+        assert target.read_bytes() == protected.read_bytes() == b'{"manga": {}}'
+
+    @staticmethod
+    def _during_export_check(monkeypatch, name, replacement):
+        """Replace os.<name> only while export checks its destination."""
+        from memanga import cli
+        real_check = cli._own_file_target
+
+        def _check(path):
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(os, name, replacement)
+                return real_check(path)
+        monkeypatch.setattr(cli, "_own_file_target", _check)
+
+    @pytest.mark.parametrize("failure", ["scandir", "target_ino", "own_stat"])
+    def test_export_refuses_existing_file_it_cannot_verify(
+            self, run_cli, root, tmp_path, monkeypatch, capsys, failure):
+        """Fail closed: an existing destination whose identity can't be
+        compared with every own file may be a hard link to a backup."""
+        target = tmp_path / "existing.json"
+        target.write_text("old", encoding="utf-8")
+        real_stat = os.stat
+
+        if failure == "scandir":
+            def _scandir(path):
+                raise PermissionError(13, "Permission denied")
+            self._during_export_check(monkeypatch, "scandir", _scandir)
+        elif failure == "target_ino":
+            def _stat(path, *a, **k):
+                st = real_stat(path, *a, **k)
+                if os.fspath(path) == os.path.realpath(target):
+                    return os.stat_result((st.st_mode, 0) + tuple(st)[2:])
+                return st
+            self._during_export_check(monkeypatch, "stat", _stat)
+        else:
+            def _stat(path, *a, **k):
+                if os.path.basename(os.fspath(path)) == "state.json":
+                    raise PermissionError(13, "Permission denied")
+                return real_stat(path, *a, **k)
+            self._during_export_check(monkeypatch, "stat", _stat)
+
+        before = self._dir_files(root)
+        capsys.readouterr()
+        assert run_cli("export", str(target)) == 1
+        err = " ".join(capsys.readouterr().err.split())
+        assert "could not make sure" in err
+        assert "Nothing was written" in err
+        assert target.read_text(encoding="utf-8") == "old"
+        assert self._dir_files(root) == before
+
+    def test_export_to_new_file_needs_no_identity_check(
+            self, run_cli, root, tmp_path, monkeypatch):
+        def _scandir(path):
+            raise PermissionError(13, "Permission denied")
+        self._during_export_check(monkeypatch, "scandir", _scandir)
+        target = tmp_path / "new.json"
+        assert run_cli("export", str(target)) == 0
+        assert json.loads(target.read_text(encoding="utf-8"))["manga"]
+
+    def test_export_over_unrelated_existing_file_works(self, run_cli, root,
+                                                       tmp_path, lock_holder):
+        target = tmp_path / "old-export.json"
+        target.write_text("old", encoding="utf-8")
+        lock_holder.hold(root)
+        before = self._dir_files(root)
+        assert run_cli("export", str(target)) == 0
+        assert json.loads(target.read_text(encoding="utf-8"))["manga"]
+        assert self._dir_files(root) == before
+
+    def test_export_to_other_file_in_config_dir_works(self, run_cli, root,
+                                                      lock_holder):
+        lock_holder.hold(root)
+        assert run_cli("export", str(root / "backup.json")) == 0
+        assert json.loads((root / "backup.json").read_text())["manga"]
+
+    def test_lock_failure_is_reported_and_nothing_runs(
+            self, run_cli, root, monkeypatch, capsys):
+        import errno
+        from memanga import cli, process_lock
+
+        def _unsupported(fd):
+            raise OSError(errno.ENOLCK, "No locks available")
+        monkeypatch.setattr(process_lock, "_lock_fd", _unsupported)
+        before = self._files(root)
+        assert run_cli("failed", "clear") == 1
+        err = capsys.readouterr().err
+        assert "cannot lock" in err
+        assert "No locks available" in err
+        assert self._files(root) == before
+        assert cli._config_lock is None

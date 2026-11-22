@@ -35,6 +35,23 @@ class TestBrandMark:
         theme.set_theme("dark", qapp)
         b.update()
 
+    def test_paints_the_app_artwork(self, theme):
+        from PySide6.QtCore import QSize
+        from memanga.gui import _load_app_icon
+        from memanga.gui.components.brand_mark import BrandMark
+        b = BrandMark(size=34)
+        ratio = b.devicePixelRatioF()
+        painted = b.grab().toImage()
+        expected = _load_app_icon().pixmap(QSize(34, 34), ratio).toImage()
+        # Points inside the rounded corners, across the artwork.
+        for x, y in ((8, 17), (17, 8), (17, 17), (26, 17), (17, 26)):
+            px, py = int(x * ratio), int(y * ratio)
+            got = painted.pixelColor(px, py)
+            want = expected.pixelColor(px, py)
+            assert abs(got.red() - want.red()) <= 16
+            assert abs(got.green() - want.green()) <= 16
+            assert abs(got.blue() - want.blue()) <= 16
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Sidebar
@@ -201,6 +218,42 @@ class TestThemePicker:
         p._on_pick("dark")
         assert theme.current_theme() == "dark"
 
+    def test_check_mark_takes_the_new_accent(self, qapp, theme):
+        # It kept the accent of the theme the card was built in.
+        from memanga.gui.components.theme_picker import ThemePicker
+        p = ThemePicker()
+        theme.set_theme("light")  # subscribers only; no app restyle needed
+        sheet = p._cards["light"]._check.styleSheet()
+        assert theme.tokens()["accent.primary"] in sheet
+        assert theme.tokens()["accent.on_primary"] in sheet
+
+    def test_cards_stack_when_two_do_not_fit(self, qapp, theme):
+        # Live finding: the Light card was cut off at the right edge of
+        # the Settings pane. Narrower than two cards, they stack.
+        from PySide6.QtWidgets import QVBoxLayout, QWidget
+        from memanga.gui.components.theme_picker import ThemePicker
+        # Inside a host, as in Settings: a window would take the
+        # two-card minimum from its own layout.
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        p = ThemePicker()
+        layout.addWidget(p)
+        host.show()
+        both = p._side_by_side_width()
+        assert p.minimumSizeHint().width() < both
+        host.resize(both - 40, 700)
+        qapp.processEvents()
+        assert p.is_stacked()
+        dark, light = p._cards["dark"], p._cards["light"]
+        assert light.geometry().top() > dark.geometry().bottom()
+        assert light.geometry().right() < p.width()
+        host.resize(both + 40, 700)
+        qapp.processEvents()
+        assert not p.is_stacked()
+        assert dark.geometry().top() == light.geometry().top()
+        host.close()
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Modal base class
@@ -247,6 +300,73 @@ class TestDownloadFromModal:
         m._chapter_input.setText("not-a-number")
         m._do_confirm()
         assert captured == []
+
+
+class TestRemoveMangaModal:
+    def test_defaults_keep_history_and_cancel_is_default(self, qapp, theme):
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        captured = []
+        m = RemoveMangaModal(None, "T", on_confirm=captured.append)
+        assert m._purge_check.isChecked() is False
+        assert "kept" in m._effects.text()
+        assert "Downloaded files stay" in m._effects.text()
+        assert m.cancel_btn.isDefault() and not m.remove_btn.isDefault()
+        m._do_confirm()
+        assert captured == [False]
+
+    def test_checkbox_updates_text_and_result(self, qapp, theme):
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        captured = []
+        m = RemoveMangaModal(None, "T", on_confirm=captured.append)
+        m._purge_check.setChecked(True)
+        # Only what is saved under this title is deleted (issue #392).
+        assert "history saved under 'T' are deleted" in m._effects.text()
+        assert "can't be undone" in m._effects.text()
+        assert "Downloaded files stay" in m._effects.text()
+        m._do_confirm()
+        assert captured == [True]
+
+    def test_checkbox_label_fits_the_modal(self, qapp, theme):
+        # A QCheckBox label never wraps, so it must fit the body width.
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        m = RemoveMangaModal(None, "T", on_confirm=None)
+        margins = m.body_layout.contentsMargins()
+        available = m.panel.width() - margins.left() - margins.right()
+        assert m._purge_check.sizeHint().width() <= available
+
+    @pytest.mark.parametrize("length", [13, 72, 160])
+    def test_long_title_text_is_not_clipped_after_ticking(self, qapp, theme,
+                                                         length):
+        # Live check: from about 71 characters the ticked text was cut off
+        # and the files line hidden, because the panel did not regrow.
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        title = ("Long manga title " * 10)[:length]
+        m = RemoveMangaModal(None, title, on_confirm=None)
+        m.show()
+        qapp.processEvents()
+        try:
+            label = m._effects
+            # Ticked, then unticked again: the panel must fit at once,
+            # without waiting for further event-loop passes.
+            for checked in (True, False):
+                m._purge_check.setChecked(checked)
+                assert label.text().endswith(
+                    "Downloaded files stay in your download folder.")
+                assert label.height() >= label.heightForWidth(label.width())
+                bottom = label.mapTo(m.panel, label.rect().bottomLeft()).y()
+                assert bottom <= m.panel.height()
+        finally:
+            m.close()
+
+    def test_title_markup_is_shown_literally(self, qapp, theme):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QLabel
+        from memanga.gui.components.remove_manga_modal import RemoveMangaModal
+        m = RemoveMangaModal(None, "<b>T</b>", on_confirm=None)
+        q = next(w for w in m.findChildren(QLabel)
+                 if w.text().startswith("Remove '"))
+        assert q.textFormat() == Qt.TextFormat.PlainText
+        assert "<b>T</b>" in q.text()
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -412,3 +532,25 @@ class TestJumpSlider:
         assert s.value() == 1
         self._click_at(s, s.width() - 1)
         assert s.value() == 8
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# WrappingLabel
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class TestWrappingLabel:
+    def test_size_hints_follow_wrapped_text_height(self, theme):
+        from memanga.gui.components.wrapping_label import WrappingLabel
+        label = WrappingLabel()
+        label.resize(120, 20)
+        label.setText("a long hint that has to wrap " * 6)
+        tall = label.heightForWidth(120)
+        assert tall > label.fontMetrics().height()
+        assert label.wordWrap()
+        assert label.sizeHint().height() == tall
+        assert label.minimumSizeHint().height() == tall
+
+        # A shorter status text shrinks the hint at the same width.
+        label.setText("Done")
+        assert label.sizeHint().height() == label.heightForWidth(120) < tall

@@ -38,15 +38,22 @@ import importlib.util
 import plistlib
 import stat
 import struct
+import sys
 import zipfile
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC = REPO_ROOT / "packaging" / "memanga-release.spec"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 README = REPO_ROOT / "README.md"
+# The download and launch instructions live on the documentation site;
+# the README links there.
+INSTALL_PAGE = REPO_ROOT / "docs" / "guide" / "install.md"
+TROUBLESHOOTING_PAGE = REPO_ROOT / "docs" / "guide" / "troubleshooting.md"
+RELEASE_DATA = REPO_ROOT / "docs" / ".vitepress" / "release.ts"
 CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 MACOS_APP = REPO_ROOT / "packaging" / "macos_app.py"
 
@@ -65,6 +72,12 @@ def _load_macos_app():
 
 
 macos_app = _load_macos_app()
+
+# The executable bit these tests build and check is a POSIX permission;
+# Windows files have none. The archives they model are made on the Linux
+# and macOS release legs, where these tests run.
+needs_posix_modes = pytest.mark.skipif(
+    sys.platform == "win32", reason="POSIX permission bits do not exist on Windows")
 
 
 def _fake_macho(arch: str) -> bytes:
@@ -151,15 +164,13 @@ def test_workflow_verifies_architecture_before_upload():
     assert ARCH_EXPR in run
 
 
-def test_macos_pdf_system_dependency_is_installed_before_pip_deps():
-    """macos-26-intel can fall back to building pikepdf from source, which
-    needs qpdf headers before requirements.txt is installed."""
-    step = _step_named("Install macOS system libraries for PDF dependencies")
-    assert step is not None, "macOS qpdf dependency step missing"
-    assert step.get("if") == "runner.os == 'macOS'"
-    assert "brew install qpdf" in step.get("run", "")
-    assert _step_index("Install macOS system libraries for PDF dependencies") \
-        < _step_index("Install dependencies")
+def test_release_never_prepares_source_builds_of_python_packages():
+    """Issue #316: the release installs wheels only (--only-binary :all:),
+    so no leg builds pikepdf from source against Homebrew's qpdf."""
+    assert _step_named("Install macOS system libraries for PDF dependencies") is None
+    assert "brew install qpdf" not in WORKFLOW.read_text(encoding="utf-8")
+    run = _step_named("Install dependencies")["run"]
+    assert "--only-binary :all:" in run and "--force-reinstall" in run
 
 
 # ── Linux archive packaging (issue #167) ──────────────────────────────
@@ -192,10 +203,11 @@ def test_linux_binary_is_packaged_as_targz():
     assert step is not None, "packaging step missing"
     assert step.get("id") == "package", "upload step can't reference the path"
     run = step.get("run", "")
-    # Linux-only branch: make it executable, then wrap it in a tarball.
+    # Linux-only branch: make the launcher executable, then wrap the
+    # one-folder app (issue #381) in a tarball.
     assert "runner.os" in run and "Linux" in run
-    assert "chmod +x" in run
-    assert "tar -czf" in run
+    assert 'chmod +x "$base/${{ matrix.artifact_name }}"' in run
+    assert 'tar -czf "${base}.tar.gz" "$base"' in run
     assert ".tar.gz" in run
     # The final upload path is threaded out as a step output so a single
     # upload step serves every OS.
@@ -205,12 +217,16 @@ def test_linux_binary_is_packaged_as_targz():
 
 def test_upload_step_uses_packaged_path():
     """The upload must ship whatever the packaging step produced (the
-    tarball on Linux, the raw binary elsewhere), not a hard-coded name."""
+    tarball on Linux, the raw binary elsewhere), not a hard-coded name,
+    plus the matching third-party notices asset (issue #380)."""
     step = _step_named("Upload artifact")
     assert step is not None
     path = step.get("with", {}).get("path", "")
-    assert path == "${{ steps.package.outputs.upload_path }}", \
-        f"upload path not wired to the packaging output: {path!r}"
+    # One path per line; each line is a whole `${{ … }}` expression.
+    lines = [line.strip() for line in path.splitlines() if line.strip()]
+    assert lines == ["${{ steps.package.outputs.upload_path }}",
+                     "${{ steps.package.outputs.notices_path }}"], \
+        f"upload path not wired to the packaging outputs: {path!r}"
 
 
 def test_workflow_gates_linux_executable_bit_before_upload():
@@ -239,6 +255,7 @@ def test_package_and_gate_precede_upload():
         f"steps out of order: package={pkg} gate={gate} upload={upload}"
 
 
+@needs_posix_modes
 def test_targz_roundtrip_preserves_executable_bit(tmp_path):
     """Mechanism check for issue #167: the format the workflow ships
     (`tar czf` / `tar xzf`) records the Unix mode inside the archive, so
@@ -248,18 +265,21 @@ def test_targz_roundtrip_preserves_executable_bit(tmp_path):
     import stat
     import tarfile
 
-    binary = tmp_path / "MeManga-linux-x64"
+    # The tarball holds the one-folder app (issue #381).
+    folder = tmp_path / "MeManga-linux-x64"
+    (folder / "_internal").mkdir(parents=True)
+    binary = folder / "MeManga"
     binary.write_bytes(b"\x7fELF fake binary")
     binary.chmod(0o755)
 
     archive = tmp_path / "MeManga-linux-x64.tar.gz"
     with tarfile.open(archive, "w:gz") as tar:
-        tar.add(binary, arcname="MeManga-linux-x64")
+        tar.add(folder, arcname="MeManga-linux-x64")
 
     # The archived member itself must carry the owner-execute bit — that
     # is the byte-level guarantee a bare release asset cannot make.
     with tarfile.open(archive, "r:gz") as tar:
-        member = tar.getmember("MeManga-linux-x64")
+        member = tar.getmember("MeManga-linux-x64/MeManga")
         assert member.mode & stat.S_IXUSR, "tar member lost the +x bit"
 
     dest = tmp_path / "out"
@@ -269,22 +289,28 @@ def test_targz_roundtrip_preserves_executable_bit(tmp_path):
         # it keeps an executable file at 0o755, so the +x bit survives.
         tar.extractall(dest, filter="data")
 
-    extracted = dest / "MeManga-linux-x64"
+    extracted = dest / "MeManga-linux-x64" / "MeManga"
     assert extracted.stat().st_mode & stat.S_IXUSR, \
         "extracted binary is not owner-executable"
 
 
-def test_readme_documents_linux_targz_launch_path():
-    """README must point Linux users at the tarball and show how to run
-    it, so the download has a clear launch path (issue #167)."""
-    text = README.read_text(encoding="utf-8")
-    # Download table links to the archive, not the bare binary.
-    assert "MeManga-linux-x64.tar.gz" in text
-    # Concrete extract + run instructions.
-    assert "tar xzf MeManga-linux-x64.tar.gz" in text
-    assert "./MeManga-linux-x64" in text
-    # The chmod fallback for file managers that still strip the bit.
-    assert "chmod +x MeManga-linux-x64" in text
+def test_install_page_documents_linux_targz_launch_path():
+    """The install page must point Linux users at the tarball and show how
+    to run it, so the download has a clear launch path (issue #167): the
+    released single file, and the folder the workflow now packs."""
+    assets = RELEASE_DATA.read_text(encoding="utf-8")
+    text = INSTALL_PAGE.read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    # The release's Linux download is the archive, not a bare binary.
+    assert "'MeManga-linux-x64.tar.gz'" in assets
+    # Concrete extract + run instructions for the released single file.
+    assert "tar -xzf MeManga-linux-x64.tar.gz" in text
+    assert "./MeManga-linux-x64\n" in text
+    # The chmod fallback for tools that strip the bit.
+    assert "chmod +x MeManga-linux-x64`" in flat
+    # The development build's archive holds a folder with the program.
+    assert 'tar -czf "${base}.tar.gz" "$base"' in WORKFLOW.read_text(encoding="utf-8")
+    assert "`MeManga-linux-x64` with `MeManga`" in flat
 
 # ── issue #163: macOS assets ship as launchable .app packages ───────────
 def test_workflow_packages_macos_app_bundle():
@@ -321,7 +347,9 @@ def test_package_step_handles_macos_without_renaming():
     run = step.get("run", "")
     assert 'if [ "${{ runner.os }}" = "macOS" ]' in run
     assert 'echo "upload_path=$asset"' in run
-    assert 'mv "$bin" "$asset"' in run
+    # Windows / Linux: the one-folder app is renamed to the asset's base
+    # name before it is archived (issue #381).
+    assert 'mv release/MeManga "$base"' in run
 
 # ── issue #163: packaging/macos_app.py behaviour (runs off macOS) ────────
 def test_read_macho_arch_identifies_slices():
@@ -335,6 +363,7 @@ def test_read_macho_arch_identifies_slices():
     assert macos_app.read_macho_arch(b"\x00\x00") is None
 
 
+@needs_posix_modes
 def test_build_app_bundle_layout(tmp_path):
     exe = tmp_path / "MeManga"
     exe.write_bytes(_fake_macho("arm64"))
@@ -370,6 +399,75 @@ def test_build_app_bundle_without_icon_omits_icon_key(tmp_path):
     assert info["CFBundleShortVersionString"]
 
 
+def test_build_app_bundle_copies_resources(tmp_path):
+    """Issue #380: the third-party notices go into Contents/Resources, so
+    the bundle seal made by `codesign` afterwards covers them."""
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("arm64"))
+    notices = tmp_path / "THIRD_PARTY_NOTICES.txt"
+    notices.write_text("notices\n", encoding="utf-8")
+
+    app = macos_app.build_app_bundle(exe, tmp_path / "out", version="1.0.0",
+                                     resources=[notices])
+
+    copied = app / "Contents" / "Resources" / "THIRD_PARTY_NOTICES.txt"
+    assert copied.read_text(encoding="utf-8") == "notices\n"
+    assert not copied.stat().st_mode & stat.S_IXUSR
+
+
+def test_build_app_bundle_missing_resource_raises(tmp_path):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("arm64"))
+    try:
+        macos_app.build_app_bundle(exe, tmp_path / "out",
+                                   resources=[tmp_path / "nope.txt"])
+    except FileNotFoundError:
+        assert not (tmp_path / "out" / "MeManga.app").exists()
+        return
+    raise AssertionError("expected FileNotFoundError for a missing resource")
+
+
+@needs_posix_modes
+def test_validate_require_resource_dir_and_zip(tmp_path):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("x86_64"))
+    notices = tmp_path / "THIRD_PARTY_NOTICES.txt"
+    notices.write_text("notices\n", encoding="utf-8")
+    with_notices = macos_app.build_app_bundle(
+        exe, tmp_path / "with", version="1.0.0", resources=[notices])
+    without = macos_app.build_app_bundle(exe, tmp_path / "without",
+                                         version="1.0.0")
+    zip_with = macos_app.zip_app_bundle(with_notices, tmp_path / "with.zip")
+    zip_without = macos_app.zip_app_bundle(without, tmp_path / "without.zip")
+    required = ["THIRD_PARTY_NOTICES.txt"]
+
+    for path in (with_notices, zip_with):
+        assert macos_app.validate_app_bundle(
+            path, expected_arch="x86_64", require_resources=required) == []
+    for path in (without, zip_without):
+        problems = macos_app.validate_app_bundle(
+            path, expected_arch="x86_64", require_resources=required)
+        assert problems == [
+            "missing MeManga.app/Contents/Resources/THIRD_PARTY_NOTICES.txt"]
+
+
+@needs_posix_modes
+def test_macos_cli_resource_flags(tmp_path, capsys):
+    exe = tmp_path / "MeManga"
+    exe.write_bytes(_fake_macho("arm64"))
+    notices = tmp_path / "THIRD_PARTY_NOTICES.txt"
+    notices.write_text("notices\n", encoding="utf-8")
+    out = tmp_path / "out"
+    assert macos_app.main(["build", "--exe", str(exe), "--dest", str(out),
+                           "--resource", str(notices)]) == 0
+    app = out / "MeManga.app"
+    assert macos_app.main(["validate", "--path", str(app), "--arch", "arm64",
+                           "--require-resource", "THIRD_PARTY_NOTICES.txt"]) == 0
+    assert macos_app.main(["validate", "--path", str(app),
+                           "--require-resource", "OTHER.txt"]) == 1
+    assert "Contents/Resources/OTHER.txt" in capsys.readouterr().out
+
+
 def test_build_app_bundle_missing_exe_raises(tmp_path):
     try:
         macos_app.build_app_bundle(tmp_path / "nope", tmp_path / "out")
@@ -387,12 +485,14 @@ def _build_and_zip(tmp_path, arch="x86_64"):
     return app, zip_path
 
 
+@needs_posix_modes
 def test_validate_roundtrip_dir_and_zip(tmp_path):
     app, zip_path = _build_and_zip(tmp_path, "x86_64")
     assert macos_app.validate_app_bundle(app, expected_arch="x86_64") == []
     assert macos_app.validate_app_bundle(zip_path, expected_arch="x86_64") == []
 
 
+@needs_posix_modes
 def test_zip_preserves_executable_bit(tmp_path):
     """The exec bit must survive into the archive — its loss is the #163
     failure mode. Read it from the stored Unix mode, as macOS does."""
@@ -575,8 +675,9 @@ def test_spec_parameterizes_codesign_identity_from_env():
     assert "codesign_identity=_codesign_identity" in text
     assert "entitlements_file=_entitlements_file" in text
     assert "codesign_identity=None" not in text
-    # UPX would invalidate the Mach-O signatures.
-    assert 'upx=_sys.platform != "darwin"' in text
+    # UPX would invalidate the Mach-O signatures; since issue #381 it is
+    # off on every platform.
+    assert "upx=False" in text and "upx=True" not in text
 
 
 def test_entitlements_are_minimal_for_hardened_runtime():
@@ -735,8 +836,8 @@ def test_signing_steps_leave_windows_and_linux_alone():
     linux = _step_named("Verify Linux archive preserves the executable bit")
     assert linux is not None and linux.get("if") == "runner.os == 'Linux'"
     by_asset = {e["asset_name"]: e for e in _build_matrix()}
-    assert "MeManga-windows-x64.exe" in by_asset
-    assert by_asset["MeManga-windows-x64.exe"]["os"] == "windows-latest"
+    assert "MeManga-windows-x64.zip" in by_asset
+    assert by_asset["MeManga-windows-x64.zip"]["os"] == "windows-latest"
 
 
 def test_workflow_removes_signing_keychain():
@@ -747,19 +848,25 @@ def test_workflow_removes_signing_keychain():
     assert _step_index("Remove macOS signing keychain") > _step_index("Upload artifact")
 
 
-def test_readme_describes_unsigned_mac_app_workaround():
+def test_docs_describe_unsigned_mac_app_and_apples_route():
     """Notarization is optional and the published app may be unsigned, so
-    the README must not promise a notarized app and must keep the fix for
-    the "damaged" dialog."""
-    text = README.read_text(encoding="utf-8")
-    assert "not code-signed or notarized" in text
-    assert "paid Apple Developer account" in text
-    assert "starting with the next release" not in text
-    assert "The Mac app is signed with a Developer ID" not in text
-    assert "is damaged and can't be opened" in text
-    assert "xattr -dr com.apple.quarantine" in text
-    # The old Gatekeeper bypass doesn't clear the "damaged" dialog.
-    assert "right-click → Open the first time" not in text
+    the docs must not promise a notarized app. The install page says the
+    release is unsigned and links troubleshooting, which gives Apple's own
+    Open Anyway route rather than clearing the quarantine flag."""
+    install = " ".join(INSTALL_PAGE.read_text(encoding="utf-8").split())
+    trouble = " ".join(TROUBLESHOOTING_PAGE.read_text(encoding="utf-8").split())
+    readme = README.read_text(encoding="utf-8")
+    assert "without Apple signing or notarization" in install
+    assert "./troubleshooting#macos-says-the-app-cannot-be-opened" in install
+    assert "not signed or notarized" in trouble
+    assert "Open Anyway" in trouble
+    assert "https://support.apple.com/en-us/102445" in trouble
+    for text in (install, trouble, readme):
+        assert "starting with the next release" not in text
+        assert "The Mac app is signed with a Developer ID" not in text
+        assert "xattr" not in text
+        # The old Gatekeeper bypass doesn't clear the "damaged" dialog.
+        assert "right-click → Open the first time" not in text
 
 
 def test_changelog_163_entry_describes_optional_notarization():
@@ -779,15 +886,28 @@ def test_changelog_163_entry_describes_optional_notarization():
     assert "self-test" in entry
 
 
-def test_contributing_documents_optional_notarization():
-    text = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    section = text.split("### macOS signing and notarization", 1)[1]
-    section = section.split("\n### ", 1)[0]
-    assert "optional" in section and "paid Apple Developer" in section
+def test_docs_document_optional_notarization():
+    """The build and release guide lists every signing secret and says
+    notarization is optional; CONTRIBUTING says the same in short and
+    links there."""
+    def section(path, heading):
+        text = (REPO_ROOT / path).read_text(encoding="utf-8")
+        body = text.split(heading, 1)[1]
+        body = body.split("\n## ", 1)[0].split("\n### ", 1)[0]
+        return " ".join(body.split())
+
+    guide = section("docs/developer/build-release.md",
+                    "## macOS signing and notarization")
+    assert "optional" in guide and "paid Apple Developer" in guide
     for name in SIGNING_SECRETS:
-        assert f"`{name}`" in section
-    assert "still\npublishes unsigned" in section
-    assert "fails if any of these repository secrets is\nmissing" not in section
+        assert f"`{name}`" in guide
+    assert "still publishes unsigned" in guide
+    assert "fails if any of these repository secrets is missing" not in guide
+
+    contributing = section("CONTRIBUTING.md", "### macOS signing and notarization")
+    assert "optional" in contributing and "paid Apple Developer" in contributing
+    assert "still publishes unsigned" in contributing
+    assert "developer/build-release#macos-signing-and-notarization" in contributing
 
 
 # ── issue #163: signed / stapled shape checks in macos_app.py ───────────
@@ -832,6 +952,7 @@ def test_has_code_signature_reads_first_fat_slice():
     assert macos_app.has_code_signature(fat)
 
 
+@needs_posix_modes
 def test_unsigned_bundle_fails_require_signed(tmp_path):
     """The exact v0.4.3 shape (no _CodeSignature, no ticket) must be
     rejected once signing is required — it passed the old gate."""
@@ -846,6 +967,7 @@ def test_unsigned_bundle_fails_require_signed(tmp_path):
         assert any("notarization ticket" in p for p in problems), problems
 
 
+@needs_posix_modes
 def test_signed_stapled_bundle_passes_dir_and_zip(tmp_path):
     app = _signed_app(tmp_path, "x86_64")
     zip_path = macos_app.zip_app_bundle(app, tmp_path / "signed.zip")
@@ -855,6 +977,7 @@ def test_signed_stapled_bundle_passes_dir_and_zip(tmp_path):
             require_signed=True, require_stapled=True) == []
 
 
+@needs_posix_modes
 def test_signed_but_unstapled_bundle_fails_require_stapled(tmp_path):
     app = _signed_app(tmp_path, "arm64", stapled=False)
     zip_path = macos_app.zip_app_bundle(app, tmp_path / "unstapled.zip")
@@ -874,6 +997,7 @@ def test_sealed_bundle_with_unsigned_binary_fails(tmp_path):
     assert any("no embedded code signature" in p for p in problems), problems
 
 
+@needs_posix_modes
 def test_validate_cli_require_flags(tmp_path, capsys):
     unsigned_dir = tmp_path / "unsigned"
     unsigned_dir.mkdir()

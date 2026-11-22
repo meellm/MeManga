@@ -35,6 +35,7 @@ class LectorMangaScraper(BaseScraper):
 
     name = "lectormanga"
     base_url = "https://lector-mangas.lat"
+    content_language = "es"  # Spanish-language site
     search_url = "https://cdn.zerocomics.net/comics"
 
     # Series pages are /comics/<slug>; reader pages are

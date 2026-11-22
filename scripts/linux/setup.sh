@@ -31,14 +31,14 @@ source venv/bin/activate
 # Install dependencies
 echo "Installing Python dependencies..."
 pip install --upgrade pip -q
-pip install -r requirements.txt -q
+pip install -r requirements/gui.txt -q
 
 # Install Playwright browsers
 echo "Installing Playwright browsers (this may take a while)..."
 playwright install chromium firefox
 
-# Create config directory
-mkdir -p ~/.config/memanga/downloads
+# Create config directory: the folder the app itself uses
+python -c "from memanga.config import default_config_dir; default_config_dir().mkdir(parents=True, exist_ok=True)"
 
 echo ""
 echo "✅ Setup complete!"

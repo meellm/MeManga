@@ -24,7 +24,7 @@ class ManganatoGGScraper(PlaywrightScraper):
     def search(self, query: str) -> List[Manga]:
         """Search for manga."""
         # Manganato uses query string search
-        search_url = f"{self.base_url}/search/story/{quote(query.replace(' ', '_'))}"
+        search_url = f"{self.base_url}/search/story/{quote(query.replace(' ', '_'), safe='')}"
         
         html = self._get_page_content(search_url, wait_time=5000)
         soup = BeautifulSoup(html, "html.parser")

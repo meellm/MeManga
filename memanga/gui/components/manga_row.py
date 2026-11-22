@@ -6,6 +6,8 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
 from PySide6.QtGui import QPixmap, QMouseEvent
 from PySide6.QtCore import Qt
 from .. import theme as T
+from ..theme.tokens import STATUS_TOKEN, status_label
+from .keyboard import is_activation, is_context_menu, menu_anchor
 
 
 class MangaRow(QFrame):
@@ -18,6 +20,8 @@ class MangaRow(QFrame):
         self.setProperty("class", "card")
         self.setFixedHeight(56)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Reachable with Tab, opened with Enter/Space (issue #396).
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._manga = manga
         self._on_click = on_click
         self._on_right_click = on_right_click
@@ -26,12 +30,16 @@ class MangaRow(QFrame):
         layout.setContentsMargins(T.PAD_MD, T.PAD_SM, T.PAD_MD, T.PAD_SM)
         layout.setSpacing(T.PAD_MD)
 
-        # Thumbnail
+        # Thumbnail. The cover cache already hands out the pixmap at
+        # this size (and at the screen's pixel density), so it is shown
+        # as it is.
+        self._thumb = None
         if cover_image:
             thumb = QLabel()
             thumb.setFixedSize(36, 48)
-            thumb.setPixmap(cover_image.scaled(36, 48, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation))
+            thumb.setPixmap(cover_image)
             layout.addWidget(thumb)
+            self._thumb = thumb
 
         # Info
         info = QVBoxLayout()
@@ -39,12 +47,20 @@ class MangaRow(QFrame):
 
         title_row = QHBoxLayout()
         title_label = QLabel(manga.get("title", "Unknown"))
+        # Titles come from source sites; show them literally.
+        title_label.setTextFormat(Qt.TextFormat.PlainText)
         title_label.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt; font-weight: bold;")
         title_row.addWidget(title_label)
 
         if new_count > 0:
             badge = QLabel(f" {new_count} NEW ")
-            badge.setStyleSheet(f"background: {T.ACCENT}; color: #fff; font-size: {T.FONT_SIZE_XS}pt; font-weight: bold; border-radius: 3px; padding: 0 3px;")
+            # Text in the accent's own "on" colour: white was 1.9:1 on
+            # the dark theme's accent (issue #395).
+            badge.setStyleSheet(
+                f"background: {T.tokens()['accent.primary']};"
+                f" color: {T.tokens()['accent.on_primary']};"
+                f" font-size: {T.FONT_SIZE_XS}pt; font-weight: bold;"
+                f" border-radius: 3px; padding: 0 3px;")
             title_row.addWidget(badge)
         title_row.addStretch()
         info.addLayout(title_row)
@@ -63,8 +79,9 @@ class MangaRow(QFrame):
         right = QVBoxLayout()
         right.setAlignment(Qt.AlignmentFlag.AlignRight)
         status = manga.get("status", "reading")
-        color = T.STATUS_COLORS.get(status, T.FG_MUTED)
-        sl = QLabel(status.capitalize())
+        # Token lookup, so "plan" and "paused" get their colour too.
+        color = T.tokens()[STATUS_TOKEN.get(status, "text.t_3")]
+        sl = QLabel(status_label(status))
         sl.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {color};")
         sl.setAlignment(Qt.AlignmentFlag.AlignRight)
         right.addWidget(sl)
@@ -78,9 +95,35 @@ class MangaRow(QFrame):
 
         layout.addLayout(right)
 
+        # Whole-row click target: name it for screen readers (issue #394).
+        self.setAccessibleName(manga.get("title", "Unknown"))
+        details = [status_label(status)]
+        if source:
+            details.append(source)
+        if state_data:
+            details.append(f"{dl_count} chapters downloaded")
+        if new_count > 0:
+            details.append(f"{new_count} new")
+        details.append("opens details")
+        self.setAccessibleDescription(", ".join(details))
+
+    def update_cover(self, cover_image: QPixmap):
+        """Show a cover that finished loading after the row was built."""
+        if self._thumb is not None and cover_image and not cover_image.isNull():
+            self._thumb.setPixmap(cover_image)
+
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton and self._on_click:
             self._on_click(self._manga)
         elif event.button() == Qt.MouseButton.RightButton and self._on_right_click:
             pos = event.globalPosition().toPoint()
             self._on_right_click(self._manga, pos.x(), pos.y())
+
+    def keyPressEvent(self, event):
+        if is_activation(event) and self._on_click:
+            self._on_click(self._manga)
+        elif is_context_menu(event) and self._on_right_click:
+            pos = menu_anchor(self)
+            self._on_right_click(self._manga, pos.x(), pos.y())
+        else:
+            super().keyPressEvent(event)

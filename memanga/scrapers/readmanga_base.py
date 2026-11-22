@@ -5,10 +5,14 @@ These sites share a common WordPress manga theme structure with CDN-hosted image
 Sites: readsnk.com, readberserk.com, readhaikyuu.com, readjujutsukaisen.com, readchainsawman.com
 """
 
+import logging
 import re
 from typing import List, Optional
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class ReadMangaBaseScraper(BaseScraper):
@@ -42,7 +46,7 @@ class ReadMangaBaseScraper(BaseScraper):
     
     def search(self, query: str) -> List[Manga]:
         """Search for manga."""
-        search_url = f"{self.base_url}/?s={query.replace(' ', '+')}"
+        search_url = f"{self.base_url}/?s={quote_plus(query)}"
         html = self._get_html(search_url)
         soup = BeautifulSoup(html, "html.parser")
         
@@ -182,5 +186,5 @@ class ReadMangaBaseScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

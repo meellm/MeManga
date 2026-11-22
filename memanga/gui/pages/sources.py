@@ -17,8 +17,10 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QCheckBox, QLineEdit,
 )
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QKeySequence
 from .base import BasePage
 from .. import theme as T
+from ..theme.tokens import TYPOGRAPHY
 
 
 class SourcesPage(BasePage):
@@ -262,10 +264,14 @@ class SourcesPage(BasePage):
         filter_row.setSpacing(10)
         self._filter_entry = QLineEdit()
         self._filter_entry.setPlaceholderText("Filter sources by domain…")
+        self._filter_entry.setAccessibleName("Filter sources")
         self._filter_entry.setMinimumWidth(220)
         self._filter_entry.setMaximumWidth(300)
         self._filter_entry.textChanged.connect(self._on_filter_changed)
         filter_row.addWidget(self._filter_entry)
+        # Ctrl/Cmd+F → filter field (issue #396).
+        self.add_shortcut(QKeySequence.StandardKey.Find,
+                          lambda: self.focus_field(self._filter_entry))
 
         # Language chip-row (All / EN / JP / ES / Other). Selecting one
         # filters the supported list to sources tagged with that lang.
@@ -417,6 +423,9 @@ class SourcesPage(BasePage):
             head.addWidget(name, 1)
             # "..." more menu — opens a small QMenu with quick actions.
             more_btn = QPushButton("⋯")
+            more_btn.setToolTip("More actions")
+            more_btn.setAccessibleName("More actions")
+            more_btn.setAccessibleDescription(domain)
             more_btn.setFixedSize(24, 22)
             more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             more_btn.setStyleSheet(
@@ -425,6 +434,9 @@ class SourcesPage(BasePage):
                 f" padding: 0; border-radius: 4px; }}"
                 f"QPushButton:hover {{ background-color: {T.tokens()['surfaces.bg_2']};"
                 f" color: {T.tokens()['text.t_1']}; }}"
+                # Keyboard focus ring (issue #396).
+                f"QPushButton[focusVisible=\"true\"]:focus {{"
+                f" border: 2px solid {T.tokens()['accent.primary']}; }}"
             )
             more_btn.clicked.connect(lambda _, d=domain: self._show_active_more(d))
             head.addWidget(more_btn)
@@ -631,6 +643,9 @@ class SourcesPage(BasePage):
                 row_layout.setSpacing(10)
 
                 check = QCheckBox()
+                # The domain sits in a separate label; give the bare
+                # checkbox its source as a name (issue #394).
+                check.setAccessibleName(source)
                 check.setChecked(source not in disabled)
                 check.stateChanged.connect(
                     lambda _=None, s=source, c=check: self._on_toggle(s, c.isChecked())
@@ -645,7 +660,8 @@ class SourcesPage(BasePage):
                     "error": T.tokens()["status.danger"],
                 }.get(hh.get("status", "unknown"), T.tokens()["text.t_4"])
                 dot = QLabel("●")
-                dot.setStyleSheet(f"color: {dot_color}; font-size: 8pt;")
+                dot.setStyleSheet(
+                    f"color: {dot_color}; font-size: {TYPOGRAPHY['size_min']}pt;")
                 row_layout.addWidget(dot)
 
                 name = QLabel(source)
@@ -660,13 +676,13 @@ class SourcesPage(BasePage):
                     f"QLabel {{"
                     f"  color: {T.tokens()['text.t_3']};"
                     f"  font-family: 'Geist Mono', monospace;"
-                    f"  font-size: 8pt; font-weight: 600;"
+                    f"  font-size: {TYPOGRAPHY['size_min']}pt; font-weight: 600;"
                     f"  letter-spacing: 0.5px;"
-                    f"  padding: 0px 4px;"
+                    f"  padding: 0px 2px;"
                     f"}}"
                 )
                 lang_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                lang_chip.setFixedWidth(28)
+                lang_chip.setFixedWidth(32)
                 row_layout.addWidget(lang_chip)
 
                 # Latency (if pinged) — fixed-width mono so columns align

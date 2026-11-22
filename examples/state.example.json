@@ -1,6 +1,7 @@
 {
   "_comment": "MeManga state example. The app creates and maintains this file automatically at ~/.config/memanga/state.json — you should not need to edit it by hand. Included only as a schema reference.",
 
+  "schema_version": 1,
   "manga": {
     "One Piece": {
       "downloaded": ["1130", "1131", "1132"],
@@ -66,9 +67,13 @@
       "title": "One Piece",
       "chapter": "1132",
       "format": "pdf",
-      "path": "/home/me/Downloads/MeManga/One Piece/One Piece - Chapter 1132.pdf",
+      "path": "/home/me/Downloads/MeManga/One Piece/One Piece - Chapter 1132.000.pdf",
       "size_mb": 4.2,
       "kindle_sent": false,
+      "source": "mangadex.org",
+      "from_backup": false,
+      "partial": false,
+      "deleted_after_send": false,
       "timestamp": "2026-05-27T12:01:30"
     }
   ],

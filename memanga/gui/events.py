@@ -5,7 +5,6 @@ Workers publish events from background threads; the main thread polls and dispat
 
 import logging
 import queue
-import traceback
 import threading
 from typing import Any, Callable, Dict, List
 
@@ -56,8 +55,7 @@ class EventBus:
                     callback(data)
                 except Exception as e:
                     # Log the error so it's not completely invisible
-                    tb = traceback.format_exc()
                     self._last_error = f"[{event_type}] {callback.__name__}: {e}"
-                    logger.error(f"Event handler error [{event_type}] {callback.__name__}: {e}\n{tb}")
-                    print(f"[EventBus ERROR] {event_type} -> {callback.__name__}: {e}")
+                    logger.exception("Event handler error [%s] %s: %s",
+                                     event_type, callback.__name__, e)
             processed += 1

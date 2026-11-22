@@ -5,10 +5,14 @@ https://manhuaus.org
 Manhua library using WordPress Manga theme.
 """
 
+import logging
 import re
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
 from .base import BaseScraper, Chapter, Manga
+
+logger = logging.getLogger(__name__)
 
 
 class ManhuaUsScraper(BaseScraper):
@@ -19,7 +23,7 @@ class ManhuaUsScraper(BaseScraper):
 
     def search(self, query: str) -> List[Manga]:
         from bs4 import BeautifulSoup
-        url = f"{self.base_url}/?s={query.replace(' ', '+')}&post_type=wp-manga"
+        url = f"{self.base_url}/?s={quote_plus(query)}&post_type=wp-manga"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         
@@ -87,5 +91,5 @@ class ManhuaUsScraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

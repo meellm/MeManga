@@ -117,13 +117,15 @@ class TestBaseScraperContract:
 
 def _discover_scraper_modules():
     """Find every scraper module under memanga.scrapers (skipping base/
-    templates) and return (name, module) pairs.
+    templates and the generated coverage_data, which holds only data) and
+    return (name, module) pairs.
     """
     import memanga.scrapers as pkg
     out = []
     for _, name, _ in pkgutil.iter_modules(pkg.__path__):
         if name.startswith("_") or name in ("base", "templates",
-                                              "playwright_base"):
+                                              "playwright_base", "catalog",
+                                              "coverage_data"):
             continue
         try:
             m = importlib.import_module(f"memanga.scrapers.{name}")
@@ -195,9 +197,9 @@ class TestMangaFireSearchUsesJsonApi:
     links, so that selector matched nothing and every search returned 0
     results. search() must hit GET /api/titles?keyword=... instead.
 
-    Issue #142 added a `vrf` token to that call, so the browser is back -
-    but only to mint the token. The result set still comes from one JSON
-    request, never from scraped HTML.
+    Issue #142 added a `vrf` token to that call. It is computed locally,
+    so the whole search is one plain JSON request, never scraped HTML
+    and never a browser.
     """
 
     class _FakeResponse:
@@ -209,6 +211,9 @@ class TestMangaFireSearchUsesJsonApi:
         def json(self):
             return self._payload
 
+        def raise_for_status(self):
+            pass
+
     class _FakeSession:
         def __init__(self, payload):
             self._payload = payload
@@ -218,20 +223,8 @@ class TestMangaFireSearchUsesJsonApi:
             self.urls.append(url)
             return TestMangaFireSearchUsesJsonApi._FakeResponse(self._payload)
 
-    class _StubVRF:
-        def __init__(self, token="TOKEN"):
-            self._token = token
-
-        def get_token(self, api_path, params=()):
-            return self._token
-
-        def invalidate(self):
-            pass
-
-    def test_search_hits_titles_api_with_encoded_keyword(self, monkeypatch):
+    def test_search_hits_titles_api_with_encoded_keyword(self):
         from memanga.scrapers import mangafire as mf
-
-        monkeypatch.setattr(mf, "get_vrf_generator", lambda: self._StubVRF())
 
         scraper = mf.MangaFireScraper()
         scraper.session = self._FakeSession({
@@ -246,18 +239,17 @@ class TestMangaFireSearchUsesJsonApi:
         results = scraper.search("blue lock/2")
 
         # One JSON call, keyword still escaped so the slash can't break
-        # out into the path, now signed with the vrf token.
+        # out into the path, signed over the decoded keyword.
+        token = mf.sign_api_request("/titles", [("keyword", "blue lock/2")])
         assert scraper.session.urls == [
-            "https://mangafire.to/api/titles?keyword=blue+lock%2F2&vrf=TOKEN",
+            "https://mangafire.to/api/titles?keyword=blue+lock%2F2"
+            f"&vrf={token}",
         ]
         assert results and results[0].url == "https://mangafire.to/title/abc-blue-lock"
 
-    def test_search_only_touches_the_browser_to_mint_a_token(self, monkeypatch):
-        """Hard guard: the browser is a token source, not the search
-        transport. With an unprotected endpoint (MangaFire's generator
-        returns null) the whole path stays browser-free, and results
-        never come from a rendered page.
-        """
+    def test_search_never_starts_a_browser(self, monkeypatch):
+        """Hard guard: signing is local, so search starts no browser and
+        results never come from a rendered page."""
         from memanga.scrapers import mangafire as mf
 
         called = {"n": 0}
@@ -277,15 +269,17 @@ class TestMangaFireSearchUsesJsonApi:
 
         import playwright.sync_api as pwapi
         monkeypatch.setattr(pwapi, "sync_playwright", lambda: _BoomPW())
-        monkeypatch.setattr(mf, "get_vrf_generator",
-                            lambda: self._StubVRF(token=None))
 
         scraper = mf.MangaFireScraper()
         scraper.session = self._FakeSession({"items": [], "meta": {}})
         scraper.search("x")
 
         assert called["n"] == 0, "search must stay browser-free"
-        assert scraper.session.urls == ["https://mangafire.to/api/titles?keyword=x"]
+        assert mf.MangaFireScraper.engine == "http"
+        assert scraper.session.urls == [
+            "https://mangafire.to/api/titles?keyword=x"
+            f"&vrf={mf.sign_api_request('/titles', [('keyword', 'x')])}",
+        ]
 
 
 class TestWeebCentralSearchHitsDataEndpoint:
@@ -383,10 +377,25 @@ class TestWeebCentralCloudflareDetection:
     def test_looks_like_cloudflare_matches_known_phrases(self):
         from memanga.scrapers.weebcentral import _looks_like_cloudflare
         assert _looks_like_cloudflare("", "Just a moment...")
+        # Body text counts only as the classic interstitial's sentences;
+        # ordinary mentions are covered in test_weebcentral_parsing.py.
         assert _looks_like_cloudflare(
-            "<html><body>Checking your browser…</body></html>",
+            "<html><body>Checking your browser before accessing "
+            "weebcentral.com.</body></html>",
         )
         assert _looks_like_cloudflare("DDoS protection by Cloudflare")
+        # A Cloudflare deny page names Cloudflare in its title, whether
+        # the title comes from the page or only from the raw markup.
+        deny_body = "<html><body>Sorry, you have been blocked</body></html>"
+        assert _looks_like_cloudflare(
+            deny_body, "Attention Required! | Cloudflare")
+        assert _looks_like_cloudflare(
+            "<html><head><title>Attention Required! | Cloudflare</title>"
+            "</head><body>Sorry, you have been blocked</body></html>")
+        # The word in ordinary body text is not a signal.
+        assert not _looks_like_cloudflare(
+            "<html><body>Mirror served via Cloudflare</body></html>",
+            "Blue Lock | Weeb Central")
         # A normal results page must NOT trip the detector.
         assert not _looks_like_cloudflare(
             "<html><a href='/series/abc'>Blue Lock</a></html>",
@@ -428,50 +437,57 @@ class TestWeebCentralCloudflareDetection:
         assert results and results[0].title == "Blue Lock"
 
 
-class TestWeebCentralChapterListStability:
+class TestWeebCentralChapterListIsComplete:
     """Regression for the "only 9 of 349 chapters returned" bug. The
-    HTMX swap that lands the full chapter list arrives in batches; the
-    scraper must wait for the count to stabilise rather than returning
-    after the first batch crosses some threshold.
+    series page renders just the newest and oldest few chapters and
+    fetches the rest over XHR on "Show All Chapters"; when that request
+    failed, the short list was returned as the whole series. The list
+    must come from the full-chapter-list fragment itself.
     """
 
-    def test_waits_until_link_count_stops_growing(self):
-        from memanga.scrapers.weebcentral import WeebCentralScraper
+    def test_reads_the_full_list_fragment_not_the_series_page(
+            self, monkeypatch):
+        from memanga.scrapers import weebcentral as wc
 
-        # Simulate the HTMX swap by returning a growing count from
-        # `page.evaluate(...)` until it plateaus.
-        sequence = iter([5, 12, 80, 200, 340, 349, 349, 349])
+        series = "https://weebcentral.com/series/01ABC/Blue-Lock"
+        full_list = "https://weebcentral.com/series/01ABC/full-chapter-list"
 
-        class _FakePage:
-            def evaluate(self, _expr):
-                return next(sequence, 349)
-            def wait_for_timeout(self, _ms):
-                pass
-
-        scraper = WeebCentralScraper()
-        final = scraper._wait_for_chapter_list_stable(
-            _FakePage(), max_passes=20, interval_ms=0,
-        )
-        assert final == 349, f"expected 349, got {final}"
-
-    def test_returns_when_count_never_grows_past_zero(self):
-        """A page with no chapter links at all must still terminate
-        (don't sit on max_passes × interval just because the count is
-        stuck at zero)."""
-        from memanga.scrapers.weebcentral import WeebCentralScraper
+        class _Link:
+            def __init__(self, n):
+                self.n = n
+            def get_attribute(self, _name):
+                return f"/chapters/C{self.n}"
+            def inner_text(self):
+                return f"Chapter {self.n}"
 
         class _FakePage:
-            def evaluate(self, _expr):
-                return 0
+            def __init__(self):
+                self.url = ""
+                self.visits = []
+            def goto(self, url, **kwargs):
+                self.url = url
+                self.visits.append((url, kwargs.get("referer")))
             def wait_for_timeout(self, _ms):
                 pass
+            def content(self):
+                return "<html><body></body></html>"
+            def title(self):
+                return "Blue Lock | Weeb Central"
+            def query_selector_all(self, _selector):
+                # The series page's first render vs the full fragment.
+                count = 349 if self.url == full_list else 9
+                return [_Link(n) for n in range(1, count + 1)]
+            def close(self):
+                pass
 
-        scraper = WeebCentralScraper()
-        # Bound the call so a regression wouldn't hang the suite.
-        final = scraper._wait_for_chapter_list_stable(
-            _FakePage(), max_passes=5, interval_ms=0,
-        )
-        assert final == 0
+        page = _FakePage()
+        monkeypatch.setattr(wc.WeebCentralScraper, "_new_page",
+                            lambda self: (None, None, page))
+
+        chapters = wc.WeebCentralScraper().get_chapters(series)
+
+        assert len(chapters) == 349
+        assert page.visits == [(full_list, series)]
 
 
 class TestWeebCentralChapterUrlSelfHeal:
@@ -543,7 +559,7 @@ class TestPlaywrightScraperPerSubclassExecutor:
     all queued serially on a single browser thread inside the
     search worker's 8-slot pool. The first slow scraper blocked every
     other Playwright source. Each subclass must now own its own
-    executor + lock pair.
+    browser worker.
     """
 
     def test_each_subclass_has_distinct_executor(self):
@@ -551,9 +567,10 @@ class TestPlaywrightScraperPerSubclassExecutor:
         from memanga.scrapers.weebcentral import WeebCentralScraper
         from memanga.scrapers.mangakatana import MangakatanataScraper
 
-        # Two subclasses → two distinct executors and two distinct locks.
-        assert WeebCentralScraper._executor is not MangakatanataScraper._executor
-        assert WeebCentralScraper._executor_lock is not MangakatanataScraper._executor_lock
+        # Two subclasses → two distinct workers (thread + lock each).
+        assert WeebCentralScraper._worker is not MangakatanataScraper._worker
+        assert "_worker" in WeebCentralScraper.__dict__
+        assert "_worker" in MangakatanataScraper.__dict__
 
     def test_get_browser_in_thread_rolls_back_partial_init(self, monkeypatch):
         """When firefox.launch raises, neither `_thread_local.playwright`
@@ -594,3 +611,39 @@ class TestPlaywrightScraperPerSubclassExecutor:
         assert not hasattr(pb._thread_local, "context")
         # And `pw.stop()` must have been called to release native resources.
         assert _BoomPW.stopped, "partial init didn't call pw.stop()"
+
+    def test_missing_browser_build_says_run_setup(self, monkeypatch):
+        """Issue #217: Playwright's "Executable doesn't exist" banner is
+        replaced by a message naming `memanga setup`, after the same
+        rollback."""
+        from memanga.first_run import BrowserSetupError
+        from memanga.scrapers import playwright_base as pb
+        from memanga.scrapers.weebcentral import WeebCentralScraper
+
+        pb.cleanup_browsers()
+        missing = RuntimeError(
+            "BrowserType.launch: Executable doesn't exist at /cache/firefox-1/firefox\n"
+            "║ Looks like Playwright was just installed or updated. ║")
+
+        class _MissingPW:
+            stopped = False
+
+            class firefox:
+                @staticmethod
+                def launch(*a, **k):
+                    raise missing
+
+            def stop(self):
+                _MissingPW.stopped = True
+
+        import playwright.sync_api as pwapi
+        monkeypatch.setattr(pwapi, "sync_playwright", lambda: type("_S", (), {
+            "start": staticmethod(lambda: _MissingPW()),
+        })())
+
+        with pytest.raises(BrowserSetupError, match="memanga setup") as info:
+            WeebCentralScraper()._get_browser_in_thread()
+        assert info.value.__cause__ is missing
+        assert "Looks like" not in str(info.value)
+        assert _MissingPW.stopped
+        assert not hasattr(pb._thread_local, "playwright")

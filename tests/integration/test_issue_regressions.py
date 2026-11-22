@@ -436,7 +436,7 @@ def test_issue_45_reader_marks_read_at_end(app_window, qapp, sample_manga,
 
 
 def test_issue_104_removes_chapter_after_read(app_window, qapp, sample_manga,
-                                              make_cbz):
+                                              make_cbz, fake_trash):
     from pathlib import Path
     app_window.config.set("reader.remove_after_read", True)
     reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
@@ -450,10 +450,27 @@ def test_issue_104_removes_chapter_after_read(app_window, qapp, sample_manga,
     bar.setValue(bar.maximum())
     qapp.processEvents()
 
+    # Read at once; the file goes when the reader leaves the chapter,
+    # since its pages are decoded from it on demand (#389).
+    assert app_window.app_state.is_chapter_read(title, "1")
+    assert artifact.exists()
+    app_window.show_page("detail", manga=sample_manga)
+    qapp.processEvents()
+
     # File gone, dropped from downloaded, but read progress kept.
     assert not artifact.exists()
     assert not app_window.app_state.is_chapter_downloaded(title, "1")
     assert app_window.app_state.is_chapter_read(title, "1")
+    # #393: moved to the trash, not deleted, and the user is told where.
+    from memanga.gui.trash import trash_name
+    trashed = fake_trash / artifact.name
+    assert trashed.exists()
+    [note] = [n for n in app_window.app_state.get_notifications()
+              if "after reading" in n["message"]]
+    assert note["type"] == "system"
+    assert note["message"] == (
+        f"Moved {title} Chapter 1 to the {trash_name()} after reading.")
+    assert trashed.name in note["details"]
 
 
 def test_issue_104_next_survives_current_download_cleanup(
@@ -475,9 +492,8 @@ def test_issue_104_next_survives_current_download_cleanup(
     bar.setValue(bar.maximum())
     qapp.processEvents()
 
-    assert not chapter_1.exists()
-    assert not app_window.app_state.is_chapter_downloaded(title, "1")
-    assert app_window.app_state.is_chapter_downloaded(title, "2")
+    # Still open, so still on disk (#389); removed once the reader moves on.
+    assert chapter_1.exists()
     assert app_window.app_state.is_chapter_read(title, "1")
 
     reader._go_next_chapter()
@@ -486,6 +502,10 @@ def test_issue_104_next_survives_current_download_cleanup(
     assert str(reader._chapter) == "2"
     assert reader._artifact_path == chapter_2
     assert reader._images
+    assert not chapter_1.exists()
+    assert not app_window.app_state.is_chapter_downloaded(title, "1")
+    assert app_window.app_state.is_chapter_downloaded(title, "2")
+    assert app_window.app_state.is_chapter_read(title, "1")
 
 
 def test_issue_104_107_prefetch_keeps_immediate_next_after_cleanup(
@@ -506,15 +526,17 @@ def test_issue_104_107_prefetch_keeps_immediate_next_after_cleanup(
     bar.setValue(bar.maximum())
     qapp.processEvents()
 
-    assert not chapter_1.exists()
-    assert app_window.app_state.get_downloaded_chapters(title) == ["3"]
+    # Still open, so still on disk (#389); removed once the reader moves on.
+    assert chapter_1.exists()
+    assert app_window.app_state.get_downloaded_chapters(title) == ["1", "3"]
 
-    # A prefetch/download completion lands chapter 2 after the current
-    # chapter has already been removed from downloaded state.
+    # A prefetch/download completion lands chapter 2 while the finished
+    # chapter is still open.
     chapter_2.write_bytes(
         make_cbz(pages=8, name="ch2.cbz").read_bytes())
     app_window.app_state.add_downloaded_chapter(title, "2")
-    assert app_window.app_state.get_downloaded_chapters(title) == ["2", "3"]
+    assert app_window.app_state.get_downloaded_chapters(title) == [
+        "1", "2", "3"]
 
     reader._on_download_complete({"title": title, "chapter": "2"})
     qapp.processEvents()
@@ -529,6 +551,8 @@ def test_issue_104_107_prefetch_keeps_immediate_next_after_cleanup(
     assert str(reader._chapter) == "2"
     assert reader._artifact_path == chapter_2
     assert reader._images
+    assert not chapter_1.exists()
+    assert app_window.app_state.get_downloaded_chapters(title) == ["2", "3"]
 
 
 def test_issue_104_disabled_keeps_chapter(app_window, qapp, sample_manga,
@@ -550,30 +574,83 @@ def test_issue_104_disabled_keeps_chapter(app_window, qapp, sample_manga,
     assert app_window.app_state.is_chapter_read(title, "1")
 
 
-def test_issue_104_deletion_failure_keeps_downloaded(app_window, qapp,
-                                                     sample_manga, make_cbz):
-    # If the artifact can't be deleted, the chapter must stay downloaded
-    # (state must not desync from disk) and the reader must not crash.
+@pytest.mark.parametrize("value", ["no", "false", 1],
+                         ids=["text-no", "text-false", "number"])
+def test_issue_293_malformed_flag_keeps_chapter(app_window, qapp, sample_manga,
+                                                make_cbz, monkeypatch, value):
+    # Truthy text in the file must pass neither cleanup gate.
     from pathlib import Path
+    moved = []
+    monkeypatch.setattr("memanga.gui.trash.move_to_trash", moved.append)
+    app_window.config.set("reader.remove_after_read", value)
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
+    title = sample_manga["title"]
+    artifact = Path(app_window.config.download_dir) / title / \
+        f"{title} - Chapter 1.cbz"
+
+    bar = reader._scroll.verticalScrollBar()
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+    assert app_window.app_state.is_chapter_read(title, "1")
+    assert reader._pending_removal is None
+
+    reader._remove_after_read(title, "1", artifact)
+
+    assert moved == []
+    assert artifact.exists()
+    assert app_window.app_state.is_chapter_downloaded(title, "1")
+    assert app_window.config.get("reader.remove_after_read") == value
+
+
+@pytest.mark.parametrize("outcome", [False, TypeError("bad binding")],
+                         ids=["refused", "raised"])
+def test_issue_104_deletion_failure_keeps_downloaded(app_window, qapp,
+                                                     sample_manga, make_cbz,
+                                                     monkeypatch, outcome):
+    # If the artifact can't be moved to the trash, the chapter must stay
+    # downloaded (state must not desync from disk) and the reader must not
+    # crash. #393: it is never deleted for good instead, whether the trash
+    # refuses the file or the Qt call itself fails.
+    from pathlib import Path
+    from memanga.gui import trash
     app_window.config.set("reader.remove_after_read", True)
     reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
     title = sample_manga["title"]
     artifact = Path(app_window.config.download_dir) / title / \
         f"{title} - Chapter 1.cbz"
 
-    # Force the (file) deletion to fail, as a locked/permission-denied
-    # artifact would in the wild.
-    import unittest.mock as mock
-    with mock.patch.object(type(artifact), "unlink",
-                           side_effect=OSError("boom")):
-        bar = reader._scroll.verticalScrollBar()
-        bar.setValue(bar.maximum())
-        qapp.processEvents()
+    # The trash refuses the file, as a volume without a usable trash or
+    # a locked/permission-denied artifact would in the wild.
+    class _FailingQFile:
+        def __init__(self, path):
+            self._path = path
+
+        def fileName(self):
+            return self._path
+
+        def moveToTrash(self):
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    monkeypatch.setattr(trash, "QFile", _FailingQFile)
+    bar = reader._scroll.verticalScrollBar()
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+    # The deferred removal runs when the reader leaves the chapter.
+    app_window.show_page("detail", manga=sample_manga)
+    qapp.processEvents()
 
     # Non-fatal: file untouched, chapter stays downloaded and read.
     assert artifact.exists()
     assert app_window.app_state.is_chapter_downloaded(title, "1")
     assert app_window.app_state.is_chapter_read(title, "1")
+    [note] = [n for n in app_window.app_state.get_notifications()
+              if "after reading" in n["message"]]
+    assert note["type"] == "error"
+    assert note["message"].startswith(
+        f"Couldn't move {title} Chapter 1 to the {trash.trash_name()} "
+        "after reading, so it was kept")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -841,9 +918,9 @@ def test_issue_111_sanitized_title_folder(app_window, qapp, make_cbz):
 
 def test_issue_111_part_style_chapter_label(app_window, qapp, sample_manga,
                                             make_cbz):
-    """Part-style labels are formatted for archive sorting on disk
-    ("2 Part 1" -> "2.01"); the reader used to search for the raw label
-    only."""
+    """Part-style labels were formatted for archive sorting on disk
+    ("2 Part 1" -> "2.01" before #241); the reader used to search for the
+    raw label only. Those downloads must stay reachable."""
     from pathlib import Path
     app_window.config.set("manga", [sample_manga])
     dl = Path(app_window.config.download_dir) / sample_manga["title"]
@@ -858,6 +935,71 @@ def test_issue_111_part_style_chapter_label(app_window, qapp, sample_manga,
     reader = app_window._pages["reader"]
     assert reader._images, (
         "#111 regression: downloader-formatted part chapter unreachable")
+
+
+@pytest.mark.parametrize("chapter,stored", [
+    # Names written since #241.
+    ("10", "0010.000"),
+    ("2 Part 1", "0002_Part 01"),
+    ("2.5", "0002.500"),
+    ("2.0", "0002.000 (2.0)"),
+    # Names written by earlier versions stay reachable.
+    ("10", "10"),
+    ("2 Part 1", "2.01"),
+    ("2 Part 1", "2 Part 1"),
+    ("2.5", "2.5"),
+])
+def test_issue_241_reader_opens_padded_and_legacy_chapter_files(
+        app_window, qapp, sample_manga, make_cbz, chapter, stored):
+    """Issue #241: chapters are saved with zero-padded labels so file
+    managers sort them in order; the reader must open those files and
+    files saved under the older label forms."""
+    from pathlib import Path
+    app_window.config.set("manga", [sample_manga])
+    dl = Path(app_window.config.download_dir) / sample_manga["title"]
+    dl.mkdir(parents=True, exist_ok=True)
+    artifact = dl / f"{sample_manga['title']} - Chapter {stored}.cbz"
+    artifact.write_bytes(make_cbz(pages=2).read_bytes())
+    app_window.app_state.add_downloaded_chapter(sample_manga["title"], chapter)
+
+    app_window.show_page("reader", manga=sample_manga, chapter=chapter)
+    qapp.processEvents()
+    reader = app_window._pages["reader"]
+    assert reader._artifact_path == artifact
+    assert reader._images
+
+
+@pytest.mark.parametrize("chapter,current", [
+    ("2", True), ("2.0", True), ("2", False), ("2.5", False),
+])
+def test_issue_241_reader_opens_long_title_chapter_files(
+        app_window, qapp, make_cbz, chapter, current):
+    """Issue #241: with a long title the downloader shortens the title so
+    the chapter text stays whole; older versions cut the end of the whole
+    name. The reader must open both."""
+    from pathlib import Path
+    from memanga.downloader import _format_chapter_number, _sanitize_filename
+    from memanga.downloader.naming import _chapter_base_name
+    title = ("Long Title " * 9).strip()
+    manga = {"title": title, "url": "https://mangadex.org/title/z",
+             "source": "mangadex.org", "status": "reading", "mode": "manual"}
+    app_window.config.set("manga", [manga])
+    dl = Path(app_window.config.download_dir) / _sanitize_filename(title)
+    dl.mkdir(parents=True, exist_ok=True)
+    if current:
+        base = _chapter_base_name("{title} - Chapter {chapter}", title,
+                                  _format_chapter_number(chapter))
+    else:
+        base = _sanitize_filename(f"{title} - Chapter {chapter}")
+    artifact = dl / f"{base}.cbz"
+    artifact.write_bytes(make_cbz(pages=2).read_bytes())
+    app_window.app_state.add_downloaded_chapter(title, chapter)
+
+    app_window.show_page("reader", manga=manga, chapter=chapter)
+    qapp.processEvents()
+    reader = app_window._pages["reader"]
+    assert reader._artifact_path == artifact
+    assert reader._images
 
 
 def test_issue_111_raw_locations_still_load(app_window, qapp, make_cbz):

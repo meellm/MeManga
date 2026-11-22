@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from .scrapers import POPULAR_SOURCES, get_scraper
+from .scrapers import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES, get_scraper
 
 
 # ─────────────────────────────────────────────────────────────────────
 # Relevance filter — many "single-manga" scrapers in the registry
-# (BeastarsManga, TGManga, AjimeNoIppo, …) hard-code `search()` to
+# (BeastarsManga, TGManga, HajimNoIppo, …) hard-code `search()` to
 # return their one manga regardless of the query string. Without this
 # filter, searching "Blue Lock" returns Beastars, Tokyo Ghoul, Hajime
 # no Ippo, etc. We compare the returned title against the query tokens
@@ -83,95 +83,10 @@ def sort_sources_by_popularity(sources: List[str]) -> List[str]:
     return sorted(sources, key=lambda d: (source_rank(d), d))
 
 
-# Sources known to be broken or dead — skipped in search so a worker
-# slot doesn't wait out the full timeout. Re-run tests/scrapers/live/
-# against a candidate domain before re-enabling it here.
-#
-# Reasons:
-#   - SHUTDOWN:     site shows a "shutdown" page (mangasee123)
-#   - DEAD_DNS:     domain resolves nowhere, every request times out
-#   - REPLACED:     domain forwards to an unrelated site (mangakakalot →
-#                   spinzywheel.com gambling page)
-#   - NEEDS_JS_API: site has an SPA + client-side search API that the
-#                   plain HTML doesn't expose (mangabolt.com)
-#   - ALIAS:        retired domain served by the same scraper as a live
-#                   one already in the sweep; skipped so the canonical
-#                   domain is the only one probed, and the aliases never
-#                   surface as separate search sources (asuracomic.net,
-#                   asuratoon.com)
-BROKEN_SEARCH_SOURCES = {
-    # SHUTDOWN
-    "mangasee123.com",            # serves a "shutdown" image
-    # DEAD_DNS / unreachable
-    "mangareader.to",
-    "chapmanganato.to",
-    "readmanganato.com",
-    "manganato.com",
-    "mangakakalot.com",           # → spinzywheel.com
-    "mangakakalot.to",
-    "manga4life.com",             # ex-mangasee mirror, also dead
-    "mangalife.us",
-    # mangaclash.com fails TLS verification (unknown issuer), and plain
-    # HTTP no longer serves MangaClash - requests may be dropped, and a
-    # browser lands on an unrelated shopping page. www. has no DNS. No
-    # verified replacement - the .org lookalike is an unrelated
-    # WordPress shell (issue #179).
-    "mangaclash.com",
-    # REPLACED / regional block / chronic timeout
-    "mangatown.com", "www.mangatown.com",
-    "manhwa18.cc",
-    "mangafreak.me", "mangafreak.ws", "ww2.mangafreak.me",
-    "bato.to", "batoto.to",
-    # hiperdex.com is blocked/unreachable from the audit network: verified
-    # HTTPS sees a self-signed localhost.localdomain cert, and unverified
-    # HTTPS / plain HTTP return a regional access-block page. It may still
-    # work elsewhere, but no verified replacement domain with live manga
-    # downloads was found - .co is parked for sale, .info is a parking
-    # redirect, and .top -> hiperdex.tv is a different tRPC app, not the
-    # Madara site this scraper targets (issue #180).
-    "hiperdex.com",
-    # region-blocked (DNS poison + SNI filter) on some networks, where
-    # connect() stalls and the 30s-timeout x 3-retry sweep slot hangs
-    # ~90s+, so drop it from the sweep. Reachable elsewhere, so it stays
-    # usable by direct URL.
-    "mangago.me", "www.mangago.me",
-    # ALIAS — retired Asura domains, same scraper as asurascans.com
-    # (issue #177). Skipped so canonical asurascans.com wins the
-    # de-dupe and the aliases never show up as their own search
-    # source; both still resolve for library entries saved on them.
-    "asuracomic.net", "asuratoon.com",
-    # ALIAS — old Lector Manga host, 301-redirects to lector-mangas.lat
-    # (issue #186). Same scraper, so only the current host is searched.
-    "lectormangass.net",
-    # NEEDS_JS_API — static HTML returns 0 hits, real search is client-side.
-    # (mgeko.cc used to be parked here; its plain-HTML search passed the
-    # live full-pipeline probe again, so it is back in the sweep - #178.)
-    "mangabolt.com",
-    "truemanga.com", "mangamonk.com",
-    "mangahub.us",                # search endpoint requires headless JS
-    "hivetoons.org", "hivetoon.com",
-    "isekaiscan.com",
-    "zinmanga.com",
-    "kunmanga.com",
-    "flamecomics.xyz",            # SPA, search via API only
-    # Strong Cloudflare interactive challenge — even cloudscraper gets a
-    # 403. Would need a real headless browser. Drops them from search;
-    # user can still add manga from these by URL.
-    "manhuafast.com",
-    "manhuaus.org",
-    # Manganato.gg also serves the Cloudflare "Just a moment..." page
-    # to plain requests + Playwright without a deep wait. Its existing
-    # Playwright scraper times out at the 60s mark in practice.
-    "manganato.gg",
-    # kagane.org redirects to kagane.to, and both the site and the
-    # yuzuki.kagane.org search API answer plain requests, cloudscraper
-    # and headless Firefox with a Cloudflare 403/challenge. The reader's
-    # images also need a per-session page token. No challenge-safe path
-    # yet, so Kagane stays registered for saved entries but is never
-    # swept (issue #182).
-    "kagane.org", "www.kagane.org", "kagane.to",
-}
+from .scrapers.catalog import SEARCH_SKIPS
 
+# Kept as a set for existing callers. Reasons live in SEARCH_SKIPS.
+BROKEN_SEARCH_SOURCES = set(SEARCH_SKIPS)
 
 def compute_search_sources(config) -> List[str]:
     """Build the source list for a multi-source sweep.
@@ -186,7 +101,11 @@ def compute_search_sources(config) -> List[str]:
       2. Every source the user has in their library — they've proven
          useful for this user already.
       3. Minus anything disabled on the Sources page
-         (`sources.disabled` in config).
+         (`sources.disabled` in config). While that key is missing
+         no selection was ever saved, so only the default selection
+         (`DEFAULT_ENABLED_SOURCES`) is swept, as on a fresh desktop
+         install. A saved list is used as it is, an empty one
+         included.
       4. Minus sites that are known dead / not searchable from plain
          HTML (BROKEN_SEARCH_SOURCES — verified against the live
          probe; updating that set is the supported way to re-enable a
@@ -198,7 +117,8 @@ def compute_search_sources(config) -> List[str]:
     except Exception:
         TEMPLATE_SCRAPERS = {}
 
-    disabled = set(config.get("sources.disabled", []) or [])
+    saved_disabled = config.get("sources.disabled")
+    disabled = set(saved_disabled or [])
     library: set = set()
     for m in config.get("manga", []):
         for s in m.get("sources", []) or []:
@@ -222,6 +142,8 @@ def compute_search_sources(config) -> List[str]:
     # reason.
     template_domains = set(TEMPLATE_SCRAPERS.keys())
     aggregators = {d for d in SCRAPERS.keys() if d not in template_domains}
+    if saved_disabled is None:
+        aggregators &= set(DEFAULT_ENABLED_SOURCES)
 
     # De-dupe canonical hostnames — many aliases map to the same scraper
     # class (e.g. tcbscans.com / tcbscans.me / tcbonepiecechapters.com
@@ -361,6 +283,12 @@ def sweep(
     return results, failures
 
 
+# Chapter-count probes running at once, shared by the CLI and the GUI.
+# Requests to one site are already paced across threads; this bounds
+# the total, kept low so slow or flaky connections aren't flooded.
+CHAPTER_COUNT_WORKERS = 4
+
+
 def fetch_chapter_count(source: str, url: str) -> Optional[int]:
     """Chapter count for one result, or None when the probe fails.
     One attempt only — callers wanting retries (the GUI chip probe)
@@ -374,9 +302,13 @@ def fetch_chapter_count(source: str, url: str) -> Optional[int]:
 
 
 def probe_chapter_counts(results: List[SearchResult],
-                         max_workers: int = 6) -> None:
+                         max_workers: int = CHAPTER_COUNT_WORKERS) -> None:
     """Fill in `chapter_count` on each result in place, in parallel.
-    Failed probes leave the field None."""
+    Failed probes leave the field None.
+
+    Each result costs one full chapter-list fetch from its source:
+    several requests for long, paged lists, a browser page load for
+    browser-driven sources, plus any retries of failed requests."""
     if not results:
         return
     with ThreadPoolExecutor(max_workers=max_workers,

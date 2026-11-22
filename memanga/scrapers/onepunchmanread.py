@@ -7,10 +7,9 @@ One Punch Man Read (onepunchmanread.com)
 
 import re
 import logging
-import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +22,9 @@ class OnePunchManReadScraper(BaseScraper):
     
     def __init__(self):
         super().__init__()
-        self.session = cloudscraper.create_scraper()
+        self._use_cloudscraper()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": BROWSER_USER_AGENT_SHORT,
             "Referer": self.BASE_URL,
         })
     
@@ -106,14 +105,14 @@ class OnePunchManReadScraper(BaseScraper):
                 src = src.strip()
                 pages.append(src)
         
-        logger.info(f"Found {len(pages)} pages in {chapter_url}")
+        logger.debug("Found %s pages in %s", len(pages), chapter_url)
         return pages
     
     def download_image(self, url: str, path: Path) -> bool:
         """Download an image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": self.BASE_URL,
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
             }
@@ -126,5 +125,5 @@ class OnePunchManReadScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

@@ -14,11 +14,14 @@ Subclass config attributes:
     normalize_blogger: bool    - Normalize Blogger URLs to /s1600/ resolution
 """
 
+import logging
 import re
 from typing import List
 from pathlib import Path
 from bs4 import BeautifulSoup
-from ..base import BaseScraper, Chapter, Manga
+from ..base import BaseScraper, Chapter, Manga, CLOUDSCRAPER_CHROME_DESKTOP
+
+logger = logging.getLogger(__name__)
 
 
 class OGImageMetaScraper(BaseScraper):
@@ -35,13 +38,7 @@ class OGImageMetaScraper(BaseScraper):
     def __init__(self):
         super().__init__()
         if self.uses_cloudscraper:
-            try:
-                import cloudscraper
-                self.session = cloudscraper.create_scraper(
-                    browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True}
-                )
-            except ImportError:
-                pass
+            self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
         self.session.headers.update({
             "Referer": self.base_url,
         })
@@ -154,5 +151,5 @@ class OGImageMetaScraper(BaseScraper):
                 f.write(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

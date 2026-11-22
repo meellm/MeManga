@@ -7,6 +7,134 @@ All notable changes are recorded here. Format loosely follows
 ## [Unreleased]
 
 ### Added
+- #255 Pushes and pull requests to `main` run CI: a lint for syntax
+  errors and undefined names, a check that the sdist and wheel build,
+  pass `twine check` and start, the whole test suite on Linux with
+  Python 3.12 in four parallel parts, and the non-GUI unit tests on
+  Python 3.11 and 3.13 and on Windows; macOS runs them on pushes to
+  `main` and releases. The live scraper probes run weekly and upload
+  `health.json`.
+- Part of #317: a tag's GitHub Release, with the desktop downloads, is
+  created only when that CI and the dependency check below pass on the
+  tag; the release builds run alongside them. The Docker image is not
+  gated yet: its own workflow still builds and publishes it for every
+  tag, whatever the tests show, until this is coordinated with the
+  Docker workflow changes in #477.
+- Part of #285: the GitHub Release text is the version's section of
+  this changelog, followed by GitHub's list of merged pull requests. A
+  tag whose version has no section here fails within seconds, before
+  the tests and release builds start. Publishing to PyPI and syncing the
+  `cli` branch are not automated yet.
+- Part of #385: the pinned dependencies in `requirements/` are checked
+  against known vulnerabilities when they change, weekly and before
+  every GitHub Release; a known vulnerability fails the check unless it
+  is listed with a reason in `.github/osv-scanner.toml`. This covers the
+  Python packages of the Docker image too, not its operating system
+  packages, which are not scanned yet. Dependabot proposes updates of the
+  GitHub Actions the workflows use.
+- #217 `memanga setup` prepares a first run after `pip install`, which
+  itself still sets nothing up. It creates `config.yaml` with the default
+  settings when there is none (an existing file is never changed) and
+  the download folder, checks both are writable, and checks that the
+  Playwright Firefox and Chromium builds are installed and start
+  headless. Missing builds are downloaded only after a yes on a terminal
+  or with `--install-browsers`; without a terminal nothing is downloaded,
+  and `--no-install-browsers` never downloads. Missing system libraries
+  are reported with the command that installs them; setup never runs
+  sudo or a package manager. It can be run again at any time and exits
+  1 while something still needs the user. A scraper whose browser build
+  is missing now says to run `memanga setup` instead of showing
+  Playwright's install banner, and `doctor` points there too.
+- #359 A small, supported Python API: `memanga.api.Library` reads the
+  tracked manga of a config directory (title, status, sources, last,
+  downloaded and failed chapters) as read-only objects, without printing,
+  locking or writing anything. Every other module is internal; checks,
+  downloads and edits are done with the CLI. See "Python API" in the
+  README.
+- #380 Release downloads and the Docker image ship third-party notices.
+  Desktop builds list every component PyInstaller bundled (Python
+  packages, the Python runtime, the Qt runtime from PySide6, the
+  PyInstaller bootloader and native libraries from the build system) with
+  the license and notice files each one ships, plus the LGPL/GPL texts
+  for the PySide6 wheels, which ship none. Every release asset gets a
+  matching `<asset>-THIRD_PARTY_NOTICES.txt`; the file is also inside
+  `MeManga.app`, next to the binary in the Linux `.tar.gz` and embedded
+  in the binary. The Docker image has the notices for its Python packages,
+  Python runtime and Playwright browser builds in
+  `/usr/share/doc/memanga/`. Builds fail when a component has no license
+  text. A desktop build's native library that no Python package or system
+  package owns needs an entry in `packaging/third_party_overrides.json`,
+  which ships that component's own license text (OpenSSL, libffi and the
+  Visual C++ runtime for the Windows build). Attributions for the
+  third-party code inside Qt and the browser builds are not reproduced;
+  the file says where they are published.
+- #345 Turning on email delivery asks which manga to send: only the
+  manga you turn on, or every manga. The desktop app's Settings and the
+  `config` wizard propose "only manga I choose", so a library is never
+  sent in full unasked; `config set delivery.mode email` and switching
+  from local to email in `config edit` take that choice when none was
+  made and say how to change it. The choice is the
+  new `email.kindle_scope` setting (`selected` or `all`), shown by
+  `config email`. A manga's own Kindle toggle always wins, and a config
+  that already used email delivery without the setting keeps sending
+  every manga as before.
+- #366 Email can be sent over implicit TLS (port 465) as well as
+  STARTTLS (port 587). The new `email.smtp_tls` setting is `auto` by
+  default (implicit TLS on port 465, STARTTLS on any other port), or
+  `starttls` / `implicit` to choose. Both check the server certificate
+  and need TLS 1.2 or later, and there is still no unencrypted mode. Delivery, `config email
+  --test` / `--send-test`, `doctor --smtp` and the desktop app's email
+  tests all use it; `config email` and `status --json` show it. A
+  connection that fails because the encryption doesn't match the port
+  now says which setting to change, instead of only timing out. The
+  guide lists SMTP settings for Gmail, iCloud Mail, Fastmail, Microsoft
+  365 and Outlook.com, including the Microsoft accounts that can't use a
+  password.
+- #355 `memanga send TARGET CHAPTER...` sends downloaded chapters to the
+  Kindle again from their saved files, with the configured email
+  settings and `delivery.delete_after_send`. Every chapter is checked
+  before anything is sent. Files are taken from the manga's download
+  folder, never through a symlink (a chapter still on the `--pending`
+  list uses its recorded file, as `send --pending` does), and nothing is
+  downloaded. A file whose name could also belong to another downloaded
+  chapter is only used when the download history says it is this
+  chapter's. A missing or unclear file, or a format the Kindle doesn't
+  accept, is reported per chapter while the others are still sent (exit
+  `3`). A failed email puts the chapter on the `--pending` list, keeping
+  the parts of a split PDF that were already accepted. Several chapters
+  ask first unless `--yes`, and `--dry-run` shows what would be sent.
+- #360 A chapter that was saved but could not be sent to the Kindle is
+  no longer only a log line. It stays downloaded, its file is kept and it
+  is recorded as not sent until a send succeeds. `memanga send --pending
+  [TARGET]` sends those chapters again (`--list` only lists them,
+  `--clear` forgets the records; the files stay), and the desktop app
+  shows "Not sent to Kindle" with a Send button in the manga's chapter
+  list. `delivery.delete_after_send` still only deletes a file once it
+  was sent. `check` and `failed retry` now report such chapters and exit
+  `3`, like other incomplete runs.
+- #343 Settings in the desktop app has an About page with the MeManga
+  version, install type (packaged app or not), Python, OS, Qt and
+  Playwright versions, whether the Playwright browsers are installed and
+  which keyring stores the app password. "Copy diagnostics" copies the
+  same list for a bug report; it holds no folder paths, user names,
+  e-mail addresses or passwords.
+- #247 The app password can come from `MEMANGA_SMTP_PASSWORD_FILE` (a
+  file such as a Docker secret) or `MEMANGA_SMTP_PASSWORD`, ahead of the
+  keyring and `config.yaml`, and is then never saved. Setting both, or a
+  file that cannot be read, leaves no app password (a stored one is not
+  used instead) and `memanga doctor` says why. Saving the password
+  without a usable keyring now warns, in the command line and in the
+  desktop app's Settings, that it is in plain text in `config.yaml`, with
+  the file's path; a keyring that silently drops secrets counts as
+  unusable. `config show` also hides email addresses (`***@domain`);
+  `config get KEY` still prints one value in full.
+- #409 `config.yaml` and `state.json` carry a `schema_version`. Files
+  from older releases load as before and are upgraded on their next
+  save, with the previous file kept as the `.bak` copy; future layout
+  changes run as step-by-step migrations. A file from a newer MeManga
+  is refused and left as it is instead of being overwritten: commands
+  exit 1 with an update hint, the desktop app shows an error and
+  `memanga doctor` reports it.
 - #357 `memanga path TARGET` prints the download folder of a tracked manga
   (only the absolute path, so `cd "$(memanga path TARGET)"` works) and
   `memanga open TARGET` opens it in the system file manager. A manga with
@@ -72,8 +200,244 @@ All notable changes are recorded here. Format loosely follows
   retry` and `failed clear`, each with an optional TARGET (a title or
   `#N`). Plain `failed` still lists, and `--retry`/`--clear` keep working
   as aliases of `retry`/`clear`.
+- #327 `memanga watch` keeps scheduled checks running without cron, for
+  Docker and NAS setups. It runs `check --auto --quiet` right away and
+  then every `--every` interval (default 6h, at least 15m) plus up to
+  `--jitter` random delay. Checks run one at a time, each as its own
+  process that locks the config directory only while it works; a failed
+  check is reported and the schedule continues. On SIGTERM a running
+  check saves its state before the watcher exits 143. `compose.yaml` has
+  a `scheduler` service for it (`docker compose up -d scheduler`) with
+  `restart: unless-stopped`, `init: true` and a one-minute stop grace
+  period; the `memanga` service for one-off commands is unchanged.
+- #344 The desktop app's first-run browser download can be skipped:
+  the prompt has **Download now**, **Skip for now** and **Quit**, and
+  says what skipping means. After a skip the app opens right away and
+  does not ask again; sources that don't need a browser work as usual,
+  and **Settings → Advanced → Browser Components** shows whether the
+  components are installed and installs them later. A failed install
+  offers **Try again** or the same skip instead of only quitting.
+- #370 (desktop) A new library is asked once where downloads should go,
+  with the default folder filled in and checked before it is accepted.
+  The folder is also shown on the empty Library page and in
+  **Settings → About**, with an **Open folder** button; it stays out of
+  the copied diagnostics.
+- #404 The cover cache on disk has a size limit, 200 MB by default
+  (**Settings → Advanced → Cover Cache**, or `gui.cover_cache_max_mb`,
+  10 to 10000). Past it, the covers used longest ago are removed; they
+  are downloaded again when needed. The size shown in Settings is now
+  given against the limit.
+- Library: a **Dropped** filter chip, and every status (Reading, Plan to
+  read, On hold, Completed, Dropped) in the right-click menu.
 
 ### Changed
+- #328 `compose.yaml` now runs the published image `meellm/memanga:0.4.4`
+  and needs no copy of the source code. It has the `memanga` service for
+  single commands, starts an init process, and takes two optional
+  settings: `MEMANGA_IMAGE` to run another image and `TZ` for the time
+  zone in the container (#331; UTC unless set). The setup that builds
+  from source, with the `scheduler` service, moved unchanged to
+  `compose.dev.yaml`: add `-f compose.dev.yaml` to `docker compose`, or
+  set `COMPOSE_FILE=compose.dev.yaml`. Both files use the same volume
+  names, so existing data stays where it is. If you built from source
+  before, keep using `compose.dev.yaml`: the published 0.4.4 image is
+  older than the development version and was not tested with data the
+  development version has written. The published image has no
+  `memanga watch`, so `compose.yaml` has no scheduler.
+- #395 Desktop text meets WCAG AA contrast (4.5:1) in both themes: the
+  muted text colour of both themes and the light theme's accent,
+  warning, danger and lilac colours are darker or lighter as needed,
+  and nothing is drawn below 9pt (the cover status pill was 7.5pt, the
+  NEW badge 8.5pt, the source and search chips 8pt). The light theme's
+  green is darker as a result.
+- Library: **Continue Reading** lists the manga last opened in the
+  built-in reader, shows read progress out of the known chapters, and
+  opens the reader at that chapter. It used to list any manga with
+  downloads as "last read", showed 50% when the total was unknown, and
+  opened the Detail page.
+- Library: statuses read the same everywhere ("On hold", "Plan to
+  read"), the status sort includes Plan to read, and the "N of M shown"
+  count moved beside **ALL MANGA**.
+- A manga without a cover shows its own title on its placeholder, in a
+  colour that stays the same between launches.
+- Covers are drawn at the screen's pixel density, are downloaded on
+  their own connections instead of waiting behind chapter downloads,
+  and appear on their cards without the Library being rebuilt.
+- Detail: when a chapter finishes downloading only its row changes, and
+  a long chapter list is built in steps, so the window stays responsive
+  during batch downloads and when opening a long series.
+- #405 Chapter counts in search results can be turned off: **Show
+  chapter counts in search results** in **Settings → Advanced → Network
+  & Privacy** (`gui.search_chapter_counts` for `memanga config set`,
+  on by default; desktop app only). Each count loads the result's
+  chapter list from its source, which can take several requests (long
+  lists come in pages, and failed requests may be retried); the README
+  now says so, and the `memanga search --no-chips` help mentions it. The
+  app and `memanga search` now fetch at most 4 counts at a time instead
+  of 6, which is easier on slow connections.
+- #376 More neutral wording in help, command output and docs. Help text
+  no longer cites issue numbers, source notes in `memanga sources` and
+  the source lists describe the site instead of making size or speed
+  claims or describing how the scraper works, and messages such as
+  "Configuration saved." end without exclamation marks. The desktop
+  app's Check Login now reports "Signed in". Options, exit codes and
+  JSON keys are unchanged; only the text of `note` changes for some
+  sources.
+- #316 Release builds install `requirements/build.txt` with
+  `--require-hashes`, wheels only (`--only-binary :all:`) and
+  `--force-reinstall`, so nothing is built from source with unpinned
+  build tools and every package is downloaded and hash-checked even if
+  the runner already had it; the macOS legs no longer install Homebrew's
+  qpdf for that. The release workflow no longer upgrades pip from the
+  index, builds only after the full lock check passes on the tag (every
+  lock generated again from its `pyproject.toml` and compared row for
+  row), and fails before building when the build environment holds a
+  package the lock does not pin, another version of one it does, more
+  than one copy of one, or one installed from a URL or path
+  (`python scripts/lock_dependencies.py --check-installed build`).
+- #315 `pyproject.toml` is the only place dependencies are declared. The
+  pinned installs in `requirements/` (`cli.txt`, `gui.txt`, `dev.txt`,
+  `build.txt`) are generated from it by `scripts/lock_dependencies.py`,
+  with hashes, for every supported platform and Python version. Which
+  versions they pin is set there too, as the state of PyPI at recorded
+  times, so the locks can be regenerated exactly, and a check fails pull
+  requests whose files differ from that in any way. They replace
+  `requirements.txt`, `requirements-docker.txt`, `requirements-lock.txt`,
+  `requirements-docker-constraints.txt` and `tests/requirements-test.txt`.
+  The Docker image installs `requirements/cli.txt` with hash checking;
+  the dev and release builds and the release workflow install
+  `requirements/build.txt`, which now also pins PyInstaller; the
+  bootstrap and Linux setup scripts install `requirements/gui.txt`. The
+  pinned versions are unchanged. The `urllib3>=2.8.0` floor, which only
+  the Docker set had, is now a package dependency, and the `dev` extra
+  has all the test tools.
+- #314 The Docker image installs the package unmodified: it keeps the
+  `memanga-gui` launcher instead of deleting it after the install, and
+  the build fails if the pinned dependencies do not satisfy the package
+  (`pip check`). In the image, `memanga-gui` and `python -m memanga.gui`
+  exit with status 1 and the same "not available in this image" error
+  as `memanga --gui`.
+- #219 PySide6 is no longer a default dependency. `pip install` gives the
+  CLI only, for servers, containers and scheduled checks; the desktop app
+  needs the new `gui` extra (`memanga[gui]`). The `dev` and `build` extras
+  include it. Without it, `memanga --gui`, `memanga-gui` and
+  `python -m memanga.gui` exit with status 1 and print the install
+  command instead of a traceback. Release downloads, the Docker image,
+  `requirements.txt` and the bootstrap script are unchanged.
+- #215 The version is set in one place, `__version__` in
+  `memanga/__init__.py`; `pyproject.toml` reads it at build time and the
+  release tag check reads it from there. The package metadata now has an
+  SPDX license expression with the license file, author, keywords,
+  classifiers and project links. Building needs setuptools 77 or newer.
+- #393 "Remove chapters after reading" moves a finished chapter's
+  download to the system trash (Recycle Bin on Windows, Trash on macOS and
+  Linux) instead of deleting it for good, so a chapter finished by
+  accident can be restored. A notification says where it went. If the
+  trash can't take it, the download is kept and stays downloaded.
+- #392 Removing a manga in the desktop app asks the same question from the
+  Library right-click menu and from the manga's page. It says what
+  happens: read progress and download history are kept unless you tick
+  "Also delete progress and history", and downloaded files
+  always stay in the download folder. Adding the manga again picks up its
+  kept progress. Both used to delete the history, and only one said so.
+  The Library header counts only tracked manga, so kept history no longer
+  inflates the manga and chapter counts. Deleting the history also clears
+  the manga's Downloads History rows. Renaming a manga now moves its
+  History rows to the new title; rows from a rename made with an older
+  version keep the old title and are not deleted, and the dialog says it
+  deletes the history saved under the manga's current title. A rename in
+  the app or with `edit --title` is refused when the new title is already
+  in the library (the app did not check this before) or still has history
+  from an earlier manga, so a rename never mixes two manga's history.
+  `remove --purge-history` also clears the manga's Downloads History rows.
+- #386 Page images are held to one explicit pixel limit, 2,048 x 65,535
+  pixels (about 134 megapixels), checked against the image header before
+  anything is decoded, by the downloader and by the desktop reader. Tall
+  webtoon strips up to the tallest possible JPEG fit; the desktop reader
+  used to refuse colour strips over about 67 megapixels that downloaded
+  fine. A downloaded page over the limit is not retried, and the
+  chapter's "Incomplete download" error names the page, its size and the
+  limit (with partial chapters allowed, it counts as a missing page). The
+  reader shows such a page as "Page N is too large to show (W x H
+  pixels)." instead of "couldn't be loaded".
+- #381 The Windows and Linux desktop downloads are a folder instead of a
+  single self-extracting file, and no release build is UPX-compressed, so
+  the LGPL components (Qt, PySide6, Shiboken6, img2pdf) stay separate files
+  under `_internal` that users can replace; their Python parts ship as
+  `.py` source. Windows now downloads as `MeManga-windows-x64.zip` (run
+  `MeManga.exe` from the extracted folder) and the Linux tarball extracts
+  to a `MeManga-linux-x64/` folder (run `./MeManga-linux-x64/MeManga`).
+  The macOS app keeps its single executable. The notices file now opens
+  with an LGPL section: the exact source archives of the shipped Qt for
+  Python, Qt and img2pdf versions, where MeManga's own source and build
+  files are, and how to use a modified component (replace the files, or
+  rebuild from source on macOS with the new `python build_app.py
+  --no-install`, which builds from the installed packages instead of
+  reinstalling the pinned ones over the modified component). A release
+  fails when its tag is not `v` plus the project version, so
+  the tag the notices name is the one the download was built from.
+  Builds drop Qt Virtual Keyboard (GPL or
+  commercial only) and Python's `readline` module (it links GNU Readline,
+  GPL), which the app never uses, and fail if either is still bundled; the release checks the extracted Windows and
+  Linux archives keep the LGPL files separate and unpacked.
+- #329 The guide shows how to pass the app password to the Docker image
+  as a secret file, with Compose (`compose.override.yaml`) or
+  `docker run`, and how to check it with `memanga doctor`.
+- #402 Browsers are replaced during long runs without `--safe`: a
+  source's headless browser is replaced with a fresh one after it has
+  served 20 searches, chapter lists or chapter pages (100 tokens for
+  MangaFire's token browser). The replacement happens between two of
+  those steps, never in the middle of one, and is only logged at debug
+  level. `--safe` still restarts every browser after every 3 downloaded
+  chapters, for machines with very little memory.
+- #253 Commands start faster: scraper modules are loaded when a source
+  is used instead of all of them on every run. `memanga --version` and
+  `--help` load no scraper, and checking or downloading a manga loads
+  only the scrapers for its sources.
+- #254 A source's scraper is reused instead of rebuilt on every lookup,
+  so repeated searches, checks and retries against one site keep its
+  connection and cookies. Each worker thread, including the ones that
+  download a chapter's pages, uses its own scraper and connection, but
+  the pause between requests to a site is now shared by all of them, so
+  parallel searches, chapter counts and downloads no longer hit one site
+  faster than its limit. Finding the scraper for a subdomain checks only
+  that host's parent domains instead of every supported site.
+- #372 The plain summary line of `memanga check` ends with the next
+  step when there is one: `next: run 'memanga failed' for details` after
+  failed chapters, or `next: rerun with --download` when chapters needed
+  confirmation. It shows even with `memanga -q`, which hides the
+  separate warning.
+- #226 Output and logging work the same everywhere. Scrapers, the
+  downloader, email delivery and the desktop app report through logging
+  instead of printing to stdout, so stdout only carries command results
+  and `--json` stays clean. Diagnostics go to stderr: warnings and errors
+  by default, more with `memanga -v` (progress) or `-vv` (debug), only
+  errors with `memanga -q`, or any level through `MEMANGA_LOG_LEVEL`;
+  this covers the warnings and errors `check` and `failed retry` report
+  themselves. When stdout is not a terminal (pipes, files, cron), or
+  with `--plain`, output is plain text without colour, emoji, borders or
+  line wrapping, and `check` prints a single summary line;
+  `NO_COLOR` turns colour off. Log lines on a redirected stderr or in a
+  log file, traceback lines included, carry a timestamp and level. `memanga --log-file`
+  also writes a rotating `diagnostics.log` in the config folder. The
+  desktop app keeps the last three `runtime.log` files instead of
+  overwriting it at every start. Passwords and tokens
+  are masked in log output, and redirected output on Windows is written
+  as UTF-8.
+- #249 Config and state live in the platform config folder:
+  `%APPDATA%\memanga` on Windows, `~/Library/Application Support/memanga`
+  on macOS and `$XDG_CONFIG_HOME/memanga` (default `~/.config/memanga`) on
+  Linux. The CLI and the desktop app pick the same folder. An existing
+  `~/.config/memanga` is moved there once, as a single rename under the
+  config lock, and a `MOVED.txt` note stays behind so scheduled checks
+  installed earlier keep running. When the move is not safe (another
+  MeManga is running, the new folder is not empty, settings point inside
+  the old folder, or the rename fails) the old folder stays in use
+  unchanged. `--config-dir` and `MEMANGA_CONFIG_DIR` still win and never
+  move anything, and now apply to the desktop app too:
+  `memanga --config-dir DIR --gui` opens the app on DIR (it was refused
+  before), the app started on its own honours `MEMANGA_CONFIG_DIR`, and
+  the daily check set up in its Settings keeps the chosen directory.
 - #348 `edit` is the command for changing a tracked manga, including its
   status (`memanga edit "One Piece" --status on-hold`); `update` stays an
   alias. Help and the bash completion list `edit (update)`.
@@ -95,6 +459,38 @@ All notable changes are recorded here. Format loosely follows
   partial-chapter settings, and clears backup-delay clocks. A chapter
   saved as a partial again keeps its record and counts as not recovered
   (exit 3).
+- #222 `failed retry` reads each manga's chapter list from the primary
+  source once per run, instead of once for every failed chapter of that
+  manga. `check` and `failed retry` now process chapters through one
+  shared module, so their download, backup, partial, delivery and state
+  handling stay the same.
+- #295 GUI downloads now go through the same chapter steps as
+  `check --download` and `failed retry`. The Detail and Downloads pages
+  honor "Delete after sending to Kindle", image folders are no longer
+  emailed, the backup source is searched with the same group filters as
+  the command line, and a backup-delay clock is cleared once the chapter
+  is saved. Chapters the reader fetches ahead of time are never deleted
+  after sending.
+- #296 Kindle email settings (addresses, SMTP server, port, timeout and
+  app password) are read from config in one place for the desktop app's
+  Downloads, Detail and Reader pages and for `check`, `failed retry`,
+  `send --pending`, `config email` and `status --json`, so their defaults
+  and when a manga is sent to the Kindle cannot drift apart. Behavior is
+  unchanged.
+- #297 `memanga cron` and the desktop app's Settings install, remove and
+  check the daily scheduled check through one shared module, so cron and
+  Windows Task Scheduler behave the same from both. Remove in Settings on
+  Windows no longer reports success and turns the setting off when the
+  task was not deleted. Status and Remove now say when the crontab or the
+  Windows task list could not be read instead of reporting that no check
+  is set up, and change nothing. `cron install` rejects times outside
+  00:00-23:59, as Settings already did. A missing `crontab` or `schtasks`,
+  or output that is not readable text, is reported as an error instead of
+  a crash, and each scheduler call that hangs gives up after
+  30 seconds. Reinstalling on Windows replaces the task in place, so a
+  failed reinstall no longer leaves no task while the setting stays on.
+  If Settings installs the check but cannot save config.yaml, it says
+  the check is installed and its settings were not saved.
 - #351 `memanga check --quiet` on a terminal without `--download` now
   skips new chapters and exits 1 with a hint, as it already did without a
   terminal. It used to skip them silently and exit 0. `--quiet` never
@@ -106,8 +502,293 @@ All notable changes are recorded here. Format loosely follows
   with the same output and exit codes, prints the matching `edit` command
   on stderr, and no longer appears in help or completion. It will be
   removed in the next release.
+- #245 `memanga.emailer.test_email_config` is renamed
+  `check_email_config`. The old name still works, warns with a
+  `DeprecationWarning`, and is no longer collected by pytest when a test
+  module imports it.
+
+### Removed
+- Python 3.10 and 3.11.0 to 3.11.4 are no longer supported: MeManga
+  needs Python 3.11.5 or newer. Python 3.10 reached its end of life in
+  October 2026, the Pillow releases that fix its known vulnerabilities
+  need Python 3.11, and the soupsieve releases that fix theirs need
+  Python 3.11.5 (#385). Installing on an older Python now stops with
+  pip's `requires-python` error.
 
 ### Fixed
+- Toasts and the list view's NEW badge had white text on the theme's
+  accent and status colours (1.9:1 in the dark theme); they use the
+  matching text colour now. Toasts also follow a theme switch, including
+  one already on screen, no longer cover each other, wrap long messages
+  and stay up longer for them.
+- At the default window size the Library filter box shrank to a few
+  letters and the status chips were cut off; when one row is too narrow
+  the chips now move to a row of their own, and Tab follows the rows.
+  In Settings, the Light theme card was cut off at the right edge: the
+  theme cards stack in a narrow pane, long hints wrap, and a tab that is
+  still too wide for a small window scrolls sideways instead of hiding
+  its right edge.
+- Detail: at the default window size the Reader layout control, the
+  Download all button and the chapter counts were cut off at the right
+  edge. The controls, the action buttons, the Send to Kindle line and
+  the chapter filter chips now wrap onto another line when they do not
+  fit, and a long chapter title or source address is shortened with "…"
+  (the full text is in its tooltip).
+- Settings: the tab icons, the theme card's check mark and the
+  concurrent-downloads number kept the previous theme's colours after a
+  theme switch on that page.
+- The Library said "No manga tracked yet" when a filter or status chip
+  simply matched nothing.
+- Switching theme no longer calls into Library cards, search rows and
+  drop-downs that were already gone; they were kept for the whole
+  session and grew with every refresh.
+- Detail: the cover appears when its download finishes instead of on
+  the next visit, an author name from a source can no longer add markup
+  to the page, and chapter rows follow a theme switch.
+- The first-run install dialog's status line was unreadable in the
+  light theme.
+- On Windows, `memanga` run without a console (a scheduled task, or
+  stdin from `NUL`) no longer opens the interactive menu and fails with
+  an `EOFError` traceback; it exits with an error, as on Linux and
+  macOS.
+- The license texts in the Windows release download are the exact,
+  unmodified files again; the Windows build's checkout converted their
+  line endings.
+- #233 An unsupported source is reported in one short line that points
+  to `memanga sources`, instead of listing every supported domain
+  (`check`, downloads and the logs). A scraper that fails with a parse
+  error while listing chapters is now reported as a failed fetch, not as
+  an unsupported source. `get_scraper()` raises the new
+  `UnsupportedSourceError`, which is still a `ValueError`.
+- #235 Browsers opened during a run are now closed when MeManga exits.
+  The exit cleanup ran only after Python had stopped the threads that own
+  the browsers, so every close failed silently and the browsers were left
+  to end with the process. Exit cleanup also no longer starts a thread
+  for a scraper that never opened a browser, and restarting a MangaFire
+  token browser that was never started no longer logs a restart.
+- #333 The Docker image runs MeManga under `tini`, so containers no
+  longer collect zombie browser processes. MeManga ran as PID 1, which
+  never reaped the processes left behind when a Playwright driver or
+  browser exited early; they stayed until the container stopped. This
+  now works however the container is started, without `docker run
+  --init` or Compose `init: true`, which the `scheduler` service no
+  longer sets (both still work). `docker stop` and Ctrl-C reach MeManga
+  as before, and exit codes are unchanged.
+- #335 `memanga cron install` refuses to run inside a Docker or Podman
+  container, where no cron daemon would ever run the check. It exits 1,
+  runs no `crontab` command, leaves `config.yaml` unchanged, and points
+  to `memanga watch` (the Compose `scheduler` service) and the Docker
+  scheduling guide. Before, it failed with a bare "could not read the
+  current crontab" error, or, in an image with `crontab`, wrote an entry
+  that never ran. `cron status` and `cron remove` work as before.
+- #396 The desktop app can be used from the keyboard. Library cards and
+  rows, continue-reading cards and the theme cards could only be clicked;
+  `Tab` now reaches them, `Enter` or `Space` opens them, and the `Menu`
+  key or `Shift+F10` opens a card's quick actions. The Auto / Manual and
+  layout drop-downs can be picked with the arrow keys and `Enter`. Buttons,
+  tabs, chips, sidebar items, check boxes, drop-downs and cards show a
+  focus ring when focused from the keyboard, not after a click; so does the
+  Search field. Page scroll areas are no longer invisible `Tab` stops
+  (`Page Up` / `Page Down` still scroll), dialogs `Tab` in reading order,
+  and menu highlights are easier to see. Opening a page from the keyboard
+  moves focus to its first control instead of leaving it in the sidebar,
+  and focus returns to a card after its quick action. In the reader, clicking a toolbar button or the page no longer
+  takes the reader keys away; `Ctrl/Cmd+0` resets the zoom as documented,
+  and `Page Up`, `Page Down`, `Space`, `Home` and `End` scroll in
+  continuous mode. New shortcuts: `Ctrl/Cmd+F` for the filter field,
+  `Ctrl/Cmd+,` for Settings and `Alt+←` (`Cmd+[` on macOS) from Detail back
+  to Library. The README's reader key table was wrong in places and now
+  lists every key for each layout.
+- #394 Screen readers announce the desktop app's controls by name. Icon
+  and glyph buttons (grid/list view, reader layout and zoom, download
+  cancel, the sources "⋯" menu), cover cards and list rows, theme cards,
+  source checkboxes, progress bars and the Settings fields used to be
+  announced as a symbol or with no name at all. Sidebar badges say what
+  they count, repeated buttons such as "Read" or "+ Add" say which
+  chapter or title they act on, and the active view, layout and theme are
+  announced. `docs/ACCESSIBILITY.md` has a manual screen-reader checklist.
+- #259 The desktop app's Settings header shows the config file it really
+  uses, including one chosen with `--config-dir` or `MEMANGA_CONFIG_DIR`,
+  and the path can be selected and copied. It used to name a
+  `~/.memanga/config.toml` that MeManga never reads or writes.
+- #389 The desktop reader opens long chapters without freezing the
+  window. It used to decode every page up front, which on long webtoon
+  chapters took seconds and hundreds of MB to several GB of memory.
+  Opening a chapter now only reads each page's size, so scrolling, the
+  page count and resuming where you left off work at once. Pages are
+  decoded in the background, starting with the ones on screen and a few
+  ahead. Pages far from where you are reading are released again, so
+  memory no longer grows with the chapter's length. A page that can't be
+  decoded shows a short message in its place. With "remove chapters
+  after reading" on, a finished chapter's file is now removed when you
+  leave the chapter rather than the moment you reach its end, so you can
+  still scroll back through it.
+- #382 The desktop reader no longer switches silently to PyMuPDF, an
+  AGPL-licensed library MeManga does not declare, whenever that happens to
+  be installed, which also changed the page sizes. Desktop builds now
+  exclude PyMuPDF so a build environment that has it can't bundle it. PDF
+  pages MeManga wrote, one image each, show that image as stored. Every
+  other PDF page (text, drawings, links and other annotations, rotated or
+  cropped pages, PDFs from other programs) is drawn whole with Qt PDF,
+  which ships with Qt, instead of showing only the images on it. Filled-in
+  form fields are merged into an in-memory copy of their page so they are
+  drawn as well; the file is never changed. A filled-in field with no
+  appearance to draw makes its page show as one that couldn't be loaded,
+  instead of the page without the field. Desktop builds' third-party
+  notices reproduce the licenses of PDFium and the other components Qt PDF
+  contains, taken from the Qt release the build ships, and the build stops
+  when the Qt version changes until they are updated. A failed page's
+  "couldn't be loaded" message now stays readable on very small pages.
+- #324, #336 The downloaded desktop app no longer offers to install a
+  scheduled check it cannot run. Its only executable starts the app, so
+  the daily task opened the window instead of checking while Settings
+  reported success. Settings now turns off the daily auto-check, its time
+  and Install there, and says to use `memanga cron install` from the
+  command-line version; Remove and Status still work for a task set up
+  earlier. Source, pip and pipx installs schedule checks as before.
+- #300 The packaged desktop app no longer contacts httpbin.org before
+  opening its window. That test request held up every launch for up to
+  several seconds on a slow, offline or firewalled network. Startup now
+  only picks the bundled certificate file, and logs which one it uses.
+- #362 Chapters saved as CBZ or ZIP are no longer emailed to the Kindle,
+  which rejects them; only PDF and EPUB are sent, and image folders stay
+  unsent as before. The chapter is still saved and kept, and the command
+  line and the desktop app both say why it was not sent. With Kindle
+  delivery on, `check` warns once before downloading in such a format,
+  and `config set`, `config edit`, interactive `config`, `doctor` and
+  Settings warn when the delivery mode and output format conflict.
+- #338 With `delivery.delete_after_send` on, the desktop app now says
+  what happened to the local copy after a Kindle send: "Sent to Kindle:
+  <file> — local copy deleted", or a warning with the reason when the
+  file could not be deleted (the chapter was still sent and the file is
+  kept). The download history records whether the local copy was
+  deleted, and the History tab shows "Sent" or "Sent · deleted" for
+  chapters that went to the Kindle, including chapters sent later with
+  Send or `memanga send --pending`. Files are still only deleted after a
+  successful send.
+- #341 The command line now honors the per-manga mode and Kindle settings
+  of the desktop app. `check --download` (and cron's `check --auto
+  --quiet`) without a manga name lists the new chapters of `manual`-mode
+  manga instead of downloading them, and the summary counts them;
+  naming the manga or answering the per-chapter question still
+  downloads. A manga with Kindle delivery turned off is never emailed by
+  `check`, `failed retry`, `send --pending` or the desktop app's Send
+  button; its chapters are saved as usual. Entries without these fields
+  keep the old defaults (automatic, Kindle on).
+- #342 The desktop app no longer cuts error messages off after 30-80
+  characters. Toasts, download rows and the Settings email test show a
+  short summary, and the Notifications entry keeps the complete error
+  behind a Details button, with a Copy action. For the 20 most recent
+  errors longer than 4,000 characters, up to 100,000 characters are kept
+  in a private file in the config folder's `error-details` directory
+  (removed with its notification, about 2 MB at most); when less than
+  the whole error is kept, the Details view says so. Kindle delivery
+  failures now get a notification too. The Search page has a Failure
+  details button listing why each source failed in the current search
+  (up to 20,000 characters per source and 100,000 per search, with any
+  cut marked). Passwords, tokens, the whole user part of URLs
+  (`https://***@host/...`), the name part of email addresses and the
+  home folder are masked in shown, copied and saved error text,
+  notification titles included. Check, download, Kindle, search and
+  Settings (email test, schedule, export, import) failures are written
+  to the log. The log masks passwords, tokens and the user part of URLs,
+  now also when the app is started with the `memanga-gui` command, which
+  printed its log lines unmasked before; it does not mask email
+  addresses or the home folder.
+- #246 File and folder names are valid on Windows, macOS and Linux:
+  control characters are removed and a Windows device name such as
+  `CON` or `nul` gets a `_` suffix. `add`, `edit --title`, `search --add`
+  and the app's Add page refuse a title that would share another
+  manga's download folder (`A:B` and `AB`), since their chapter files
+  would overwrite each other.
+- #246 EPUB metadata no longer names the manga title as the author. The
+  author comes from the manga entry; the language comes from the entry's
+  `language` or from a source that serves one language (MangaDex, TCB
+  Scans, Thunder Scans EN, the Spanish and Indonesian sources), and is
+  `und` (undetermined) instead of English when unknown. CBZ ComicInfo
+  adds `LanguageISO` when the language is known and `Manga` =
+  `YesAndRightToLeft` only for titles known to read right to left (TCB
+  Scans, or `reading_direction: rtl` on the manga entry); manhwa and
+  webtoons are no longer marked right to left.
+- #246 Cancelling a chapter download waits for page downloads already
+  in progress before the temporary folder is removed.
+- #246 `add --fallback-days` without `--backup` fails instead of being
+  ignored. `import` reads files as UTF-8 (a BOM is accepted) and rejects,
+  before anything is written, manga entries whose `url`, `source`,
+  `sources` or `fallback_delay_days` have the wrong type, and imports
+  (merge or `--replace`) that would give two manga the same download
+  folder.
+- #246 Config changes from different threads take the same lock as
+  saving, and scrapers no longer swallow Ctrl+C.
+- #212 Installing the package (`pip install .`, `pip install -e ".[dev]"`,
+  `pip wheel .`) no longer runs the setup script. The build backend
+  executed the old root `setup.py`, which created a `venv`, installed
+  requirements, downloaded Playwright browsers and on Linux ran `sudo
+  apt-get`. The script is now `scripts/bootstrap.py` and runs only when
+  called: `python scripts/bootstrap.py` replaces `python setup.py`;
+  `scripts\windows\setup.bat` calls it as before.
+- #244 Only one MeManga process at a time changes a config directory, so
+  a cron `check`, a manual command and the desktop app no longer overwrite
+  each other's downloads, failed records, reading progress or imports.
+  Commands that change config or state take a lock on the directory
+  (`memanga.lock`) before loading anything; while another check, command
+  or the desktop app holds it they exit 1 with a message on stderr and
+  change nothing, and the desktop app shows an error instead of starting.
+  Read-only commands (`list`, `status`, `path`, `open`, `sources`,
+  `export`, `doctor`, `failed` listing, `config show/get/path`,
+  `cron status`, `search --json` without `--add`) still run. The system
+  releases the lock when the process ends, even after a crash, so there
+  is nothing to clean up. Scheduled checks use the same lock. A
+  read-only command leaves a damaged `state.json` untouched while another
+  process holds the lock, and `export` refuses to write over MeManga's own
+  files in the config directory.
+- #243 A damaged `state.json` is no longer replaced by empty state. It
+  is kept as `state.json.corrupt-<time>-<id>`, the previous copy is
+  restored from `state.json.bak` when there is one, and the CLI (on
+  stderr), the desktop app and `memanga doctor` say where the damaged
+  file went. A state file that can't be read or copied aside is never
+  overwritten: commands other than `doctor` stop with exit 1 and the
+  desktop app shows an error instead of starting. The same happens when
+  the restored copy can't be written to `state.json`, or when
+  `state.json.bak` exists but can't be read; the damaged file then stays
+  in place, so the next start tries the restore again, `state.json.bak`
+  is unchanged, and an identical damaged file is kept only once. Every
+  save keeps the previous `state.json` and `config.yaml` as `.bak` and
+  flushes the new file to disk before replacing the old one (and the
+  folder afterwards, where the system supports it); if the previous copy
+  can't be kept, the save fails and both files stay as they were. A CLI
+  command whose save fails (for example on a full disk) stops with exit
+  1 and a short message naming the file instead of a traceback. The
+  desktop app also shows an error for a broken `config.yaml` instead of
+  crashing.
+- #230 `check` and `failed retry` write `state.json` after every chapter,
+  so a run that is killed, crashes or times out no longer forgets
+  chapters it already saved and sent, and the next run does not download
+  or send them again. If the state file can't be written, the command
+  stops with exit 1 before downloading or sending anything else. SIGTERM
+  (cron `timeout`, `systemctl stop`, `docker stop`) now saves pending
+  state like Ctrl-C and exits 143. A chapter can still be sent twice if
+  the process dies after sending it and before its state is written.
+  The desktop app is unchanged.
+- #241 Downloaded chapter files and folders are named so that they sort in
+  chapter order, extension included, both by plain character order and
+  under locale sorting that skips punctuation. Numeric chapters use a
+  fixed-width number: four digits, a dot and three decimals
+  (`Chapter 0002.000`, `Chapter 0002.500`, `Chapter 0010.000`). Chapters
+  up to 9999 with up to three decimal places are ordered exactly. Part
+  chapters keep a readable label after their chapter's numeric names
+  (`Chapter 0002_Part 02`, `Chapter 0002_Part 10`) instead of the
+  decimal-looking `2.10`. Labels that the number alone would not spell
+  (`2.0`, `2.00`, `02`, `2.50`) get the source label added
+  (`Chapter 0002.000 (2.00)`), so different numeric chapters no longer
+  share a file and one download cannot replace another. Names for the same
+  chapter number stay together, in no fixed order among themselves. File
+  names are still capped at 100 characters, but a long manga title is now
+  shortened instead of the end of the name, so the chapter part is never
+  cut off. `{chapter}` in a custom naming template uses the same form.
+  Other labels such as `Extra` are unchanged. Existing files are not
+  renamed and still open in the reader. Post-processing `{chapter}` and
+  `MEMANGA_CHAPTER` still receive the original chapter number.
 - #406 `scripts/run.sh` and `scripts\windows\run.bat` no longer switch to
   the project folder before running MeManga. Relative paths such as
   `import backup.json` or `export backup.json` now resolve in the folder
@@ -160,6 +841,11 @@ All notable changes are recorded here. Format loosely follows
   1 when the manga is not found (they used to exit 0), and `check` exits
   1 when no manga could be checked. Errors and warnings are written to
   stderr so stdout only carries results.
+
+### Security
+- #385 Pillow 13.0.0, certifi 2026.10.23 and soupsieve 4.1.1 replace
+  releases with known vulnerabilities in every pinned install, the
+  Docker image and the release downloads.
 
 ## [0.4.4] - 2026-10-03
 
@@ -486,7 +1172,7 @@ All notable changes are recorded here. Format loosely follows
   reporting "No new chapters". MangaDex chapter dedup is now stable
   across repeated checks.
 
-## [0.2.0] - 2026-05-28
+## [0.2.0] - 2026-05-30
 
 ### Added
 - PySide6 desktop GUI (Library / Detail / Reader / Downloads / Search /
@@ -571,5 +1257,20 @@ All notable changes are recorded here. Format loosely follows
 
 ## Earlier versions
 
-Pre-PySide6 versions tracked the CLI-only releases — see the git tag
-history (`v0.0.x` → `v0.1.0`) for details.
+The oldest tagged and published release is v0.2.0, so this changelog
+starts there. Earlier work, including the untagged version 0.1.0, is in
+the git history.
+
+[Unreleased]: https://github.com/meellm/MeManga/compare/v0.4.4...main
+[0.4.4]: https://github.com/meellm/MeManga/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/meellm/MeManga/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/meellm/MeManga/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/meellm/MeManga/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/meellm/MeManga/compare/v0.3.3...v0.4.0
+[0.3.3]: https://github.com/meellm/MeManga/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/meellm/MeManga/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/meellm/MeManga/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/meellm/MeManga/compare/v0.2.2...v0.3.0
+[0.2.2]: https://github.com/meellm/MeManga/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/meellm/MeManga/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/meellm/MeManga/releases/tag/v0.2.0

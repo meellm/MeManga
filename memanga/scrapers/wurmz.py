@@ -34,6 +34,7 @@ class WurmzScraper(BaseScraper):
 
     name = "wurmz"
     base_url = "https://wurmz.net"
+    content_language = "id"  # Indonesian-language site
     search_url = "https://wurmz.net/semua-komik"
 
     # Series pages are /detail/<type>/<slug>; reader pages append

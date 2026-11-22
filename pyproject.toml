@@ -1,18 +1,54 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+# 77 is the first setuptools that accepts an SPDX `license` string with
+# `license-files` (PEP 639).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "memanga"
-version = "0.4.4"
+# The version is set once, as `__version__` in memanga/__init__.py.
+dynamic = ["version"]
 description = "Automatic manga downloader with Kindle support"
 readme = "README.md"
-license = {text = "MIT"}
-requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "meellm"}]
+# 3.11.5: the soupsieve releases with fixes for known vulnerabilities
+# need it (#385).
+requires-python = ">=3.11.5"
+keywords = [
+    "manga",
+    "manga-downloader",
+    "comics",
+    "kindle",
+    "e-reader",
+    "epub",
+    "cbz",
+    "pdf",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Utilities",
+]
 dependencies = [
     "rich>=13.0.0",
     "pyyaml>=6.0",
     "requests>=2.28.0",
+    # Security floor for the urllib3 that requests pulls in.
+    "urllib3>=2.8.0",
     "img2pdf>=0.5.0",
     "Pillow>=10.0.0",
     "beautifulsoup4>=4.12.0",
@@ -21,22 +57,215 @@ dependencies = [
     "pikepdf>=8.0.0",
     "keyring>=24.0.0",
     "playwright-stealth>=2.0,<3",
-    "PySide6>=6.5.0",
-    "certifi>=2024.7.0",
 ]
 
 [project.optional-dependencies]
+# This file is the only place dependencies are declared. The pinned
+# installs in requirements/ are generated from it; after a change here run
+# `python scripts/lock_dependencies.py` (see CONTRIBUTING.md).
+#
+# The desktop app. The default install is the CLI only, for servers,
+# containers and scheduled checks.
+gui = ["PySide6>=6.5.0"]
+# The GUI tests and the desktop build need the app's Qt runtime.
 dev = [
-    "pytest>=7.4.0",
-    "pytest-qt>=4.2.0",
-    "pytest-mock>=3.12.0",
-    "pytest-env>=1.1.0",
+    "memanga[gui]",
+    "pytest>=8.0",
+    "pytest-qt>=4.4",
+    "pytest-mock>=3.12",
+    "pytest-env>=1.1",
+    # Parses version specifiers in the dependency-declaration tests.
+    "packaging>=21.0",
+    # Runs unrelated test files in parallel: pytest -n auto
+    "pytest-xdist>=3.5",
+    # Coverage report: pytest --cov=memanga --cov-report=html
+    "pytest-cov>=4.1",
+    # Lint and format: ruff check, ruff format ([tool.ruff] below).
+    "ruff>=0.17.4",
+    # Type check: mypy ([tool.mypy] below).
+    "mypy>=2.4",
+    # Runs the checks of .pre-commit-config.yaml on a commit.
+    "pre-commit>=4.0",
 ]
-build = ["pyinstaller>=6.0", "certifi>=2024.7.0"]
+build = [
+    "memanga[gui]",
+    "pyinstaller>=6.0,<7.0",
+    "certifi>=2024.7.0",
+    # Backs keyring's Windows Credential Manager backend. keyring already
+    # requires it on Windows; it is listed so the frozen app keeps it even
+    # if a keyring release dropped it, which would leave the app on
+    # keyring's Null backend (saved email passwords silently lost).
+    'pywin32-ctypes>=0.2.0; sys_platform == "win32"',
+]
 
+[project.urls]
+Homepage = "https://github.com/meellm/MeManga"
+Documentation = "https://meellm.github.io/MeManga/"
+Repository = "https://github.com/meellm/MeManga"
+Issues = "https://github.com/meellm/MeManga/issues"
+Changelog = "https://github.com/meellm/MeManga/blob/main/CHANGELOG.md"
+Releases = "https://github.com/meellm/MeManga/releases"
+
+# memanga-gui stays a console script, not a gui-script: on Windows a
+# gui-script has no console, so the error printed without the gui extra
+# would not be seen. The release downloads are the windowed app.
 [project.scripts]
 memanga = "memanga.cli:main"
 memanga-gui = "memanga.gui:launch_gui"
 
+# Which versions requirements/*.txt pin: each package at its newest
+# release that fits the bounds above, as PyPI was at `resolve-at` (UTC),
+# or at the time listed for it below. Nothing else picks them, so
+# `python scripts/lock_dependencies.py --check` can regenerate the locks
+# and compare. To update a package, move its time (or `resolve-at` for
+# all the others) and regenerate.
+[tool.lock-dependencies]
+resolve-at = "2026-05-25T08:00:00Z"
+
+# Packages read from a later PyPI: the urllib3 security floor, the
+# certifi, Pillow and soupsieve releases with fixes for known
+# vulnerabilities (#385), the Linux keyring backend of the Docker image,
+# and the test, build and code-quality tools with their own dependencies.
+# ruff is read at the release the CI lint job installs. pre-commit's
+# virtualenv and filelock, with what they require, are read at releases
+# with fixes for known vulnerabilities.
+[tool.lock-dependencies.resolve-package-at]
+ast-serialize = "2026-11-02T00:00:00Z"
+certifi = "2026-11-02T00:00:00Z"
+cffi = "2026-11-02T00:00:00Z"
+coverage = "2026-11-02T00:00:00Z"
+cryptography = "2026-11-02T00:00:00Z"
+distlib = "2026-11-02T00:00:00Z"
+filelock = "2026-11-02T00:00:00Z"
+importlib-metadata = "2026-11-02T00:00:00Z"
+iniconfig = "2026-11-02T00:00:00Z"
+librt = "2026-11-02T00:00:00Z"
+mypy = "2026-11-02T00:00:00Z"
+packaging = "2026-11-02T00:00:00Z"
+pillow = "2026-11-02T00:00:00Z"
+pluggy = "2026-11-02T00:00:00Z"
+pycparser = "2026-11-02T00:00:00Z"
+pyinstaller = "2026-11-02T00:00:00Z"
+pyinstaller-hooks-contrib = "2026-11-02T00:00:00Z"
+pytest = "2026-11-02T00:00:00Z"
+pytest-env = "2026-11-02T00:00:00Z"
+pytest-mock = "2026-11-02T00:00:00Z"
+python-discovery = "2026-11-02T00:00:00Z"
+python-dotenv = "2026-11-02T00:00:00Z"
+ruff = "2026-11-06T00:00:00Z"
+setuptools = "2026-11-02T00:00:00Z"
+soupsieve = "2026-11-16T00:00:00Z"
+urllib3 = "2026-11-02T00:00:00Z"
+virtualenv = "2026-11-02T00:00:00Z"
+zipp = "2026-11-02T00:00:00Z"
+
+[tool.setuptools.dynamic]
+version = {attr = "memanga.__version__"}
+
 [tool.setuptools.packages.find]
 include = ["memanga*"]
+
+# The desktop app's icon set. Built packages leave out non-Python files
+# that are not listed here.
+[tool.setuptools.package-data]
+"memanga.gui" = ["assets/icon/*.png"]
+
+# Code quality checks (#289). With the dev install, from the repository
+# root:
+#
+#   ruff check .             lint
+#   ruff format --check .    formatting (`ruff format .` rewrites)
+#   mypy                     types
+#
+# .pre-commit-config.yaml runs the same three, with this configuration and
+# the ruff and mypy of requirements/dev.txt, on every commit.
+[tool.ruff]
+target-version = "py311"
+# Python files only. Ruff also takes Markdown files by default and
+# rewrites their Python code blocks; the README and the documentation are
+# left as they are written.
+extend-exclude = ["*.md"]
+# Excluded paths stay excluded when a file is named on the command line,
+# as the commit hooks do.
+force-exclude = true
+
+[tool.ruff.lint]
+# Only the rules that mean the code cannot run: syntax errors, invalid
+# comparisons and statements, undefined names. The CI lint job selects
+# the same rules.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.ruff.format]
+# Code from before the formatter, not written to its style yet. Every
+# other file, and every new file outside these paths, is formatted. To
+# bring a path in: remove it here and commit what `ruff format <path>`
+# changes on its own, apart from other changes. A directory is listed
+# with `/**`: a pattern is matched against each file, not its folders.
+exclude = [
+    "build.py",
+    "build_app.py",
+    "memanga/api.py",
+    "memanga/backup.py",
+    "memanga/chapter_pipeline.py",
+    "memanga/chapters.py",
+    "memanga/cli.py",
+    "memanga/cli_docs.py",
+    "memanga/completion.py",
+    "memanga/config.py",
+    "memanga/config_docs.py",
+    "memanga/cron.py",
+    "memanga/doctor.py",
+    "memanga/downloader/**",
+    "memanga/email_settings.py",
+    "memanga/emailer.py",
+    "memanga/first_run.py",
+    "memanga/gui/**",
+    "memanga/image_limits.py",
+    "memanga/output.py",
+    "memanga/perf.py",
+    "memanga/persist.py",
+    "memanga/process_lock.py",
+    "memanga/schema.py",
+    "memanga/scrapers/**",
+    "memanga/search.py",
+    "memanga/source_docs.py",
+    "memanga/state.py",
+    "memanga/state_stores/activity.py",
+    "memanga/state_stores/backups.py",
+    "memanga/state_stores/catalogue.py",
+    "memanga/state_stores/failures.py",
+    "memanga/state_stores/library.py",
+    "memanga/state_stores/notifications.py",
+    "memanga/state_stores/reading.py",
+    "memanga/state_stores/source_health.py",
+    "memanga/suspicion.py",
+    "memanga/watch.py",
+    "packaging/**",
+    "scripts/**",
+    "tests/**",
+]
+
+[tool.mypy]
+python_version = "3.11"
+# The modules that are type checked so far: the chapter model, the schema
+# versions and the state stores. They import only the standard library
+# and each other, so they need no stubs. To check more, add the path here
+# and fix what mypy reports in it.
+files = [
+    "memanga/chapters.py",
+    "memanga/schema.py",
+    "memanga/state_stores",
+]
+# In a checked package but not passing yet: full_details() assigns None
+# to a variable first bound to a str.
+exclude = ['^memanga/state_stores/notifications\.py$']
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unused_configs = true
+
+# The rest of memanga is read for its types when a checked module imports
+# it, but its own errors are not reported until it is listed in `files`.
+[[tool.mypy.overrides]]
+module = "memanga.*"
+follow_imports = "silent"

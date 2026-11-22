@@ -6,6 +6,10 @@ import pytest
 
 from memanga.scrapers.mangapill import MangapillScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangapillScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def scraper():

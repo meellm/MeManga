@@ -3,6 +3,8 @@ mutation, app-password keyring helpers, persistence round-trips."""
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 
@@ -30,6 +32,36 @@ class TestConfigBasics:
         # Top-level nested dicts should also be readable directly.
         a = config.get("a")
         assert a == {"b": {"c": 42}}
+
+
+class TestConfigLocking:
+    """Issue #246: set() and reset() mutate under the same lock as save()."""
+
+    @staticmethod
+    def _blocks_until_lock_released(config, action):
+        import threading
+        config._lock.acquire()
+        worker = threading.Thread(target=action, daemon=True)
+        try:
+            worker.start()
+            worker.join(0.3)
+            assert worker.is_alive(), "ran without taking the config lock"
+        finally:
+            config._lock.release()
+        worker.join(5)
+        assert not worker.is_alive()
+
+    def test_set_waits_for_lock(self, config):
+        self._blocks_until_lock_released(
+            config, lambda: config.set("gui.sort_by", "status"))
+        assert config.get("gui.sort_by") == "status"
+
+    def test_reset_waits_for_lock(self, config):
+        config.set("gui.sort_by", "status")
+        self._blocks_until_lock_released(config, config.reset)
+        assert config.get("gui.sort_by") == "title"
+        config.reload()
+        assert config.get("gui.sort_by") == "title"
 
 
 class TestPartialChapterConfig:
@@ -112,6 +144,186 @@ class TestKeyringHelpers:
         assert get_app_password(config) == ""
 
 
+class TestAppPasswordStorage:
+    """Issue #247: the plaintext fallback is reported, and the password
+    can be injected through the environment."""
+
+    @pytest.fixture
+    def keyring_store(self, monkeypatch):
+        import keyring
+        store = {}
+        monkeypatch.setattr(keyring, "set_password",
+                            lambda s, u, p: store.__setitem__((s, u), p))
+        monkeypatch.setattr(keyring, "get_password",
+                            lambda s, u: store.get((s, u)))
+        return store
+
+    @pytest.fixture
+    def broken_keyring(self, monkeypatch):
+        import keyring
+
+        def broken(*a):
+            raise RuntimeError("no backend")
+        monkeypatch.setattr(keyring, "set_password", broken)
+        monkeypatch.setattr(keyring, "get_password", broken)
+
+    def test_keyring_store_reported_and_config_cleared(self, config, keyring_store):
+        from memanga.config import set_app_password
+        config.set("email.app_password", "old-plain")
+        assert set_app_password(config, "secret-pw") == "keyring"
+        assert config.get("email.app_password") == ""
+        assert keyring_store == {("memanga", "app_password"): "secret-pw"}
+
+    def test_keyring_failure_falls_back_to_config(self, config, broken_keyring):
+        from memanga.config import get_app_password, set_app_password
+        assert set_app_password(config, "secret-pw") == "config"
+        config.reload()
+        assert config.get("email.app_password") == "secret-pw"
+        assert get_app_password(config) == "secret-pw"
+
+    def test_discarding_keyring_counts_as_unavailable(self, config, monkeypatch):
+        import keyring
+        monkeypatch.setattr(keyring, "set_password", lambda s, u, p: None)
+        monkeypatch.setattr(keyring, "get_password", lambda s, u: None)
+        from memanga.config import get_app_password, set_app_password
+        assert set_app_password(config, "secret-pw") == "config"
+        assert get_app_password(config) == "secret-pw"
+
+    def test_plaintext_notice_names_path_not_password(self, config, broken_keyring):
+        from memanga.config import plaintext_password_notice, set_app_password
+        set_app_password(config, "secret-pw")
+        notice = plaintext_password_notice(config)
+        assert str(config.config_path) in notice
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in notice
+        assert "secret-pw" not in notice
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+    def test_plaintext_fallback_file_is_private(self, config, broken_keyring):
+        import os
+        import stat
+        from memanga.config import set_app_password
+        set_app_password(config, "secret-pw")
+        mode = stat.S_IMODE(os.stat(config.config_path).st_mode)
+        assert mode & 0o077 == 0
+
+    def test_env_password_wins_and_is_not_stored(self, config, keyring_store,
+                                                 monkeypatch):
+        from memanga.config import get_app_password
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        config.set("email.app_password", "config-pw")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "env-pw")
+        assert get_app_password(config) == "env-pw"
+        assert config.get("email.app_password") == "config-pw"
+        assert keyring_store == {("memanga", "app_password"): "keyring-pw"}
+        assert not config.config_path.exists()
+
+    def test_password_file_wins_and_strips_newline(self, config, keyring_store,
+                                                   monkeypatch, tmp_path):
+        from memanga.config import get_app_password
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        secret = tmp_path / "smtp_password"
+        secret.write_bytes(b"file pw with spaces\n")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(secret))
+        assert get_app_password(config) == "file pw with spaces"
+
+    def test_empty_env_values_count_as_unset(self, config, keyring_store,
+                                             monkeypatch):
+        from memanga.config import app_password_override, get_app_password
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", "")
+        assert app_password_override() is None
+        assert get_app_password(config) == "keyring-pw"
+
+    @pytest.mark.parametrize("problem", ["both", "missing", "empty", "directory",
+                                         "too_large", "not_utf8"])
+    def test_unusable_override_fails_safe(self, config, keyring_store, monkeypatch,
+                                          tmp_path, caplog, problem):
+        from memanga.config import (AppPasswordError, app_password_override,
+                                    get_app_password)
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        config.set("email.app_password", "config-pw")
+        secret = tmp_path / "smtp_password"
+        if problem == "both":
+            secret.write_text("file-pw", encoding="utf-8")
+            monkeypatch.setenv("MEMANGA_SMTP_PASSWORD", "env-pw")
+        elif problem == "empty":
+            secret.write_text("\n", encoding="utf-8")
+        elif problem == "directory":
+            secret.mkdir()
+        elif problem == "too_large":
+            secret.write_text("x" * 5000, encoding="utf-8")
+        elif problem == "not_utf8":
+            secret.write_bytes(b"\xff\xfe\xfa")
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE", str(secret))
+
+        with pytest.raises(AppPasswordError) as excinfo:
+            app_password_override()
+        message = str(excinfo.value)
+        assert "file-pw" not in message and "env-pw" not in message
+        # Never falls back to a stored password, and never raises.
+        with caplog.at_level("WARNING", logger="memanga.config"):
+            assert get_app_password(config) == ""
+        assert "MEMANGA_SMTP_PASSWORD" in caplog.text
+        assert "file-pw" not in caplog.text and "env-pw" not in caplog.text
+
+    @pytest.mark.parametrize("file_name, reason", [
+        # open() raises ValueError
+        ("smtp\x00password", "not a valid file path"),
+        # POSIX: the user lookup in expanduser() raises ValueError. Windows
+        # resolves no other user's "~name" at all (RuntimeError).
+        ("~memanga-no-such-user-247\x00/pw",
+         "cannot resolve the home folder" if sys.platform == "win32"
+         else "not a valid file path"),
+    ])
+    def test_nul_in_password_file_path_fails_safe(self, config, keyring_store,
+                                                  monkeypatch, caplog, file_name,
+                                                  reason):
+        # A NUL must not escape get_app_password, wherever it is caught.
+        # The OS environment cannot hold a NUL, so the value is injected
+        # through a mapping, and config's os.environ is replaced by a
+        # plain dict for this test only.
+        from memanga import config as config_mod
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        config.set("email.app_password", "config-pw")
+        environ = {"MEMANGA_SMTP_PASSWORD_FILE": file_name}
+        with pytest.raises(config_mod.AppPasswordError) as excinfo:
+            config_mod.app_password_override(environ)
+        message = str(excinfo.value)
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in message
+        assert reason in message
+        monkeypatch.setattr(config_mod.os, "environ",
+                            dict(config_mod.os.environ, **environ))
+        with caplog.at_level("WARNING", logger="memanga.config"):
+            assert config_mod.get_app_password(config) == ""
+        for text in (message, caplog.text):
+            assert "keyring-pw" not in text and "config-pw" not in text
+
+    def test_unknown_user_in_password_file_path_fails_safe(self, config, keyring_store,
+                                                           monkeypatch):
+        # Through the real environment: get_app_password never raises.
+        from memanga.config import (AppPasswordError, app_password_override,
+                                    get_app_password)
+        keyring_store[("memanga", "app_password")] = "keyring-pw"
+        monkeypatch.setenv("MEMANGA_SMTP_PASSWORD_FILE",
+                           "~memanga-no-such-user-247/smtp_password")
+        with pytest.raises(AppPasswordError) as excinfo:
+            app_password_override()
+        assert "MEMANGA_SMTP_PASSWORD_FILE" in str(excinfo.value)
+        assert get_app_password(config) == ""
+
+    def test_unresolvable_home_in_password_file_path(self, monkeypatch):
+        from memanga import config as config_mod
+
+        def no_home(self):
+            raise RuntimeError("Could not determine home directory.")
+        monkeypatch.setattr(config_mod.Path, "expanduser", no_home)
+        with pytest.raises(config_mod.AppPasswordError) as excinfo:
+            config_mod.app_password_override(
+                {"MEMANGA_SMTP_PASSWORD_FILE": "~/smtp_password"})
+        assert "home folder" in str(excinfo.value)
+
+
 class TestInvalidConfigFile:
     def _write(self, isolated_home, text):
         path = isolated_home / ".config" / "memanga" / "config.yaml"
@@ -155,6 +367,11 @@ class TestConfigKeys:
         ("delivery.delete_after_send", "yes", True),
         ("gui.auto_check", "off", False),
         ("email.smtp_port", "587", 587),
+        ("email.smtp_tls", "Implicit", "implicit"),
+        ("email.smtp_tls", "starttls", "starttls"),
+        ("email.smtp_tls", "auto", "auto"),
+        ("email.smtp_timeout", "30", 30),
+        ("email.max_email_mb", "20", 20),
         ("partial_chapters.threshold_percent", "12.5", 12.5),
         ("cron.time", "6:5", "06:05"),
         ("delivery.post_processing.command", "", ""),
@@ -172,6 +389,15 @@ class TestConfigKeys:
         ("email.smtp_port", "0"),
         ("email.smtp_port", "70000"),
         ("email.smtp_port", "5.5"),
+        # Issue #366: no cleartext mode, and no guessing at other names.
+        ("email.smtp_tls", "none"),
+        ("email.smtp_tls", "ssl"),
+        ("email.smtp_tls", ""),
+        ("email.smtp_timeout", "0"),
+        ("email.smtp_timeout", "601"),
+        ("email.max_email_mb", "9"),
+        ("email.max_email_mb", "51"),
+        ("email.max_email_mb", "20.5"),
         ("partial_chapters.threshold_percent", "150"),
         ("partial_chapters.threshold_percent", "nan"),
         ("cron.time", "25:00"),
@@ -193,21 +419,64 @@ class TestConfigKeys:
     def test_defaults_are_valid(self, isolated_home):
         from memanga.config import CONFIG_KEYS, Config, config_value_problem
         cfg = Config()
+        # Issue #345: no default on purpose; unset keeps "all" for configs
+        # that already used email delivery.
+        unset = {"email.kindle_scope"}
         for key in CONFIG_KEYS:
+            if key in unset:
+                assert cfg.get(key) is None, key
+                continue
             assert config_value_problem(key, cfg.get(key)) is None, key
 
     @pytest.mark.parametrize("key,value", [
         ("email.smtp_port", "587"),
         ("email.smtp_port", True),
+        ("email.smtp_tls", "tls"),
+        ("email.smtp_tls", 465),
         ("delivery.delete_after_send", "yes"),
         ("delivery.output_format", "mobi"),
         ("cron.time", 450),  # unquoted 7:30 in YAML 1.1
         ("partial_chapters.threshold_percent", 101),
         ("mangadex.removed_group_ids", "abc"),
+        # Issue #337
+        ("gui.network_check", "off"),
+        ("gui.mangadex_cover_fallback", 0),
+        ("gui.network_check_hosts", "1.1.1.1:53"),
+        ("gui.network_check_hosts", ["https://example.test"]),
+        ("gui.network_check_hosts", ["example.test"]),
+        ("gui.network_check_hosts", ["example.test:0"]),
+        ("gui.network_check_hosts", ["2001:db8::1:443"]),
+        ("gui.network_check_hosts", [443]),
+        # Issue #405
+        ("gui.search_chapter_counts", "no"),
     ])
     def test_value_problem(self, key, value):
         from memanga.config import config_value_problem
         assert config_value_problem(key, value)
+
+    @pytest.mark.parametrize("value", [
+        [], ["1.1.1.1:53"], ["example.test:443", "[2001:db8::1]:443"],
+    ])
+    def test_network_check_hosts_accepted(self, value):
+        from memanga.config import config_value_problem
+        assert config_value_problem("gui.network_check_hosts", value) is None
+
+    @pytest.mark.parametrize("key,text,expected", [
+        ("gui.network_check", "false", False),
+        ("gui.mangadex_cover_fallback", "off", False),
+        ("gui.search_chapter_counts", "off", False),
+    ])
+    def test_network_privacy_switches_parse(self, key, text, expected):
+        from memanga.config import parse_config_value
+        assert parse_config_value(key, text) is expected
+
+    def test_network_privacy_defaults(self, isolated_home):
+        from memanga.config import Config
+        cfg = Config()
+        assert cfg.get("gui.network_check") is True
+        assert cfg.get("gui.network_check_hosts") == []
+        assert cfg.get("gui.mangadex_cover_fallback") is True
+        assert cfg.get("gui.search_chapter_counts") is True
 
     @pytest.mark.parametrize("data,expected", [
         ({}, []),
@@ -222,3 +491,212 @@ class TestConfigKeys:
     def test_section_problems(self, data, expected):
         from memanga.config import config_section_problems
         assert config_section_problems(data) == expected
+
+
+class TestValidationAtLoad:
+    """Issue #293: known keys are checked when the file is loaded."""
+
+    @staticmethod
+    def _load(config, text, **kwargs):
+        from memanga.config import Config
+        config.config_path.write_text(text, encoding="utf-8")
+        return Config(config.config_dir, **kwargs)
+
+    @pytest.mark.parametrize("text,problem", [
+        ("email: oops\n", "email: expected a section"),
+        ("gui: []\n", "gui: expected a section"),
+        ("delivery:\n  post_processing: 5\n",
+         "delivery.post_processing: expected a section"),
+    ])
+    def test_broken_section_is_refused_and_kept(self, config, text, problem):
+        from memanga.config import ConfigError
+        with pytest.raises(ConfigError, match=problem):
+            self._load(config, text)
+        loaded = self._load(config, text, tolerate_errors=True)
+        assert problem in loaded.load_error
+        with pytest.raises(ConfigError):
+            loaded.save()
+        assert config.config_path.read_text(encoding="utf-8") == text
+
+    def test_empty_section_takes_its_defaults(self, config):
+        loaded = self._load(config, "delivery:\nemail:\n")
+        assert loaded.load_error is None
+        assert loaded.get("delivery.output_format") == "pdf"
+        assert loaded.get("email.smtp_port") == 587
+        assert loaded.validation_problems == []
+
+    def test_defaults_fill_nested_sections(self, config):
+        loaded = self._load(
+            config, "delivery:\n  post_processing:\n    enabled: true\n")
+        assert loaded.get("delivery.post_processing") == {
+            "enabled": True, "command": "", "fail_on_error": False}
+
+    def test_invalid_value_is_reported_and_kept(self, config):
+        loaded = self._load(config, "email:\n  smtp_port: nope\n")
+        assert loaded.load_error is None
+        assert loaded.validation_problems == [
+            "email.smtp_port: expected a whole number"]
+        assert "email.smtp_port" in loaded.validation_notice
+        loaded.save()
+        loaded.reload()
+        assert loaded.get("email.smtp_port") == "nope"
+
+    def test_unknown_keys_survive_a_save(self, config):
+        loaded = self._load(
+            config, "future:\n  flag: 1\ndelivery:\n  new_option: x\n")
+        assert loaded.validation_problems == []
+        loaded.save()
+        loaded.reload()
+        assert loaded.get("future.flag") == 1
+        assert loaded.get("delivery.new_option") == "x"
+
+    def test_problems_never_contain_the_value(self, config):
+        loaded = self._load(
+            config,
+            "email:\n  app_password: 987654321\n"
+            "gui:\n  network_check_hosts: ['user:s3cret-token@host']\n")
+        notice = loaded.validation_notice
+        assert "email.app_password" in notice
+        assert "gui.network_check_hosts" in notice
+        assert "987654321" not in notice
+        assert "s3cret-token" not in notice
+
+    def test_valid_file_has_no_notice(self, config):
+        assert self._load(config, "manga: []\n").validation_notice is None
+
+    @pytest.mark.parametrize("value", [
+        float("nan"), float("inf"), float("-inf"), 10 ** 400])
+    def test_threshold_must_be_a_finite_number_in_range(self, value):
+        from memanga.config import config_value_problem
+        assert config_value_problem(
+            "partial_chapters.threshold_percent", value)
+
+    def test_nan_threshold_does_not_allow_every_page_to_fail(self, config):
+        loaded = self._load(
+            config, "partial_chapters:\n  threshold_percent: .nan\n")
+        assert loaded.partial_threshold == 5.0
+
+    @pytest.mark.parametrize("value", [
+        float("inf"), float("-inf"), 10 ** 400,
+    ], ids=["infinity", "negative-infinity", "too-large-for-float"])
+    def test_unusable_threshold_uses_the_default(self, config, value):
+        config.set("partial_chapters.threshold_percent", value)
+        assert config.partial_threshold == 5.0
+        assert config.get("partial_chapters.threshold_percent") == value
+
+    @pytest.mark.parametrize("key,name", [
+        ("reader.remove_after_read", "reader_remove_after_read"),
+        ("cron.enabled", "cron_enabled"),
+    ], ids=["reader", "cron"])
+    def test_flag_is_only_on_for_a_real_true(self, config, key, name):
+        for value in ("no", "false", 1):
+            config.set(key, value)
+            assert getattr(config, name) is False
+            assert config.get(key) == value
+        config.set(key, True)
+        assert getattr(config, name) is True
+
+
+class TestTypedDelivery:
+    """Issue #293: ``Config.delivery`` is the checked view of delivery.*."""
+
+    def test_defaults(self, config):
+        from memanga.config import PostProcessingSettings
+        delivery = config.delivery
+        assert delivery.mode == "local"
+        assert delivery.download_dir == config.download_dir
+        assert delivery.delete_after_send is False
+        assert delivery.output_format == "pdf"
+        assert delivery.naming_template == "{title} - Chapter {chapter}"
+        assert delivery.post_processing == PostProcessingSettings()
+
+    @pytest.mark.parametrize("key,value,field,expected", [
+        # Truthy text must never delete a file.
+        ("delivery.delete_after_send", "no", "delete_after_send", False),
+        ("delivery.mode", "fax", "mode", "local"),
+        ("delivery.output_format", "mobi", "output_format", "pdf"),
+        ("delivery.naming_template", 5, "naming_template",
+         "{title} - Chapter {chapter}"),
+        ("delivery.naming_template", "  ", "naming_template",
+         "{title} - Chapter {chapter}"),
+    ])
+    def test_invalid_value_reads_as_the_default(self, config, key, value,
+                                                field, expected):
+        config.set(key, value)
+        assert getattr(config.delivery, field) == expected
+        # The stored value is not touched.
+        assert config.get(key) == value
+
+    @pytest.mark.parametrize("raw", [
+        {"enabled": "false", "command": "run"},
+        {"enabled": 1, "command": "run"},
+        {"enabled": None, "command": "run"},
+        "oops",
+        None,
+    ])
+    def test_post_processing_stays_off_for_bad_values(self, raw):
+        from memanga.config import PostProcessingSettings
+        assert PostProcessingSettings.from_mapping(raw).enabled is False
+
+    def test_post_processing_bad_fields_read_as_unset(self):
+        from memanga.config import PostProcessingSettings
+        settings = PostProcessingSettings.from_mapping(
+            {"enabled": True, "command": ["run"], "fail_on_error": "yes"})
+        assert settings == PostProcessingSettings(enabled=True)
+
+    def test_command_is_not_in_the_repr(self):
+        from memanga.config import PostProcessingSettings
+        settings = PostProcessingSettings(enabled=True, command="run --token x")
+        assert "--token" not in repr(settings)
+
+    @pytest.mark.parametrize("value", ["", "   ", 5, ["a"]])
+    def test_bad_download_dir_is_not_the_current_directory(self, config, value):
+        config.set("delivery.download_dir", value)
+        assert config.download_dir == config.config_dir / "downloads"
+        assert config.delivery.download_dir == config.download_dir
+
+    def test_unresolvable_download_dir_does_not_hide_other_settings(
+            self, config, monkeypatch):
+        from memanga import config as config_mod
+
+        def no_home(self):
+            raise RuntimeError("Could not determine home directory.")
+        config.set("delivery.delete_after_send", True)
+        monkeypatch.setattr(config_mod.Path, "expanduser", no_home)
+        delivery = config.delivery
+        assert delivery.download_dir is None
+        assert delivery.delete_after_send is True
+
+    def test_follows_set_reload_and_reset(self, config):
+        config.set("delivery.output_format", "epub")
+        assert config.delivery.output_format == "epub"
+        config.save()
+        config.set("delivery.output_format", "cbz")
+        assert config.delivery.output_format == "cbz"
+        config.reload()
+        assert config.delivery.output_format == "epub"
+        config.reset()
+        assert config.delivery.output_format == "pdf"
+
+    def test_is_read_only(self, config):
+        import dataclasses
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.delivery.mode = "email"
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.delivery.post_processing.enabled = True
+
+    def test_fields_match_the_schema(self):
+        from dataclasses import fields
+        from memanga.config import (CONFIG_KEYS, DeliverySettings,
+                                    PostProcessingSettings)
+        names = {f"delivery.{f.name}" for f in fields(DeliverySettings)
+                 if f.name != "post_processing"}
+        names |= {f"delivery.post_processing.{f.name}"
+                  for f in fields(PostProcessingSettings)}
+        assert names == {k for k in CONFIG_KEYS if k.startswith("delivery.")}
+
+    def test_post_processing_defaults_match_the_config_defaults(self, config):
+        from dataclasses import asdict
+        from memanga.config import PostProcessingSettings
+        assert (asdict(PostProcessingSettings())
+                == config._default_config()["delivery"]["post_processing"])

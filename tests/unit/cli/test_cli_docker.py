@@ -40,6 +40,19 @@ class TestCliOnlyEnvVar:
         assert "--gui" not in out
         assert "graphical" not in out.lower()
 
+    def test_help_mentions_config_dir_with_gui_outside_cli_only(
+            self, monkeypatch, isolated_home, capsys):
+        """#249: with the GUI installed, --config-dir help says it also
+        applies to --gui; the CLI-only help above must not."""
+        monkeypatch.delenv("MEMANGA_CLI_ONLY", raising=False)
+        monkeypatch.setattr(sys, "argv", ["memanga", "--help"])
+        import memanga.cli as cli
+        with pytest.raises(SystemExit) as exc:
+            cli.main()
+        assert exc.value.code == 0
+        out = " ".join(capsys.readouterr().out.split())
+        assert "also with --gui" in out
+
     def test_help_hides_epilog_gui_line(self, monkeypatch, isolated_home, capsys):
         monkeypatch.setenv("MEMANGA_CLI_ONLY", "1")
         monkeypatch.setattr(sys, "argv", ["memanga", "--help"])
@@ -78,7 +91,27 @@ class TestCliOnlyEnvVar:
         monkeypatch.setattr(sys, "argv", ["memanga", "--gui"])
         import memanga.cli as cli
         launched = []
-        fake_gui = types.SimpleNamespace(launch_gui=lambda: launched.append(True))
+        fake_gui = types.SimpleNamespace(
+            launch_gui=lambda **kwargs: launched.append(True))
         monkeypatch.setitem(sys.modules, "memanga.gui", fake_gui)
         cli.main()
         assert launched == [True]
+
+
+class TestGuiLauncherInCliOnlyImage:
+    """#314: the image keeps the memanga-gui launcher; it exits like --gui."""
+
+    def test_launch_gui_rejected_before_dependency_check(
+            self, monkeypatch, isolated_home, capsys):
+        monkeypatch.setenv("MEMANGA_CLI_ONLY", "1")
+        # The image has no Qt; the error must not be the pip install hint.
+        for name in ("PySide6", "shiboken6"):
+            monkeypatch.setitem(sys.modules, name, None)
+        import memanga.gui as gui
+        with pytest.raises(SystemExit) as exc:
+            gui.launch_gui()
+        assert exc.value.code == 1
+        err = capsys.readouterr().err
+        assert "not available in this image" in err
+        assert "pip install" not in err
+        assert "Traceback" not in err

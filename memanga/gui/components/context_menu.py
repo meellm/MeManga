@@ -15,7 +15,10 @@ class ContextMenu:
         menu.setStyleSheet(
             f"QMenu {{ background: {T.BG_CARD}; border: 1px solid {T.BORDER}; border-radius: 6px; padding: 4px; }}"
             f"QMenu::item {{ padding: 6px 20px; color: {T.FG}; border-radius: 4px; }}"
-            f"QMenu::item:selected {{ background: {T.BORDER}; }}"
+            # Solid accent highlight, like a native menu, so the item the
+            # arrow keys are on is easy to see (issue #396).
+            f"QMenu::item:selected {{ background: {T.tokens()['accent.primary']};"
+            f" color: {T.tokens()['accent.on_primary']}; }}"
             f"QMenu::separator {{ height: 1px; background: {T.BORDER}; margin: 4px 8px; }}"
         )
 

@@ -36,6 +36,7 @@ class ThunderScansScraper(BaseScraper):
 
     name = "thunderscans"
     base_url = "https://en-thunderscans.com"
+    content_language = "en"  # English edition (en-thunderscans.com)
 
     # Search results are 10 per page; follow "Next" a few pages at most.
     _MAX_SEARCH_PAGES = 3

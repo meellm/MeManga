@@ -6,11 +6,14 @@ Next.js based manhwa scanlation site - uses Playwright to render JS content.
 Extends PlaywrightScraper for thread-safe Playwright with shared cleanup.
 """
 
+import logging
 import re
 import json
 from typing import List
 from .playwright_base import PlaywrightScraper
-from .base import Chapter, Manga
+from .base import Chapter, Manga, BROWSER_USER_AGENT_SHORT
+
+logger = logging.getLogger(__name__)
 
 
 class FlameComicsScraper(PlaywrightScraper):
@@ -68,7 +71,7 @@ class FlameComicsScraper(PlaywrightScraper):
 
                             results.append(Manga(title=title, url=manga_url, cover_url=cover_url))
             except json.JSONDecodeError as e:
-                print(f"[FlameComics] JSON parse error: {e}")
+                logger.debug("JSON parse error: %s", e)
 
         # Fallback: try browse/search page
         if not results:
@@ -92,7 +95,7 @@ class FlameComicsScraper(PlaywrightScraper):
                                 cover_url = f"https://cdn.flamecomics.xyz/uploads/images/series/{series_id}/{cover}" if cover else None
                                 results.append(Manga(title=title, url=manga_url, cover_url=cover_url))
             except Exception as e:
-                print(f"[FlameComics] Search fallback error: {e}")
+                logger.warning("Search fallback error: %s", e)
 
         return results[:10]
 
@@ -200,7 +203,7 @@ class FlameComicsScraper(PlaywrightScraper):
         """Download image with proper referer header."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": f"{self.base_url}/",
             }
             response = self.session.get(url, headers=headers, timeout=30)
@@ -210,5 +213,5 @@ class FlameComicsScraper(PlaywrightScraper):
             P(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"[FlameComics] Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

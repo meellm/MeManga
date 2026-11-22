@@ -4,6 +4,7 @@ HentaiFox.com scraper
 
 import re
 from typing import List, Optional
+from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from .base import BaseScraper, Chapter, Manga
@@ -14,10 +15,11 @@ class HentaiFoxScraper(BaseScraper):
     
     name = "hentaifox"
     base_url = "https://hentaifox.com"
+    nsfw = True
     
     def search(self, query: str) -> List[Manga]:
         """Search for galleries."""
-        url = f"{self.base_url}/search/?q={query}&page=1"
+        url = f"{self.base_url}/search/?q={quote_plus(query)}&page=1"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         

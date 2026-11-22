@@ -5,6 +5,7 @@ Site: https://manytoon.com (NSFW - hentai manhwa)
 
 import re
 from typing import List
+from urllib.parse import quote_plus
 from .playwright_base import PlaywrightScraper
 from .base import Manga, Chapter
 from bs4 import BeautifulSoup
@@ -14,10 +15,11 @@ class ManyToonScraper(PlaywrightScraper):
     name = "Manytoon"
     domains = ["manytoon.com"]
     base_url = "https://manytoon.com"
+    nsfw = True
 
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title."""
-        url = f"{self.base_url}/?s={query.replace(' ', '+')}"
+        url = f"{self.base_url}/?s={quote_plus(query)}"
         html = self._get_page_content(url, wait_time=5000)
         soup = BeautifulSoup(html, "html.parser")
 

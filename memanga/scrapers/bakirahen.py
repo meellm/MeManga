@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from typing import List, Optional
 from urllib.parse import urljoin
 
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class BakiRahenScraper(BaseScraper):
         self.base_url = "https://bakirahen.com"
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": BROWSER_USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Referer": self.base_url,
@@ -85,7 +85,7 @@ class BakiRahenScraper(BaseScraper):
             # Sort by chapter number (descending - newest first)
             chapters.sort(key=lambda c: c.numeric, reverse=True)
             
-            logger.info(f"Found {len(chapters)} chapters for Baki Rahen")
+            logger.debug("Found %s chapters for Baki Rahen", len(chapters))
             return chapters
             
         except Exception as e:
@@ -122,7 +122,7 @@ class BakiRahenScraper(BaseScraper):
                     seen.add(img)
                     unique_images.append(img)
             
-            logger.info(f"Found {len(unique_images)} images in chapter")
+            logger.debug("Found %s images in chapter", len(unique_images))
             return unique_images
             
         except Exception as e:
@@ -133,7 +133,7 @@ class BakiRahenScraper(BaseScraper):
         """Download an image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": BROWSER_USER_AGENT,
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
                 "Referer": self.base_url,

@@ -73,8 +73,10 @@ class TestCoverLoadFailedFallback:
 
         assert _wait_for(
             lambda: config.get("manga")[0].get("cover_url") == _FALLBACK_URL)
-        event_bus.poll()
-        assert updated and updated[0]["title"] == "Blue Lock"
+        # The new URL is visible before update_manga has saved and the
+        # task has published, so wait for the event too.
+        assert _wait_for(lambda: event_bus.poll() or updated)
+        assert updated[0]["title"] == "Blue Lock"
 
     def test_attempted_once_per_url(self, stub_app, config, monkeypatch):
         config.set("manga", [{"title": "Blue Lock", "cover_url": _DEAD_URL}])

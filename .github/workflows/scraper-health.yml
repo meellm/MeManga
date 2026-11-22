@@ -1,0 +1,63 @@
+name: Scraper health
+
+# The live scraper probes (issue #255) against the real sites, weekly and
+# by hand, never on pushes or pull requests. health.json names every
+# source that is down, blocks the runner or changed its pages, and the
+# stage that broke. Such sources do not fail the run, which is listed in
+# its summary instead; the run fails when the probes could not run or
+# report, or a test failed other than by its source failing.
+
+on:
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scraper-health
+  cancel-in-progress: false
+
+jobs:
+  live:
+    # The Playwright release in requirements/dev.txt (1.60) supports
+    # Ubuntu up to 24.04 and cannot install its browsers on 26.04, which
+    # ubuntu-latest now is. Move this with a Playwright upgrade.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements/dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements/dev.txt
+          python -m pip install --no-deps -e .
+          python -m playwright install --with-deps firefox chromium
+      - name: Check that the browsers start
+        # A browser that cannot start would fail its probes like a broken
+        # source.
+        run: memanga doctor --check browsers --launch-browsers
+      - name: Run live probes
+        id: probes
+        # Without pytest-qt: the probes use no Qt, and it would import Qt,
+        # which needs system libraries this job does not install. Failed
+        # probes exit 1; the next step tells them from a broken run.
+        run: |
+          set +e
+          python -m pytest -p no:pytest-qt -m live tests/scrapers/live/ --health-report=health.json
+          echo "exit-code=$?" >> "$GITHUB_OUTPUT"
+      - name: Check the health report
+        run: python scripts/check_health_report.py health.json "${{ steps.probes.outputs.exit-code }}"
+      - name: Upload health report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scraper-health
+          path: health.json
+          if-no-files-found: warn
+          retention-days: 30

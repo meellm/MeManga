@@ -6,13 +6,16 @@ Manga: Kengan Ashura / Kengan Omega by Sandrovich Yabako and Daromeon
 Architecture: WordPress + wp-content/uploads CDN
 """
 
+import logging
 import re
 import requests
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from urllib.parse import urljoin
 
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
+
+logger = logging.getLogger(__name__)
 
 
 class KenganAshuraMangaScraper(BaseScraper):
@@ -23,7 +26,7 @@ class KenganAshuraMangaScraper(BaseScraper):
         self.base_url = "https://kenganashura.com"
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": BROWSER_USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Referer": "https://kenganashura.com/",
@@ -36,18 +39,14 @@ class KenganAshuraMangaScraper(BaseScraper):
         
         if any(term in query_lower for term in ["kengan", "ashura", "omega"]):
             results.append(Manga(
-                id="kengan-ashura",
                 title="Kengan Ashura",
                 url=f"{self.base_url}/manga/kengan-ashura-chapter-1/",
-                cover_url="",
-                source="kenganashura.com"
+                cover_url=None,
             ))
             results.append(Manga(
-                id="kengan-omega",
                 title="Kengan Omega",
                 url=f"{self.base_url}/manga/kengan-omega-chapter-1/",
-                cover_url="",
-                source="kenganashura.com"
+                cover_url=None,
             ))
         
         return results
@@ -94,7 +93,7 @@ class KenganAshuraMangaScraper(BaseScraper):
             chapters.sort(key=lambda x: x.numeric, reverse=True)
             
         except Exception as e:
-            print(f"Error getting chapters: {e}")
+            logger.warning("Error getting chapters: %s", e)
         
         return chapters
     
@@ -123,7 +122,7 @@ class KenganAshuraMangaScraper(BaseScraper):
                             pages.append(src)
             
         except Exception as e:
-            print(f"Error getting pages from {chapter_url}: {e}")
+            logger.warning("Error getting pages from %s: %s", chapter_url, e)
         
         return pages
     
@@ -131,7 +130,7 @@ class KenganAshuraMangaScraper(BaseScraper):
         """Download an image from the given URL."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": self.base_url,
             }
             
@@ -144,6 +143,6 @@ class KenganAshuraMangaScraper(BaseScraper):
                 return True
             
         except Exception as e:
-            print(f"Error downloading image {url}: {e}")
+            logger.debug("Error downloading image %s: %s", url, e)
         
         return False

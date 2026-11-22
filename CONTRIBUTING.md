@@ -1,100 +1,120 @@
 # Contributing to MeManga
 
-Thanks for taking the time to contribute! This guide covers everything
-you need to set up the project locally, run the tests, and get a pull
-request landed.
+Thanks for taking the time to contribute! This guide covers setting up
+the project locally, running the tests and getting a pull request landed.
+The [developer pages](https://meellm.github.io/MeManga/developer/contributing)
+on the documentation site go into more detail.
 
 ## Code of Conduct
 
 Be kind. Treat other contributors the way you'd want to be treated.
 Disagreements are fine; personal attacks aren't.
 
+MeManga's [Code of Conduct](CODE_OF_CONDUCT.md) is the Contributor
+Covenant 2.1. Report conduct problems privately by email to
+`info.meellm@gmail.com`, not in a public issue or discussion.
+
 ## Quick start
+
+[Set up for development](https://meellm.github.io/MeManga/developer/contributing) is the full guide:
+system libraries, running MeManga from the clone, browser components,
+tests, what CI runs and the generated files. The short version, as CI
+installs it:
 
 ```bash
 git clone https://github.com/meellm/MeManga.git
 cd MeManga
-
-# Create a venv and install everything (deps + dev deps)
-python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-pip install -e ".[dev]"           # also pulls pytest, pyinstaller, etc.
-
-# Run the GUI
-python -m memanga.gui
-
-# Run the CLI
-python -m memanga --help
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
+python -m pip install --require-hashes -r requirements/dev.txt   # pinned: gui extra + test tools
+python -m pip install --no-deps -e .                             # the package itself, editable
+python -m pytest                                                 # the default test run
 ```
 
-The GUI launches in offscreen mode in CI (`QT_QPA_PLATFORM=offscreen`);
-locally it opens the real Qt window.
+`memanga setup` or `python -m playwright install firefox chromium`
+installs the browser components. Only sources that use a browser and the
+live probes need them.
+
+### Package extras
+
+`pip install .` installs the CLI only; PySide6 is not a default
+dependency. The extras in `pyproject.toml`:
+
+| Extra | Adds | Use it for |
+|---|---|---|
+| `gui` | PySide6 | Running the desktop app (`memanga --gui`, `memanga-gui`) |
+| `dev` | `gui` plus pytest, pytest-qt, pytest-mock, pytest-env, pytest-xdist, pytest-cov, packaging, Ruff, mypy and pre-commit | Tests and local quality checks; the GUI tests need Qt |
+| `build` | `gui` plus PyInstaller, certifi and (on Windows) pywin32-ctypes | Desktop builds |
+
+`pyproject.toml` is the only place dependencies are declared; the
+pinned installs in `requirements/` are generated from it (see
+[Dependency locks](#dependency-locks)). A new dependency that only the
+GUI imports goes in the `gui` extra, never in `dependencies`.
+Code outside `memanga/gui/` must not import Qt at import time;
+`tests/unit/test_optional_gui.py` checks that and the metadata.
 
 ## Project layout
 
-```
-memanga/
-├── cli.py              # CLI entry point (memanga.cli:main)
-├── config.py           # YAML config persistence
-├── state.py            # State journal (downloaded chapters, etc.)
-├── downloader.py       # Chapter download + format conversion
-├── emailer.py          # Kindle/SMTP delivery
-├── scrapers/           # 200+ site scrapers
-│   ├── base.py         # BaseScraper / Chapter / Manga dataclasses
-│   ├── playwright_base.py
-│   ├── templates/      # NuxtSSR, OGImageMeta, WordPressMadara, …
-│   └── *.py            # Per-site scrapers
-└── gui/
-    ├── app.py          # MeMangaApp QMainWindow
-    ├── pages/          # Library / Detail / Reader / Settings / Sources
-    ├── components/     # Reusable widgets
-    ├── workers.py      # Background thread pool + EventBus dispatch
-    └── theme/          # tokens + QSS builder
-
-tests/                  # Unit + integration tests
-docs/                   # User-facing documentation
-examples/               # Sample config + state
-packaging/              # PyInstaller specs (dev + release)
-scripts/                # Platform setup scripts
-```
+[Architecture](https://meellm.github.io/MeManga/developer/architecture#where-to-change-what) maps
+the modules and says where to change what.
 
 ## Running the tests
 
 ```bash
-# Full suite (fast — uses fixtures, no real network)
-pytest
-
-# Only unit
-pytest tests/unit
-
-# Only GUI
-pytest tests/unit/gui
-
-# Live scraper health checks (hits real sites — slow, opt-in)
-pytest -m live tests/scrapers/live/
-
-# Curated end-to-end probes only — each walks search → chapters →
-# pages → image and a failure names the first broken stage
-pytest -m live tests/scrapers/live/test_live_parsing.py -v
-
-# Machine-readable report (per-stage details + failures_by_stage)
-pytest -m live tests/scrapers/live/ --health-report=health.json
+python -m pytest                          # the default run: everything but the live probes
+python -m pytest tests/unit/test_api.py   # one file while you work
+python -m pytest -n auto                  # the default run in parallel
+python -m pytest -m live tests/scrapers/live/   # live probes against the real sites, opt-in
 ```
 
-All checked-in tests should pass before you push. CI runs `pytest` on
-every push.
+[Run the tests](https://meellm.github.io/MeManga/developer/contributing#run-the-tests) explains the
+defaults and markers, and [Write a scraper](https://meellm.github.io/MeManga/developer/scrapers#live-probe)
+the live probes. Pushes and pull requests to `main` run the CI workflow;
+[What CI runs](https://meellm.github.io/MeManga/developer/contributing#what-ci-runs) lists every
+workflow and when it runs.
+
+## Local quality checks
+
+With the dev environment active, from the repository root:
+
+```sh
+ruff check .
+ruff format --check .
+mypy
+pre-commit install          # once per clone
+pre-commit run --all-files
+```
+
+Keep the dev environment active when committing: the local mypy hook uses
+its Python. Formatting and type checking cover a gradually expanding set
+of files; see [Local quality checks](https://meellm.github.io/MeManga/developer/contributing#local-quality-checks).
 
 ## Adding a scraper
+
+[Write a scraper](https://meellm.github.io/MeManga/developer/scrapers)
+explains each step, the fixtures, the tests and the live probe in detail.
 
 1. Drop `memanga/scrapers/newsite.py` (or pick a template under
    `memanga/scrapers/templates/` and add an entry to
    `memanga/scrapers/registry.py`).
-2. Subclass `BaseScraper` (or `PlaywrightScraper` if JS-rendered).
+2. Subclass `BaseScraper` (or `PlaywrightScraper` if JS-rendered). If the
+   site sits behind Cloudflare's JavaScript check, call
+   `self._use_cloudscraper()` in `__init__` (optionally with a browser
+   profile such as `CLOUDSCRAPER_CHROME_DESKTOP`) instead of importing
+   `cloudscraper` yourself. cloudscraper is best-effort: it stops working
+   when a site raises its protection, so a source that needs a real
+   browser should use `PlaywrightScraper`. When a block or challenge page
+   still comes back, raise a clear error instead of parsing it as content.
 3. Implement `search()`, `get_chapters()`, `get_pages()`.
-4. Register the domain in `memanga/scrapers/__init__.py` (or the
-   registry's `TEMPLATE_SCRAPERS` map for template-based scrapers).
+4. Register the domain in `_SCRAPER_PATHS` in `memanga/scrapers/__init__.py`
+   as `"newsite:NewSiteScraper"` (module and class; it is imported on first
+   use), or in the registry's `TEMPLATE_SCRAPERS` map for template-based
+   scrapers.
 5. Add a fixture-based test under `tests/scrapers/`.
+6. Declare `engine`, `content_language`, and `nsfw` on the scraper class
+   where applicable. Add per-domain search skips or notes in
+   `memanga/scrapers/catalog.py` when needed.
+7. Regenerate the source lists with `python -m memanga.source_docs`.
 
 ## Commit style
 
@@ -111,82 +131,70 @@ docs: clarify Playwright first-launch download
 
 ## Pull request checklist
 
-- [ ] Tests pass locally (`pytest`)
-- [ ] New behaviour has tests
+The pull request template has the same items, except the commit style
+and the generated files, which are listed only here.
+
+- [ ] `pytest` passes locally
+- [ ] New behaviour has tests (or notes saying why not)
 - [ ] No `print()` debug noise left in production code
 - [ ] Commit messages follow the style above
 - [ ] No secrets, `.env`, or personal config in the diff
-- [ ] If you touched a scraper, you noted whether you tested it live
+- [ ] Generated files are regenerated when their inputs changed
+- [ ] If you touched a scraper, you ran the live probe at least once
+
+If you add or change what the command line prints, follow [Command-line output](https://meellm.github.io/MeManga/developer/contributing#command-line-output).
 
 ## Building executables
 
 ```bash
-python build.py        # Single-file dev exe with console (MeManga-Dev.exe)
-python build_app.py    # Single-file release exe, no console (MeManga.exe)
+python build.py        # dev build with a console: MeManga-Dev[.exe] in the repo root
+python build_app.py    # release build, no console: release/MeManga and release/THIRD_PARTY_NOTICES.txt
 ```
 
-Both scripts move the final binary to the repo root and sweep the
-`build/` + `dist/` scratch directories.
+Both install `requirements/build.txt` into the current environment first,
+so run them in a virtual environment made for building, and both delete
+the `build/` and `dist/` scratch folders when they succeed.
+`python build_app.py --no-install` builds from the packages already
+installed. [Build and release](https://meellm.github.io/MeManga/developer/build-release#build-the-desktop-app) describes
+the outputs on each system and how a version is released.
 
 ### macOS signing and notarization
 
-Signing and notarization are optional and need a paid Apple Developer
-Program membership. When all of these repository secrets are set, tag
-builds sign the macOS apps with a Developer ID Application certificate,
-notarize them with Apple and staple the ticket before upload, and the
-release job fails if any of those steps or the Gatekeeper check fails:
+Signing and notarization of the macOS downloads are optional and need a
+paid Apple Developer Program membership. The release workflow uses them
+only when all six repository secrets are set; without them it still
+publishes unsigned, unnotarized `MeManga.app` zips. The secrets and what
+the workflow checks are listed under
+[macOS signing and notarization](https://meellm.github.io/MeManga/developer/build-release#macos-signing-and-notarization).
 
-| Secret | Value |
-|---|---|
-| `MACOS_CERTIFICATE_BASE64` | Base64 of the Developer ID Application `.p12` export |
-| `MACOS_CERTIFICATE_PASSWORD` | Password of that `.p12` |
-| `MACOS_CODESIGN_IDENTITY` | Identity name, e.g. `Developer ID Application: Name (TEAMID)` |
-| `APPLE_ID` | Apple ID used for notarization |
-| `APPLE_TEAM_ID` | Ten-character Apple Developer Team ID |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for that Apple ID |
+### Dependency locks
 
-If any secret is missing the release workflow logs a warning and still
-publishes unsigned, unnotarized `MeManga.app` zips. They pass the same
-bundle, architecture and Playwright checks, but Gatekeeper may report
-them as damaged or from an unidentified developer until the user clears
-the quarantine flag (see the README).
-
-Local `python build_app.py` runs on a Mac stay unsigned (ad-hoc) unless
-`MEMANGA_CODESIGN_IDENTITY` is set; hardened-runtime entitlements live in
-`packaging/macos-entitlements.plist`.
-
-### Dependency pinning for release builds
-
-The dev build (`build.py`) installs from `requirements.txt`
-(`>=` ranges) so you get the latest patch-level updates while
-iterating.
-
-The release build (`build_app.py`) installs from
-**`requirements-lock.txt`** — exact pins for every direct **and
-transitive** dependency. This is what makes the binary on every
-GitHub release reproducible six months later from the same git tag.
-
-**When to refresh the lock:**
-- Any time you bump a dependency in `requirements.txt`.
-- Before cutting a release tag.
-
-**How to refresh:**
+`pyproject.toml` is the only place dependencies are declared; the files in
+`requirements/` are generated from it, pinned with hashes. After changing
+the dependencies or `[tool.lock-dependencies]`, regenerate them (needs
+uv 0.13.1 and the network) and commit both:
 
 ```bash
-pip install pip-tools
-pip-compile --output-file=requirements-lock.txt --strip-extras requirements.txt
-git add requirements-lock.txt
-git commit -m "chore(deps): refresh requirements-lock.txt"
+python -m pip install "uv==0.13.1"
+python scripts/lock_dependencies.py
+git add pyproject.toml requirements/
 ```
 
-`pip-compile` walks the full transitive tree once and writes one
-row per package with the resolved version + the chain that pulled
-it in. If a security advisory drops, bump the offending package in
-`requirements.txt` and re-run pip-compile — the lock will
-recompute consistently.
+Never edit the files by hand. `python scripts/lock_dependencies.py --check`
+verifies them; [Dependency locks](https://meellm.github.io/MeManga/developer/build-release#dependency-locks) explains the
+files, `--check`, `--check --offline` and `--check-installed build`.
+
+## Translations
+
+The desktop app, the command line and the documentation are in English
+only today, and translations are welcome.
+[Translations](https://meellm.github.io/MeManga/developer/contributing#translations)
+explains how to start: with an issue that names the language and a small
+first part to translate.
 
 ## Reporting issues
 
-See [SECURITY.md](SECURITY.md) for vulnerability reports. For
-everything else, open a GitHub issue with the **Bug report** or
+See [SECURITY.md](SECURITY.md) for vulnerability reports. Ask questions
+and share ideas in [Discussions](https://github.com/meellm/MeManga/discussions).
+For everything else, open a GitHub issue with the **Bug report** or
 **Feature request** template.

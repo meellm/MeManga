@@ -13,6 +13,9 @@ class TCBScansScraper(BaseScraper):
     
     name = "tcbscans"
     base_url = "https://tcbonepiecechapters.com"
+    # English releases of Japanese (Shonen Jump) manga.
+    content_language = "en"
+    reading_direction = "rtl"
     
     def search(self, query: str) -> List[Manga]:
         """Search for manga - TCB has limited selection, so we list all projects."""

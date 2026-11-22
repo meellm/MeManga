@@ -5,14 +5,18 @@ https://www.mangago.me
 Large yaoi/shoujo collection, general manga too.
 """
 
+import logging
 import re
 import time
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
 
 import requests
 
-from .base import BaseScraper, Chapter, Manga, _retry, is_retryable_request_error
+from .base import BaseScraper, Chapter, Manga, _retry, is_retryable_request_error, BROWSER_USER_AGENT_SHORT
+
+logger = logging.getLogger(__name__)
 
 
 class MangagoScraper(BaseScraper):
@@ -22,7 +26,7 @@ class MangagoScraper(BaseScraper):
     base_url = "https://www.mangago.me"
 
     # mangago.me is periodically DNS-poisoned and SNI-filtered in some
-    # regions (hence its place in search.BROKEN_SEARCH_SOURCES). On such a
+    # regions (see catalog.SEARCH_SKIPS). On such a
     # network every connect() stalls without an RST, so BaseScraper's 30s
     # timeout x 3 retries makes a direct search()/get_chapters() call hang
     # ~90-180s. Bound the connect wait and skip retries for connection
@@ -68,7 +72,7 @@ class MangagoScraper(BaseScraper):
         """Search for manga by title."""
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/r/l_search/?name={query.replace(' ', '+')}"
+        url = f"{self.base_url}/r/l_search/?name={quote_plus(query)}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         
@@ -170,7 +174,7 @@ class MangagoScraper(BaseScraper):
         """Download image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": f"{self.base_url}/",
             }
             response = self.session.get(
@@ -181,5 +185,5 @@ class MangagoScraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

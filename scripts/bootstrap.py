@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""
+MeManga Cross-Platform Setup Script
+Works on Windows, macOS, and Linux
+
+Run it explicitly: python scripts/bootstrap.py
+It is not part of the package build. `pip install .` only installs the
+package and never runs these steps.
+"""
+
+import subprocess
+import sys
+import os
+import platform
+from pathlib import Path
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+
+def run(cmd, shell=True):
+    """Run a command and return success status"""
+    print(f"  → {cmd}")
+    result = subprocess.run(cmd, shell=shell)
+    return result.returncode == 0
+
+def main():
+    print("📖 Setting up MeManga...")
+    print(f"   Platform: {platform.system()}")
+    print()
+
+    os.chdir(PROJECT_DIR)
+    
+    is_windows = platform.system() == "Windows"
+    is_linux = platform.system() == "Linux"
+    
+    venv_dir = PROJECT_DIR / "venv"
+    
+    if is_windows:
+        python_exe = venv_dir / "Scripts" / "python.exe"
+        pip_exe = venv_dir / "Scripts" / "pip.exe"
+        activate_hint = r"venv\Scripts\activate"
+    else:
+        python_exe = venv_dir / "bin" / "python"
+        pip_exe = venv_dir / "bin" / "pip"
+        activate_hint = "source venv/bin/activate"
+
+    # Linux: Check for xvfb (needed for headless browser)
+    if is_linux:
+        print("Checking for xvfb (headless display)...")
+        result = subprocess.run("which xvfb-run", shell=True, capture_output=True)
+        if result.returncode != 0:
+            print("  Installing xvfb...")
+            run("sudo apt-get update && sudo apt-get install -y xvfb")
+        else:
+            print("  ✓ xvfb already installed")
+        print()
+
+    # Create virtual environment
+    if not venv_dir.exists():
+        print("Creating virtual environment...")
+        run(f"{sys.executable} -m venv venv")
+    else:
+        print("✓ Virtual environment exists")
+    print()
+
+    # Upgrade pip
+    print("Upgrading pip...")
+    run(f'"{pip_exe}" install --upgrade pip -q')
+    print()
+
+    # Install dependencies
+    print("Installing Python dependencies...")
+    run(f'"{pip_exe}" install -r requirements/gui.txt -q')
+    print()
+
+    # Install Playwright browsers
+    print("Installing Playwright browsers (this may take a while)...")
+    run(f'"{python_exe}" -m playwright install chromium firefox')
+    print()
+
+    # Linux: Install Playwright system dependencies (shared libraries for browsers)
+    if is_linux:
+        print("Installing Playwright system dependencies...")
+        run(f'"{python_exe}" -m playwright install-deps')
+        print()
+
+    # Create config directory: the platform folder the app itself uses
+    result = subprocess.run(
+        [str(python_exe), "-c",
+         "from memanga.config import default_config_dir; "
+         "d = default_config_dir(); d.mkdir(parents=True, exist_ok=True); print(d)"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print(f"✓ Config directory: {result.stdout.strip()}")
+        print()
+
+    print("=" * 50)
+    print("✅ Setup complete!")
+    print("=" * 50)
+    print()
+    
+    if is_windows:
+        print("Quick start (Windows):")
+        print(r"  venv\Scripts\python -m memanga.gui    # Desktop app (recommended)")
+        print(r"  venv\Scripts\python -m memanga --help # CLI")
+        print(r"  scripts\windows\run.bat add -i        # CLI: add manga to track")
+        print(r"  scripts\windows\run.bat check         # CLI: check for new chapters")
+    else:
+        print("Quick start:")
+        print("  ./venv/bin/python -m memanga.gui   # Desktop app (recommended)")
+        print("  ./venv/bin/python -m memanga --help # CLI")
+        print("  ./scripts/run.sh add -i            # CLI: add manga to track")
+        print("  ./scripts/run.sh check             # CLI: check for new chapters")
+
+if __name__ == "__main__":
+    main()

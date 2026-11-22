@@ -1,45 +1,48 @@
 """
 State management for MeManga - tracks downloaded chapters and check history
+
+``State`` owns the single ``state.json`` file: loading and recovery,
+atomic saves with a ``.bak`` copy, the dirty flag and the shared lock.
+The rules of each domain live in focused stores (``memanga.state_stores``)
+reachable as attributes, e.g. ``state.reading`` or ``state.failures``.
 """
 
-import copy
 import json
 import os
-import re
-import tempfile
 import threading
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Mapping
 
-from .backup import merge_backup_state
+from .config import default_config_dir
 from .perf import timed
+from .persist import atomic_write_text, preserve_corrupt
+from .schema import (SCHEMA_VERSION_KEY, SchemaVersionError, add_schema_version,
+                     migrate as migrate_schema)
+from .state_stores import (ActivityStore, BackupStore, CatalogueStore,
+                           FailureStore, LibraryStore, NotificationStore,
+                           ReadingStore, SearchHistoryStore,
+                           SourceHealthStore)
+from .state_stores._base import snapshot as _snapshot_value
+# Re-exported: existing callers import the chapter helpers from here.
+from .chapters import (  # noqa: F401
+    CHAPTER_NUMBER_RE as _CHAPTER_NUMBER_RE,
+    chapter_number as _chapter_number,
+    chapter_sort_key as _chapter_sort_key,
+)
 
 
-_CHAPTER_NUMBER_RE = re.compile(r"(\d+(?:\.\d+)?)")
+# Issue #409: layout version of state.json (see memanga.schema). When
+# it is bumped, register ``old_version: migrate_fn`` below.
+STATE_SCHEMA_VERSION = 1
+_STATE_MIGRATIONS = {
+    0: add_schema_version,
+}
 
 
-def _chapter_number(label: Any) -> Optional[float]:
-    """Return the first numeric chapter value embedded in a label."""
-    match = _CHAPTER_NUMBER_RE.search(str(label))
-    if not match:
-        return None
-    return float(match.group(1))
-
-
-def _chapter_sort_key(chapter) -> float:
-    """Numeric sort key for a chapter identifier.
-
-    Mirrors Chapter.numeric (scrapers/base.py): plain numbers sort by
-    value and labelled numbers like "2 Part 1" or "Chapter 10" by their
-    first embedded number, so labelled chapters land after their plain
-    predecessors and the reader's Next controls can reach a prefetched
-    "2 Part 1" from chapter "1" (issue #107). Fully non-numeric labels
-    keep the old float()-only fallback of 0.0.
-    """
-    num = _chapter_number(chapter)
-    return num if num is not None else 0.0
+class StateError(Exception):
+    """The state file exists but could not be loaded or kept safe."""
 
 
 class State:
@@ -54,42 +57,182 @@ class State:
     same reentrant lock via ``_locked()``. Getters return deep snapshots
     (nested containers included) and container-accepting setters store
     snapshots, so no caller ever holds a live alias into ``_data``.
+
+    Issue #225: domain rules live in focused stores that share this
+    object's file, lock and dirty flag (see ``memanga.state_stores``):
+    ``library``, ``catalogue``, ``backups``, ``failures``, ``reading``,
+    ``notifications``, ``searches``, ``activity`` and ``source_health``.
+    The flat methods below the persistence layer are compatibility
+    wrappers that delegate to those stores.
     """
 
-    # Latency above which a successful probe is flagged "warning" instead
-    # of "ok". Healthy sites on an ordinary connection routinely answer in
-    # 500-2000 ms, so a lower bound paints almost every source yellow. This
-    # threshold reserves the warning tier for responses that are genuinely
-    # sluggish.
-    SLOW_LATENCY_MS = 2500
+    # Kept here for existing callers; owned by SourceHealthStore.
+    SLOW_LATENCY_MS = SourceHealthStore.SLOW_LATENCY_MS
 
-    def __init__(self, config_dir: Optional[Path] = None):
+    def __init__(self, config_dir: Optional[Path] = None, recover: bool = True):
         if config_dir:
             self.config_dir = Path(config_dir)
         else:
-            self.config_dir = Path.home() / ".config" / "memanga"
+            self.config_dir = default_config_dir()
 
         self.state_path = self.config_dir / "state.json"
+        self.backup_path = self.config_dir / "state.json.bak"
         self.config_dir.mkdir(parents=True, exist_ok=True)
         # Reentrant so mutators that persist immediately can call save()
         # (and nested public getters) while already holding the lock.
         self._lock = threading.RLock()
         self._dirty = False
-        self._data = self._load()
+        # Issue #243: set when state.json exists but cannot be loaded and
+        # could not be copied aside or restored; save() then refuses to write so the
+        # only copy is never replaced.
+        self.load_error: Optional[str] = None
+        # Set when a damaged state.json was copied aside on load; tells the
+        # user where it went and what was loaded instead.
+        self.recovery_notice: Optional[str] = None
+        self.preserved_path: Optional[Path] = None
+        # Issue #244: with ``recover=False`` (a read-only command that does
+        # not hold the config directory lock) a damaged state.json is not
+        # copied aside, removed or restored; ``needs_recovery`` is set and
+        # loading fails instead, so nothing in the directory is changed.
+        self._recover = recover
+        self.needs_recovery = False
+        # Issue #225: one store per domain, all backed by this object.
+        self.library = LibraryStore(self)
+        self.catalogue = CatalogueStore(self)
+        self.backups = BackupStore(self)
+        self.failures = FailureStore(self)
+        self.reading = ReadingStore(self)
+        self.notifications = NotificationStore(self)
+        self.searches = SearchHistoryStore(self)
+        self.activity = ActivityStore(self)
+        self.source_health = SourceHealthStore(self)
+        self._data, restored = self._load()
+        if restored:
+            self._write_back_restored()
+        self._migrate_schema()
 
-    def _load(self) -> Dict[str, Any]:
-        """Load state from file."""
-        if self.state_path.exists():
+    def _migrate_schema(self):
+        """Bring the loaded state up to STATE_SCHEMA_VERSION (issue #409).
+
+        Only ``_data`` changes: the next save writes the upgraded layout
+        and keeps the file it replaces as state.json.bak, and a read-only
+        command never writes it. Runs after _write_back_restored so a
+        restored backup is written back as it was. A state file from a
+        newer MeManga (or with an invalid version) sets ``load_error`` so
+        it is never overwritten.
+        """
+        try:
+            self._data = migrate_schema(self._data, STATE_SCHEMA_VERSION,
+                                        _STATE_MIGRATIONS, "state")
+        except SchemaVersionError as e:
+            self.recovery_notice = None
+            self.load_error = f"{self.state_path}: {e}"
+            self._data = self._default_state()
+
+    def _write_back_restored(self):
+        """Replace the damaged state.json with the copy restored from
+        state.json.bak.
+
+        The damaged file stays in place until this write succeeds, so a
+        start never finds state.json missing after a failed recovery (a
+        missing file is a fresh start). No backup rotation here: that
+        would turn the damaged file into the backup. If the write fails,
+        refuse to run on this state: load_error is set, saves are refused,
+        state.json stays damaged (the next start retries the restore) and
+        state.json.bak is left as it is.
+        """
+        payload = json.dumps(self._data, indent=None, default=str)
+        try:
+            atomic_write_text(self.state_path, payload)
+            return
+        except OSError as e:
+            error = e
+        self.recovery_notice = None
+        self.load_error = (
+            f"{self.state_path} is damaged and the previous copy in "
+            f"{self.backup_path} could not be written back: {error}. "
+            f"{self.state_path} was left as it is (a copy is kept as "
+            f"{self.preserved_path}), and {self.backup_path} is unchanged."
+        )
+
+    def _read_state_file(self, path: Path) -> Dict[str, Any]:
+        """Parse a state file. Raises OSError if it cannot be read and
+        ValueError if its content is not a JSON object."""
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("does not contain a JSON object")
+        return data
+
+    def _load(self):
+        """Load state from file. Returns ``(data, restored_from_backup)``.
+
+        Issue #243: a damaged state.json used to be replaced by empty
+        state on the next save, losing download history, read progress
+        and source health. It is now copied aside (the copy is never
+        overwritten) and the last good copy from state.json.bak is loaded
+        when there is one; see _write_back_restored.
+        """
+        path = self.state_path
+        if not path.exists():
+            return self._default_state(), False
+        try:
+            return self._read_state_file(path), False
+        except OSError as e:
+            # Possibly temporary (permissions, I/O): keep the file in place.
+            self.load_error = f"cannot read {path}: {e}"
+            return self._default_state(), False
+        except ValueError as e:
+            problem = f"{path} is damaged ({e})"
+        if not self._recover:
+            self.needs_recovery = True
+            self.load_error = (
+                f"{problem}. It is only repaired while no other MeManga "
+                f"process is using {self.config_dir}; nothing was changed. "
+                "Retry when that process has finished."
+            )
+            return self._default_state(), False
+        try:
+            self.preserved_path = preserve_corrupt(path)
+        except OSError as e:
+            self.load_error = f"{problem}, and it could not be copied for recovery: {e}"
+            return self._default_state(), False
+
+        kept = f"{problem}. The damaged file was kept as {self.preserved_path}."
+        try:
+            data = self._read_state_file(self.backup_path)
+        except (FileNotFoundError, ValueError):
+            # Nothing to restore: drop the damaged original now that it is
+            # copied. If that fails, the next save replaces it.
             try:
-                with open(self.state_path, "r") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, IOError):
-                return self._default_state()
-        return self._default_state()
+                os.unlink(path)
+            except OSError:
+                pass
+            self.recovery_notice = (
+                f"{kept} No usable backup was found, so MeManga started "
+                "with empty state (download history, read progress and "
+                "source health)."
+            )
+            return self._default_state(), False
+        except OSError as e:
+            # The backup exists but cannot be read now (permissions, I/O).
+            # It may be the only good copy: refuse rather than start
+            # empty, and leave both files where they are.
+            self.load_error = (
+                f"{kept} The backup {self.backup_path} could not be read: "
+                f"{e}. {path} and the backup were left as they are."
+            )
+            return self._default_state(), False
+        self.recovery_notice = (
+            f"{kept} Restored the previous copy from {self.backup_path}; "
+            "changes made after that save may be missing."
+        )
+        return data, True
 
     def _default_state(self) -> Dict[str, Any]:
         """Return default state structure."""
         return {
+            SCHEMA_VERSION_KEY: STATE_SCHEMA_VERSION,
             "manga": {},
             "last_check": None,
             "check_history": [],
@@ -112,18 +255,9 @@ class State:
     @staticmethod
     def _snapshot(value):
         """Deep-copy container values so nothing a caller receives (or
-        passes in) aliases ``_data`` — shallow copies still leaked the
-        dicts nested inside returned lists, e.g. editing a row from
-        get_available_chapters() changed stored state. Everything in
-        ``_data`` is plain JSON types, so deepcopy stays cheap relative
-        to the GUI work that consumes these snapshots.
+        passes in) aliases ``_data``; see ``state_stores._base.snapshot``.
         """
-        return copy.deepcopy(value) if isinstance(value, (dict, list)) else value
-
-    @classmethod
-    def _copy_entry(cls, entry: Dict[str, Any]) -> Dict[str, Any]:
-        """Snapshot a manga entry, deep-copying its container values."""
-        return {k: cls._snapshot(v) for k, v in entry.items()}
+        return _snapshot_value(value)
 
     def _entry_value(self, manga_title: str, key: str, default=None):
         """Read one field of a manga entry under the lock.
@@ -139,21 +273,21 @@ class State:
 
     @timed("state.save")
     def save(self):
-        """Save state to file atomically. Thread-safe."""
+        """Save state to file atomically. Thread-safe.
+
+        The previous file is kept as state.json.bak (issue #243). Raises
+        StateError while ``load_error`` is set, so a state file that could
+        not be loaded is never overwritten.
+        """
+        if self.load_error:
+            raise StateError(
+                f"Refusing to overwrite {self.state_path}: {self.load_error}"
+            )
         with self._lock:
             data_snapshot = json.dumps(self._data, indent=None, default=str)
-            fd, tmp_path = tempfile.mkstemp(dir=self.config_dir, suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w") as f:
-                    f.write(data_snapshot)
-                os.replace(tmp_path, self.state_path)
-                self._dirty = False
-            except Exception:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+            atomic_write_text(self.state_path, data_snapshot,
+                              backup_path=self.backup_path)
+            self._dirty = False
 
     def _mark_dirty(self):
         """Mark state as modified. Use flush() to write to disk."""
@@ -179,319 +313,6 @@ class State:
             data[key] = self._snapshot(value)
             self.save()
 
-    def merge_missing_manga_state(
-        self,
-        imported_state: Dict[str, Any],
-        *,
-        merge_existing_downloaded: bool = False,
-        title_aliases: Optional[Mapping[str, str]] = None,
-    ):
-        """Merge imported manga state entries without replacing local state.
-
-        Issue #110: Settings backup import used to build a snapshot with
-        get("manga"), mutate it, then set("manga") wholesale. A worker update
-        between those calls could be overwritten. Keep the read/merge/save under
-        the State lock so local worker mutations serialize with import.
-        """
-        if imported_state is None:
-            imported_state = {}
-        if not isinstance(imported_state, dict):
-            raise TypeError("imported_state must be a dict")
-        with self._locked() as data:
-            manga = data.setdefault("manga", {})
-            if merge_existing_downloaded:
-                data["manga"] = self._snapshot(
-                    merge_backup_state(
-                        manga,
-                        imported_state,
-                        title_aliases=title_aliases,
-                    )
-                )
-            else:
-                for title, state_data in imported_state.items():
-                    if not manga.get(title):
-                        manga[title] = self._snapshot(state_data)
-            self.save()
-
-    # ========================================================================
-    # Manga State
-    # ========================================================================
-
-    def get_manga_state(self, manga_title: str) -> Dict[str, Any]:
-        """Get full state for a manga (a snapshot, not the live entry)."""
-        with self._locked() as data:
-            return self._copy_entry(data.get("manga", {}).get(manga_title, {}))
-
-    def get_last_chapter(self, manga_title: str) -> Optional[str]:
-        """Get the last downloaded chapter number for a manga."""
-        return self._entry_value(manga_title, "last_chapter")
-
-    def set_last_chapter(self, manga_title: str, chapter: str):
-        """Set the last downloaded chapter for a manga.
-
-        Marks dirty rather than syncing — the app's 5s flush timer + the
-        closeEvent flush cover durability without thrashing disk on
-        every per-chapter update.
-        """
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            data["manga"][manga_title]["last_chapter"] = chapter
-            data["manga"][manga_title]["last_updated"] = datetime.now().isoformat()
-            self._mark_dirty()
-
-    def get_downloaded_chapters(self, manga_title: str) -> List[str]:
-        """Get list of all downloaded chapter numbers for a manga."""
-        return self._entry_value(manga_title, "downloaded", [])
-
-    def add_downloaded_chapter(self, manga_title: str, chapter: str):
-        """Mark a chapter as downloaded."""
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-
-            if "downloaded" not in entry:
-                entry["downloaded"] = []
-
-            chapter_str = str(chapter)
-            if chapter_str not in entry["downloaded"]:
-                entry["downloaded"].append(chapter_str)
-                entry["downloaded"].sort(key=_chapter_sort_key)
-
-            entry["last_chapter"] = chapter_str
-            entry["last_updated"] = datetime.now().isoformat()
-            self._mark_dirty()
-
-    def is_chapter_downloaded(self, manga_title: str, chapter: str) -> bool:
-        """Check if a chapter has been downloaded."""
-        return str(chapter) in self.get_downloaded_chapters(manga_title)
-
-    def remove_downloaded_chapter(self, manga_title: str, chapter: str) -> bool:
-        """Drop a single chapter from the downloaded list (issue #104).
-
-        Deliberately narrow: it touches only ``downloaded`` and leaves
-        ``read_chapters`` alone, so removing a chapter's local file after
-        it is read returns the Detail row to the Download state without
-        losing read progress. Returns True if the chapter was present.
-        No-op for unknown manga or chapters not marked downloaded.
-        """
-        with self._locked() as data:
-            manga_state = data.get("manga", {}).get(manga_title)
-            if not manga_state:
-                return False
-            downloaded = manga_state.get("downloaded", [])
-            chapter_str = str(chapter)
-            if chapter_str not in downloaded:
-                return False
-            downloaded.remove(chapter_str)
-            manga_state.get("saved_chapter_groups", {}).pop(chapter_str, None)
-            self._mark_dirty()
-            return True
-
-    def set_chapter_groups(self, manga_title: str, chapter: str, source: str,
-                           group_ids: List[str], group_names: List[str]):
-        """Record the scanlation group(s) of a saved chapter (issue #400).
-
-        Kept apart from ``available_chapters`` so a later check, which may
-        drop a removed group's upload from the feed, can't erase who the
-        saved file came from.
-        """
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-            entry.setdefault("saved_chapter_groups", {})[str(chapter)] = {
-                "source": source,
-                "group_ids": list(group_ids or []),
-                "group_names": list(group_names or []),
-            }
-            self._mark_dirty()
-
-    def get_chapter_groups(self, manga_title: str, chapter: str) -> Dict[str, Any]:
-        """Saved chapter's group record, or an empty dict if none was kept."""
-        groups = self._entry_value(manga_title, "saved_chapter_groups", {}) or {}
-        return groups.get(str(chapter), {})
-
-    # ========================================================================
-    # Backup Source Tracking
-    # ========================================================================
-
-    def get_pending_backup(self, manga_title: str, chapter: str) -> Optional[Dict[str, Any]]:
-        """Get pending backup info for a chapter (if waiting for primary to catch up)."""
-        pending = self._entry_value(manga_title, "pending_backup", {})
-        return pending.get(str(chapter))
-
-    def set_pending_backup(self, manga_title: str, chapter: str, backup_source: str, backup_url: str):
-        """Mark a chapter as seen on backup source, start the waiting period."""
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-
-            if "pending_backup" not in entry:
-                entry["pending_backup"] = {}
-
-            chapter_str = str(chapter)
-            if chapter_str not in entry["pending_backup"]:
-                entry["pending_backup"][chapter_str] = {
-                    "first_seen": datetime.now().isoformat(),
-                    "backup_source": backup_source,
-                    "backup_url": backup_url,
-                }
-                self.save()
-
-    def clear_pending_backup(self, manga_title: str, chapter: str):
-        """Clear pending backup for a chapter (downloaded from primary or backup)."""
-        with self._locked() as data:
-            pending = data.get("manga", {}).get(manga_title, {}).get("pending_backup", {})
-
-            chapter_str = str(chapter)
-            if chapter_str in pending:
-                del pending[chapter_str]
-                self.save()
-
-    def clear_all_pending_backups(self, manga_title: str):
-        """Clear all pending backups for a manga."""
-        with self._locked() as data:
-            if manga_title in data.get("manga", {}):
-                data["manga"][manga_title]["pending_backup"] = {}
-                self.save()
-
-    def get_all_pending_backups(self, manga_title: str) -> Dict[str, Dict[str, Any]]:
-        """Get all pending backup chapters for a manga."""
-        return self._entry_value(manga_title, "pending_backup", {})
-
-    # ========================================================================
-    # Suspicious Batch Tracking
-    # ========================================================================
-
-    def set_suspicious_batch(self, manga_title: str, info: Dict[str, Any]):
-        """Record a suspicious chapter batch that was held back from
-        download/delivery. ``info`` should describe the batch (chapters,
-        score, reasons, backup verification status, detected_at)."""
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            data["manga"][manga_title]["suspicious_batch"] = self._snapshot(info)
-            self.save()
-
-    def get_suspicious_batch(self, manga_title: str) -> Optional[Dict[str, Any]]:
-        """Get the held-back suspicious batch for a manga, if any."""
-        return self._entry_value(manga_title, "suspicious_batch")
-
-    def clear_suspicious_batch(self, manga_title: str):
-        """Clear the suspicious batch record (accepted, confirmed, or stale)."""
-        with self._locked() as data:
-            manga_state = data.get("manga", {}).get(manga_title, {})
-            if "suspicious_batch" in manga_state:
-                del manga_state["suspicious_batch"]
-                self.save()
-
-    # ========================================================================
-    # Failed Chapter Tracking
-    # ========================================================================
-
-    def add_failed_chapter(
-        self,
-        manga_title: str,
-        chapter: str,
-        source: str,
-        error: str,
-        failed_pages: Optional[List[int]] = None,
-    ):
-        """Record a chapter download failure."""
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            chapter_str = str(chapter)
-            entry = data["manga"][manga_title]
-
-            if "failed_chapters" not in entry:
-                entry["failed_chapters"] = {}
-
-            existing = entry["failed_chapters"].get(chapter_str, {})
-            entry["failed_chapters"][chapter_str] = {
-                "failed_at": datetime.now().isoformat(),
-                "source": source,
-                "error": error[:300],
-                "failed_pages": self._snapshot(failed_pages or []),
-                "attempts": existing.get("attempts", 0) + 1,
-            }
-            self.save()
-
-    def get_failed_chapters(self, manga_title: str) -> Dict[str, Any]:
-        """Get all failed chapter records for a manga."""
-        return self._entry_value(manga_title, "failed_chapters", {})
-
-    def get_all_failed_chapters(self) -> Dict[str, Dict[str, Any]]:
-        """Get failed chapters for all manga that have failures."""
-        with self._locked() as data:
-            result = {}
-            for title, manga_state in data.get("manga", {}).items():
-                failed = manga_state.get("failed_chapters", {})
-                if failed:
-                    result[title] = copy.deepcopy(failed)
-            return result
-
-    def clear_failed_chapter(self, manga_title: str, chapter: str):
-        """Remove a failed chapter record after successful re-download."""
-        with self._locked() as data:
-            chapter_str = str(chapter)
-            failed = data.get("manga", {}).get(manga_title, {}).get("failed_chapters", {})
-            if chapter_str in failed:
-                del failed[chapter_str]
-                self.save()
-
-    # ========================================================================
-    # Accepted Partial Chapter Tracking
-    # ========================================================================
-
-    def add_partial_chapter(
-        self,
-        manga_title: str,
-        chapter: str,
-        source: str = "",
-        failed_pages: Optional[List[int]] = None,
-        total_pages: int = 0,
-        path: str = "",
-        from_backup: bool = False,
-    ):
-        """Record an accepted partial chapter so it remains retryable."""
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            chapter_str = str(chapter)
-            entry = data["manga"][manga_title]
-            entry.setdefault("partial_chapters", {})[chapter_str] = {
-                "accepted_at": datetime.now().isoformat(),
-                "source": source,
-                "failed_pages": self._snapshot(failed_pages or []),
-                "total_pages": int(total_pages or 0),
-                "path": path,
-                "from_backup": bool(from_backup),
-            }
-            self.save()
-
-    def get_partial_chapters(self, manga_title: str) -> Dict[str, Any]:
-        """Get accepted partial chapter records for a manga."""
-        return self._entry_value(manga_title, "partial_chapters", {})
-
-    def get_partial_chapter(self, manga_title: str, chapter: str) -> Optional[Dict[str, Any]]:
-        """Get one accepted partial chapter record."""
-        partials = self.get_partial_chapters(manga_title)
-        return partials.get(str(chapter))
-
-    def get_all_partial_chapters(self) -> Dict[str, Dict[str, Any]]:
-        """Get accepted partial chapters for all manga."""
-        with self._locked() as data:
-            return {
-                title: self._snapshot(partials)
-                for title, manga_state in data.get("manga", {}).items()
-                if (partials := manga_state.get("partial_chapters", {}))
-            }
-
-    def clear_partial_chapter(self, manga_title: str, chapter: str):
-        """Remove an accepted partial record after a complete re-download."""
-        with self._locked() as data:
-            chapter_str = str(chapter)
-            partials = data.get("manga", {}).get(manga_title, {}).get("partial_chapters", {})
-            if chapter_str in partials:
-                del partials[chapter_str]
-                self.save()
 
     def _ensure_manga_entry(self, manga_title: str):
         """Ensure manga entry exists in state. Caller must hold ``_lock``."""
@@ -510,554 +331,365 @@ class State:
                 "partial_chapters": {},
             }
 
-    # ========================================================================
-    # Check History
-    # ========================================================================
-
-    def update_last_check(self, new_chapters: int = 0, downloaded: int = 0):
-        """Update the last check timestamp and optionally log to history."""
-        with self._locked() as data:
-            now = datetime.now().isoformat()
-            data["last_check"] = now
-
-            # Add to history (keep last 50)
-            if "check_history" not in data:
-                data["check_history"] = []
-
-            data["check_history"].append({
-                "timestamp": now,
-                "new_chapters": new_chapters,
-                "downloaded": downloaded,
-            })
-
-            # Trim history
-            data["check_history"] = data["check_history"][-50:]
-
-            self.save()
-
-    def get_check_history(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent check history."""
-        with self._locked() as data:
-            return self._snapshot(data.get("check_history", [])[-limit:])
-
-    # ========================================================================
-    # Statistics
-    # ========================================================================
-
-    def get_stats(self) -> Dict[str, Any]:
-        """Get overall statistics."""
-        with self._locked() as data:
-            manga_data = data.get("manga", {})
-
-            total_manga = len(manga_data)
-            total_chapters = sum(
-                len(m.get("downloaded", []))
-                for m in manga_data.values()
-            )
-
-            return {
-                "total_manga": total_manga,
-                "total_chapters": total_chapters,
-                "last_check": data.get("last_check"),
-                "checks_logged": len(data.get("check_history", [])),
-            }
-
-    # ========================================================================
-    # Reading Progress
-    # ========================================================================
-
-    def set_reading_progress(self, manga_title: str, chapter: str):
-        """Update the last-read chapter for a manga."""
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-            if "reading_progress" not in entry:
-                entry["reading_progress"] = {}
-            entry["reading_progress"]["last_chapter"] = str(chapter)
-            entry["reading_progress"]["last_read"] = datetime.now().isoformat()
-            self._mark_dirty()
-
-    def get_reading_progress(self, manga_title: str) -> Dict[str, Any]:
-        """Get reading progress for a manga."""
-        return self._entry_value(manga_title, "reading_progress", {})
-
-    def get_continue_reading(self) -> Optional[Dict[str, Any]]:
-        """Get the most recently read manga for 'Continue Reading' widget."""
-        with self._locked() as data:
-            best = None
-            best_time = None
-            for title, entry in data.get("manga", {}).items():
-                progress = entry.get("reading_progress", {})
-                last_read = progress.get("last_read")
-                if last_read and progress.get("last_chapter"):
-                    if best_time is None or last_read > best_time:
-                        best_time = last_read
-                        best = {"title": title, **progress}
-            return self._snapshot(best)
-
-    # ── Reader resume position (issue #106) ────────────────────────────
-    # Separate from `reading_progress.last_chapter` (the cursor) and
-    # `read_chapters` (the read set): this stores *where inside a chapter*
-    # the reader left off, so reopening a chapter can restore the exact
-    # page (paged mode) or scroll offset (webtoon/strip mode).
-
-    def set_reader_position(self, manga_title: str, chapter, mode: str,
-                            page_index: Optional[int] = None,
-                            scroll_ratio: Optional[float] = None):
-        """Save the in-chapter resume position for a manga/chapter."""
-        if chapter is None or str(chapter).strip() == "":
-            return
-        # Issue #224: take the shared reentrant lock (#110) so creating the
-        # entry/positions dicts can't race a worker or the periodic
-        # flush/save; ``_ensure_manga_entry`` also requires it held.
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-            positions = entry.setdefault("reader_positions", {})
-            pos: Dict[str, Any] = {
-                "mode": mode,
-                "updated_at": datetime.now().isoformat(),
-            }
-            if page_index is not None:
-                pos["page_index"] = max(0, int(page_index))
-            if scroll_ratio is not None:
-                pos["scroll_ratio"] = min(1.0, max(0.0, float(scroll_ratio)))
-            positions[str(chapter)] = pos
-            self._mark_dirty()
-
-    def get_reader_position(self, manga_title: str, chapter) -> Optional[Dict[str, Any]]:
-        """Get the saved resume position, or None if never saved."""
-        positions = self.get_manga_state(manga_title).get("reader_positions", {})
-        return positions.get(str(chapter))
-
-    def clear_reader_position(self, manga_title: str, chapter):
-        """Drop the saved resume position (e.g. chapter finished)."""
-        # Issue #224: check-then-delete under the shared lock so a
-        # concurrent flush/save never serializes the dict mid-removal.
-        with self._locked() as data:
-            positions = data.get("manga", {}).get(manga_title, {}).get("reader_positions", {})
-            ch = str(chapter)
-            if ch in positions:
-                del positions[ch]
-                self._mark_dirty()
-
-    # ── Per-chapter read tracking (issue #18) ──────────────────────────
-    # `reading_progress.last_chapter` only tracks the cursor (the most-
-    # recently-opened chapter). The set below tracks every individual
-    # chapter the user has opened in the Reader, so the Library card and
-    # Detail chapter rows can show a per-chapter read indicator.
-
-    def mark_chapter_read(self, manga_title: str, chapter):
-        """Add `chapter` to the per-manga read set (idempotent)."""
-        if chapter is None or str(chapter).strip() == "":
-            return
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-            read_list = entry.setdefault("read_chapters", [])
-            ch = str(chapter)
-            if ch not in read_list:
-                read_list.append(ch)
-                self._mark_dirty()
-
-    def unmark_chapter_read(self, manga_title: str, chapter):
-        with self._locked() as data:
-            entry = data.get("manga", {}).get(manga_title)
-            if not entry:
-                return
-            read_list = entry.get("read_chapters", [])
-            ch = str(chapter)
-            if ch in read_list:
-                read_list.remove(ch)
-                self._mark_dirty()
-
-    def is_chapter_read(self, manga_title: str, chapter) -> bool:
-        return str(chapter) in self.get_read_chapters(manga_title)
-
-    def get_read_chapters(self, manga_title: str) -> List[str]:
-        return self._entry_value(manga_title, "read_chapters", []) or []
-
-    def get_read_count(self, manga_title: str) -> int:
-        """Number of chapters read, without snapshotting the read list.
-
-        The Library page calls this per manga on every refresh (grid
-        cards + the header's read total), so it counts under the lock
-        instead of paying get_read_chapters()'s deep copy each time.
-        """
-        with self._locked() as data:
-            return len(
-                data.get("manga", {}).get(manga_title, {}).get("read_chapters", []) or []
-            )
-
-    # ========================================================================
-    # New Chapter Badges
-    # ========================================================================
-
-    def set_new_chapters(self, manga_title: str, count: int):
-        """Set the number of new chapters available for a manga."""
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            data["manga"][manga_title]["new_chapters_available"] = count
-            self._mark_dirty()
-
-    def get_new_chapters(self, manga_title: str) -> int:
-        """Get the number of new chapters available."""
-        return self._entry_value(manga_title, "new_chapters_available", 0)
-
-    def clear_new_chapters(self, manga_title: str):
-        """Clear the new chapters badge (e.g. after downloading)."""
-        with self._locked() as data:
-            entry = data.get("manga", {}).get(manga_title, {})
-            if entry.get("new_chapters_available", 0) > 0:
-                entry["new_chapters_available"] = 0
-                self._mark_dirty()
-
-    def decrement_new_chapters(self, manga_title: str):
-        """Decrement the new chapters badge by 1 (used by manual single downloads)."""
-        with self._locked() as data:
-            entry = data.get("manga", {}).get(manga_title, {})
-            current = entry.get("new_chapters_available", 0)
-            if current > 0:
-                entry["new_chapters_available"] = current - 1
-                self._mark_dirty()
-
-    # ========================================================================
-    # Available Chapters Cache
-    # ========================================================================
-
-    def set_available_chapters(self, manga_title: str, chapters: List[Dict[str, Any]]):
-        """Cache the full list of chapters from the last check (for both modes).
-
-        Each entry should contain: number, title, source, source_url, is_backup.
-        Used by the Detail page to show every chapter as 'Read' (downloaded) or
-        'Download' (available) without re-scraping.
-        """
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-            # Keep the group of chapters saved before their record existed:
-            # the new list may no longer include that group's upload.
-            downloaded = set(entry.get("downloaded", []))
-            for old in entry.get("available_chapters", []) or []:
-                num = str(old.get("number", ""))
-                if (num in downloaded
-                        and num not in entry.get("saved_chapter_groups", {})
-                        and (old.get("group_ids") or old.get("group_names"))):
-                    entry.setdefault("saved_chapter_groups", {})[num] = {
-                        "source": old.get("source", ""),
-                        "group_ids": list(old.get("group_ids", [])),
-                        "group_names": list(old.get("group_names", [])),
-                    }
-            entry["available_chapters"] = self._snapshot(list(chapters))
-            self._mark_dirty()
-
-    def get_available_chapters(self, manga_title: str) -> List[Dict[str, Any]]:
-        """Get the cached chapter list for a manga (empty list if never checked)."""
-        return self._entry_value(manga_title, "available_chapters", [])
-
-    def get_available_chapter_count(self, manga_title: str) -> int:
-        """Number of cached available chapters, without snapshotting them.
-
-        Callers that only need the total (Library cards' "Read X/N"
-        line) would otherwise deep-copy the whole cached list - per
-        card, per refresh - just to call len() on it.
-        """
-        with self._locked() as data:
-            return len(
-                data.get("manga", {}).get(manga_title, {}).get("available_chapters", []) or []
-            )
-
-    def get_catalogue_baseline(self, manga_title: str) -> Optional[float]:
-        """Highest chapter number the source has legitimately exposed so far.
-
-        This "last seen available chapter" high-water mark lets the
-        suspicious-batch guard tell an existing-but-undownloaded backlog
-        apart from a genuine source jump (#102). Returns ``None`` when no
-        trusted snapshot has been recorded yet.
-        """
-        value = self.get_manga_state(manga_title).get("catalogue_baseline")
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
-
-    def set_catalogue_baseline(self, manga_title: str, highest: float):
-        """Record the trusted catalogue high-water mark for a manga (#102).
-
-        Only ever called with a value the source has actually shown and that
-        the guard did not hold back, so it never advances past an unverified
-        suspicious jump.
-        """
-        # Issue #224: update checks call this from background workers, so
-        # it needs the same shared lock as every other mutator (#110).
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            try:
-                data["manga"][manga_title]["catalogue_baseline"] = float(highest)
-            except (TypeError, ValueError):
-                return
-            self._mark_dirty()
-
-    # ========================================================================
-    # External Chapters (already read outside the app)
-    # ========================================================================
-
-    def mark_external_chapter(self, manga_title: str, chapter: str):
-        """Record a chapter that was read outside MeManga.
-
-        Stored separately from `downloaded` so the app never lies about what's
-        on disk; the Detail page renders these as "Read elsewhere" rows.
-        """
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-            if "external_chapters" not in entry:
-                entry["external_chapters"] = []
-            ch_str = str(chapter)
-            if ch_str not in entry["external_chapters"]:
-                entry["external_chapters"].append(ch_str)
-                entry["external_chapters"].sort(key=_chapter_sort_key)
-                self._mark_dirty()
-
-    def get_external_chapters(self, manga_title: str) -> List[str]:
-        """Get the chapters the user marked as already read elsewhere."""
-        return self._entry_value(manga_title, "external_chapters", [])
-
-    def is_external_chapter(self, manga_title: str, chapter: str) -> bool:
-        """Whether a chapter was previously marked as read-elsewhere."""
-        return str(chapter) in self.get_external_chapters(manga_title)
-
-    # ========================================================================
-    # Notifications
-    # ========================================================================
-
-    def add_notification(self, ntype: str, message: str):
-        """Add a notification to the log."""
-        with self._locked() as data:
-            if "notifications" not in data:
-                data["notifications"] = []
-            data["notifications"].append({
-                "type": ntype,
-                "message": message,
-                "timestamp": datetime.now().isoformat(),
-                "read": False,
-            })
-            data["notifications"] = data["notifications"][-100:]
-            self._mark_dirty()
-
-    def get_notifications(self, limit: int = 20) -> List[Dict[str, Any]]:
-        """Get recent notifications. Items are copies — mark_notifications_read
-        mutates the stored dicts in place, so live references would race."""
-        with self._locked() as data:
-            return self._snapshot(
-                list(reversed(data.get("notifications", [])[-limit:])))
-
-    def get_unread_count(self) -> int:
-        """Count unread notifications."""
-        with self._locked() as data:
-            return sum(1 for n in data.get("notifications", []) if not n.get("read"))
-
-    def mark_notifications_read(self):
-        """Mark all notifications as read."""
-        with self._locked() as data:
-            for n in data.get("notifications", []):
-                n["read"] = True
-            self._mark_dirty()
-
-    def clear_notifications(self):
-        """Wipe all notifications. Used by the GUI's 'Clear all' button."""
-        with self._locked() as data:
-            data["notifications"] = []
-            self._mark_dirty()
-
-    def filter_notifications(self, kind: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Return notifications filtered by category.
-
-        Categories collapse the granular `type` values into the four chip
-        buckets used in the UI:
-            all       — everything
-            new       — new-chapter findings ("check")
-            downloads — download-complete / kindle-sent events
-            system    — errors, warnings, generic system events
-        """
-        with self._locked() as data:
-            all_notifs = self._snapshot(
-                list(reversed(data.get("notifications", [])[-limit:])))
-        if kind == "all":
-            return all_notifs
-        bucket_map = {
-            "new":       {"check"},
-            "downloads": {"download", "kindle"},
-            "system":    {"error", "warn", "system"},
-        }
-        targets = bucket_map.get(kind, set())
-        return [n for n in all_notifs if n.get("type") in targets]
-
-    # ========================================================================
-    # Search history (for Search page recent-chip row)
-    # ========================================================================
-
-    def add_search_query(self, query: str, limit: int = 8):
-        """Push a query onto the deduped recent-search list (newest first)."""
-        if not query or not query.strip():
-            return
-        q = query.strip()
-        with self._locked() as data:
-            history = data.get("search_history", []) or []
-            # Dedupe by case-insensitive match, then prepend.
-            history = [h for h in history if h.lower() != q.lower()]
-            history.insert(0, q)
-            data["search_history"] = history[:limit]
-            self._mark_dirty()
-
-    def get_recent_searches(self, limit: int = 8) -> List[str]:
-        with self._locked() as data:
-            return list(data.get("search_history", []) or [])[:limit]
-
-    def clear_search_history(self):
-        with self._locked() as data:
-            data["search_history"] = []
-            self._mark_dirty()
-
-    # ========================================================================
-    # Download History
-    # ========================================================================
-
-    def add_download_history(self, title: str, chapter: str, fmt: str,
-                             path: str = "", size_mb: float = 0, kindle_sent: bool = False):
-        """Log a completed download."""
-        with self._locked() as data:
-            if "download_history" not in data:
-                data["download_history"] = []
-            data["download_history"].append({
-                "title": title,
-                "chapter": chapter,
-                "format": fmt,
-                "path": path,
-                "size_mb": round(size_mb, 2),
-                "kindle_sent": kindle_sent,
-                "timestamp": datetime.now().isoformat(),
-            })
-            data["download_history"] = data["download_history"][-200:]
-            self._mark_dirty()
-
-    def get_download_history(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get recent download history."""
-        with self._locked() as data:
-            return self._snapshot(
-                list(reversed(data.get("download_history", [])[-limit:])))
-
-    # ========================================================================
-    # Source Health
-    # ========================================================================
-
-    def update_source_health(self, domain: str, success: bool,
-                             error_msg: str = "", latency_ms: int = None):
-        """Update health status for a source domain.
-
-        ``latency_ms`` (optional) records the round-trip time of the
-        probe that produced this status update. Drives the "Xms" badge
-        in the Sources screen.
-        """
-        with self._locked() as data:
-            if "source_health" not in data:
-                data["source_health"] = {}
-            now = datetime.now().isoformat()
-            health = data["source_health"].get(domain, {"error_count": 0})
-            if success:
-                health["last_success"] = now
-                health["error_count"] = 0
-                # Flag only genuinely slow responses; see SLOW_LATENCY_MS.
-                if latency_ms is not None and latency_ms > self.SLOW_LATENCY_MS:
-                    health["status"] = "warning"
-                else:
-                    health["status"] = "ok"
-            else:
-                health["last_error"] = now
-                health["last_error_msg"] = error_msg[:100]
-                health["error_count"] = health.get("error_count", 0) + 1
-                health["status"] = "warning" if health["error_count"] < 3 else "error"
-            if latency_ms is not None:
-                health["latency_ms"] = int(latency_ms)
-            data["source_health"][domain] = health
-            self._mark_dirty()
-
-    def get_source_health(self, domain: str) -> Dict[str, Any]:
-        """Get health info for a source."""
-        with self._locked() as data:
-            return self._snapshot(data.get("source_health", {}).get(domain, {}))
-
-    def get_all_source_health(self) -> Dict[str, Dict[str, Any]]:
-        """Get health info for all sources. Entries are copies — probes
-        update the stored dicts in place."""
-        with self._locked() as data:
-            return self._snapshot(data.get("source_health", {}))
-
-    def reset_manga_progress(self, manga_title: str, from_chapter: float = 0):
-        """Reset a manga's download progress to re-download from a specific chapter.
-        If from_chapter is 0, clears everything for a full re-download.
-        If from_chapter is N, keeps chapters < N downloaded and re-downloads N onwards.
-        """
-        with self._locked() as data:
-            self._ensure_manga_entry(manga_title)
-            entry = data["manga"][manga_title]
-            if from_chapter == 0:
-                entry["last_chapter"] = None
-                entry["downloaded"] = []
-                entry["partial_chapters"] = {}
-            else:
-                # Keep only chapters before from_chapter, remove the rest.
-                # Labelled chapters (e.g. "Chapter 3" or "3 Part 1") compare
-                # by their embedded chapter number. Labels with no number are preserved
-                # because they cannot be ordered safely against the threshold.
-                def _keep_downloaded(ch):
-                    num = _chapter_number(ch)
-                    return num is None or num < from_chapter
-
-                entry["downloaded"] = [
-                    ch for ch in entry.get("downloaded", [])
-                    if _keep_downloaded(ch)
-                ]
-                entry["partial_chapters"] = {
-                    ch: info
-                    for ch, info in entry.get("partial_chapters", {}).items()
-                    if _keep_downloaded(ch)
-                }
-                entry["last_chapter"] = None
-            entry["last_updated"] = datetime.now().isoformat()
-            self.save()
-
-    # ========================================================================
-    # Cleanup
-    # ========================================================================
-
-    def rename_manga(self, old_title: str, new_title: str) -> bool:
-        """Move a manga's state entry to a new title (edit/rename flows).
-
-        Issue #110: replaces the GUI's direct ``_data`` pokes so renames go
-        through the lock like every other mutation.
-        """
-        with self._locked() as data:
-            manga = data.get("manga", {})
-            if old_title not in manga:
-                return False
-            manga[new_title] = manga.pop(old_title)
-            self.save()
-            return True
-
-    def remove_manga(self, manga_title: str) -> bool:
-        """Remove a manga from state."""
-        with self._locked() as data:
-            if manga_title in data.get("manga", {}):
-                del data["manga"][manga_title]
-                self.save()
-                return True
-            return False
-
     def clear_all(self):
         """Clear all state (fresh start)."""
         with self._lock:
             self._data = self._default_state()
             self.save()
+
+    # ========================================================================
+    # Compatibility wrappers (issue #225)
+    #
+    # Each method below keeps an existing ``State`` call working by
+    # delegating to the store that owns the rule. New code should call the
+    # store directly, e.g. ``state.reading.set_position(...)``.
+    # ========================================================================
+
+    # ── Library / downloads: state.library ─────────────────────────────
+
+    def merge_missing_manga_state(
+        self,
+        imported_state: Dict[str, Any],
+        *,
+        merge_existing_downloaded: bool = False,
+        title_aliases: Optional[Mapping[str, str]] = None,
+    ) -> None:
+        """See :meth:`LibraryStore.merge_missing`."""
+        self.library.merge_missing(
+            imported_state,
+            merge_existing_downloaded=merge_existing_downloaded,
+            title_aliases=title_aliases,
+        )
+
+    def get_manga_state(self, manga_title: str) -> Dict[str, Any]:
+        """See :meth:`LibraryStore.get_entry`."""
+        return self.library.get_entry(manga_title)
+
+    def get_last_chapter(self, manga_title: str) -> Optional[str]:
+        """See :meth:`LibraryStore.get_last_chapter`."""
+        return self.library.get_last_chapter(manga_title)
+
+    def set_last_chapter(self, manga_title: str, chapter: str) -> None:
+        """See :meth:`LibraryStore.set_last_chapter`."""
+        self.library.set_last_chapter(manga_title, chapter)
+
+    def get_downloaded_chapters(self, manga_title: str) -> List[str]:
+        """See :meth:`LibraryStore.get_downloaded`."""
+        return self.library.get_downloaded(manga_title)
+
+    def add_downloaded_chapter(self, manga_title: str, chapter: str) -> None:
+        """See :meth:`LibraryStore.add_downloaded`."""
+        self.library.add_downloaded(manga_title, chapter)
+
+    def is_chapter_downloaded(self, manga_title: str, chapter: str) -> bool:
+        """See :meth:`LibraryStore.is_downloaded`."""
+        return self.library.is_downloaded(manga_title, chapter)
+
+    def remove_downloaded_chapter(self, manga_title: str, chapter: str) -> bool:
+        """See :meth:`LibraryStore.remove_downloaded`."""
+        return self.library.remove_downloaded(manga_title, chapter)
+
+    def set_chapter_groups(self, manga_title: str, chapter: str, source: str,
+                           group_ids: List[str], group_names: List[str]) -> None:
+        """See :meth:`LibraryStore.set_chapter_groups`."""
+        self.library.set_chapter_groups(manga_title, chapter, source,
+                                        group_ids, group_names)
+
+    def get_chapter_groups(self, manga_title: str, chapter: str) -> Dict[str, Any]:
+        """See :meth:`LibraryStore.get_chapter_groups`."""
+        return self.library.get_chapter_groups(manga_title, chapter)
+
+    def mark_external_chapter(self, manga_title: str, chapter: str) -> None:
+        """See :meth:`LibraryStore.mark_external`."""
+        self.library.mark_external(manga_title, chapter)
+
+    def get_external_chapters(self, manga_title: str) -> List[str]:
+        """See :meth:`LibraryStore.get_external`."""
+        return self.library.get_external(manga_title)
+
+    def is_external_chapter(self, manga_title: str, chapter: str) -> bool:
+        """See :meth:`LibraryStore.is_external`."""
+        return self.library.is_external(manga_title, chapter)
+
+    def reset_manga_progress(self, manga_title: str, from_chapter: float = 0) -> None:
+        """See :meth:`LibraryStore.reset_progress`."""
+        self.library.reset_progress(manga_title, from_chapter)
+
+    def rename_manga(self, old_title: str, new_title: str) -> bool:
+        """See :meth:`LibraryStore.rename`."""
+        return self.library.rename(old_title, new_title)
+
+    def has_manga_history(self, manga_title: str) -> bool:
+        """See :meth:`LibraryStore.has_history`."""
+        return self.library.has_history(manga_title)
+
+    def remove_manga(self, manga_title: str) -> bool:
+        """See :meth:`LibraryStore.remove`."""
+        return self.library.remove(manga_title)
+
+    # ── Backup sources and suspicious batches: state.backups ───────────
+
+    def get_pending_backup(self, manga_title: str, chapter: str) -> Optional[Dict[str, Any]]:
+        """See :meth:`BackupStore.get_pending`."""
+        return self.backups.get_pending(manga_title, chapter)
+
+    def set_pending_backup(self, manga_title: str, chapter: str, backup_source: str,
+                           backup_url: str) -> None:
+        """See :meth:`BackupStore.set_pending`."""
+        self.backups.set_pending(manga_title, chapter, backup_source, backup_url)
+
+    def clear_pending_backup(self, manga_title: str, chapter: str) -> None:
+        """See :meth:`BackupStore.clear_pending`."""
+        self.backups.clear_pending(manga_title, chapter)
+
+    def clear_all_pending_backups(self, manga_title: str) -> None:
+        """See :meth:`BackupStore.clear_all_pending`."""
+        self.backups.clear_all_pending(manga_title)
+
+    def get_all_pending_backups(self, manga_title: str) -> Dict[str, Dict[str, Any]]:
+        """See :meth:`BackupStore.get_all_pending`."""
+        return self.backups.get_all_pending(manga_title)
+
+    def set_suspicious_batch(self, manga_title: str, info: Dict[str, Any]) -> None:
+        """See :meth:`BackupStore.set_suspicious_batch`."""
+        self.backups.set_suspicious_batch(manga_title, info)
+
+    def get_suspicious_batch(self, manga_title: str) -> Optional[Dict[str, Any]]:
+        """See :meth:`BackupStore.get_suspicious_batch`."""
+        return self.backups.get_suspicious_batch(manga_title)
+
+    def clear_suspicious_batch(self, manga_title: str) -> None:
+        """See :meth:`BackupStore.clear_suspicious_batch`."""
+        self.backups.clear_suspicious_batch(manga_title)
+
+    # ── Failed and partial chapters: state.failures ────────────────────
+
+    def add_failed_chapter(
+        self,
+        manga_title: str,
+        chapter: str,
+        source: str,
+        error: str,
+        failed_pages: Optional[List[int]] = None,
+    ) -> None:
+        """See :meth:`FailureStore.add_failed`."""
+        self.failures.add_failed(manga_title, chapter, source, error, failed_pages)
+
+    def get_failed_chapters(self, manga_title: str) -> Dict[str, Any]:
+        """See :meth:`FailureStore.get_failed`."""
+        return self.failures.get_failed(manga_title)
+
+    def get_all_failed_chapters(self) -> Dict[str, Dict[str, Any]]:
+        """See :meth:`FailureStore.get_all_failed`."""
+        return self.failures.get_all_failed()
+
+    def clear_failed_chapter(self, manga_title: str, chapter: str) -> None:
+        """See :meth:`FailureStore.clear_failed`."""
+        self.failures.clear_failed(manga_title, chapter)
+
+    def add_partial_chapter(
+        self,
+        manga_title: str,
+        chapter: str,
+        source: str = "",
+        failed_pages: Optional[List[int]] = None,
+        total_pages: int = 0,
+        path: str = "",
+        from_backup: bool = False,
+    ) -> None:
+        """See :meth:`FailureStore.add_partial`."""
+        self.failures.add_partial(manga_title, chapter, source, failed_pages,
+                                  total_pages, path, from_backup)
+
+    def get_partial_chapters(self, manga_title: str) -> Dict[str, Any]:
+        """See :meth:`FailureStore.get_partials`."""
+        return self.failures.get_partials(manga_title)
+
+    def get_partial_chapter(self, manga_title: str, chapter: str) -> Optional[Dict[str, Any]]:
+        """See :meth:`FailureStore.get_partial`."""
+        return self.failures.get_partial(manga_title, chapter)
+
+    def get_all_partial_chapters(self) -> Dict[str, Dict[str, Any]]:
+        """See :meth:`FailureStore.get_all_partials`."""
+        return self.failures.get_all_partials()
+
+    def clear_partial_chapter(self, manga_title: str, chapter: str) -> None:
+        """See :meth:`FailureStore.clear_partial`."""
+        self.failures.clear_partial(manga_title, chapter)
+
+    # ── Check history, download history, stats: state.activity ─────────
+
+    def update_last_check(self, new_chapters: int = 0, downloaded: int = 0) -> None:
+        """See :meth:`ActivityStore.record_check`."""
+        self.activity.record_check(new_chapters, downloaded)
+
+    def get_check_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """See :meth:`ActivityStore.get_check_history`."""
+        return self.activity.get_check_history(limit)
+
+    def get_stats(self) -> Dict[str, Any]:
+        """See :meth:`ActivityStore.get_stats`."""
+        return self.activity.get_stats()
+
+    def add_download_history(self, title: str, chapter: str, fmt: str,
+                             path: str = "", size_mb: float = 0, kindle_sent: bool = False,
+                             *, source: Optional[str] = None, from_backup: bool = False,
+                             partial: bool = False,
+                             deleted_after_send: bool = False) -> None:
+        """See :meth:`ActivityStore.add_download`."""
+        self.activity.add_download(title, chapter, fmt, path, size_mb, kindle_sent,
+                                   source=source, from_backup=from_backup,
+                                   partial=partial,
+                                   deleted_after_send=deleted_after_send)
+
+    def get_download_history(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """See :meth:`ActivityStore.get_download_history`."""
+        return self.activity.get_download_history(limit)
+
+    def remove_download_history(self, manga_title: str) -> int:
+        """See :meth:`ActivityStore.remove_downloads`."""
+        return self.activity.remove_downloads(manga_title)
+
+    # ── Reading progress, positions, read set: state.reading ───────────
+
+    def set_reading_progress(self, manga_title: str, chapter: str) -> None:
+        """See :meth:`ReadingStore.set_progress`."""
+        self.reading.set_progress(manga_title, chapter)
+
+    def get_reading_progress(self, manga_title: str) -> Dict[str, Any]:
+        """See :meth:`ReadingStore.get_progress`."""
+        return self.reading.get_progress(manga_title)
+
+    def get_continue_reading(self) -> Optional[Dict[str, Any]]:
+        """See :meth:`ReadingStore.get_continue_reading`."""
+        return self.reading.get_continue_reading()
+
+    def set_reader_position(self, manga_title: str, chapter, mode: str,
+                            page_index: Optional[int] = None,
+                            scroll_ratio: Optional[float] = None) -> None:
+        """See :meth:`ReadingStore.set_position`."""
+        self.reading.set_position(manga_title, chapter, mode,
+                                  page_index=page_index, scroll_ratio=scroll_ratio)
+
+    def get_reader_position(self, manga_title: str, chapter) -> Optional[Dict[str, Any]]:
+        """See :meth:`ReadingStore.get_position`."""
+        return self.reading.get_position(manga_title, chapter)
+
+    def clear_reader_position(self, manga_title: str, chapter) -> None:
+        """See :meth:`ReadingStore.clear_position`."""
+        self.reading.clear_position(manga_title, chapter)
+
+    def mark_chapter_read(self, manga_title: str, chapter) -> None:
+        """See :meth:`ReadingStore.mark_read`."""
+        self.reading.mark_read(manga_title, chapter)
+
+    def unmark_chapter_read(self, manga_title: str, chapter) -> None:
+        """See :meth:`ReadingStore.unmark_read`."""
+        self.reading.unmark_read(manga_title, chapter)
+
+    def is_chapter_read(self, manga_title: str, chapter) -> bool:
+        """See :meth:`ReadingStore.is_read`."""
+        return self.reading.is_read(manga_title, chapter)
+
+    def get_read_chapters(self, manga_title: str) -> List[str]:
+        """See :meth:`ReadingStore.get_read`."""
+        return self.reading.get_read(manga_title)
+
+    def get_read_count(self, manga_title: str) -> int:
+        """See :meth:`ReadingStore.get_read_count`."""
+        return self.reading.get_read_count(manga_title)
+
+    # ── Available chapters, baseline, badges: state.catalogue ──────────
+
+    def set_new_chapters(self, manga_title: str, count: int) -> None:
+        """See :meth:`CatalogueStore.set_new_count`."""
+        self.catalogue.set_new_count(manga_title, count)
+
+    def get_new_chapters(self, manga_title: str) -> int:
+        """See :meth:`CatalogueStore.get_new_count`."""
+        return self.catalogue.get_new_count(manga_title)
+
+    def clear_new_chapters(self, manga_title: str) -> None:
+        """See :meth:`CatalogueStore.clear_new_count`."""
+        self.catalogue.clear_new_count(manga_title)
+
+    def decrement_new_chapters(self, manga_title: str) -> None:
+        """See :meth:`CatalogueStore.decrement_new_count`."""
+        self.catalogue.decrement_new_count(manga_title)
+
+    def set_available_chapters(self, manga_title: str,
+                               chapters: List[Dict[str, Any]]) -> None:
+        """See :meth:`CatalogueStore.set_available`."""
+        self.catalogue.set_available(manga_title, chapters)
+
+    def get_available_chapters(self, manga_title: str) -> List[Dict[str, Any]]:
+        """See :meth:`CatalogueStore.get_available`."""
+        return self.catalogue.get_available(manga_title)
+
+    def get_available_chapter_count(self, manga_title: str) -> int:
+        """See :meth:`CatalogueStore.get_available_count`."""
+        return self.catalogue.get_available_count(manga_title)
+
+    def get_catalogue_baseline(self, manga_title: str) -> Optional[float]:
+        """See :meth:`CatalogueStore.get_baseline`."""
+        return self.catalogue.get_baseline(manga_title)
+
+    def set_catalogue_baseline(self, manga_title: str, highest: float) -> None:
+        """See :meth:`CatalogueStore.set_baseline`."""
+        self.catalogue.set_baseline(manga_title, highest)
+
+    # ── Notifications: state.notifications ─────────────────────────────
+
+    def add_notification(self, ntype: str, message: str,
+                         details: Optional[str] = None) -> None:
+        """See :meth:`NotificationStore.add`."""
+        self.notifications.add(ntype, message, details)
+
+    def get_notifications(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """See :meth:`NotificationStore.get_recent`."""
+        return self.notifications.get_recent(limit)
+
+    def get_unread_count(self) -> int:
+        """See :meth:`NotificationStore.get_unread_count`."""
+        return self.notifications.get_unread_count()
+
+    def mark_notifications_read(self) -> None:
+        """See :meth:`NotificationStore.mark_all_read`."""
+        self.notifications.mark_all_read()
+
+    def clear_notifications(self) -> None:
+        """See :meth:`NotificationStore.clear`."""
+        self.notifications.clear()
+
+    def filter_notifications(self, kind: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """See :meth:`NotificationStore.filter`."""
+        return self.notifications.filter(kind, limit)
+
+    # ── Search history: state.searches ─────────────────────────────────
+
+    def add_search_query(self, query: str, limit: int = 8) -> None:
+        """See :meth:`SearchHistoryStore.add`."""
+        self.searches.add(query, limit)
+
+    def get_recent_searches(self, limit: int = 8) -> List[str]:
+        """See :meth:`SearchHistoryStore.get_recent`."""
+        return self.searches.get_recent(limit)
+
+    def clear_search_history(self) -> None:
+        """See :meth:`SearchHistoryStore.clear`."""
+        self.searches.clear()
+
+    # ── Source health: state.source_health ─────────────────────────────
+
+    def update_source_health(self, domain: str, success: bool,
+                             error_msg: str = "", latency_ms: Optional[int] = None) -> None:
+        """See :meth:`SourceHealthStore.update`."""
+        self.source_health.update(domain, success, error_msg, latency_ms)
+
+    def get_source_health(self, domain: str) -> Dict[str, Any]:
+        """See :meth:`SourceHealthStore.get`."""
+        return self.source_health.get(domain)
+
+    def get_all_source_health(self) -> Dict[str, Dict[str, Any]]:
+        """See :meth:`SourceHealthStore.get_all`."""
+        return self.source_health.get_all()

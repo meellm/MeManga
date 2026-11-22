@@ -52,25 +52,24 @@ _cfg_punpunmanga = {
     "SEARCH_KEYWORDS": ["punpun", "oyasumi"],
 }
 
-_cfg_furieren = {
-    "BASE_URL": "https://furieren.com",
-    "ASSETS_URL": "https://assets.furieren.com/frieren",
-    "MANGA_TITLE": "Frieren: Beyond Journey's End",
-    "SEARCH_KEYWORDS": ["frieren", "journey's end"],
-}
-
 _cfg_kokounohito = {
-    "BASE_URL": "https://kokounohito.com",
+    # The site only answers over plain HTTP, where it redirects (path
+    # preserved) to its HTTPS reader; port 443 does not respond.
+    "BASE_URL": "http://kokounohito.com",
     "ASSETS_URL": "https://assets.kokounohito.com/kokounohito",
     "MANGA_TITLE": "The Climber (Kokou no Hito)",
     "SEARCH_KEYWORDS": ["climber", "kokou"],
 }
 
 _cfg_madeabyss = {
-    "BASE_URL": "https://madeabyss.com",
+    # The site only answers over plain HTTP, where it redirects (path
+    # preserved) to its HTTPS reader; port 443 does not respond.
+    "BASE_URL": "http://madeabyss.com",
     "ASSETS_URL": "https://assets.madeabyss.com/madeinabyss",
     "MANGA_TITLE": "Made in Abyss",
     "SEARCH_KEYWORDS": ["abyss", "made"],
+    # Chapters include decimal ones (16.5, 42.1, ...) the site links to.
+    "CHAPTERS_FROM_LINKS": True,
 }
 
 _cfg_unopiece = {
@@ -101,46 +100,11 @@ _cfg_kagurabachiread = {
     "SEARCH_KEYWORDS": ["kagurabachi"],
 }
 
-_cfg_centuriya = {
-    "BASE_URL": "https://centuriya.com",
-    "ASSETS_URL": "https://assets.centuriya.com/centuria",
-    "MANGA_TITLE": "Centuria",
-    "SEARCH_KEYWORDS": ["centuria"],
-}
-
-_cfg_grandbluemanga = {
-    "BASE_URL": "https://grandbluemanga.com",
-    "ASSETS_URL": "https://assets.grandbluemanga.com/grandblue",
-    "MANGA_TITLE": "Grand Blue Dreaming",
-    "SEARCH_KEYWORDS": ["grand blue"],
-}
-
 _cfg_gachiakutayo = {
     "BASE_URL": "https://gachiakutayo.com",
     "ASSETS_URL": "https://assets.gachiakutayo.com/gachiakuta",
     "MANGA_TITLE": "Gachiakuta",
     "SEARCH_KEYWORDS": ["gachiakuta"],
-}
-
-_cfg_galaxxias = {
-    "BASE_URL": "https://galaxxias.com",
-    "ASSETS_URL": "https://assets.galaxxias.com/galaxias",
-    "MANGA_TITLE": "Galaxias",
-    "SEARCH_KEYWORDS": ["galaxias"],
-}
-
-_cfg_ichithewitchread = {
-    "BASE_URL": "https://ichithewitchread.com",
-    "ASSETS_URL": "https://assets.ichithewitchread.com/ichithewitch",
-    "MANGA_TITLE": "Ichi the Witch",
-    "SEARCH_KEYWORDS": ["ichi"],
-}
-
-_cfg_jujutsumodulo_nuxt = {
-    "BASE_URL": "https://jujutsumodulo.com",
-    "ASSETS_URL": "https://assets.jujutsumodulo.com/jujutsumodulo",
-    "MANGA_TITLE": "Jujutsu Kaisen Modulo",
-    "SEARCH_KEYWORDS": ["jujutsu modulo"],
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -275,14 +239,6 @@ _cfg_gantz = {
     "uses_cloudscraper": True,
 }
 
-_cfg_parasyte = {
-    "base_url": "https://w9.parasytemanga.com",
-    "manga_title": "Parasyte",
-    "chapter_link_pattern": r'chapter-(\d+(?:\.\d+)?)',
-    "image_cdn_filters": ["blogger.googleusercontent.com"],
-    "uses_cloudscraper": True,
-}
-
 _cfg_fma = {
     "base_url": "https://w9.full-metal-alchemist.online",
     "manga_title": "Fullmetal Alchemist",
@@ -312,14 +268,6 @@ _cfg_bakidou = {
     "manga_title": "Baki (All Series)",
     "image_cdn_filters": ["wp-content/uploads"],
     "cover_url": "https://bakidou.com/wp-content/uploads/2020/01/hiya.jpg",
-}
-
-_cfg_worldtrigger = {
-    "base_url": "https://world-trigger.online",
-    "manga_title": "World Trigger",
-    "chapter_link_pattern": r'chapter-(\d+(?:\.\d+)?)',
-    "image_cdn_filters": ["blogger.googleusercontent.com"],
-    "cover_url": "https://world-trigger.online/wp-content/uploads/2022/06/World-Trigger-Manga.webp",
 }
 
 _cfg_hyouka = {
@@ -364,11 +312,6 @@ _cfg_deathnotefree = {
 # WordPress Madara configs
 # ═══════════════════════════════════════════════════════════════════
 
-_cfg_azmanga = {
-    "base_url": "https://azmanga.com",
-    "uses_ajax": True,
-}
-
 _cfg_mangaforfree = {
     "base_url": "https://mangaforfree.net",
     "uses_ajax": True,
@@ -399,14 +342,6 @@ _cfg_gutsberserk = {
     "uses_cloudscraper": True,
 }
 
-_cfg_vinlandsaga = {
-    "base_url": "https://ww3.vinlandsagamanga.net",
-    "manga_title": "Vinland Saga",
-    "manga_slug": "vinland-saga",
-    "is_single_manga": True,
-    "image_cdn_filters": ["img.spoilerhat.com", "zjcdn.mangafox.me"],
-}
-
 _cfg_dandadannet = {
     "base_url": "https://ww2.dandadanmanga.net",
     "manga_title": "Dandadan",
@@ -427,11 +362,6 @@ _cfg_mangaread = {
     "uses_ajax": True,
 }
 
-_cfg_s2manga = {
-    "base_url": "https://s2manga.com",
-    "uses_ajax": True,
-}
-
 _cfg_manhwatop = {
     "base_url": "https://manhwatop.com",
     "uses_ajax": True,
@@ -446,6 +376,7 @@ _cfg_manga18fx = {
     "base_url": "https://manga18fx.com",
     "uses_ajax": True,
     "image_cdn_filters": ["manga18fx"],
+    "nsfw": True,
 }
 
 _cfg_aquamanga = {
@@ -471,37 +402,16 @@ _cfg_dragontranslation = {
     "uses_ajax": True,
 }
 
-_cfg_hipercool = {
-    "base_url": "https://hipercool.net",
-    "uses_ajax": True,
-}
-
-_cfg_mangasehri = {
-    "base_url": "https://mangasehri.com",
-    "uses_ajax": True,
-}
-
 _cfg_mangawow = {
     "base_url": "https://mangawow.com",
     "uses_ajax": True,
     "image_cdn_filters": ["mangawow.com"],
 }
 
-_cfg_pawmanga = {
-    "base_url": "https://pawmanga.com",
-    "uses_ajax": True,
-    "image_cdn_filters": ["pawmanga.com"],
-}
-
 _cfg_rawxz = {
     "base_url": "https://rawjx.net",
     "uses_ajax": True,
     "image_cdn_filters": ["rawxz.xyz"],
-}
-
-_cfg_resetscans = {
-    "base_url": "https://reset-scans.org",
-    "uses_ajax": True,
 }
 
 _cfg_ruyamanga = {
@@ -586,11 +496,6 @@ _cfg_witchhat = {
     "cdn_domains": ["laiond.com", "loinew.com"],
 }
 
-_cfg_callofthenight = {
-    "base_url": "https://w2.call-of-the-night.online",
-    "manga_title": "Call of the Night (Yofukashi no Uta)",
-}
-
 _cfg_aoashi = {
     "base_url": "https://ao-ashi-manga.com",
     "manga_title": "Ao Ashi",
@@ -617,13 +522,6 @@ _cfg_real = {
 _cfg_conan2 = {
     "base_url": "https://detective-conan.online",
     "manga_title": "Detective Conan",
-    "uses_cloudscraper": True,
-}
-
-_cfg_skipbeat2 = {
-    "base_url": "https://skip-beat.online",
-    "manga_title": "Skip Beat!",
-    "cdn_domains": ["loinew.com"],
     "uses_cloudscraper": True,
 }
 
@@ -660,13 +558,6 @@ _cfg_readjjkfree = {
     "cdn_domains": ["planeptune.us", "wp-content/uploads"],
 }
 
-_cfg_bleachorg = {
-    "base_url": "https://www.bleachmanga.org",
-    "manga_title": "Bleach",
-    "manga_slug": "bleach",
-    "cdn_domains": ["cdn.mangaclash.com"],
-}
-
 _cfg_kagurabachimnew = {
     "base_url": "https://kagurabachi-manga.com",
     "manga_title": "Kagurabachi",
@@ -685,19 +576,13 @@ TEMPLATE_SCRAPERS = {
     "jjkaisen.com": (NuxtSSRScraper, _cfg_jjkaisen),
     "oshinokoyo.com": (NuxtSSRScraper, _cfg_oshinokoyo),
     "punpunmanga.com": (NuxtSSRScraper, _cfg_punpunmanga),
-    "furieren.com": (NuxtSSRScraper, _cfg_furieren),
     "kokounohito.com": (NuxtSSRScraper, _cfg_kokounohito),
     "madeabyss.com": (NuxtSSRScraper, _cfg_madeabyss),
     "unopiece.com": (NuxtSSRScraper, _cfg_unopiece),
     "onepunchmanofficial.com": (NuxtSSRScraper, _cfg_onepunchmanofficial),
     "blackclova.com": (NuxtSSRScraper, _cfg_blackclova),
     "kagurabachiread.com": (NuxtSSRScraper, _cfg_kagurabachiread),
-    "centuriya.com": (NuxtSSRScraper, _cfg_centuriya),
-    "grandbluemanga.com": (NuxtSSRScraper, _cfg_grandbluemanga),
     "gachiakutayo.com": (NuxtSSRScraper, _cfg_gachiakutayo),
-    "galaxxias.com": (NuxtSSRScraper, _cfg_galaxxias),
-    "ichithewitchread.com": (NuxtSSRScraper, _cfg_ichithewitchread),
-    "jujutsumodulo.com": (NuxtSSRScraper, _cfg_jujutsumodulo_nuxt),
 
     # ── OG Image Meta ──
     "frieren-manga.com": (OGImageMetaScraper, _cfg_frierenmanga),
@@ -728,15 +613,12 @@ TEMPLATE_SCRAPERS = {
     "dorohedoro.online": (OGImageMetaScraper, _cfg_dorohedoro),
     "gantzmangafree.com": (OGImageMetaScraper, _cfg_gantz),
     "www.gantzmangafree.com": (OGImageMetaScraper, _cfg_gantz),
-    "parasytemanga.com": (OGImageMetaScraper, _cfg_parasyte),
-    "w9.parasytemanga.com": (OGImageMetaScraper, _cfg_parasyte),
     "full-metal-alchemist.online": (OGImageMetaScraper, _cfg_fma),
     "w9.full-metal-alchemist.online": (OGImageMetaScraper, _cfg_fma),
 
     "beckmanga.com": (OGImageMetaScraper, _cfg_beck),
     "readclaymore.com": (OGImageMetaScraper, _cfg_claymore),
     "bakidou.com": (OGImageMetaScraper, _cfg_bakidou),
-    "world-trigger.online": (OGImageMetaScraper, _cfg_worldtrigger),
     "hyoukamanga.com": (OGImageMetaScraper, _cfg_hyouka),
     "witch-watch.com": (OGImageMetaScraper, _cfg_witchwatch),
     "onepiece-manga-online.net": (OGImageMetaScraper, _cfg_onepiecemangaonline),
@@ -747,7 +629,6 @@ TEMPLATE_SCRAPERS = {
     "www.deathnotemangafree.com": (OGImageMetaScraper, _cfg_deathnotefree),
 
     # ── WordPress Madara ──
-    "azmanga.com": (WordPressMadaraScraper, _cfg_azmanga),
     "mangaforfree.net": (WordPressMadaraScraper, _cfg_mangaforfree),
     "sxfmanga.net": (WordPressMadaraScraper, _cfg_sxfmanga),
     "ww2.sxfmanga.net": (WordPressMadaraScraper, _cfg_sxfmanga),
@@ -756,17 +637,12 @@ TEMPLATE_SCRAPERS = {
     "www.mashlemanga.net": (WordPressMadaraScraper, _cfg_mashlemanga),
     "gutsberserk.com": (WordPressMadaraScraper, _cfg_gutsberserk),
     "www.gutsberserk.com": (WordPressMadaraScraper, _cfg_gutsberserk),
-    "vinlandsagamanga.net": (WordPressMadaraScraper, _cfg_vinlandsaga),
-    "ww3.vinlandsagamanga.net": (WordPressMadaraScraper, _cfg_vinlandsaga),
-    "w3.vinlandsagamanga.net": (WordPressMadaraScraper, _cfg_vinlandsaga),
     "dandadanmanga.net": (WordPressMadaraScraper, _cfg_dandadannet),
     "ww2.dandadanmanga.net": (WordPressMadaraScraper, _cfg_dandadannet),
     "w2.dandadanmanga.net": (WordPressMadaraScraper, _cfg_dandadannet),
     "hiperdex.com": (WordPressMadaraScraper, _cfg_hiperdex),
     "mangaread.org": (WordPressMadaraScraper, _cfg_mangaread),
     "www.mangaread.org": (WordPressMadaraScraper, _cfg_mangaread),
-    "s2manga.com": (WordPressMadaraScraper, _cfg_s2manga),
-    "s2manga.io": (WordPressMadaraScraper, _cfg_s2manga),
     "manhwatop.com": (WordPressMadaraScraper, _cfg_manhwatop),
     "mangadistrict.com": (WordPressMadaraScraper, _cfg_mangadistrict),
     "manga18fx.com": (WordPressMadaraScraper, _cfg_manga18fx),
@@ -776,12 +652,8 @@ TEMPLATE_SCRAPERS = {
     "apollcomics.es": (WordPressMadaraScraper, _cfg_apollcomics),
     "bokugents.com": (WordPressMadaraScraper, _cfg_bokugents),
     "dragontranslation.org": (WordPressMadaraScraper, _cfg_dragontranslation),
-    "hipercool.net": (WordPressMadaraScraper, _cfg_hipercool),
-    "mangasehri.com": (WordPressMadaraScraper, _cfg_mangasehri),
     "mangawow.com": (WordPressMadaraScraper, _cfg_mangawow),
-    "pawmanga.com": (WordPressMadaraScraper, _cfg_pawmanga),
     "rawjx.net": (WordPressMadaraScraper, _cfg_rawxz),
-    "reset-scans.org": (WordPressMadaraScraper, _cfg_resetscans),
     "ruyamanga2.com": (WordPressMadaraScraper, _cfg_ruyamanga),
     "www.ruyamanga2.com": (WordPressMadaraScraper, _cfg_ruyamanga),
     "shinobiscans.com": (WordPressMadaraScraper, _cfg_shinobiscans),
@@ -800,22 +672,17 @@ TEMPLATE_SCRAPERS = {
     "detective-conan-manga.online": (LaiondCDNScraper, _cfg_conan_laiond),
     "case-closed.online": (LaiondCDNScraper, _cfg_caseclosed),
     "witch-hat-atelier.online": (LaiondCDNScraper, _cfg_witchhat),
-    "call-of-the-night.online": (LaiondCDNScraper, _cfg_callofthenight),
-    "w2.call-of-the-night.online": (LaiondCDNScraper, _cfg_callofthenight),
     "ao-ashi-manga.com": (LaiondCDNScraper, _cfg_aoashi),
     "d-grayman.online": (LaiondCDNScraper, _cfg_dgrayman),
     "blue-exorcist.online": (LaiondCDNScraper, _cfg_blueexorcist_laiond),
     "real-manga.online": (LaiondCDNScraper, _cfg_real),
     "detective-conan.online": (LaiondCDNScraper, _cfg_conan2),
-    "skip-beat.online": (LaiondCDNScraper, _cfg_skipbeat2),
 
     # ── Mangosm ──
     "readblacklagoon.com": (MangosmScraper, _cfg_blacklagoon),
     "hxhmanga.com": (MangosmScraper, _cfg_hxh),
     "jujutsukaisenmodulo.org": (MangosmScraper, _cfg_jjkmodulo),
     "readjujutsukaisenfree.com": (MangosmScraper, _cfg_readjjkfree),
-    "bleachmanga.org": (MangosmScraper, _cfg_bleachorg),
-    "www.bleachmanga.org": (MangosmScraper, _cfg_bleachorg),
     "kagurabachi-manga.com": (MangosmScraper, _cfg_kagurabachimnew),
 }
 

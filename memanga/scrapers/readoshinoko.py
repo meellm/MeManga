@@ -5,12 +5,15 @@ Content: Oshi no Ko by Aka Akasaka and Mengo Yokoyari (167+ chapters)
 Architecture: WordPress + mangaread.org CDN
 """
 
+import logging
 import re
 import requests
 from pathlib import Path
 from bs4 import BeautifulSoup
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, BROWSER_USER_AGENT_SHORT
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ReadOshiNoKoScraper(BaseScraper):
@@ -21,7 +24,7 @@ class ReadOshiNoKoScraper(BaseScraper):
         self.base_url = "https://w13.readoshinoko.com"
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'User-Agent': BROWSER_USER_AGENT,
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.9',
             'Referer': 'https://w13.readoshinoko.com/',
@@ -76,12 +79,12 @@ class ReadOshiNoKoScraper(BaseScraper):
             def sort_key(ch):
                 try:
                     return float(ch.number)
-                except:
+                except Exception:
                     return 0
             chapters.sort(key=sort_key, reverse=True)
             
         except Exception as e:
-            print(f"Error fetching chapters: {e}")
+            logger.warning("Error fetching chapters: %s", e)
         
         return chapters
 
@@ -122,7 +125,7 @@ class ReadOshiNoKoScraper(BaseScraper):
             return unique_images
             
         except Exception as e:
-            print(f"Error fetching pages: {e}")
+            logger.warning("Error fetching pages: %s", e)
         
         return images
 
@@ -130,7 +133,7 @@ class ReadOshiNoKoScraper(BaseScraper):
         """Download image from mangaread.org CDN"""
         try:
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'User-Agent': BROWSER_USER_AGENT_SHORT,
                 'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
                 'Referer': 'https://w13.readoshinoko.com/',
             }
@@ -143,5 +146,5 @@ class ReadOshiNoKoScraper(BaseScraper):
                 f.write(resp.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

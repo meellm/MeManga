@@ -2,7 +2,10 @@
 MeManga GUI - PySide6-based graphical interface.
 """
 
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def _is_frozen():
@@ -232,54 +235,130 @@ def _install_playwright_browsers_stream(on_line, cancelled):
     return False, "\n".join(errors) if errors else "no install strategy available"
 
 
-def _ensure_browsers():
-    """Ensure the Playwright browsers (Firefox and Chromium) are installed.
+# Set when the user chose "Skip for now" at the first-run browser prompt
+# (issue #344). While it is set the prompt is not shown again; installing
+# the browsers, from Settings or any other way, clears it.
+BROWSER_SKIP_KEY = "gui.browser_install_skipped"
 
-    Drives the install via the streaming progress dialog
-    (:class:`FirefoxInstallDialog`). If the install fails, the dialog
-    surfaces the captured subprocess log so the failure cause is
-    diagnosable; the surrounding loop offers a retry/quit choice.
+_BROWSER_PROMPT_TEXT = (
+    "Some sources need Firefox and Chromium browser components to load "
+    "their pages.\n\n"
+    "Download them now? (about 250 MB, needs internet)\n\n"
+    "If you skip, MeManga opens right away. Sources that don't need a "
+    "browser, such as MangaDex, work as usual; sources that do need one "
+    "will fail until the components are installed. You can install them "
+    "later in Settings → Advanced."
+)
+
+
+def _ask_browser_install(failure=None):
+    """Ask what to do about the missing browsers. Returns ``"install"``,
+    ``"skip"`` or ``"quit"``.
+
+    ``failure`` is the error text of an install that just failed; the
+    question then offers to try again. Closing the box or pressing Esc
+    is the same as "Skip for now".
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    box = QMessageBox()
+    box.setIcon(QMessageBox.Icon.Question)
+    if failure:
+        box.setWindowTitle("Installation Failed")
+        box.setText(
+            "Browser installation failed.\n\n"
+            "Check your internet connection and try again, or skip for "
+            "now and install later in Settings → Advanced.\n\n"
+            "You can also install manually with:\n"
+            "    playwright install firefox chromium\n\n"
+            f"--- details ---\n{failure}"
+        )
+        install_text = "Try again"
+    else:
+        box.setWindowTitle("MeManga — Browser Components")
+        box.setText(_BROWSER_PROMPT_TEXT)
+        install_text = "Download now"
+    install_btn = box.addButton(install_text, QMessageBox.ButtonRole.AcceptRole)
+    skip_btn = box.addButton("Skip for now", QMessageBox.ButtonRole.RejectRole)
+    quit_btn = box.addButton("Quit", QMessageBox.ButtonRole.DestructiveRole)
+    box.setDefaultButton(install_btn)
+    box.setEscapeButton(skip_btn)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked == install_btn:
+        return "install"
+    if clicked == quit_btn:
+        return "quit"
+    return "skip"
+
+
+def _set_browser_skip(config, skipped: bool) -> None:
+    """Record (or clear) the user's choice to run without the browsers."""
+    if config is None or bool(config.get(BROWSER_SKIP_KEY)) == skipped:
+        return
+    try:
+        config.set(BROWSER_SKIP_KEY, skipped)
+        config.save()
+    except Exception:
+        logger.exception("Could not save %s", BROWSER_SKIP_KEY)
+
+
+def _ensure_browsers(config=None):
+    """Offer to install the Playwright browsers (Firefox and Chromium)
+    when they are missing. Returns whether they are installed.
+
+    The download can be skipped (issue #344): the app then starts
+    without them, sources that don't use a browser keep working, and
+    Settings → Advanced installs them later. A skip is remembered in
+    ``config``, so the question is asked once, not on every launch.
+
+    The install runs in the streaming progress dialog
+    (:class:`FirefoxInstallDialog`), which shows the captured log when
+    it fails; the question is then asked again with "Try again".
     """
     if _check_playwright_browsers():
+        _set_browser_skip(config, False)
         return True
+    if config is not None and config.get(BROWSER_SKIP_KEY):
+        return False
 
-    from PySide6.QtWidgets import QMessageBox
     from .components.firefox_install_dialog import FirefoxInstallDialog
 
+    failure = None
     while True:
-        confirm = QMessageBox.question(
-            None, "MeManga — Browser Required",
-            "MeManga needs Firefox and Chromium browser components to "
-            "scrape manga.\n\n"
-            "Download now? (~250 MB, requires internet)",
-        )
-        if confirm != QMessageBox.StandardButton.Yes:
-            quit_answer = QMessageBox.question(
-                None, "MeManga",
-                "MeManga cannot work without browser components.\n\nQuit?",
-            )
-            if quit_answer == QMessageBox.StandardButton.Yes:
-                sys.exit(0)
-            continue
+        choice = _ask_browser_install(failure)
+        if choice == "quit":
+            sys.exit(0)
+        if choice == "skip":
+            _set_browser_skip(config, True)
+            return False
 
         dlg = FirefoxInstallDialog()
         ok, error_text = dlg.run_install()
         if ok:
+            _set_browser_skip(config, False)
             return True
+        # Cancelled by the user: back to the first question, not a
+        # failure report. Otherwise the dialog already showed the log;
+        # ask again with the reason.
+        cancelled = getattr(dlg, "_cancelled", False)
+        failure = None if cancelled else (error_text or "unknown error")[:1200]
 
-        # The dialog already surfaced the captured log in its own UI;
-        # offer a retry-or-quit choice and loop.
-        detail = (error_text or "unknown error")[:1200]
-        retry = QMessageBox.question(
-            None, "Installation Failed",
-            "Browser installation failed.\n\n"
-            "Check your internet connection and try again.\n\n"
-            "You can also install manually with:\n"
-            "    playwright install firefox chromium\n\n"
-            f"--- details ---\n{detail}",
-        )
-        if retry != QMessageBox.StandardButton.Yes:
-            sys.exit(0)
+
+def _first_run_setup(window, config):
+    """First-run questions asked once the window is up: where downloads
+    go, for a new library (issue #370)."""
+    from .components.download_location_dialog import (
+        DownloadLocationDialog, needs_download_location)
+    if not needs_download_location(config):
+        return
+    dialog = DownloadLocationDialog(window, config)
+    if dialog.exec():
+        # Show the chosen folder where the old one was on screen.
+        settings = getattr(window, "_pages", {}).get("settings")
+        if settings is not None:
+            settings.reload_from_config()
+        window.events.publish("library_updated", {"action": "download_dir"})
 
 
 def _load_app_icon():
@@ -340,11 +419,231 @@ def _set_windows_app_user_model_id():
         pass
 
 
-def launch_gui():
-    """Launch the MeManga GUI application."""
-    from PySide6.QtWidgets import QApplication
+# Issue #226: the windowed entry (gui/__main__.py) opens runtime.log in
+# the config folder it selected, under that folder's lock, and registers
+# how to move both to the folder the window ends up locking, should
+# another process have moved the legacy folder in between (#249).
+_runtime_log_mover = None
+
+
+def set_runtime_log_mover(mover) -> None:
+    """Register ``mover(config_dir)``; ``None`` removes it."""
+    global _runtime_log_mover
+    _runtime_log_mover = mover
+
+
+def _follow_runtime_log(config_dir) -> None:
+    """Keep runtime.log, and its lock, with the folder the window locked."""
+    mover = _runtime_log_mover
+    if mover is None:
+        return
+    try:
+        mover(config_dir)
+    except Exception:
+        # A diagnostic log must never stop the window from opening.
+        logger.exception("Could not move runtime.log to %s", config_dir)
+
+
+def _lock_problem(error):
+    """Dialog text for a config directory the GUI could not lock (#244)."""
+    from ..process_lock import ConfigDirBusy
+    if isinstance(error, ConfigDirBusy):
+        return (
+            "MeManga is already running for this library:\n"
+            f"{error.config_dir}\n\n"
+            "Another window, a running check or another memanga command "
+            "is using it. Close it or wait for it to finish, then start "
+            "MeManga again."
+        )
+    return (
+        f"MeManga could not lock its folder:\n{error.config_dir}\n\n"
+        f"{error.error.strerror or error.error}\n\n"
+        "MeManga needs a folder on a file system that supports file locks."
+    )
+
+
+def _startup_problem(config, state):
+    """Message for a config or state file the GUI cannot run on, or None.
+
+    Issue #243: the window used to crash on a broken config.yaml, and a
+    state file that cannot be loaded must not be overwritten.
+    """
+    if config.load_error:
+        return (
+            f"MeManga could not load its config file:\n{config.config_path}"
+            f"\n\n{config.load_error}\n\n"
+            "Fix or move the file, then start MeManga again."
+        )
+    if state.load_error:
+        return (
+            f"MeManga could not load its state file:\n\n{state.load_error}"
+            "\n\nFix or move the file, then start MeManga again."
+        )
+    return None
+
+
+def _ensure_logging() -> None:
+    """Give a direct start the same redacting log setup as the others.
+
+    ``memanga --gui`` and ``python -m memanga.gui`` (and the frozen
+    builds) configure logging before calling :func:`launch_gui`; the
+    ``memanga-gui`` script and other direct callers did not, so records
+    went out through Python's fallback handler without
+    :class:`memanga.output.RedactingFormatter` and printed URL
+    credentials, tokens and passwords as they were (issue #342). Setup
+    done by a caller wins: its level, log file and handlers are kept, and
+    no second set of handlers is added.
+    """
+    from ..output import configure_logging, logging_configured, resolve_log_level
+    if logging_configured():
+        return
+    # Same defaults as the module entry point (gui/__main__.py).
+    configure_logging(resolve_log_level(default=logging.INFO), timestamps=True)
+
+
+# Issue #219: the Qt runtime comes with the ``gui`` extra, not with the
+# default install the CLI and servers use. Import name -> the gui extra's
+# requirement in pyproject.toml.
+GUI_REQUIREMENTS = {"PySide6": "PySide6>=6.5.0"}
+
+
+def _repository_url():
+    """The Repository URL from the installed package metadata, or None."""
+    try:
+        from importlib import metadata
+        urls = metadata.metadata("memanga").get_all("Project-URL") or []
+    except Exception:
+        return None
+    for entry in urls:
+        label, _, url = entry.partition(",")
+        if label.strip().lower() == "repository" and url.strip():
+            return url.strip()
+    return None
+
+
+def _windows():
+    import os
+    return os.name == "nt"
+
+
+def _python_commands(arguments):
+    """Indented shell lines that run ``arguments`` with this Python.
+
+    pip has to install into the environment MeManga runs in; a bare
+    ``python`` may be another one (a venv that is not activated, pipx),
+    so the interpreter path is kept and quoted where the shell needs it.
+    On Windows a path that needs quotes gets a cmd line and a PowerShell
+    line, which runs a quoted path only after ``&``.
+    """
+    import re
+    exe = sys.executable or "python"
+    if not _windows():
+        import shlex
+        return [f"    {shlex.quote(exe)} {arguments}"]
+    if re.fullmatch(r"[A-Za-z0-9_.:\\/-]+", exe):
+        return [f"    {exe} {arguments}"]
+    powershell = "'" + exe.replace("'", "''") + "'"
+    return [f'    "{exe}" {arguments}',
+            f"    & {powershell} {arguments}  # PowerShell"]
+
+
+def _gui_install_hint():
+    """How to add the ``gui`` extra, for the missing-dependency error.
+
+    The first command works for any install, without knowing where
+    MeManga was installed from.
+    """
+    packages = " ".join(f'"{r}"' for r in GUI_REQUIREMENTS.values())
+    lines = [
+        "Install the gui extra's packages into the Python environment "
+        "MeManga runs in:",
+        *_python_commands(f"-m pip install {packages}"),
+    ]
+    url = _repository_url()
+    if url:
+        lines += [
+            "or reinstall MeManga with the gui extra:",
+            *_python_commands(f'-m pip install "memanga[gui] @ git+{url}"'),
+        ]
+    lines += [
+        "In the folder of a source checkout, use instead:",
+        *_python_commands('-m pip install -e ".[gui]"'),
+        "The memanga command works without it.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _missing_gui_dependency():
+    """Name of the first GUI package that is not installed, else None.
+
+    Only looks the package up: an installed Qt that fails to import
+    (missing system libraries, for example) keeps its own error.
+    """
+    import importlib.util
+    for name in GUI_REQUIREMENTS:
+        try:
+            if importlib.util.find_spec(name) is None:
+                return name
+        except (ImportError, ValueError):
+            return name
+    return None
+
+
+def _require_gui_dependencies():
+    """Exit with install guidance when the ``gui`` extra is missing."""
+    missing = _missing_gui_dependency()
+    if missing is None:
+        return
+    sys.stderr.write(
+        f"error: the MeManga desktop app needs {missing}, which is not "
+        "installed.\n" + _gui_install_hint()
+    )
+    sys.exit(1)
+
+
+def _require_desktop_build():
+    """Exit when this is the CLI-only Docker image (issue #314).
+
+    The image installs the whole package, so ``memanga-gui`` exists
+    there, but not the Qt runtime; pip install hints would be wrong.
+    """
+    import os
+    if not os.environ.get("MEMANGA_CLI_ONLY"):
+        return
+    sys.stderr.write(
+        "error: the MeManga desktop app is not available in this image "
+        "(CLI-only Docker build)\n"
+        "Use the memanga command instead.\n"
+    )
+    sys.exit(1)
+
+
+def launch_gui(config=None, state=None, explicit_config_dir=None):
+    """Launch the MeManga GUI application.
+
+    ``config`` and ``state`` are the already loaded objects when the CLI
+    starts the GUI; otherwise they are loaded here, in the directory the
+    CLI would select (issue #249): ``explicit_config_dir``, else
+    ``$MEMANGA_CONFIG_DIR``, else the platform default.
+    ``explicit_config_dir`` is the directory chosen with ``--config-dir``
+    or ``$MEMANGA_CONFIG_DIR`` (None for the default), so the daily check
+    set up from Settings runs on the same directory.
+    """
+    # Before anything can log, imports included (issue #342).
+    _ensure_logging()
+    _require_desktop_build()
+    # Before any Qt import: without the gui extra this exits with the
+    # install command instead of a ModuleNotFoundError traceback.
+    _require_gui_dependencies()
+
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtCore import QTimer
     from .app import MeMangaApp
     from . import theme as T
+    from ..config import (Config, default_config_dir, default_root_moved,
+                          explicit_config_dir as _explicit)
+    from ..process_lock import ConfigDirBusy, ConfigDirLock, ConfigDirLockError
+    from ..state import State
 
     # Must run before QApplication() so the taskbar honours our icon.
     _set_windows_app_user_model_id()
@@ -365,13 +664,73 @@ def launch_gui():
     if app_icon is not None:
         qapp.setWindowIcon(app_icon)
 
-    _ensure_browsers()
+    # Issue #244: the window keeps config and state loaded and saves
+    # them for the whole session, so it holds the config directory lock
+    # until the process exits. Taken before loading; under `memanga --gui`
+    # the CLI already holds it and this only joins that lock.
+    if config is not None:
+        config_dir = config.config_dir
+    else:
+        explicit_config_dir = _explicit(explicit_config_dir)
+        config_dir = explicit_config_dir or default_config_dir()
+    def _lock(directory):
+        lock = ConfigDirLock(directory)
+        try:
+            lock.acquire()
+        except (ConfigDirBusy, ConfigDirLockError) as e:
+            QMessageBox.critical(None, "MeManga", _lock_problem(e))
+            sys.exit(1)
+        return lock
 
-    window = MeMangaApp()
+    lock = _lock(config_dir)
+    # Issue #249: another process may have moved the legacy folder to the
+    # platform folder between default_config_dir() and the lock, so this
+    # lock is on a recreated, empty legacy folder. Switch to the platform
+    # folder before loading anything, as the CLI does.
+    if config is None and explicit_config_dir is None and default_root_moved(config_dir):
+        lock.release()
+        moved_from = config_dir
+        config_dir = default_config_dir()
+        if default_root_moved(config_dir):
+            QMessageBox.critical(
+                None, "MeManga",
+                f"MeManga's folder was just moved from:\n{moved_from}\n\n"
+                "Nothing was changed. Start MeManga again.")
+            sys.exit(1)
+        lock = _lock(config_dir)
+    _follow_runtime_log(config_dir)
+
+    if config is None:
+        config = Config(config_dir, tolerate_errors=True)
+    if state is None:
+        state = State(config_dir)
+    problem = _startup_problem(config, state)
+    if problem:
+        QMessageBox.critical(None, "MeManga", problem)
+        sys.exit(1)
+
+    browsers_installed = _ensure_browsers(config)
+
+    window = MeMangaApp(config=config, app_state=state,
+                        explicit_config_dir=explicit_config_dir)
+    # Settings → Advanced shows this and offers the install (issue #344).
+    window.browsers_installed = browsers_installed
     # NOTE: don't subscribe `lambda: T.apply(qapp)` here.
     # `T.set_theme(name, qapp)` already calls `apply(qapp)` BEFORE
     # notifying subscribers, so a re-subscribed apply() would run a
     # full QSS+palette+polish pass twice per theme switch — the
     # noticeable freeze the user was seeing.
     window.show()
+    if state.recovery_notice:
+        notice = state.recovery_notice
+        QTimer.singleShot(
+            0, lambda: QMessageBox.warning(window, "MeManga", notice))
+    # Issue #293: the app runs, but a setting it ignores is not silent.
+    settings_notice = config.validation_notice
+    if settings_notice:
+        QTimer.singleShot(
+            0, lambda: QMessageBox.warning(window, "MeManga", settings_notice))
+    # After the window is on screen, so the question appears over the
+    # app it is about.
+    QTimer.singleShot(0, lambda: _first_run_setup(window, config))
     sys.exit(qapp.exec())

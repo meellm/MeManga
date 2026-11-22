@@ -17,6 +17,13 @@ from memanga.scrapers.mangabuddy import MangaBuddyScraper
 from memanga.scrapers.comix import ComixScraper
 from memanga.scrapers import get_scraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {
+    "MangaBuddyScraper": ("search", "chapters", "pages"),
+    "ComixScraper": ("search", "chapters"),
+}
+
 
 # ──────────────────────────────────────────────────────────────────────
 # MangaBuddy — represents the largest single Playwright scraper.
@@ -223,8 +230,6 @@ class TestComixChapters:
 PLAYWRIGHT_DOMAINS = [
     "weebcentral.com",
     "mangakatana.com",
-    "mangafire.to",
-    "mangasee123.com",
     "mangabuddy.com",
     "mangataro.org",
     "flamecomics.xyz",
@@ -241,15 +246,9 @@ PLAYWRIGHT_DOMAINS = [
     "toonily.me",
     "omegascans.org",
     "hivetoons.org",
-    "mangayy.org",
-    "manga4life.com",
-    "isekaiscan.com",
-    "zinmanga.com",
     "zazamanga.com",
-    "mangaclash.com",
     "kunmanga.com",
     "manytoon.com",
-    "pururin.to",
     "hentairead.com",
     "manganato.gg",
     "mangahere.onl",

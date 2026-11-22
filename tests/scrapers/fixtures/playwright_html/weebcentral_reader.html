@@ -1,0 +1,20 @@
+<!-- WeebCentral fixture: SANITIZED EXCERPT of a real page, captured 2026-10-28 from
+     https://weebcentral.com/chapters/01J76XZ2SJ0NRW2KYE07NRP41E (reader, after scrolling).
+     EXCERPT ONLY: the live reader had 75 <img alt="Page N"> in section#chapter-images; pages 1-3 and 74-75 are kept.
+     The two header logos sit outside <main>; the analytics beacon is the page's last element.
+     Sanitized: svg bodies emptied, <source> and Alpine x-data/@click attributes dropped, whitespace collapsed, analytics token redacted. URLs as strings only; no media. The page <img> attributes are as captured. -->
+<title>Chapter 1 | Blue Lock | Weeb Central</title>
+<!-- header logos (non-reader images, outside <main>): -->
+<img alt="Weeb Central Logo" class="hidden md:block" height="80" src="/static/images/brand.png" width="250"/>
+<img alt="Weeb Central Logo" class="block md:hidden" height="40" src="/static/images/brand.png" width="125"/>
+<main><!-- reader container -->
+<section class="w-full flex-1 flex flex-col pb-4 cursor-pointer" hx-get="https://weebcentral.com/chapters/01J76XZ2SJ0NRW2KYE07NRP41E/images" hx-include="[name='reading_style'],[name='current_page']" hx-swap="outerHTML" hx-trigger="change from:[name='reading_style']" id="chapter-images" style="gap: var(--strip-gap, 0px)">
+  <img alt="Page 1" class="max-w-full h-auto mx-auto" decoding="async" loading="lazy" onerror="this.onerror=null; this.style.minHeight=''; this.src='/static/images/broken_image.jpg'" onload="this.style.minHeight=''" src="https://hot.planeptune.us/manga/Blue-Lock/0001-001.png" style=""/>
+  <img alt="Page 2" class="max-w-full h-auto mx-auto" decoding="async" loading="lazy" onerror="this.onerror=null; this.style.minHeight=''; this.src='/static/images/broken_image.jpg'" onload="this.style.minHeight=''" src="https://hot.planeptune.us/manga/Blue-Lock/0001-002.png" style=""/>
+  <img alt="Page 3" class="max-w-full h-auto mx-auto" decoding="async" loading="lazy" onerror="this.onerror=null; this.style.minHeight=''; this.src='/static/images/broken_image.jpg'" onload="this.style.minHeight=''" src="https://hot.planeptune.us/manga/Blue-Lock/0001-003.png" style=""/>
+  <!-- ... 70 more <img alt="Page N"> children, DOM order == page order 1..75, no duplicates, no non-page imgs inside section ... -->
+  <img alt="Page 74" class="max-w-full h-auto mx-auto" decoding="async" loading="lazy" onerror="this.onerror=null; this.style.minHeight=''; this.src='/static/images/broken_image.jpg'" onload="this.style.minHeight=''" src="https://hot.planeptune.us/manga/Blue-Lock/0001-074.png" style="min-height: 50vh"/>
+  <img alt="Page 75" class="max-w-full h-auto mx-auto" decoding="async" loading="lazy" onerror="this.onerror=null; this.style.minHeight=''; this.src='/static/images/broken_image.jpg'" onload="this.style.minHeight=''" src="https://hot.planeptune.us/manga/Blue-Lock/0001-075.png" style="min-height: 50vh"/>
+</section></main>
+<!-- last-in-body analytics beacon (only occurrence of the substring 'cloudflare' in the page, at char offset ~115932 of 116333; token redacted): -->
+<script crossorigin="anonymous" data-cf-beacon='{"version":"2024.11.0","token":"REDACTED","r":1,"spa":2}' integrity="..." src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" type="module"></script>

@@ -11,10 +11,11 @@ each theme — not the *current* theme.
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QPainter, QColor, QLinearGradient
 from PySide6.QtWidgets import (
-    QWidget, QFrame, QHBoxLayout, QVBoxLayout, QLabel,
+    QWidget, QFrame, QBoxLayout, QHBoxLayout, QVBoxLayout, QLabel,
 )
 from .. import theme as T
 from ..theme.tokens import THEMES
+from .keyboard import is_activation
 
 
 class _MiniPreview(QWidget):
@@ -115,6 +116,8 @@ class _ThemeCard(QFrame):
         self._theme_name = theme_name
         self.setProperty("role", "theme_card")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Reachable with Tab, picked with Enter/Space (issue #396).
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -126,19 +129,16 @@ class _ThemeCard(QFrame):
         title_row = QHBoxLayout()
         label = QLabel(THEMES[theme_name]["label"].split("—")[0].strip())
         label.setProperty("role", "card_title")
+        # Painted preview card: name it for screen readers (issue #394).
+        self.setAccessibleName(f"{label.text()} theme")
         title_row.addWidget(label)
 
         title_row.addStretch(1)
 
         self._check = QLabel("✓")
-        accent = T.tokens()["accent.primary"]
-        on_acc = T.tokens()["accent.on_primary"]
         self._check.setFixedSize(22, 22)
         self._check.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._check.setStyleSheet(
-            f"background-color: {accent}; color: {on_acc};"
-            f"border-radius: 11px; font-weight: 700;"
-        )
+        self._style_check()
         self._check.hide()
         title_row.addWidget(self._check)
 
@@ -148,27 +148,58 @@ class _ThemeCard(QFrame):
                       if "—" in THEMES[theme_name]["label"] else "")
         desc.setProperty("role", "hint")
         layout.addWidget(desc)
+        self._desc_text = desc.text()
+        self.setAccessibleDescription(self._desc_text)
+
+    def _style_check(self):
+        """The check badge in the current theme's accent. It used to keep
+        the colours of the theme the card was built in."""
+        toks = T.tokens()
+        self._check.setStyleSheet(
+            f"background-color: {toks['accent.primary']};"
+            f" color: {toks['accent.on_primary']};"
+            f"border-radius: 11px; font-weight: 700;"
+        )
 
     def set_selected(self, selected: bool):
+        self._style_check()
         self.setProperty("selected", "true" if selected else "false")
         self.style().unpolish(self)
         self.style().polish(self)
         self._check.setVisible(selected)
+        # The check mark is visual only; say the state in words.
+        self.setAccessibleDescription(", ".join(
+            part for part in (
+                "Selected" if selected else "", self._desc_text,
+            ) if part
+        ))
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self._theme_name)
         super().mousePressEvent(ev)
 
+    def keyPressEvent(self, ev):
+        if is_activation(ev):
+            self.clicked.emit(self._theme_name)
+        else:
+            super().keyPressEvent(ev)
+
 
 class ThemePicker(QWidget):
-    """Two-card theme switcher (dark + light)."""
+    """Two-card theme switcher (dark + light).
+
+    The cards sit side by side when there is room for both and one
+    above the other when there is not, instead of the second card being
+    cut off at the right edge of a narrow Settings pane.
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
+        self._layout = layout
 
         self._cards: dict = {}
         for name in ("dark", "light"):
@@ -179,6 +210,39 @@ class ThemePicker(QWidget):
 
         self._sync()
         T.on_theme_change(self._sync)
+
+    def _side_by_side_width(self) -> int:
+        cards = list(self._cards.values())
+        return (sum(card.minimumSizeHint().width() for card in cards)
+                + self._layout.spacing() * (len(cards) - 1))
+
+    def minimumSizeHint(self):
+        # One card wide, so a narrow pane can make the cards stack
+        # rather than forcing its content wider than what is visible.
+        hint = super().minimumSizeHint()
+        if not getattr(self, "_cards", None):
+            return hint
+        hint.setWidth(max(card.minimumSizeHint().width()
+                          for card in self._cards.values()))
+        return hint
+
+    def resizeEvent(self, ev):
+        super().resizeEvent(ev)
+        self._fit_direction(ev.size().width())
+
+    def _fit_direction(self, width: int):
+        if not getattr(self, "_cards", None):
+            return
+        wanted = (QBoxLayout.Direction.LeftToRight
+                  if width >= self._side_by_side_width()
+                  else QBoxLayout.Direction.TopToBottom)
+        if self._layout.direction() != wanted:
+            self._layout.setDirection(wanted)
+            # The height needed changes with the direction.
+            self.updateGeometry()
+
+    def is_stacked(self) -> bool:
+        return self._layout.direction() == QBoxLayout.Direction.TopToBottom
 
     def _on_pick(self, name: str):
         from PySide6.QtWidgets import QApplication

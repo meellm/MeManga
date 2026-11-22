@@ -173,7 +173,7 @@ def _scraper_returning(numbers):
 
 def _patch_scrapers(monkeypatch, by_domain):
     import memanga.downloader as dl
-    monkeypatch.setattr(dl, "get_scraper", lambda d: by_domain[d])
+    monkeypatch.setattr(dl.updates, "get_scraper", lambda d: by_domain[d])
 
 
 SINGLE_SOURCE_MANGA = {

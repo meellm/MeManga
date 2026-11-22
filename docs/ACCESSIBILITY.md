@@ -1,0 +1,113 @@
+# Accessibility smoke checklist
+
+A short manual pass for the desktop GUI with a real screen reader. It checks
+that controls announce a useful name (and, where it helps, a description of
+which item they act on or which state is current). Run it after changing GUI
+controls.
+
+Screen readers: Orca (Linux), NVDA or Narrator (Windows), VoiceOver (macOS).
+Use the screen reader's object/review navigation to move through each page;
+keyboard reachability has its own checklist below, and color contrast is
+not part of either list.
+
+Start with a library of at least two manga, one with new chapters, and one
+downloaded chapter.
+
+## Sidebar
+
+- [ ] Each nav item is announced by its plain name ("Library", "Downloads",
+      "Search", "Notifications", "Sources", "Settings"), without stray padding.
+- [ ] Items with a count badge also announce what the number means
+      (for example "2 manga in library", "3 unread notifications").
+- [ ] The auto-check bar in the footer is announced as "Auto-check progress".
+
+## Library
+
+- [ ] The filter field is announced as "Filter library". The sort box says
+      what it does ("Sort library" or, where the platform announces a drop-down
+      by its current choice, as on Linux, the description "Sort order of the
+      library").
+- [ ] The view toggles are announced as "Grid view" and "List view"; the active
+      one says "Current view", the other what it switches to.
+- [ ] Each cover card (grid) and row (list) is announced by the manga title,
+      followed by status, chapter progress, new-chapter count and
+      "opens details".
+- [ ] Continue-reading cards are announced by title with the last read chapter.
+
+## Detail
+
+- [ ] "Remove" says which manga it removes.
+- [ ] Each chapter's "Read" / "Download" / "Retry" / "Send" says which chapter
+      it acts on.
+
+## Search and Sources
+
+- [ ] The search field is announced as "Search manga"; each "+ Add" says which
+      title and source it adds.
+- [ ] The sources filter field is announced as "Filter sources".
+- [ ] Each source checkbox is announced with its source domain and its checked
+      state; the "⋯" button is announced as "More actions" with the domain.
+
+## Downloads
+
+- [ ] An active download row's cancel button is announced as "Cancel download"
+      with the chapter, and its bar as "Download progress".
+
+## Reader
+
+- [ ] The layout buttons are announced as "Continuous scroll", "Single page"
+      and "Two-page spread"; the active one says "current layout".
+- [ ] The zoom buttons are announced as "Zoom out" and "Zoom in".
+- [ ] The bottom bar is announced as "Reading progress" with its value.
+
+## Settings
+
+- [ ] Tabs are announced as "General", "Kindle / Email", "Advanced", "About".
+- [ ] Theme cards are announced as "Dark theme" / "Light theme"; the active one
+      says "Selected".
+- [ ] Download directory, file naming template, concurrent downloads slider,
+      Kindle/SMTP fields, app password, daily auto-check time, max pages
+      allowed to fail and post-processing command each announce their label,
+      not their placeholder or an empty name.
+- [ ] The Output Format and MangaDex Image Quality drop-downs say what they
+      set, not only their current choice ("pdf", "Original").
+
+# Keyboard checklist
+
+A manual pass without touching the mouse, in both the dark and the light
+theme. Start the same way as above. The app's shortcuts and how focus moves
+are on the [Keyboard](https://meellm.github.io/MeManga/desktop/keyboard) page; the reader's keys are
+under [Keyboard](https://meellm.github.io/MeManga/desktop/reader#keyboard) on the Reader page.
+
+## Focus ring
+
+- [ ] `Tab` and `Shift+Tab` show a clearly visible ring on every stop:
+      sidebar items, buttons (including primary ones), tabs, chips, text
+      fields, drop-downs, check boxes, Library cards and rows,
+      continue-reading cards and theme cards.
+- [ ] Clicking a button with the mouse does not leave a ring on it.
+- [ ] Labels don't shift by a pixel when the ring appears.
+- [ ] No Tab stop is invisible: every press of `Tab` moves the ring to a
+      control you can see, including on long pages; `Page Up` / `Page Down`
+      still scroll them.
+
+## Pages
+
+- [ ] Library: `Tab` reaches the filter, sort, view toggles and each card or
+      row; `Enter` or `Space` opens Detail with focus on its first control;
+      the `Menu` key or `Shift+F10` opens the quick actions menu, which arrow
+      keys and `Enter` operate.
+- [ ] Detail: every chapter button can be reached; `Alt+←` (`Cmd+[` on
+      macOS) returns to Library; the mode drop-down opens with `Space`, and
+      arrow keys highlight Auto / Manual and `Enter` picks one.
+- [ ] Reader: every key in the reader's key table works in all three layouts, also
+      after clicking a toolbar button or the page; `Ctrl/Cmd+0` resets zoom.
+- [ ] Search, Sources, Downloads, Notifications: every control can be
+      reached and used; `Ctrl/Cmd+F` puts the cursor in the filter or search
+      field.
+- [ ] Settings (`Ctrl/Cmd+,`): every tab, field and the Save button can be
+      reached; the theme cards switch theme with `Enter` or `Space`.
+- [ ] Dialogs (Add manga, Download from, Remove, error details): focus
+      starts inside the dialog, `Tab` goes × → fields → Cancel → primary
+      button and stays in the dialog, the ring on Cancel is not cut off, and
+      `Esc` closes it.

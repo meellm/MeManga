@@ -160,8 +160,13 @@ class TestBashCompletion:
         reply = _complete(script, "")
         assert {"edit", "update"} <= set(reply)
         assert "set" not in reply
-        assert _complete(script, "se") == ["search"]
+        assert _complete(script, "se") == ["search", "send", "setup"]
         assert _complete(script, "update", "Some Title", "--st") == ["--status"]
+
+    def test_setup_offers_both_browser_flags(self, script):
+        # Issue #217: --install-browsers / --no-install-browsers.
+        assert set(_complete(script, "setup", "--")) >= {
+            "--install-browsers", "--no-install-browsers"}
 
     def test_read_unread(self, script):
         reply = _complete(script, "")
@@ -213,10 +218,10 @@ class TestBashCompletion:
         # and a single-manga template site are all valid --source values.
         swept = compute_search_sources(_NoConfig())
         assert "mangadex.org" in swept
-        assert "mangasee123.com" in BROKEN_SEARCH_SOURCES
+        assert "mangareader.to" in BROKEN_SEARCH_SOURCES
         template = sorted(TEMPLATE_SCRAPERS)[0].removeprefix("www.")
         assert template not in swept
-        for source in ("mangadex.org", "mangasee123.com", template):
+        for source in ("mangadex.org", "mangareader.to", template):
             assert source in _complete(script, "search", "q", "--source",
                                        source[:-1]), source
 

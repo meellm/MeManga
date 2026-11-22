@@ -1,0 +1,16 @@
+# Store text with LF and check it out with LF on every platform.
+* text=auto eol=lf
+
+# Scripts need the line endings of their interpreter.
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.gif binary
+*.icns binary
+*.ico binary
+*.png binary
+
+# License texts are shipped verbatim (issue #380): no line-ending
+# conversion on checkout, also on Windows.
+packaging/licenses/** -text !eol

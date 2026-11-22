@@ -39,6 +39,7 @@ class AsuraScansScraper(BaseScraper):
 
     name = "asurascans"
     base_url = "https://asurascans.com"
+    engine = "api"
     api_url = "https://api.asurascans.com/api"
 
     # Series slug segment: /comics/<slug> today, /series/<slug> or the

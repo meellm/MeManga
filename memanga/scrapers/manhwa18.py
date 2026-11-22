@@ -5,10 +5,14 @@ https://manhwa18.cc
 Adult manhwa/webtoon library.
 """
 
+import logging
 import re
 from typing import List
+from urllib.parse import quote_plus
 from pathlib import Path
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT_SHORT
+
+logger = logging.getLogger(__name__)
 
 
 class Manhwa18Scraper(BaseScraper):
@@ -16,12 +20,13 @@ class Manhwa18Scraper(BaseScraper):
     
     name = "manhwa18"
     base_url = "https://manhwa18.cc"
+    nsfw = True
     
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title."""
         from bs4 import BeautifulSoup
         
-        url = f"{self.base_url}/search?q={query.replace(' ', '+')}"
+        url = f"{self.base_url}/search?q={quote_plus(query)}"
         html = self._get_html(url)
         soup = BeautifulSoup(html, "html.parser")
         
@@ -118,7 +123,7 @@ class Manhwa18Scraper(BaseScraper):
         """Download image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "User-Agent": BROWSER_USER_AGENT_SHORT,
                 "Referer": f"{self.base_url}/",
             }
             response = self.session.get(url, headers=headers, timeout=30)
@@ -127,5 +132,5 @@ class Manhwa18Scraper(BaseScraper):
             Path(path).write_bytes(response.content)
             return True
         except Exception as e:
-            print(f"Failed to download {url}: {e}")
+            logger.debug("Failed to download %s: %s", url, e)
             return False

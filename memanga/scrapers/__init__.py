@@ -1,699 +1,733 @@
 """
 MeManga Scrapers
 
-Working sources:
-- TCBScans (tcbonepiecechapters.com) - Jump manga: One Piece, JJK, MHA
-- WeebCentral (weebcentral.com) - Large library, 1000+ manga
-- Asura Scans (asurascans.com) - Manhwa specialist (JSON API)
-- Mangakatana (mangakatana.com) - General library
-- MangaDex (mangadex.org) - Community uploads (skip Shueisha)
-- Mangapill (mangapill.com) - Large library, no Cloudflare
-- MangaPark (mangapark1.com) - Large library (Chromium, Cloudflare)
-- MangaReader (mangareader.to) - Large library, clean UI
-- MangaSee (mangasee123.com) - High quality scans
-- MangaBuddy (mangabuddy.com) - Popular aggregator
-- Bato.to (bato.to) - Community-driven
-- Mangakakalot (mangakakalot.com) - Huge library
-- Manganato (manganato.com) - Same network as Kakalot
-- Mangago (mangago.me) - Large yaoi/shoujo collection
-- MangaTaro (mangataro.org) - ComicK replacement, popular aggregator
-- Mangadot (mangadot.net) - Multi-language aggregator (SSR + JSON API)
-- Olympus Scanlation (olympusxyz.com) - Spanish manhwa scans (JSON API)
-- ZonaTMO (zonatmo.org) - Spanish manga/manhwa library (plain HTML)
-- Lector Manga (lector-mangas.lat) - Spanish manga/manhwa reader (static HTML)
-- Thunder Scans EN (en-thunderscans.com) - English manhwa scans (MangaThemesia HTML)
-- Wurmz (wurmz.net) - Indonesian manga/manhwa/manhua reader (Next.js SSR HTML)
-- MangaFire (mangafire.to) - VRF bypass + image descrambling (Playwright)
-- Plus ~80 template-based scrapers via registry (Nuxt SSR, OG Image Meta, Madara, Laiond CDN, Mangosm)
+``SCRAPERS`` maps every supported domain to its scraper class: the
+individual scrapers registered below plus the template-based ones from
+``registry.TEMPLATE_SCRAPERS``. Source metadata (search skips, curated
+ranking, notes, and the class-level ``engine`` / ``content_language`` /
+``nsfw`` attributes) is collected by ``catalog.source_catalog()``; see
+docs/SUPPORTED_SOURCES.md for the generated list.
+
+Scraper modules are imported on first lookup, not with this package, so
+commands that never talk to a site don't load every scraper and its
+dependencies. Listing or testing domains imports no scraper module;
+``SCRAPERS[domain]`` and ``get_scraper()`` import only the one needed.
+
+``get_scraper()`` hands each thread one instance per scraper class, so
+repeated calls for a source share its session. It never gives one
+instance to two threads (scraper state and sessions are not guaranteed
+thread-safe); code that hands a scraper's work to threads of its own
+gives each a ``BaseScraper.worker_copy()``, as chapter page downloads
+do. Request spacing is shared by the whole class in every thread (see
+``base.BaseScraper._rate_lock``).
 """
 
+import sys
+import threading
+import warnings
+from collections.abc import Iterator, Mapping
+from importlib import import_module
+from importlib.abc import Loader, MetaPathFinder
+from importlib.util import spec_from_loader
+from typing import Dict, Optional, Type, Union
+
 from .base import BaseScraper, Chapter, Manga
-from .registry import get_template_scrapers
 
-# ── Core aggregator scrapers ──
-from .tcbscans import TCBScansScraper
-from .weebcentral import WeebCentralScraper
-from .asurascans import AsuraScansScraper
-from .mangakatana import MangakatanataScraper
-from .mangadex import MangaDexScraper
-from .mangapill import MangapillScraper
-from .mangapark import MangaParkScraper
-from .mangareader import MangaReaderScraper
-from .mangafire import MangaFireScraper
-from .mangasee import MangaSeeScraper
-from .mangabuddy import MangaBuddyScraper
-from .batoto import BatoToScraper
-from .mangakakalot import MangakakalotScraper
-from .manganato import ManganatoScraper
-from .mangago import MangagoScraper
-from .mangataro import MangaTaroScraper
-from .mangadot import MangadotScraper
-from .olympus import OlympusScraper
-from .zonatmo import ZonaTMOScraper
-from .lectormanga import LectorMangaScraper
-from .thunderscans import ThunderScansScraper
-from .wurmz import WurmzScraper
-from .flamecomics import FlameComicsScraper
-from .luminousscans import LuminousScansScraper
-from .mangahere import MangaHereScraper
-from .hentai20 import Hentai20Scraper
-from .readcomiconline import ReadComicOnlineScraper
-from .coffeemanga import CoffeeMangaScraper
-from .mgeko import MGekoScraper
-from .manhuafast import ManhuaFastScraper
-from .mangaeffect import MangaReadScraper
-from .manhuaplus import ManhuaPlusScraper
-from .manhwa18 import Manhwa18Scraper
-from .mangahub import MangaHubScraper
-from .mangatown import MangaTownScraper
-from .manhuaus import ManhuaUsScraper
-from .truemanga import TrueMangaScraper
-from .nhentai import NHentaiScraper
-from .hentaifox import HentaiFoxScraper
-from .imhentai import IMHentaiScraper
-from .ehentai import EHentaiScraper
-from .mangapanda import MangaPandaScraper
-from .mangabolt import MangaBoltScraper
-from .mangafoxfun import MangaFoxFunScraper
-from .mangahubus import MangaHubUsScraper
-from .onemanga import OneMangaScraper
-from .mangafreak import MangaFreakScraper
-from .comick import ComickScraper
-from .comix import ComixScraper
-from .fanfox import FanFoxScraper
-from .toonily import ToonilyScraper
-from .omegascans import OmegaScansScraper
-from .hivetoons import HivetoonsScraper
-from .mangayy import MangaYYScraper
-from .manga4life import Manga4LifeScraper
-from .zazamanga import ZazaMangaScraper
-from .mangaball import MangaBallScraper
-from .atsumaru import AtsumaruScraper
-from .manytoon import ManyToonScraper
-from .pururin import PururinScraper
-from .hentairead import HentaiReadScraper
-from .manganato_gg import ManganatoGGScraper
-from .mangahereonl import MangaHereOnlScraper
-
-# ── Playwright-based Madara scrapers (not templatable) ──
-from .isekaiscan import IsekaiScanScraper
-from .zinmanga import ZinMangaScraper
-from .mangaclash import MangaClashScraper
-from .kunmanga import KunMangaScraper
-
-# ── ReadManga base + subclasses ──
-from .readmanga_base import ReadMangaBaseScraper
-from .readsnk import ReadSNKScraper
-from .readberserk import ReadBerserkScraper
-from .readhaikyuu import ReadHaikyuuScraper
-from .readjujutsukaisen import ReadJujutsuKaisenScraper
-from .readchainsawman import ReadChainsawManScraper
-from .readonepiece import ReadOnePieceScraper
-from .readnaruto import ReadNarutoScraper
-from .readmha import ReadMHAScraper
-from .readfairytail import ReadFairyTailScraper
-from .readblackclover import ReadBlackCloverScraper
-
-# ── Unique/complex scrapers kept as individual files ──
-from .beastarsmanga import BeastarsMangaScraper
-from .vagabondmanga import VagabondMangaScraper
-from .monstermanga import MonsterMangaScraper
-from .deathnotemanga import DeathNoteMangaScraper
-from .tgmanga import TGMangaScraper
-from .readichithewitch import ReadIchiTheWitchScraper
-from .demonslayermanga import DemonSlayerMangaScraper
-from .drstonemanga import DrStoneMangaScraper
-from .sakamotomanga import SakamotoMangaScraper
-from .elusivesamurai import ElusiveSamuraiScraper
-from .readbluelockorg import ReadBlueLockOrgScraper
-from .bocchitherockmanga import BocchiTheRockMangaScraper
-from .spyxfamilymanga import SpyXFamilyMangaScraper
-from .blueexorcistmanga import BlueExorcistMangaScraper
-from .ajimenoippo import AjimeNoIppoScraper
-from .hajimenoippoonline import HajimeNoIppoOnlineScraper
-from .hajimnoippo import HajimNoIppoScraper
-from .hajimenoippoblogger import HajimeNoIppoBloggerScraper
-from .bluelockreadonline import BlueLockReadOnlineScraper
-from .readslamdunkonline import ReadSlamDunkOnlineScraper
-from .readtokyorevengers import ReadTokyoRevengersScraper
-from .dragonballsuperonline import DragonBallSuperOnlineScraper
-from .dragonballsuperorg import DragonBallSuperOrgScraper
-from .fairytailmangafree import FairyTailMangaFreeScraper
-from .jojolionmanga import JoJolionMangaScraper
-from .homunculusmanga import HomunculusMangaScraper
-from .sousnofrierenga import SousouNoFrierenScraper
-from .demonslayeronline import DemonSlayerOnlineScraper
-from .mangoasis import MangOasisScraper
-from .readkingdomfree import ReadKingdomFreeScraper
-from .sakamotodaysonline import SakamotoDaysOnlineScraper
-from .onepiecemanga1 import OnePieceManga1Scraper
-from .kaijuno8manga import KaijuNo8MangaScraper
-from .bluelockmangaorg import BlueLockMangaNetScraper
-from .tokyoghoulclub import TokyoGhoulClubScraper
-from .fireforcemangaorg import FireForceMangaOrgScraper
-from .readkenganashura import ReadKenganAshuraScraper
-from .bluelockreadcom import BlueLockReadComScraper
-from .onepieceread import OnePieceReadScraper
-from .mangadna import MangaDNAScraper
-from .readjjkmanga import ReadJJKMangaScraper
-from .readoshinoko import ReadOshiNoKoScraper
-from .readberserkmanga import ReadBerserkMangaScraper
-from .monstermangaonline import MonsterMangaOnlineScraper
-from .kenganashuramanga import KenganAshuraMangaScraper
-from .oyasumipunpunmanga import OyasumiPunpunMangaScraper
-from .readsnkmanga import ReadSNKMangaScraper
-from .onepunchmanmangaa import OnePunchManMangaaScraper
-from .readopm import ReadOPMScraper
-from .readjjkcom import ReadJJKComScraper
-from .onepunchmanread import OnePunchManReadScraper
-from .berserkmangorg import BerserkMangOrgScraper
-from .bluelockreadww2 import BlueLockReadWW2Scraper
-from .mashlemangaonline import MashleMangaOnlineScraper
-from .readonepunchonline import ReadOnePunchOnlineScraper
-from .bakirahen import BakiRahenScraper
-from .blamemanga import BlameMangaScraper
-from .jjkmanga import JJKMangaScraper
-from .kagane import KaganeScraper
-from .vymanga import VyMangaScraper
-
-# ── Scrapers kept as individual files (unique domain mappings) ──
-
-SCRAPERS = {
+# Individual scrapers: domain -> "module:ClassName" within this package.
+_SCRAPER_PATHS: Dict[str, str] = {
     # TCB Scans - Jump manga (no Cloudflare, simple requests)
-    "tcbonepiecechapters.com": TCBScansScraper,
-    "tcbscans.com": TCBScansScraper,
-    "tcbscans.me": TCBScansScraper,
+    "tcbonepiecechapters.com": "tcbscans:TCBScansScraper",
+    "tcbscans.com": "tcbscans:TCBScansScraper",
+    "tcbscans.me": "tcbscans:TCBScansScraper",
 
     # WeebCentral - Large library (hybrid: cloudscraper + Playwright)
-    "weebcentral.com": WeebCentralScraper,
+    "weebcentral.com": "weebcentral:WeebCentralScraper",
 
     # Asura Scans - Manhwa (api.asurascans.com JSON API).
     # asuracomic.net / asuratoon.com are retired aliases kept so
     # library entries saved against them still resolve.
-    "asurascans.com": AsuraScansScraper,
-    "asuracomic.net": AsuraScansScraper,
-    "asuratoon.com": AsuraScansScraper,
+    "asurascans.com": "asurascans:AsuraScansScraper",
+    "asuracomic.net": "asurascans:AsuraScansScraper",
+    "asuratoon.com": "asurascans:AsuraScansScraper",
 
     # Mangakatana - General (Playwright/Firefox)
-    "mangakatana.com": MangakatanataScraper,
+    "mangakatana.com": "mangakatana:MangakatanataScraper",
 
     # MangaDex - Community (API)
-    "mangadex.org": MangaDexScraper,
-    "api.mangadex.org": MangaDexScraper,
+    "mangadex.org": "mangadex:MangaDexScraper",
+    "api.mangadex.org": "mangadex:MangaDexScraper",
 
     # Mangapill - Large library (no Cloudflare, simple requests)
-    "mangapill.com": MangapillScraper,
+    "mangapill.com": "mangapill:MangapillScraper",
 
-    # MangaPark - current working domain
-    "mangapark1.com": MangaParkScraper,
+    # MangaPark (mangapark1.com, behind a Cloudflare challenge)
+    "mangapark1.com": "mangapark:MangaParkScraper",
+
+    # MangaPark (mangapark.cc) - a separate site; old hosts are not aliased
+    "mangapark.cc": "mangapark_cc:MangaParkCCScraper",
 
     # MangaReader.to
-    "mangareader.to": MangaReaderScraper,
+    "mangareader.to": "mangareader:MangaReaderScraper",
 
-    # MangaFire.to (Firefox + VRF bypass + descrambling)
-    "mangafire.to": MangaFireScraper,
-
-    # MangaSee123
-    "mangasee123.com": MangaSeeScraper,
+    # MangaFire.to (signed JSON API + descrambling)
+    "mangafire.to": "mangafire:MangaFireScraper",
 
     # MangaBuddy
-    "mangabuddy.com": MangaBuddyScraper,
+    "mangabuddy.com": "mangabuddy:MangaBuddyScraper",
 
     # Bato.to
-    "bato.to": BatoToScraper,
-    "batoto.to": BatoToScraper,
-
-    # Mangakakalot
-    "mangakakalot.com": MangakakalotScraper,
-    "mangakakalot.to": MangakakalotScraper,
-
-    # Manganato
-    "manganato.com": ManganatoScraper,
-    "chapmanganato.to": ManganatoScraper,
-    "readmanganato.com": ManganatoScraper,
+    "bato.to": "batoto:BatoToScraper",
+    "batoto.to": "batoto:BatoToScraper",
 
     # Mangago
-    "mangago.me": MangagoScraper,
-    "www.mangago.me": MangagoScraper,
+    "mangago.me": "mangago:MangagoScraper",
+    "www.mangago.me": "mangago:MangagoScraper",
 
     # MangaTaro (ComicK replacement)
-    "mangataro.org": MangaTaroScraper,
+    "mangataro.org": "mangataro:MangaTaroScraper",
 
     # Mangadot - Multi-language aggregator (React Router SSR + JSON API)
-    "mangadot.net": MangadotScraper,
+    "mangadot.net": "mangadot:MangadotScraper",
 
     # Olympus Scanlation - Spanish manhwa scans (Nuxt JSON API + panel chapter list)
-    "olympusxyz.com": OlympusScraper,
+    "olympusxyz.com": "olympus:OlympusScraper",
 
     # ZonaTMO - Spanish manga/manhwa library (Laravel SSR HTML)
-    "zonatmo.org": ZonaTMOScraper,
+    "zonatmo.org": "zonatmo:ZonaTMOScraper",
 
     # Lector Manga - Spanish manga/manhwa reader (static Astro HTML).
     # lectormangass.net 301-redirects to lector-mangas.lat and is kept
     # so URLs saved or discovered on the old host still resolve.
-    "lector-mangas.lat": LectorMangaScraper,
-    "lectormangass.net": LectorMangaScraper,
+    "lector-mangas.lat": "lectormanga:LectorMangaScraper",
+    "lectormangass.net": "lectormanga:LectorMangaScraper",
 
     # Thunder Scans EN - English manhwa scans (MangaThemesia WordPress theme)
-    "en-thunderscans.com": ThunderScansScraper,
+    "en-thunderscans.com": "thunderscans:ThunderScansScraper",
 
     # Wurmz - Indonesian manga/manhwa/manhua reader (Next.js SSR HTML)
-    "wurmz.net": WurmzScraper,
+    "wurmz.net": "wurmz:WurmzScraper",
+
+    # MangaDenizi - Turkish manga/manhwa/webtoon reader (Nuxt JSON API)
+    "mangadenizi.net": "mangadenizi:MangaDeniziScraper",
+
+    # WEBTOON - official Originals in English, Spanish, French and German
+    "webtoons.com": "webtoon:WebtoonScraper",
+
+    # KadoComi - official KADOKAWA Japanese manga (public episode viewer)
+    "comic-walker.com": "kadocomi:KadoComiScraper",
+
+    # SushiScan and Lelmanga - French scans (MangaThemesia WordPress theme)
+    "sushiscan.net": "mangathemesia_sites:SushiScanScraper",
+    "lelmanga.com": "mangathemesia_sites:LelMangaScraper",
+
+    # Sen Manga - raw manga (public JSON API)
+    "raw.senmanga.com": "senmanga:SenMangaScraper",
+
+    # ManhuaTop - English manhua reader (public JSON API)
+    "manhuatop.org": "manhuatop:ManhuaTopScraper",
+
+    # MangaHome - English manga reader
+    "mangahome.com": "mangahome:MangaHomeScraper",
+
+    # ManhwaWeb - Spanish manhwa, manga and manhua library (public JSON API)
+    "manhwaweb.com": "manhwaweb:ManhwaWebScraper",
+
+    # LeerCapitulo - Spanish manga/manhwa/manhua reader
+    "leercapitulo.co": "leercapitulo:LeerCapituloScraper",
+
+    # Uzay Manga - Turkish manga/manhwa/manhua reader (SvelteKit data routes)
+    "uzaymanga.com": "uzaymanga:UzayMangaScraper",
+
+    # Serein Scan - Turkish manhwa reader (MangaThemesia)
+    "sereinscan.com": "sereinscan:SereinScanScraper",
+
+    # PatiManga - Turkish manhwa and webtoon library (Yomiko theme)
+    "patimanga.com": "patimanga:PatiMangaScraper",
+
+    # MangaVault - Spanish manhwa, manga and manhua library (Astro pages)
+    "mangavault.lat": "mangavault:MangaVaultScraper",
+
+    # HeavenManga - Spanish manhwa, manga and manhua library
+    "heavenmanga.com": "heavenmanga:HeavenMangaScraper",
+
+    # Uchuujin - Spanish manga and manhwa reader (MangaThemesia)
+    "uchuujinmangas.com": "uchuujin:UchuujinScraper",
+
+    # OnePiece-Tube - German One Piece main chapter list
+    "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
+
+    # MangaRW - raw manga (public JSON API)
+    "mangarw.com": "mangarw:MangaRwScraper",
+
+    # Manga Demon - English manga and manhwa scans
+    "demonicscans.org": "mangademon:MangaDemonScraper",
+
+    # Rawkuma - raw manga (WordPress pages and search form)
+    "rawkuma.net": "rawkuma:RawkumaScraper",
+
+    # Mangas-Origines - French manga, manhwa and manhua scans
+    "mangas-origines.fr": "mangasorigines:MangasOriginesScraper",
+
+    # Raw UwU - raw manga (public JSON routes)
+    "rawuwu.net": "rawuwu:RawUwuScraper",
+
+    # Anime-Sama - French manga scans (published viewer)
+    "anime-sama.to": "animesama:AnimeSamaScraper",
+
+    # Mangaraw.ink - raw manga
+    "mangaraw.ink": "mangarawink:MangarawInkScraper",
+
+    # Dynasty Scans - English yuri scanlations (public JSON)
+    "dynasty-scans.com": "dynasty:DynastyScraper",
+
+    # Lelscan VF - French manga scans (first chapter-list page only)
+    "lelscanfr.com": "lelscanvf:LelscanVFScraper",
 
     # FlameComics
-    "flamecomics.xyz": FlameComicsScraper,
+    "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
     # LuminousScans
-    "luminousscans.com": LuminousScansScraper,
+    "luminousscans.com": "luminousscans:LuminousScansScraper",
 
     # MangaHere
-    "mangahere.cc": MangaHereScraper,
+    "mangahere.cc": "mangahere:MangaHereScraper",
 
     # Hentai20 (NSFW)
-    "hentai20.io": Hentai20Scraper,
+    "hentai20.io": "hentai20:Hentai20Scraper",
 
     # ReadComicOnline (Comics)
-    "readcomiconline.li": ReadComicOnlineScraper,
+    "readcomiconline.li": "readcomiconline:ReadComicOnlineScraper",
 
     # CoffeeManga
-    "coffeemanga.io": CoffeeMangaScraper,
+    "coffeemanga.io": "coffeemanga:CoffeeMangaScraper",
 
     # MGeko
-    "mgeko.cc": MGekoScraper,
+    "mgeko.cc": "mgeko:MGekoScraper",
 
     # ManhuaFast
-    "manhuafast.com": ManhuaFastScraper,
+    "manhuafast.com": "manhuafast:ManhuaFastScraper",
 
     # MangaRead/MangaEffect
-    "mangaeffect.com": MangaReadScraper,
+    "mangaeffect.com": "coffeemanga:MangaReadScraper",
 
     # ManhuaPlus
-    "manhuaplus.org": ManhuaPlusScraper,
+    "manhuaplus.org": "manhuaplus:ManhuaPlusScraper",
 
     # Manhwa18
-    "manhwa18.cc": Manhwa18Scraper,
+    "manhwa18.cc": "manhwa18:Manhwa18Scraper",
 
     # MangaHub
-    "mangahub.io": MangaHubScraper,
+    "mangahub.io": "mangahub:MangaHubScraper",
 
     # MangaTown
-    "mangatown.com": MangaTownScraper,
-    "www.mangatown.com": MangaTownScraper,
+    "mangatown.com": "mangatown:MangaTownScraper",
+    "www.mangatown.com": "mangatown:MangaTownScraper",
 
     # ManhuaUs
-    "manhuaus.org": ManhuaUsScraper,
+    "manhuaus.org": "manhuaus:ManhuaUsScraper",
 
     # TrueManga / MangaMonk
-    "truemanga.com": TrueMangaScraper,
-    "mangamonk.com": TrueMangaScraper,
+    "truemanga.com": "truemanga:TrueMangaScraper",
+    "mangamonk.com": "truemanga:TrueMangaScraper",
 
     # NHentai (Doujin gallery)
-    "nhentai.net": NHentaiScraper,
+    "nhentai.net": "nhentai:NHentaiScraper",
 
     # HentaiFox (Doujin gallery)
-    "hentaifox.com": HentaiFoxScraper,
+    "hentaifox.com": "hentaifox:HentaiFoxScraper",
 
     # IMHentai (Doujin gallery)
-    "imhentai.xxx": IMHentaiScraper,
+    "imhentai.xxx": "imhentai:IMHentaiScraper",
 
     # E-Hentai (Doujin gallery)
-    "e-hentai.org": EHentaiScraper,
-    "exhentai.org": EHentaiScraper,
+    "e-hentai.org": "ehentai:EHentaiScraper",
+    "exhentai.org": "ehentai:EHentaiScraper",
 
     # ReadSNK - Attack on Titan dedicated (WordPress + CDN)
-    "readsnk.com": ReadSNKScraper,
+    "readsnk.com": "readsnk:ReadSNKScraper",
 
     # ReadBerserk - Berserk dedicated (WordPress + CDN)
-    "readberserk.com": ReadBerserkScraper,
+    "readberserk.com": "readberserk:ReadBerserkScraper",
 
     # ReadHaikyuu - Haikyuu!! dedicated (WordPress + CDN)
-    "readhaikyuu.com": ReadHaikyuuScraper,
+    "readhaikyuu.com": "readhaikyuu:ReadHaikyuuScraper",
 
     # ReadJujutsuKaisen - JJK dedicated (WordPress + CDN)
-    "readjujutsukaisen.com": ReadJujutsuKaisenScraper,
+    "readjujutsukaisen.com": "readjujutsukaisen:ReadJujutsuKaisenScraper",
 
     # ReadChainsawMan - Chainsaw Man dedicated (WordPress + CDN)
-    "readchainsawman.com": ReadChainsawManScraper,
+    "readchainsawman.com": "readchainsawman:ReadChainsawManScraper",
 
     # ReadOnePiece - One Piece dedicated (WordPress + CDN)
-    "readonepiece.com": ReadOnePieceScraper,
-    "ww8.readonepiece.com": ReadOnePieceScraper,
-    "ww12.readonepiece.com": ReadOnePieceScraper,
+    "readonepiece.com": "readonepiece:ReadOnePieceScraper",
+    "ww8.readonepiece.com": "readonepiece:ReadOnePieceScraper",
+    "ww12.readonepiece.com": "readonepiece:ReadOnePieceScraper",
 
     # ReadNaruto - Naruto dedicated (WordPress + CDN)
-    "readnaruto.com": ReadNarutoScraper,
-    "ww8.readnaruto.com": ReadNarutoScraper,
-    "ww10.readnaruto.com": ReadNarutoScraper,
-    "ww11.readnaruto.com": ReadNarutoScraper,
+    "readnaruto.com": "readnaruto:ReadNarutoScraper",
+    "ww8.readnaruto.com": "readnaruto:ReadNarutoScraper",
+    "ww10.readnaruto.com": "readnaruto:ReadNarutoScraper",
+    "ww11.readnaruto.com": "readnaruto:ReadNarutoScraper",
 
     # ReadMHA - My Hero Academia dedicated (WordPress + CDN)
-    "readmha.com": ReadMHAScraper,
-    "ww8.readmha.com": ReadMHAScraper,
-    "ww10.readmha.com": ReadMHAScraper,
+    "readmha.com": "readmha:ReadMHAScraper",
+    "ww8.readmha.com": "readmha:ReadMHAScraper",
+    "ww10.readmha.com": "readmha:ReadMHAScraper",
 
     # ReadFairyTail - Fairy Tail dedicated (WordPress + CDN)
-    "readfairytail.com": ReadFairyTailScraper,
-    "ww7.readfairytail.com": ReadFairyTailScraper,
+    "readfairytail.com": "readfairytail:ReadFairyTailScraper",
+    "ww7.readfairytail.com": "readfairytail:ReadFairyTailScraper",
 
     # ReadBlackClover - Black Clover dedicated (WordPress + CDN)
-    "readblackclover.com": ReadBlackCloverScraper,
-    "ww7.readblackclover.com": ReadBlackCloverScraper,
+    "readblackclover.com": "readblackclover:ReadBlackCloverScraper",
+    "ww7.readblackclover.com": "readblackclover:ReadBlackCloverScraper",
 
     # MangaPanda - MangaHub network (cloudscraper)
-    "mangapanda.onl": MangaPandaScraper,
+    "mangapanda.onl": "mangapanda:MangaPandaScraper",
 
     # MangaBolt - Jump manga aggregator
-    "mangabolt.com": MangaBoltScraper,
+    "mangabolt.com": "mangabolt:MangaBoltScraper",
 
     # MangaFox.fun - MangaHub network (cloudscraper)
-    "mangafox.fun": MangaFoxFunScraper,
+    "mangafox.fun": "mangapanda:MangaFoxFunScraper",
 
     # MangaHub.us - MangaHub network (cloudscraper)
-    "mangahub.us": MangaHubUsScraper,
+    "mangahub.us": "mangahubus:MangaHubUsScraper",
 
     # 1Manga.co - Large library (MangaHub CDN)
-    "1manga.co": OneMangaScraper,
+    "1manga.co": "onemanga:OneMangaScraper",
 
     # MangaFreak.ws - Large manga library
-    "mangafreak.ws": MangaFreakScraper,
-    "mangafreak.me": MangaFreakScraper,
-    "ww2.mangafreak.me": MangaFreakScraper,
+    "mangafreak.ws": "mangafreak:MangaFreakScraper",
+    "mangafreak.me": "mangafreak:MangaFreakScraper",
+    "ww2.mangafreak.me": "mangafreak:MangaFreakScraper",
 
     # ComicK - Popular manga aggregator (public JSON API)
-    "comick.io": ComickScraper,
-    "comick.dev": ComickScraper,
+    "comick.io": "comick:ComickScraper",
+    "comick.dev": "comick:ComickScraper",
 
     # Comix - Popular manga/manhwa aggregator (Playwright)
-    "comix.to": ComixScraper,
+    "comix.to": "comix:ComixScraper",
 
     # FanFox (MangaFox) - Large manga library (Playwright)
-    "fanfox.net": FanFoxScraper,
-    "mangafox.me": FanFoxScraper,
+    "fanfox.net": "fanfox:FanFoxScraper",
+    "mangafox.me": "fanfox:FanFoxScraper",
 
     # Toonily - Korean manhwa/webtoon (Playwright)
-    "toonily.me": ToonilyScraper,
+    "toonily.me": "toonily:ToonilyScraper",
 
     # Omega Scans - Manhwa/webtoon (Playwright)
-    "omegascans.org": OmegaScansScraper,
+    "omegascans.org": "omegascans:OmegaScansScraper",
 
     # Hivetoons - Void Scans network (Playwright)
-    "hivetoons.org": HivetoonsScraper,
-    "hivetoon.com": HivetoonsScraper,
-
-    # MangaYY - WordPress Madara (Playwright)
-    "mangayy.org": MangaYYScraper,
-    "likemanga.io": MangaYYScraper,
-
-    # Manga4Life / MangaLife - Large library (Playwright + JS)
-    "manga4life.com": Manga4LifeScraper,
-    "mangalife.us": Manga4LifeScraper,
-
-    # IsekaiScan - Isekai manga/manhwa (Playwright + Madara)
-    "isekaiscan.com": IsekaiScanScraper,
-
-    # ZinManga - Manga aggregator (Playwright + Madara)
-    "zinmanga.com": ZinMangaScraper,
+    "hivetoons.org": "hivetoons:HivetoonsScraper",
+    "hivetoon.com": "hivetoons:HivetoonsScraper",
 
     # ZazaManga - Manga aggregator (Playwright, redirected series sites)
-    "zazamanga.com": ZazaMangaScraper,
-    "www.zazamanga.com": ZazaMangaScraper,
-    "deathnotemanga.com": ZazaMangaScraper,
-    "death-note-online.com": ZazaMangaScraper,
-    "fairytail100yearsquest.com": ZazaMangaScraper,
-    "gintama.site": ZazaMangaScraper,
-    "initialdmanga.com": ZazaMangaScraper,
-    "inuyasha.net": ZazaMangaScraper,
-    "onepunchmanmanga.org": ZazaMangaScraper,
-    "readhellsing.com": ZazaMangaScraper,
-    "readoverlord.com": ZazaMangaScraper,
+    "zazamanga.com": "zazamanga:ZazaMangaScraper",
+    "www.zazamanga.com": "zazamanga:ZazaMangaScraper",
+    "deathnotemanga.com": "zazamanga:ZazaMangaScraper",
+    "death-note-online.com": "zazamanga:ZazaMangaScraper",
+    "fairytail100yearsquest.com": "zazamanga:ZazaMangaScraper",
+    "gintama.site": "zazamanga:ZazaMangaScraper",
+    "initialdmanga.com": "zazamanga:ZazaMangaScraper",
+    "inuyasha.net": "zazamanga:ZazaMangaScraper",
+    "onepunchmanmanga.org": "zazamanga:ZazaMangaScraper",
+    "readhellsing.com": "zazamanga:ZazaMangaScraper",
+    "readoverlord.com": "zazamanga:ZazaMangaScraper",
 
     # MangaBall - Multi-language aggregator (HTTP JSON API)
-    "mangaball.net": MangaBallScraper,
+    "mangaball.net": "mangaball:MangaBallScraper",
 
     # Atsumaru - Manga aggregator (Typesense search + REST API)
-    "atsu.moe": AtsumaruScraper,
-
-    # MangaClash - Manga aggregator (Playwright + Madara + CF).
-    # Site unreachable (#179); kept so saved library entries still
-    # resolve, but skipped by the search sweep.
-    "mangaclash.com": MangaClashScraper,
+    "atsu.moe": "atsumaru:AtsumaruScraper",
 
     # KunManga - Manga aggregator (Playwright + Madara + CF)
-    "kunmanga.com": KunMangaScraper,
+    "kunmanga.com": "kunmanga:KunMangaScraper",
 
     # ManyToon - Adult manhwa (Playwright + JS chapters)
-    "manytoon.com": ManyToonScraper,
-
-    # Pururin - Doujin gallery (Playwright + JS)
-    "pururin.to": PururinScraper,
+    "manytoon.com": "manytoon:ManyToonScraper",
 
     # HentaiRead - Hentai manga (Playwright)
-    "hentairead.com": HentaiReadScraper,
+    "hentairead.com": "hentairead:HentaiReadScraper",
 
     # Manganato.gg - New domain with Cloudflare (Playwright)
-    "manganato.gg": ManganatoGGScraper,
+    "manganato.gg": "manganato_gg:ManganatoGGScraper",
 
     # MangaHere.onl - Images from mghcdn.com (Playwright)
-    "mangahere.onl": MangaHereOnlScraper,
+    "mangahere.onl": "mangahereonl:MangaHereOnlScraper",
 
     # BeastarsManga - Beastars dedicated (WordPress + cdn.readkakegurui.com)
-    "beastarsmanga.com": BeastarsMangaScraper,
+    "beastarsmanga.com": "single_title_sites:BeastarsMangaScraper",
 
     # VagabondManga - Vagabond dedicated (WordPress + cdn.mangaclash.com)
-    "vagabondmanga.org": VagabondMangaScraper,
-    "www.vagabondmanga.org": VagabondMangaScraper,
+    "vagabondmanga.org": "single_title_sites:VagabondMangaScraper",
+    "www.vagabondmanga.org": "single_title_sites:VagabondMangaScraper",
 
     # MonsterManga - Monster (Naoki Urasawa) dedicated (WordPress + official.lowee.us)
-    "monstermanga.org": MonsterMangaScraper,
-    "www.monstermanga.org": MonsterMangaScraper,
+    "monstermanga.org": "single_title_sites:MonsterMangaScraper",
+    "www.monstermanga.org": "single_title_sites:MonsterMangaScraper",
 
     # DeathNoteManga - Death Note dedicated (WordPress + Blogger CDN)
-    "death-note-manga.com": DeathNoteMangaScraper,
-    "w13.death-note-manga.com": DeathNoteMangaScraper,
+    "death-note-manga.com": "single_title_sites:DeathNoteMangaScraper",
+    "w13.death-note-manga.com": "single_title_sites:DeathNoteMangaScraper",
 
     # TGManga - Tokyo Ghoul dedicated (WordPress + wp-content)
-    "tgmanga.com": TGMangaScraper,
+    "tgmanga.com": "single_title_sites:TGMangaScraper",
 
     # ReadIchiTheWitch - Ichi the Witch dedicated (cdn.readichithewitch.com)
-    "readichithewitch.com": ReadIchiTheWitchScraper,
-    "ww1.readichithewitch.com": ReadIchiTheWitchScraper,
+    "readichithewitch.com": "single_title_sites:ReadIchiTheWitchScraper",
+    "ww1.readichithewitch.com": "single_title_sites:ReadIchiTheWitchScraper",
 
     # DemonSlayerManga - Demon Slayer / Kimetsu no Yaiba dedicated (cdn.demonslayermanga.com)
-    "demonslayermanga.com": DemonSlayerMangaScraper,
-    "ww9.demonslayermanga.com": DemonSlayerMangaScraper,
-
-    # DrStoneManga - Dr. Stone dedicated (assets.drstonemanga.com)
-    "drstonemanga.com": DrStoneMangaScraper,
+    "demonslayermanga.com": "demonslayermanga:DemonSlayerMangaScraper",
+    "ww9.demonslayermanga.com": "demonslayermanga:DemonSlayerMangaScraper",
 
     # SakamotoManga - Sakamoto Days dedicated (cdn3.mangaclash.com)
-    "sakamotomanga.com": SakamotoMangaScraper,
+    "sakamotomanga.com": "sakamotomanga:SakamotoMangaScraper",
 
     # ElusiveSamurai - The Elusive Samurai dedicated (pic.readkakegurui.com)
-    "elusive-samurai.com": ElusiveSamuraiScraper,
-    "w4.elusive-samurai.com": ElusiveSamuraiScraper,
-
-    # ReadBlueLockOrg - Blue Lock dedicated (images.asuratoon.top)
-    "readbluelock.org": ReadBlueLockOrgScraper,
+    "elusive-samurai.com": "single_title_sites:ElusiveSamuraiScraper",
+    "w4.elusive-samurai.com": "single_title_sites:ElusiveSamuraiScraper",
 
     # BocchiTheRockManga - Bocchi the Rock! dedicated (cdn.black-clover.org)
-    "bocchitherockmanga.com": BocchiTheRockMangaScraper,
-    "w5.bocchitherockmanga.com": BocchiTheRockMangaScraper,
+    "bocchitherockmanga.com": "single_title_sites:BocchiTheRockMangaScraper",
+    "w5.bocchitherockmanga.com": "single_title_sites:BocchiTheRockMangaScraper",
 
     # SpyXFamilyManga - Spy x Family dedicated (cdn3.mangaclash.com)
-    "spyxfamilymanga.org": SpyXFamilyMangaScraper,
+    "spyxfamilymanga.org": "single_title_sites:SpyXFamilyMangaScraper",
 
     # BlueExorcistManga - Blue Exorcist / Ao no Exorcist dedicated (cdn.readkakegurui.com)
-    "blueexorcistmanga.com": BlueExorcistMangaScraper,
-
-    # AjimeNoIppo - Hajime no Ippo dedicated (WordPress + cdn.mangaclash.com)
-    "ajimenoippo.com": AjimeNoIppoScraper,
-    "www.ajimenoippo.com": AjimeNoIppoScraper,
+    "blueexorcistmanga.com": "single_title_sites:BlueExorcistMangaScraper",
 
     # HajimeNoIppoOnline - Hajime no Ippo dedicated (WordPress + laiond.com)
-    "hajime-no-ippo-manga.online": HajimeNoIppoOnlineScraper,
+    "hajime-no-ippo-manga.online": "single_title_sites:HajimeNoIppoOnlineScraper",
 
     # HajimNoIppo - Hajime no Ippo dedicated (WordPress + planeptune.us)
-    "hajimnoippo.com": HajimNoIppoScraper,
+    "hajimnoippo.com": "single_title_sites:HajimNoIppoScraper",
 
     # HajimeNoIppoBlogger - Hajime no Ippo dedicated (WordPress + Blogger CDN)
-    "hajime-noippo.com": HajimeNoIppoBloggerScraper,
-    "w22.hajime-noippo.com": HajimeNoIppoBloggerScraper,
+    "hajime-noippo.com": "single_title_sites:HajimeNoIppoBloggerScraper",
+    "w22.hajime-noippo.com": "single_title_sites:HajimeNoIppoBloggerScraper",
 
     # BlueLockReadOnline - Blue Lock dedicated (WordPress + wp-content)
-    "bluelockread.online": BlueLockReadOnlineScraper,
+    "bluelockread.online": "single_title_sites:BlueLockReadOnlineScraper",
 
     # ReadSlamDunkOnline - Slam Dunk dedicated (WordPress + cdn.mangaclash.com)
-    "read-slamdunk.online": ReadSlamDunkOnlineScraper,
+    "read-slamdunk.online": "single_title_sites:ReadSlamDunkOnlineScraper",
 
     # ReadTokyoRevengers - Tokyo Revengers dedicated (WordPress + wp-content/mangaread.org)
-    "read-tokyorevengers.com": ReadTokyoRevengersScraper,
-    "w20.read-tokyorevengers.com": ReadTokyoRevengersScraper,
-    "w23.read-tokyorevengers.com": ReadTokyoRevengersScraper,
+    "read-tokyorevengers.com": "single_title_sites:ReadTokyoRevengersScraper",
+    "w20.read-tokyorevengers.com": "single_title_sites:ReadTokyoRevengersScraper",
+    "w23.read-tokyorevengers.com": "single_title_sites:ReadTokyoRevengersScraper",
 
     # DragonBallSuperOnline - Dragon Ball Super dedicated (WordPress + wp-content/uploads)
-    "thedragonballsuper.online": DragonBallSuperOnlineScraper,
-
-    # DragonBallSuperOrg - Dragon Ball Super dedicated (WordPress + mangaread.org CDN)
-    "dragonballsuper.org": DragonBallSuperOrgScraper,
-    "www.dragonballsuper.org": DragonBallSuperOrgScraper,
+    "thedragonballsuper.online": "single_title_sites:DragonBallSuperOnlineScraper",
 
     # FairyTailMangaFree - Fairy Tail 100 Years Quest dedicated (WordPress + cdn.mangaclash.com)
-    "fairytailmangafree.com": FairyTailMangaFreeScraper,
-    "www.fairytailmangafree.com": FairyTailMangaFreeScraper,
+    "fairytailmangafree.com": "single_title_sites:FairyTailMangaFreeScraper",
+    "www.fairytailmangafree.com": "single_title_sites:FairyTailMangaFreeScraper",
 
     # JoJolionManga - JoJo Part 8: JoJolion dedicated (WordPress + Blogger CDN)
-    "jojolionmanga.com": JoJolionMangaScraper,
+    "jojolionmanga.com": "jojolionmanga:JoJolionMangaScraper",
 
     # HomunculusManga - Homunculus dedicated (WordPress + mangaread.org CDN)
-    "homunculusmanga.com": HomunculusMangaScraper,
-    "www.homunculusmanga.com": HomunculusMangaScraper,
+    "homunculusmanga.com": "single_title_sites:HomunculusMangaScraper",
+    "www.homunculusmanga.com": "single_title_sites:HomunculusMangaScraper",
 
     # SousouNoFrieren - Frieren dedicated (WordPress + cdn.mangaclash.com)
-    "sousou-no-frieren.com": SousouNoFrierenScraper,
-
-    # DemonSlayerOnline - Demon Slayer dedicated (WordPress Ifenzi + cdn.readkakegurui.com)
-    "demon-slayer.online": DemonSlayerOnlineScraper,
-    "w4.demon-slayer.online": DemonSlayerOnlineScraper,
+    "sousou-no-frieren.com": "single_title_sites:SousouNoFrierenScraper",
 
     # MangOasis - Multilingual manga aggregator (WordPress MangaVerse + cdn.mangoasis.com)
-    "mangoasis.com": MangOasisScraper,
-    "www.mangoasis.com": MangOasisScraper,
+    "mangoasis.com": "mangoasis:MangOasisScraper",
+    "www.mangoasis.com": "mangoasis:MangOasisScraper",
 
     # ReadKingdomFree - Kingdom dedicated (WordPress + planeptune.us CDN)
-    "readkingdomfree.com": ReadKingdomFreeScraper,
-    "www.readkingdomfree.com": ReadKingdomFreeScraper,
-
-    # SakamotoDaysOnline - Sakamoto Days dedicated (PHP + attachment CDN)
-    "sakamoto-days.online": SakamotoDaysOnlineScraper,
+    "readkingdomfree.com": "readkingdomfree:ReadKingdomFreeScraper",
+    "www.readkingdomfree.com": "readkingdomfree:ReadKingdomFreeScraper",
 
     # OnePieceManga1 - One Piece dedicated (WordPress + Contabo storage CDN)
-    "1piecemanga.com": OnePieceManga1Scraper,
-    "w064.1piecemanga.com": OnePieceManga1Scraper,
+    "1piecemanga.com": "single_title_sites:OnePieceManga1Scraper",
+    "w064.1piecemanga.com": "single_title_sites:OnePieceManga1Scraper",
 
     # KaijuNo8Manga - Kaiju No. 8 dedicated (WordPress + wp-content CDN)
-    "kaijuno8-manga.com": KaijuNo8MangaScraper,
+    "kaijuno8-manga.com": "single_title_sites:KaijuNo8MangaScraper",
 
     # BlueLockMangaNet - Blue Lock dedicated (WordPress + Blogger CDN)
-    "bluelockmanga.net": BlueLockMangaNetScraper,
+    "bluelockmanga.net": "single_title_sites:BlueLockMangaNetScraper",
 
     # TokyoGhoulClub - Tokyo Ghoul dedicated (WordPress Toivo Lite + cdn.mangaclash.com)
-    "tokyoghoul.club": TokyoGhoulClubScraper,
+    "tokyoghoul.club": "single_title_sites:TokyoGhoulClubScraper",
 
     # FireForceMangaOrg - Fire Force dedicated (WordPress Toivo Lite + cdn.mangaclash.com)
-    "fireforcemanga.org": FireForceMangaOrgScraper,
-    "w1.fireforcemanga.org": FireForceMangaOrgScraper,
+    "fireforcemanga.org": "single_title_sites:FireForceMangaOrgScraper",
+    "w1.fireforcemanga.org": "single_title_sites:FireForceMangaOrgScraper",
 
     # ReadKenganAshura - Kengan Ashura dedicated (WordPress Comic Easel + Blogger CDN)
-    "read-kengan-ashura.com": ReadKenganAshuraScraper,
+    "read-kengan-ashura.com": "single_title_sites:ReadKenganAshuraScraper",
 
     # BlueLockReadCom - Blue Lock dedicated (custom site + attachment CDN)
-    "bluelock-read.com": BlueLockReadComScraper,
+    "bluelock-read.com": "bluelockreadcom:BlueLockReadComScraper",
 
     # OnePieceRead - One Piece dedicated (Next.js SSR + cdn.onepiecechapters.com)
-    "onepieceread.com": OnePieceReadScraper,
+    "onepieceread.com": "onepieceread:OnePieceReadScraper",
 
     # MangaDNA - General manga/manhwa aggregator (img.mangadna.com CDN)
-    "mangadna.com": MangaDNAScraper,
+    "mangadna.com": "mangadna:MangaDNAScraper",
 
     # ReadJJKManga - JJK + Modulo dedicated (WordPress + wp-content CDN)
-    "readjujutsukaisenmanga.com": ReadJJKMangaScraper,
+    "readjujutsukaisenmanga.com": "readjjkmanga:ReadJJKMangaScraper",
 
     # ReadOshiNoKo - Oshi no Ko dedicated (WordPress + mangaread.org CDN)
-    "readoshinoko.com": ReadOshiNoKoScraper,
-    "w13.readoshinoko.com": ReadOshiNoKoScraper,
+    "readoshinoko.com": "readoshinoko:ReadOshiNoKoScraper",
+    "w13.readoshinoko.com": "readoshinoko:ReadOshiNoKoScraper",
 
     # ReadBerserkManga - Berserk dedicated (WordPress + hot.planeptune.us CDN)
-    "read-berserk-manga.com": ReadBerserkMangaScraper,
+    "read-berserk-manga.com": "readberserkmanga:ReadBerserkMangaScraper",
 
     # MonsterMangaOnline - Aggregator (WordPress MangaVerse + cdn.monster-manga.online)
-    "monster-manga.online": MonsterMangaOnlineScraper,
-    "www.monster-manga.online": MonsterMangaOnlineScraper,
+    "monster-manga.online": "monstermangaonline:MonsterMangaOnlineScraper",
+    "www.monster-manga.online": "monstermangaonline:MonsterMangaOnlineScraper",
 
     # KenganAshuraManga - Kengan Ashura/Omega dedicated (WordPress + wp-content CDN)
-    "kenganashura.com": KenganAshuraMangaScraper,
-
-    # OyasumiPunpunManga - Goodnight Punpun dedicated (WordPress Ifenzi + cdn.readkakegurui.com)
-    "oyasumipunpun.com": OyasumiPunpunMangaScraper,
+    "kenganashura.com": "kenganashuramanga:KenganAshuraMangaScraper",
 
     # ReadSNKManga - Attack on Titan dedicated (WordPress + Blogger CDN)
-    "readsnkmanga.com": ReadSNKMangaScraper,
+    "readsnkmanga.com": "readsnkmanga:ReadSNKMangaScraper",
 
     # OnePunchManMangaa - One Punch Man dedicated (WordPress + wp-content/uploads CDN)
-    "onepunchmanmangaa.com": OnePunchManMangaaScraper,
+    "onepunchmanmangaa.com": "onepunchmanmangaa:OnePunchManMangaaScraper",
 
     # ReadOPM - Manga aggregator with One Punch Man focus (cdn.readopm.com CDN)
-    "readopm.com": ReadOPMScraper,
-    "ww6.readopm.com": ReadOPMScraper,
+    "readopm.com": "readopm:ReadOPMScraper",
+    "ww6.readopm.com": "readopm:ReadOPMScraper",
 
     # ReadJJK.com - Jujutsu Kaisen dedicated (WordPress Kadence + img.read-jjk.com CDN)
-    "read-jjk.com": ReadJJKComScraper,
+    "read-jjk.com": "readjjkcom:ReadJJKComScraper",
 
     # OnePunchManRead - One Punch Man dedicated (WordPress Elementor + cdn.mangadistrict.com CDN)
-    "onepunchmanread.com": OnePunchManReadScraper,
+    "onepunchmanread.com": "onepunchmanread:OnePunchManReadScraper",
 
     # BerserkMangOrg - Berserk dedicated (WordPress + mangaread.org CDN)
-    "berserkmang.org": BerserkMangOrgScraper,
-    "www.berserkmang.org": BerserkMangOrgScraper,
+    "berserkmang.org": "berserkmangorg:BerserkMangOrgScraper",
+    "www.berserkmang.org": "berserkmangorg:BerserkMangOrgScraper",
 
     # BlueLockReadWW2 - Blue Lock dedicated (custom theme + cdn.bluelockread.com CDN)
-    "bluelockread.com": BlueLockReadWW2Scraper,
-    "ww2.bluelockread.com": BlueLockReadWW2Scraper,
+    "bluelockread.com": "bluelockreadww2:BlueLockReadWW2Scraper",
+    "ww2.bluelockread.com": "bluelockreadww2:BlueLockReadWW2Scraper",
 
     # MashleMangaOnline - Mashle dedicated (WordPress + wp-content/uploads CDN)
-    "mashle-manga.online": MashleMangaOnlineScraper,
+    "mashle-manga.online": "mashlemangaonline:MashleMangaOnlineScraper",
 
     # ReadOnePunchOnline - One Punch Man (WordPress + cache.imagemanga.online CDN)
-    "one-punch.online": ReadOnePunchOnlineScraper,
-    "read.one-punch.online": ReadOnePunchOnlineScraper,
+    "one-punch.online": "readonepunchonline:ReadOnePunchOnlineScraper",
+    "read.one-punch.online": "readonepunchonline:ReadOnePunchOnlineScraper",
 
     # BakiRahen - Baki Rahen dedicated (WordPress Ifenzi v2 + cdn.readkakegurui.com CDN)
-    "bakirahen.com": BakiRahenScraper,
+    "bakirahen.com": "bakirahen:BakiRahenScraper",
 
     # BlameManga - BLAME! dedicated (WordPress Comic Easel + Blogger CDN)
-    "blame-manga.com": BlameMangaScraper,
-    "w9.blame-manga.com": BlameMangaScraper,
-
-    # JJKManga - Jujutsu Kaisen dedicated (cloudscraper + pic.readkakegurui.com CDN)
-    "jjkmanga.net": JJKMangaScraper,
+    "blame-manga.com": "single_title_sites:BlameMangaScraper",
+    "w9.blame-manga.com": "single_title_sites:BlameMangaScraper",
 
     # Kagane - Multi-manga REST API + Playwright for DRM-protected images.
     # kagane.org now redirects to kagane.to; both sit behind a Cloudflare
     # challenge, so Kagane is skipped by search (see BROKEN_SEARCH_SOURCES).
-    "kagane.org": KaganeScraper,
-    "www.kagane.org": KaganeScraper,
-    "kagane.to": KaganeScraper,
+    "kagane.org": "kagane:KaganeScraper",
+    "www.kagane.org": "kagane:KaganeScraper",
+    "kagane.to": "kagane:KaganeScraper",
 
     # VyManga - General aggregator (chapter links via ad-redirect -> Blogger CDN)
     # Legacy hosts (vymanga.net / vyvymanga.net) 403 on their own /manga/ pages
     # but the scraper canonicalises them to mangavyvy.net; register them so
     # saved/manual entries resolve to a scraper before canonicalisation runs.
-    "mangavyvy.net": VyMangaScraper,
-    "vymanga.net": VyMangaScraper,
-    "vyvymanga.net": VyMangaScraper,
+    "mangavyvy.net": "vymanga:VyMangaScraper",
+    "vymanga.net": "vymanga:VyMangaScraper",
+    "vyvymanga.net": "vymanga:VyMangaScraper",
 }
 
-# Merge template-based scrapers into SCRAPERS dict
-# Template scrapers override any duplicate domains (fixes dead code duplicates)
-SCRAPERS.update(get_template_scrapers())
+# Exported by name for callers that import a scraper class from this
+# package; resolved lazily by __getattr__ below.
+_CLASS_PATHS: Dict[str, str] = {
+    path.partition(":")[2]: path for path in _SCRAPER_PATHS.values()
+}
+_CLASS_PATHS["ReadMangaBaseScraper"] = "readmanga_base:ReadMangaBaseScraper"
+_CLASS_PATHS["get_template_scrapers"] = "registry:get_template_scrapers"
+
+
+# A "module:ClassName" path, or a class built from a template config.
+_Entry = Union[str, Type[BaseScraper]]
+
+
+def _load(path: str):
+    """Import ``"module:name"`` from this package and return the object."""
+    module, _, name = path.partition(":")
+    return getattr(import_module(f".{module}", __name__), name)
+
+
+class _LazyScrapers(Mapping[str, Type[BaseScraper]]):
+    """Read-only domain -> scraper class mapping that imports on lookup.
+
+    Iterating, ``len()`` and ``in`` only need the domain names, so they
+    never import a scraper module; reading a value imports just the
+    module that defines it.
+    """
+
+    def __init__(self, paths: Dict[str, str]):
+        self._paths = paths
+        self._entries: Optional[Dict[str, _Entry]] = None
+
+    def _domains(self) -> Dict[str, _Entry]:
+        if self._entries is None:
+            from .registry import get_template_scrapers
+            entries: Dict[str, _Entry] = dict(self._paths)
+            # Template scrapers override any duplicate domains (fixes dead code duplicates)
+            entries.update(get_template_scrapers())
+            self._entries = entries
+        return self._entries
+
+    def __getitem__(self, domain: str) -> Type[BaseScraper]:
+        entry = self._domains()[domain]
+        return _load(entry) if isinstance(entry, str) else entry
+
+    def __contains__(self, domain: object) -> bool:
+        return domain in self._domains()
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._domains())
+
+    def __len__(self) -> int:
+        return len(self._domains())
+
+    def __repr__(self) -> str:
+        return f"<scraper registry: {len(self)} domains>"
+
+
+SCRAPERS: Mapping[str, Type[BaseScraper]] = _LazyScrapers(_SCRAPER_PATHS)
+
+
+def __getattr__(name: str):
+    path = _CLASS_PATHS.get(name)
+    if path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return _load(path)
+
+
+def __dir__():
+    return sorted(set(globals()) | set(_CLASS_PATHS))
+
+
+# Scraper modules folded into a shared module (#251): old name -> new.
+# Their import paths still resolve, with a DeprecationWarning, to a
+# module carrying the same names; the package itself never uses them.
+_MOVED_MODULES: Dict[str, str] = {
+    **dict.fromkeys((
+        "beastarsmanga", "monstermanga", "readichithewitch",
+        "hajimenoippoonline", "hajimnoippo", "hajimenoippoblogger",
+        "bluelockreadonline", "vagabondmanga", "sousnofrierenga",
+        "spyxfamilymanga", "tgmanga", "blueexorcistmanga", "blamemanga",
+        "homunculusmanga", "fireforcemangaorg", "tokyoghoulclub", "deathnotemanga",
+        "bluelockmangaorg", "kaijuno8manga", "dragonballsuperonline",
+        "onepiecemanga1", "readslamdunkonline",
+        "readtokyorevengers", "fairytailmangafree", "readkenganashura",
+        "bocchitherockmanga", "elusivesamurai",
+    ), "single_title_sites"),
+    "mangaeffect": "coffeemanga",
+    "mangafoxfun": "mangapanda",
+}
+
+
+class _MovedModuleFinder(MetaPathFinder, Loader):
+    """Import ``memanga.scrapers.<old>`` as an alias of its new module."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        package, _, module = fullname.rpartition(".")
+        if package != __name__ or module not in _MOVED_MODULES:
+            return None
+        return spec_from_loader(fullname, self)
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        new = f"{__name__}.{_MOVED_MODULES[module.__name__.rpartition('.')[2]]}"
+        warnings.warn(f"{module.__name__} has moved to {new}",
+                      DeprecationWarning, stacklevel=2)
+        target = import_module(new)
+        module.__dict__.update((k, v) for k, v in vars(target).items()
+                               if not k.startswith("__"))
+
+
+sys.meta_path.append(_MovedModuleFinder())
+
+
+# Per-thread scraper instances, keyed by scraper class.
+_instances = threading.local()
+
+
+class UnsupportedSourceError(LookupError, ValueError):
+    """No scraper is registered for a source domain.
+
+    The message stays short and points at `memanga sources` instead of
+    listing every domain. Still a ``ValueError`` for callers that caught
+    the plain error ``get_scraper()`` raised before.
+    """
+
+    def __init__(self, source: str):
+        self.source = source
+        super().__init__(
+            f"No scraper available for: {source}. "
+            "Run 'memanga sources' to list supported sources."
+        )
+
+
+def _resolve_class(source: str) -> Optional[Type[BaseScraper]]:
+    """Scraper class for ``source``: an exact domain, else its closest
+    registered parent domain (``ww3.mangafreak.me`` -> ``mangafreak.me``).
+
+    Each parent is a single registry lookup, so a miss checks only the
+    host's own labels and imports nothing.
+    """
+    if source in SCRAPERS:
+        return SCRAPERS[source]
+    dot = source.find(".")
+    while dot != -1:
+        parent = source[dot + 1:]
+        if parent in SCRAPERS:
+            return SCRAPERS[parent]
+        dot = source.find(".", dot + 1)
+    return None
 
 
 def get_scraper(source: str) -> BaseScraper:
-    """Get scraper instance for a source domain."""
+    """Get the scraper instance for a source domain.
+
+    Repeated calls from one thread return the same instance for every
+    domain of a scraper class; other threads get their own. Raises
+    ``UnsupportedSourceError`` when no scraper handles the domain.
+    """
     source = source.lower()
     if source.startswith("www."):
         source = source[4:]
 
-    # Exact match first
-    if source in SCRAPERS:
-        return SCRAPERS[source]()
+    cls = _resolve_class(source)
+    if cls is None:
+        raise UnsupportedSourceError(source)
 
-    # Match by domain suffix (e.g., "ww3.mangafreak.me" matches "mangafreak.me")
-    for domain, scraper_class in SCRAPERS.items():
-        if source == domain or source.endswith("." + domain):
-            return scraper_class()
+    local = _instances  # read once: clear_scraper_cache() may swap it
+    instances = getattr(local, "by_class", None)
+    if instances is None:
+        instances = local.by_class = {}
+    scraper = instances.get(cls)
+    if scraper is None:
+        scraper = instances[cls] = cls()
+    return scraper
 
-    supported = list_supported_sources()
-    raise ValueError(f"No scraper available for: {source}\nSupported: {', '.join(supported)}")
+
+def clear_scraper_cache() -> None:
+    """Drop the cached scraper instances of every thread."""
+    global _instances
+    _instances = threading.local()
 
 
 def list_supported_sources():
@@ -708,51 +742,7 @@ def list_supported_sources():
     return sorted(sources)
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Curated source ranking — verified end-to-end (search → get_chapters
-# → get_pages round-trip) against live sites by the probe script in
-# tests/scrapers/live/. Used for:
-#
-#   - POPULAR_SOURCES order: the search worker submits sources in this
-#     order so MangaDex / MangaPill etc. always start first.
-#   - DEFAULT_ENABLED_SOURCES: shipped pre-checked on first launch
-#     so a fresh user gets results in seconds instead of probing
-#     100+ smaller sources sequentially. Everything else stays
-#     available — user can flip it on in Sources tab any time.
-#
-# Re-order or trim if a future probe run says a site went stale.
-# ─────────────────────────────────────────────────────────────────────
-
-
-POPULAR_SOURCES = [
-    "mangadex.org",
-    "mangapill.com",
-    "mangapark1.com",
-    "mangafire.to",
-    "mangabuddy.com",
-    "weebcentral.com",
-    "mangakatana.com",
-    "asurascans.com",
-    "comix.to",
-    "comick.io",
-    "mangahub.io",
-    "mangahere.cc",
-    "mangapanda.onl",
-    "mangahere.onl",
-    "mangataro.org",
-    "luminousscans.com",
-    "tcbonepiecechapters.com",
-    "fanfox.net",
-    "1manga.co",
-    "coffeemanga.io",
-    "manhuaplus.org",
-    "mangaeffect.com",
-    "mangafox.fun",
-    "mangayy.org",
-]
-
-# Fresh installs ship with the top 15 ticked on the Sources page.
-# Everything else is in `sources.disabled` by default. Only canonical
-# domains belong here — retired aliases (asuracomic.net, asuratoon.com)
-# stay out so the sweep doesn't probe the same scraper twice.
-DEFAULT_ENABLED_SOURCES = POPULAR_SOURCES[:15]
+# Curated ranking and first-launch defaults live in the source catalog;
+# re-exported here because the search engine and GUI import them from
+# this package.
+from .catalog import DEFAULT_ENABLED_SOURCES, POPULAR_SOURCES  # noqa: E402

@@ -1,0 +1,27 @@
+# config.yaml as written before schema versions (issue #409): no
+# schema_version, and sections added later (reader, partial_chapters)
+# are missing.
+cron:
+  enabled: true
+  time: '07:30'
+delivery:
+  delete_after_send: false
+  download_dir: /data/manga
+  mode: email
+  naming_template: '{title} - Chapter {chapter}'
+  output_format: epub
+email:
+  smtp_port: 587
+  smtp_server: smtp.example.com
+gui:
+  auto_check: false
+  sort_by: last_updated
+manga:
+- title: One Piece
+  source: tcbonepiecechapters.com
+  url: https://tcbonepiecechapters.com/mangas/5/one-piece
+- title: Solo Leveling
+  fallback_delay_days: 2
+  sources:
+  - url: https://mangafire.to/manga/solo-leveling.xxx
+  - url: https://mangadex.org/title/uuid-here

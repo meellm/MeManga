@@ -318,5 +318,5 @@ def test_run_bat_runs_launcher_isolated_with_absolute_venv_python():
     assert not [c for c in commands if "-m memanga" in c or "pythonpath" in c]
 
 
-def test_setup_bat_runs_setup_py_by_script_path():
-    assert 'python "%~dp0..\\..\\setup.py"' in SETUP_BAT.read_text()
+def test_setup_bat_runs_bootstrap_by_script_path():
+    assert 'python "%~dp0..\\bootstrap.py"' in SETUP_BAT.read_text()

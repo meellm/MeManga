@@ -1,47 +1,96 @@
 """
-Settings page - Tabbed: General, Email, Sources, Advanced.
+Settings page - Tabbed: General, Email, Advanced, About.
+
+Each tab's widgets are built by a mixin in ``settings_tabs``; this page
+owns the shell (header, left-rail nav, sticky save bar) and the actions:
+config save/reset/reload, email tests, scheduled checks, import/export,
+cache and log actions, and the About checks.
 """
 
 import json
-import platform
+import logging
 import subprocess
-import sys
 import threading
 from datetime import datetime
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
-    QScrollArea, QWidget, QComboBox, QCheckBox, QRadioButton,
-    QLineEdit, QFileDialog, QButtonGroup, QSizePolicy, QSpinBox,
-    QAbstractSpinBox,
+    QScrollArea, QWidget, QFileDialog,
 )
 from PySide6.QtCore import Qt, QObject, Signal, Slot
 from .base import BasePage
+from .settings_tabs import (SCHEDULING_UNAVAILABLE_TEXT, AboutTabMixin,
+                            AdvancedTabMixin, EmailTabMixin, GeneralTabMixin,
+                            SettingsFormMixin)
 from .. import theme as T
+from ... import doctor
+from ..components.error_details import detail_tooltip, notify_error, summarize_error
 from ..components.toast import Toast
+from .._subprocess import no_window_kwargs
 from ...backup import EXPORT_VERSION, BackupVersionError, validate_backup
-from ...cron import (build_cron_line, build_task_command, managed_lines,
-                     read_crontab,
-                     remove_managed_lines, replace_managed_line,
-                     source_checkout_root, unmanaged_memanga_lines)
+from ...emailer import kindle_format_error
+from ...cron import (ScheduleStatus, install_schedule, parse_schedule_time,
+                     remove_schedule, schedule_status,
+                     scheduled_checks_supported, source_checkout_root)
+
+logger = logging.getLogger(__name__)
+
+
+def _run_scheduler(argv, **kwargs):
+    """Run a crontab/schtasks command for the shared scheduler service
+    without flashing a console window from the windowed release exe."""
+    return subprocess.run(argv, **kwargs, **no_window_kwargs())
+
+
+def _kindle_format_toast_text(config):
+    """Settings-saved notice when Send to Kindle is chosen with an output
+    format Kindle doesn't accept (issue #362), else None. The settings
+    are still saved: the format works for local downloads."""
+    if config.delivery_mode != "email":
+        return None
+    reason = kindle_format_error(config.output_format)
+    if not reason:
+        return None
+    return (f"{reason}\nChapters will be saved but not sent to Kindle;\n"
+            "choose PDF or EPUB to send them.")
+
+
+def _plaintext_password_toast_text(config_path) -> str:
+    """Settings-saved notice when the app password went to config.yaml
+    because no system keyring is usable (issue #247). Names the file,
+    never the password."""
+    return (
+        "Settings saved. No system keyring is available, so the app\n"
+        "password is stored in plain text in:\n"
+        f"{config_path}\n"
+        "Keep this file private: only your user account should be able\n"
+        "to read it (on Linux and macOS: chmod 600)."
+    )
 
 
 class _EmailTestSignals(QObject):
-    result = Signal(str, str)
+    result = Signal(str, str, str)  # text, kind, full error (may be "")
 
 
-class SettingsPage(BasePage):
-    """Tabbed settings: General, Email, Sources, Advanced."""
+class _AboutSignals(QObject):
+    checked = Signal(object)  # doctor.about_checks() result
+
+
+class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
+                   AboutTabMixin, SettingsFormMixin, BasePage):
+    """Tabbed settings: General, Email, Advanced, About."""
 
     def __init__(self, parent, app):
         super().__init__(parent, app)
         self._current_tab = "general"
         self._email_test_signals = _EmailTestSignals(self)
         self._email_test_signals.result.connect(self._set_email_test_result)
+        self._about_signals = _AboutSignals(self)
+        self._about_signals.checked.connect(self._set_about_checks)
+        self._about_info = None  # filled on the first visit to About
         self._build()
 
     def _build(self):
         from PySide6.QtWidgets import QFrame
-        from ..assets.icons import icon
         from ... import __version__
 
         root = QVBoxLayout(self)
@@ -63,14 +112,18 @@ class SettingsPage(BasePage):
         reset_btn = QPushButton("  Reset to defaults")
         reset_btn.setProperty("variant", "ghost")
         reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.setIcon(icon("refresh", T.tokens()["text.t_2"], 14))
+        self._reset_btn = reset_btn  # icon recoloured by _refresh_icons
         reset_btn.setToolTip("Reset all settings to defaults")
         reset_btn.clicked.connect(self._reset_to_defaults)
         top_row.addWidget(reset_btn)
         h_layout.addLayout(top_row)
 
-        meta = QLabel(f"MeManga v{__version__}  ·  Config: ~/.memanga/config.toml")
+        # The config file this window really uses: the platform folder,
+        # --config-dir or $MEMANGA_CONFIG_DIR (issue #259).
+        meta = QLabel(f"MeManga v{__version__}  ·  Config: {self.app.config.config_path}")
         meta.setProperty("role", "meta")
+        meta.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._config_path_label = meta
         h_layout.addWidget(meta)
         root.addWidget(header_w)
 
@@ -96,13 +149,17 @@ class SettingsPage(BasePage):
         nav_l.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self._tab_buttons: dict[str, QPushButton] = {}
+        self._tab_icons: dict[str, str] = {}
         nav_items = [
             ("general",  "General",        "settings"),
             ("email",    "Kindle / Email", "bell"),
             ("advanced", "Advanced",       "refresh"),
+            ("about",    "About",          "info"),
         ]
         for key, label, icon_name in nav_items:
             btn = QPushButton("  " + label)
+            # Leading spaces pad the icon only (issue #394).
+            btn.setAccessibleName(label)
             btn.setProperty("variant", "nav")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             # 42 px — same as the sidebar nav buttons. The nav QSS
@@ -111,7 +168,7 @@ class SettingsPage(BasePage):
             # from clipping on Windows; the button needs the full
             # height to honour the padding.
             btn.setFixedHeight(42)
-            btn.setIcon(icon(icon_name, T.tokens()["text.t_2"], 16))
+            self._tab_icons[key] = icon_name
             from PySide6.QtCore import QSize
             btn.setIconSize(QSize(16, 16))
             btn.clicked.connect(lambda _, t=key: self._switch_tab(t))
@@ -129,7 +186,7 @@ class SettingsPage(BasePage):
         # ── General tab ──
         self._general_scroll = QScrollArea()
         self._general_scroll.setWidgetResizable(True)
-        self._general_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._general_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         general_content = QWidget()
         self._general_layout = QVBoxLayout(general_content)
         self._general_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -140,7 +197,7 @@ class SettingsPage(BasePage):
         # ── Email tab ──
         self._email_scroll = QScrollArea()
         self._email_scroll.setWidgetResizable(True)
-        self._email_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._email_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         email_content = QWidget()
         self._email_layout = QVBoxLayout(email_content)
         self._email_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -151,7 +208,7 @@ class SettingsPage(BasePage):
         # ── Advanced tab ──
         self._advanced_scroll = QScrollArea()
         self._advanced_scroll.setWidgetResizable(True)
-        self._advanced_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._advanced_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         advanced_content = QWidget()
         self._advanced_layout = QVBoxLayout(advanced_content)
         self._advanced_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -159,10 +216,22 @@ class SettingsPage(BasePage):
         self._advanced_scroll.setWidget(advanced_content)
         self._build_advanced()
 
+        # ── About tab ──
+        self._about_scroll = QScrollArea()
+        self._about_scroll.setWidgetResizable(True)
+        self._about_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        about_content = QWidget()
+        self._about_layout = QVBoxLayout(about_content)
+        self._about_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._about_layout.setSpacing(T.PAD_SM)
+        self._about_scroll.setWidget(about_content)
+        self._build_about()
+
         # Add all tab scrolls into the right pane
         right_l.addWidget(self._general_scroll, 1)
         right_l.addWidget(self._email_scroll, 1)
         right_l.addWidget(self._advanced_scroll, 1)
+        right_l.addWidget(self._about_scroll, 1)
 
         # Sticky save bar pinned to the bottom of the right pane — outside
         # every scroll area so it stays visible no matter how tall the
@@ -190,6 +259,8 @@ class SettingsPage(BasePage):
         # construct time and never refreshed.
         self._restyle_save_bar()
         T.on_theme_change(self._restyle_save_bar)
+        self._refresh_icons()
+        T.on_theme_change(self._refresh_icons)
 
         self._switch_tab("general")
 
@@ -224,9 +295,24 @@ class SettingsPage(BasePage):
             f"  background-color: {toks['accent.primary_2']};"
             f"  border-color: {toks['accent.primary_2']};"
             f"}}"
+            # Keyboard focus ring (issue #396), as for app primary buttons.
+            f"QPushButton[focusVisible=\"true\"]:focus {{"
+            f"  border: 2px solid {toks['text.t_1']};"
+            f"  padding: 7px 17px;"
+            f"}}"
         )
         # Re-render the icon at the new on-accent color too.
         self._save_bar_btn.setIcon(_ic("check", toks["accent.on_primary"], 14))
+
+    def _refresh_icons(self):
+        """Draw the header and tab-rail icons in the current theme's
+        secondary text colour. Drawn once, they kept the colour of the
+        theme the page was built in after a switch from this page."""
+        from ..assets.icons import icon
+        colour = T.tokens()["text.t_2"]
+        self._reset_btn.setIcon(icon("refresh", colour, 14))
+        for key, btn in self._tab_buttons.items():
+            btn.setIcon(icon(self._tab_icons[key], colour, 16))
 
     def _switch_tab(self, tab_name):
         self._current_tab = tab_name
@@ -234,6 +320,11 @@ class SettingsPage(BasePage):
         self._general_scroll.setVisible(tab_name == "general")
         self._email_scroll.setVisible(tab_name == "email")
         self._advanced_scroll.setVisible(tab_name == "advanced")
+        self._about_scroll.setVisible(tab_name == "about")
+        if tab_name == "about":
+            self._refresh_about_download_dir()
+            if self._about_info is None:
+                self._start_about_checks()
 
         for name, btn in self._tab_buttons.items():
             is_active = (name == tab_name)
@@ -241,552 +332,50 @@ class SettingsPage(BasePage):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 
-    # ── Helpers ──
-
-    def _section(self, parent_layout, text):
-        label = QLabel(text)
-        label.setStyleSheet(f"font-size: {T.FONT_SIZE_LG}pt; font-weight: bold;")
-        label.setContentsMargins(0, T.PAD_LG, 0, T.PAD_SM)
-        parent_layout.addWidget(label)
-
-    def _labeled_entry(self, parent_layout, label_text, value, placeholder="", password=False):
-        row = QHBoxLayout()
-        lbl = QLabel(label_text)
-        lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        lbl.setFixedWidth(120)
-        row.addWidget(lbl)
-
-        entry = QLineEdit()
-        entry.setMinimumWidth(280)
-        if placeholder:
-            entry.setPlaceholderText(placeholder)
-        if password:
-            entry.setEchoMode(QLineEdit.EchoMode.Password)
-        if value:
-            entry.setText(str(value))
-        row.addWidget(entry, 1)
-        parent_layout.addLayout(row)
-        return entry
-
-    # ── General Tab ──
-
-    def _build_general(self):
-        f = self._general_layout
-
-        # ── Appearance card (theme picker) ──
-        # New since the spec rewrite — instantly re-themes the app via
-        # the token system. Persisted in QSettings.
-        from ..components.theme_picker import ThemePicker
-        self._section(f, "Appearance")
-        appearance_hint = QLabel("Pick a look. Affects every screen — switches instantly, no restart.")
-        appearance_hint.setProperty("role", "hint")
-        f.addWidget(appearance_hint)
-        f.addSpacing(8)
-        f.addWidget(ThemePicker())
-        f.addSpacing(16)
-
-        # Delivery mode
-        self._section(f, "Delivery Mode")
-        mode_row = QHBoxLayout()
-        self._mode_group = QButtonGroup(self)
-        self._radio_local = QRadioButton("Local (save to disk)")
-        self._radio_email = QRadioButton("Email (send to Kindle)")
-        self._mode_group.addButton(self._radio_local)
-        self._mode_group.addButton(self._radio_email)
-        if self.app.config.delivery_mode == "email":
-            self._radio_email.setChecked(True)
-        else:
-            self._radio_local.setChecked(True)
-        mode_row.addWidget(self._radio_local)
-        mode_row.addSpacing(T.PAD_XL)
-        mode_row.addWidget(self._radio_email)
-        mode_row.addStretch()
-        f.addLayout(mode_row)
-
-        # Download directory
-        dir_row = QHBoxLayout()
-        dir_lbl = QLabel("Download Directory:")
-        dir_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        dir_row.addWidget(dir_lbl)
-
-        self._dir_entry = QLineEdit(str(self.app.config.download_dir))
-        self._dir_entry.setMinimumHeight(36)
-        self._dir_entry.setMinimumWidth(300)
-        dir_row.addWidget(self._dir_entry, 1)
-
-        browse_btn = QPushButton("Browse")
-        browse_btn.setMinimumHeight(36)
-        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        browse_btn.clicked.connect(self._browse_dir)
-        dir_row.addWidget(browse_btn)
-        f.addLayout(dir_row)
-
-        # Output format
-        self._section(f, "Output Format")
-        format_row = QHBoxLayout()
-        format_row.setSpacing(12)
-        self._format_combo = QComboBox()
-        self._format_combo.addItems(["pdf", "epub", "cbz", "zip", "jpg", "png", "webp"])
-        self._format_combo.setCurrentText(self.app.config.output_format)
-        self._format_combo.setMinimumWidth(160)
-        self._format_combo.currentTextChanged.connect(lambda _: self._refresh_filename_preview())
-        format_row.addWidget(self._format_combo)
-
-        hint = QLabel("pdf/epub = e-reader  |  cbz/zip = archive")
-        hint.setProperty("role", "hint")
-        format_row.addWidget(hint, 1)
-        f.addLayout(format_row)
-
-        self._section(f, "MangaDex Image Quality")
-        self._mangadex_quality = QComboBox()
-        self._mangadex_quality.addItem("Original", False)
-        self._mangadex_quality.addItem("Data saver (smaller downloads)", True)
-        self._mangadex_quality.setCurrentIndex(
-            1 if self.app.config.get("mangadex.data_saver", False) else 0)
-        self._mangadex_quality.setMaximumWidth(280)
-        f.addWidget(self._mangadex_quality)
-
-        # Concurrent downloads slider (1..8). JumpSlider so a groove
-        # click sets the clicked value instead of page-stepping to an
-        # extreme (#46).
-        from ..components.slider import JumpSlider
-        self._section(f, "Concurrent Downloads")
-        slider_row = QHBoxLayout()
-        slider_row.setSpacing(14)
-        slider_hint = QLabel("Higher = faster, may trip rate limits.")
-        slider_hint.setProperty("role", "hint")
-        slider_row.addWidget(slider_hint)
-
-        self._concurrent_slider = JumpSlider(Qt.Orientation.Horizontal)
-        self._concurrent_slider.setMinimum(1)
-        self._concurrent_slider.setMaximum(8)
-        self._concurrent_slider.setSingleStep(1)
-        self._concurrent_slider.setMaximumWidth(280)
-        self._concurrent_slider.setMinimumWidth(160)
-        current_concurrent = int(self.app.config.get("gui.max_concurrent_downloads", 2))
-        self._concurrent_slider.setValue(max(1, min(8, current_concurrent)))
-        slider_row.addWidget(self._concurrent_slider)
-
-        self._concurrent_value_lbl = QLabel(str(self._concurrent_slider.value()))
-        self._concurrent_value_lbl.setStyleSheet(
-            f"font-family: 'Geist Mono', monospace; font-size: 13pt; "
-            f"color: {T.tokens()['accent.primary']}; min-width: 24px;"
-        )
-        self._concurrent_slider.valueChanged.connect(
-            lambda v: self._concurrent_value_lbl.setText(str(v))
-        )
-        slider_row.addWidget(self._concurrent_value_lbl)
-        slider_row.addStretch(1)
-        f.addLayout(slider_row)
-
-        # Naming template
-        self._section(f, "File Naming")
-        naming_row = QHBoxLayout()
-        naming_lbl = QLabel("Template:")
-        naming_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        naming_row.addWidget(naming_lbl)
-
-        self._naming_entry = QLineEdit(
-            self.app.config.get("delivery.naming_template", "{title} - Chapter {chapter}")
-        )
-        self._naming_entry.setMinimumHeight(36)
-        self._naming_entry.setMinimumWidth(280)
-        self._naming_entry.textChanged.connect(self._refresh_filename_preview)
-        naming_row.addWidget(self._naming_entry, 1)
-        f.addLayout(naming_row)
-
-        # Variable chips — click to insert into the template.
-        var_row = QHBoxLayout()
-        var_row.setSpacing(6)
-        var_label = QLabel("Variables:")
-        var_label.setProperty("role", "hint")
-        var_row.addWidget(var_label)
-        for var in ["{title}", "{chapter}", "{source}", "{date}"]:
-            chip = QPushButton(var)
-            chip.setProperty("variant", "chip")
-            chip.setProperty("active", "false")
-            chip.setCursor(Qt.CursorShape.PointingHandCursor)
-            chip.clicked.connect(lambda _, v=var: self._insert_template_var(v))
-            var_row.addWidget(chip)
-        var_row.addStretch(1)
-        f.addLayout(var_row)
-
-        # Live preview of resolved filename.
-        self._preview_frame = QFrame()
-        pf_l = QHBoxLayout(self._preview_frame)
-        pf_l.setContentsMargins(12, 8, 12, 8)
-        pf_l.setSpacing(8)
-        pf_label = QLabel("Preview:")
-        pf_label.setProperty("role", "hint")
-        pf_l.addWidget(pf_label)
-        self._filename_preview = QLabel("")
-        self._filename_preview.setWordWrap(True)
-        self._filename_preview.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Preferred,
-        )
-        pf_l.addWidget(self._filename_preview, 1)
-        f.addWidget(self._preview_frame)
-        # Style + restyle on theme change so it isn't stuck on the
-        # snapshot taken at construct time.
-        self._style_preview_frame()
-        T.on_theme_change(self._style_preview_frame)
-        self._refresh_filename_preview()
-
-        # Save button moved to the sticky save bar at the bottom of the
-        # right pane (always visible regardless of scroll position).
-
-    # ── Email Tab ──
-
-    def _build_email(self):
-        f = self._email_layout
-
-        self._section(f, "Kindle / SMTP")
-
-        self._entry_kindle_email = self._labeled_entry(
-            f, "Kindle Email:", self.app.config.get("email.kindle_email", ""), "your-kindle@kindle.com"
-        )
-        self._entry_sender_email = self._labeled_entry(
-            f, "Sender Email:", self.app.config.get("email.sender_email", ""), "your-email@gmail.com"
-        )
-        self._entry_smtp_server = self._labeled_entry(
-            f, "SMTP Server:", self.app.config.get("email.smtp_server", "smtp.gmail.com")
-        )
-        self._entry_smtp_port = self._labeled_entry(
-            f, "SMTP Port:", str(self.app.config.get("email.smtp_port", 587))
-        )
-
-        # Password row
-        pw_row = QHBoxLayout()
-        pw_lbl = QLabel("App Password:")
-        pw_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        pw_lbl.setFixedWidth(120)
-        pw_row.addWidget(pw_lbl)
-
-        self._password_entry = QLineEdit()
-        self._password_entry.setMinimumHeight(36)
-        self._password_entry.setFixedWidth(220)
-        self._password_entry.setEchoMode(QLineEdit.EchoMode.Password)
-        pw_row.addWidget(self._password_entry)
-
-        pw_hint = QLabel("(leave blank to keep)")
-        pw_hint.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        pw_row.addWidget(pw_hint)
-        pw_row.addStretch()
-        f.addLayout(pw_row)
-
-        # Delete after send
-        self._delete_after_check = QCheckBox("Delete file after sending")
-        self._delete_after_check.setChecked(self.app.config.get("delivery.delete_after_send", False))
-        f.addWidget(self._delete_after_check)
-
-        f.addSpacing(T.PAD_SM)
-
-        # Test connection
-        test_row = QHBoxLayout()
-        test_btn = QPushButton("Test Connection")
-        test_btn.setMinimumHeight(36)
-        test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        test_btn.clicked.connect(self._test_email)
-        test_row.addWidget(test_btn)
-
-        self._test_label = QLabel("")
-        self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt;")
-        test_row.addWidget(self._test_label)
-        test_row.addStretch()
-        f.addLayout(test_row)
-
-        # Save button lives in the shared sticky bar at the bottom of
-        # the right pane (always visible regardless of scroll position).
-
-    # ── Advanced Tab ──
-
-    def _build_advanced(self):
-        f = self._advanced_layout
-
-        # Reader prefetch (issue #107)
-        self._section(f, "Reader")
-        prefetch_hint = QLabel(
-            "While reading a manual-mode manga, download the next chapter "
-            "in the background so Next continues without leaving the reader."
-        )
-        prefetch_hint.setProperty("role", "hint")
-        prefetch_hint.setWordWrap(True)
-        f.addWidget(prefetch_hint)
-
-        self._prefetch_check = QCheckBox("Prefetch the next chapter while reading")
-        self._prefetch_check.setChecked(self.app.config.reader_prefetch_enabled)
-        f.addWidget(self._prefetch_check)
-
-        # Remove chapters after reading (issue #104)
-        remove_read_hint = QLabel(
-            "Delete a chapter's local download once you finish it in the "
-            "built-in reader. Read progress is kept, so the chapter simply "
-            "returns to the Download state on the Detail page."
-        )
-        remove_read_hint.setProperty("role", "hint")
-        remove_read_hint.setWordWrap(True)
-        f.addWidget(remove_read_hint)
-
-        self._remove_after_read_check = QCheckBox(
-            "Remove chapters after reading"
-        )
-        self._remove_after_read_check.setChecked(
-            self.app.config.get("reader.remove_after_read", False)
-        )
-        f.addWidget(self._remove_after_read_check)
-
-        f.addSpacing(T.PAD_XL)
-
-        # Scheduled checks
-        self._section(f, "Scheduled Checks")
-        cron_row = QHBoxLayout()
-
-        self._cron_check = QCheckBox("Enable daily auto-check")
-        self._cron_check.setChecked(self.app.config.get("cron.enabled", False))
-        cron_row.addWidget(self._cron_check)
-
-        time_lbl = QLabel("Time:")
-        time_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        cron_row.addWidget(time_lbl)
-
-        self._cron_time = QLineEdit(self.app.config.get("cron.time", "06:00"))
-        self._cron_time.setMinimumWidth(90)
-        self._cron_time.setMaximumWidth(120)
-        self._cron_time.setStyleSheet("font-family: 'Geist Mono', monospace;")
-        cron_row.addWidget(self._cron_time)
-        cron_row.addStretch()
-        f.addLayout(cron_row)
-
-        cron_btns = QHBoxLayout()
-        install_btn = QPushButton("Install")
-        install_btn.setProperty("class", "accent")
-        install_btn.setMinimumHeight(36)
-        install_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        install_btn.clicked.connect(self._install_cron)
-        cron_btns.addWidget(install_btn)
-
-        remove_btn = QPushButton("Remove")
-        remove_btn.setMinimumHeight(36)
-        remove_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        remove_btn.clicked.connect(self._remove_cron)
-        cron_btns.addWidget(remove_btn)
-
-        status_btn = QPushButton("Status")
-        status_btn.setMinimumHeight(36)
-        status_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        status_btn.clicked.connect(self._check_cron_status)
-        cron_btns.addWidget(status_btn)
-
-        cron_btns.addStretch()
-        f.addLayout(cron_btns)
-
-        self._cron_status_label = QLabel("")
-        self._cron_status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-        f.addWidget(self._cron_status_label)
-
-        f.addSpacing(T.PAD_XL)
-
-        # Partial-chapter tolerance (issue #86)
-        self._section(f, "Partial Chapters")
-        partial_hint = QLabel(
-            "Keep a chapter that is missing a few pages instead of discarding it."
-        )
-        partial_hint.setProperty("role", "hint")
-        partial_hint.setWordWrap(True)
-        f.addWidget(partial_hint)
-
-        self._partial_check = QCheckBox("Allow partial chapters")
-        self._partial_check.setChecked(self.app.config.partial_enabled)
-        f.addWidget(self._partial_check)
-
-        thresh_row = QHBoxLayout()
-        thresh_lbl = QLabel("Max pages allowed to fail:")
-        thresh_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        thresh_row.addWidget(thresh_lbl)
-
-        self._partial_threshold = QSpinBox()
-        self._partial_threshold.setMinimum(0)
-        self._partial_threshold.setMaximum(100)
-        self._partial_threshold.setSuffix(" %")
-        self._partial_threshold.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-        self._partial_threshold.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._partial_threshold.setValue(int(round(self.app.config.partial_threshold)))
-        self._partial_threshold.setMinimumWidth(56)
-        self._partial_threshold.setMaximumWidth(72)
-        thresh_row.addWidget(self._partial_threshold)
-        thresh_row.addStretch(1)
-        f.addLayout(thresh_row)
-
-        # Grey out the threshold when tolerance is off.
-        self._partial_threshold.setEnabled(self._partial_check.isChecked())
-        self._partial_check.toggled.connect(self._partial_threshold.setEnabled)
-
-        f.addSpacing(T.PAD_XL)
-
-        # Post-processing
-        self._section(f, "Post-Processing")
-
-        self._post_processing_check = QCheckBox("Run a command after each chapter download")
-        self._post_processing_check.setChecked(
-            self.app.config.get("delivery.post_processing.enabled", False)
-        )
-        self._post_processing_check.toggled.connect(
-            self._refresh_post_processing_enabled
-        )
-        f.addWidget(self._post_processing_check)
-
-        command_row = QHBoxLayout()
-        command_lbl = QLabel("Command:")
-        command_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
-        command_row.addWidget(command_lbl)
-
-        self._post_processing_command = QLineEdit(
-            self.app.config.get("delivery.post_processing.command", "")
-        )
-        self._post_processing_command.setMinimumHeight(36)
-        self._post_processing_command.setMinimumWidth(280)
-        self._post_processing_command.setPlaceholderText(
-            "python scripts/after_download.py {output_path}"
-        )
-        command_row.addWidget(self._post_processing_command, 1)
-        f.addLayout(command_row)
-        self._post_processing_command.setToolTip(
-            "Runs after the final chapter file or folder is created"
-        )
-
-        self._post_processing_fail_check = QCheckBox(
-            "Mark download failed if the command exits with an error"
-        )
-        self._post_processing_fail_check.setChecked(
-            self.app.config.get("delivery.post_processing.fail_on_error", False)
-        )
-        f.addWidget(self._post_processing_fail_check)
-
-        pp_hint = QLabel(
-            "Available placeholders: {output_path}, {title}, {chapter}, "
-            "{source}, {format}, {is_dir}. The same values are also exposed "
-            "as MEMANGA_* environment variables.\nCommands run directly; invoke "
-            "a shell explicitly if you need shell features."
-        )
-        pp_hint.setWordWrap(True)
-        pp_hint.setProperty("role", "hint")
-        f.addWidget(pp_hint)
-        self._refresh_post_processing_enabled()
-
-        f.addSpacing(T.PAD_XL)
-
-        # Import/Export
-        self._section(f, "Import / Export")
-        ie_row = QHBoxLayout()
-
-        export_btn = QPushButton("Export")
-        export_btn.setMinimumHeight(36)
-        export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        export_btn.clicked.connect(self._export)
-        ie_row.addWidget(export_btn)
-
-        import_merge_btn = QPushButton("Import (Merge)")
-        import_merge_btn.setMinimumHeight(36)
-        import_merge_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        import_merge_btn.clicked.connect(lambda: self._import(replace=False))
-        ie_row.addWidget(import_merge_btn)
-
-        import_replace_btn = QPushButton("Import (Replace)")
-        import_replace_btn.setProperty("class", "danger")
-        import_replace_btn.setMinimumHeight(36)
-        import_replace_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        import_replace_btn.clicked.connect(lambda: self._import(replace=True))
-        ie_row.addWidget(import_replace_btn)
-
-        ie_row.addStretch()
-        f.addLayout(ie_row)
-
-        # ── Diagnostics section ──
-        f.addSpacing(T.PAD_XL)
-        self._section(f, "Diagnostics")
-
-        diag_row = QHBoxLayout()
-
-        # Clear cache — wipes the cover cache + on-disk thumbs.
-        self._clear_cache_btn = QPushButton("Clear cache")
-        self._clear_cache_btn.setMinimumHeight(36)
-        self._clear_cache_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._clear_cache_btn.clicked.connect(self._clear_cache)
-        diag_row.addWidget(self._clear_cache_btn)
-
-        open_logs_btn = QPushButton("Open logs folder")
-        open_logs_btn.setMinimumHeight(36)
-        open_logs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        open_logs_btn.clicked.connect(self._open_logs_folder)
-        diag_row.addWidget(open_logs_btn)
-
-        # Cache size label, updated lazily.
-        self._cache_size_label = QLabel("")
-        self._cache_size_label.setProperty("role", "hint")
-        diag_row.addWidget(self._cache_size_label)
-
-        diag_row.addStretch()
-        f.addLayout(diag_row)
-
-        # Refresh cache size on display.
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(100, self._refresh_cache_size)
-
-    def _refresh_post_processing_enabled(self):
-        enabled = self._post_processing_check.isChecked()
-        self._post_processing_command.setEnabled(enabled)
-        self._post_processing_fail_check.setEnabled(enabled)
-
-    def _refresh_cache_size(self):
-        """Compute the on-disk size of the cover cache and update the label."""
-        from pathlib import Path
-        cache_dir = self.app.config.config_dir / "covers"
-        total = 0
-        try:
-            if cache_dir.exists():
-                for f in cache_dir.iterdir():
-                    if f.is_file():
-                        total += f.stat().st_size
-        except Exception:
-            pass
-        mb = total / (1024 * 1024)
-        if mb >= 1:
-            self._cache_size_label.setText(f"{mb:.1f} MB cached")
-            self._clear_cache_btn.setText(f"Clear {mb:.0f} MB")
-        elif total > 0:
-            kb = total / 1024
-            self._cache_size_label.setText(f"{kb:.0f} KB cached")
-            self._clear_cache_btn.setText("Clear cache")
-        else:
-            self._cache_size_label.setText("Cache is empty")
-            self._clear_cache_btn.setText("Clear cache")
+    # ── About checks ──
+
+    def _start_about_checks(self):
+        self._about_info = doctor.about_basics()
+        self._refresh_about_rows()
+        signals = self._about_signals
+
+        def _check():
+            try:
+                result = doctor.about_checks()
+            except Exception:
+                result = {}
+            try:
+                signals.checked.emit(result)
+            except RuntimeError:
+                pass  # page already closed and deleted
+
+        threading.Thread(target=_check, daemon=True,
+                         name="settings-about-checks").start()
+
+    @Slot(object)
+    def _set_about_checks(self, result):
+        if self._about_info is None:
+            return
+        self._about_info.update(result or {
+            "keyring": {"backend": None},
+            "browsers": {"status": "error"},
+        })
+        self._refresh_about_rows()
+        self._copy_about_btn.setEnabled(True)
+
+    # ── Diagnostics ──
 
     def _clear_cache(self):
         """Delete cached cover thumbnails and reset the in-memory cache."""
-        from pathlib import Path
         from ..components.dialogs import ConfirmDialog
-        cache_dir = self.app.config.config_dir / "covers"
 
         def _do_clear():
-            removed = 0
+            # Files and in-memory pixmaps go together, so stale entries
+            # don't linger.
             try:
-                if cache_dir.exists():
-                    for f in cache_dir.iterdir():
-                        if f.is_file():
-                            try:
-                                f.unlink()
-                                removed += 1
-                            except Exception:
-                                pass
+                removed = self.app.cover_cache.clear()
             except Exception:
-                pass
-            # Reset the in-memory pixmap cache so stale entries don't linger.
-            try:
-                self.app.cover_cache._memory.clear()
-                self.app.cover_cache._failed.clear()
-            except Exception:
-                pass
+                removed = 0
             Toast(self, f"Cleared {removed} cached file(s)", kind="success")
             self._refresh_cache_size()
 
@@ -795,6 +384,34 @@ class SettingsPage(BasePage):
             message="This removes all locally-cached cover thumbnails. They'll be re-fetched next time.",
             on_confirm=_do_clear,
         )
+
+    def _install_browsers(self):
+        """Download the Playwright browsers from Settings (issue #344):
+        the first-run download can be skipped, and this is how it is
+        done later. Uses the same progress dialog as the first run."""
+        network = getattr(self.app, "network", None)
+        if network is not None and not network.is_online:
+            Toast(self, "You're offline — connect to install the browser "
+                        "components.", kind="warn")
+            return
+        from ..components.firefox_install_dialog import FirefoxInstallDialog
+        ok, _error = FirefoxInstallDialog(self.window()).run_install()
+        if ok:
+            self.app.browsers_installed = True
+            if self.app.config.get("gui.browser_install_skipped"):
+                # Installed now: the next launch checks as usual again.
+                self.app.config.set("gui.browser_install_skipped", False)
+                self.app.config.save()
+            Toast(self, "Browser components installed", kind="success")
+        # A failure is shown, with its log, by the dialog itself.
+        self._refresh_browser_status()
+
+    def _open_download_dir(self):
+        """Open the download folder in the OS file manager."""
+        from .._subprocess import open_in_file_manager
+        # Creates the folder when the first download hasn't yet.
+        if not open_in_file_manager(self.app.config.download_dir):
+            Toast(self, "Couldn't open the download folder", kind="error")
 
     def _open_logs_folder(self):
         """Open the user config dir (where state.json + logs live) in the
@@ -809,77 +426,16 @@ class SettingsPage(BasePage):
 
     # ── Actions ──
 
-    def _browse_dir(self):
-        path = QFileDialog.getExistingDirectory(self, "Select Download Directory")
-        if path:
-            self._dir_entry.setText(path)
-
     def _validate_time(self, time_str):
-        try:
-            parts = time_str.strip().split(":")
-            if len(parts) != 2:
-                return False
-            h, m = int(parts[0]), int(parts[1])
-            return 0 <= h <= 23 and 0 <= m <= 59
-        except (ValueError, IndexError):
-            return False
-
-    def _style_preview_frame(self):
-        """Apply theme colors to the filename preview frame + its label.
-        Called once at build + again on every theme switch."""
-        if not hasattr(self, "_preview_frame"):
-            return
-        self._preview_frame.setStyleSheet(
-            f"QFrame {{"
-            f"  background-color: {T.tokens()['surfaces.bg_0']};"
-            f"  border: 1px dashed {T.tokens()['surfaces.border_strong']};"
-            f"  border-radius: 6px;"
-            f"}}"
-        )
-        self._filename_preview.setStyleSheet(
-            f"font-family: 'Geist Mono', monospace; font-size: 11pt;"
-            f"color: {T.tokens()['accent.primary']};"
-        )
-
-    def _insert_template_var(self, var: str):
-        """Insert a {variable} token at the cursor of the naming template."""
-        cur = self._naming_entry.cursorPosition()
-        text = self._naming_entry.text()
-        new_text = text[:cur] + var + text[cur:]
-        self._naming_entry.setText(new_text)
-        self._naming_entry.setCursorPosition(cur + len(var))
-        self._naming_entry.setFocus()
-
-    def _refresh_filename_preview(self):
-        """Render a live preview of the filename template + extension."""
-        # Guard: format-combo's setCurrentText fires while the preview
-        # widgets are still being built. Skip until both exist.
-        if not (hasattr(self, "_naming_entry") and hasattr(self, "_filename_preview")):
-            return
-        template = self._naming_entry.text().strip() or "{title} - Chapter {chapter}"
-        from datetime import datetime
-        sample = {
-            "title": "Chainsaw Man",
-            "chapter": "1",
-            "source": "mangadex.org",
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "author": "Tatsuki Fujimoto",
-            "volume": "1",
-        }
-        try:
-            filename = template.format(**sample)
-        except Exception:
-            filename = template
-        ext = self._format_combo.currentText() if hasattr(self, "_format_combo") else "pdf"
-        # Strip leading dot if user picked the "(.pdf)" format string.
-        if ext.startswith("."):
-            ext = ext[1:]
-        self._filename_preview.setText(f"{filename}.{ext}")
+        return parse_schedule_time(time_str) is not None
 
     def _save(self):
         cfg = self.app.config
         mode = "email" if self._radio_email.isChecked() else "local"
         cfg.set("delivery.mode", mode)
+        if mode == "email":
+            cfg.set("email.kindle_scope",
+                    "all" if self._radio_scope_all.isChecked() else "selected")
         cfg.set("delivery.download_dir", self._dir_entry.text().strip())
         cfg.set("delivery.output_format", self._format_combo.currentText())
         cfg.set("mangadex.data_saver", self._mangadex_quality.currentData())
@@ -914,15 +470,20 @@ class SettingsPage(BasePage):
             cfg.set("email.smtp_port", 587)
 
         pw = self._password_entry.text().strip()
+        password_in_config = False
         if pw:
             from ...config import set_app_password
-            set_app_password(cfg, pw)
+            password_in_config = set_app_password(cfg, pw) == "config"
 
-        cron_time = self._cron_time.text().strip()
-        if not self._validate_time(cron_time):
-            cron_time = "06:00"
-        cfg.set("cron.enabled", self._cron_check.isChecked())
-        cfg.set("cron.time", cron_time)
+        # Where scheduling is unsupported the controls are disabled and
+        # may still show a value Remove has since cleared, so they never
+        # write cron settings (issue #324).
+        if scheduled_checks_supported():
+            cron_time = self._cron_time.text().strip()
+            if not self._validate_time(cron_time):
+                cron_time = "06:00"
+            cfg.set("cron.enabled", self._cron_check.isChecked())
+            cfg.set("cron.time", cron_time)
         cfg.set(
             "delivery.post_processing.enabled",
             self._post_processing_check.isChecked(),
@@ -952,21 +513,77 @@ class SettingsPage(BasePage):
                 self._remove_after_read_check.isChecked(),
             )
 
+        # Network & Privacy (issue #337). The connectivity check takes
+        # effect right away; turning it off clears any offline state.
+        if hasattr(self, "_network_check"):
+            network_check = self._network_check.isChecked()
+            cfg.set("gui.network_check", network_check)
+            network = getattr(self.app, "network", None)
+            if network is not None:
+                network.set_enabled(network_check)
+        if hasattr(self, "_mangadex_cover_check"):
+            cfg.set("gui.mangadex_cover_fallback",
+                    self._mangadex_cover_check.isChecked())
+        if hasattr(self, "_search_chapter_counts_check"):
+            cfg.set("gui.search_chapter_counts",
+                    self._search_chapter_counts_check.isChecked())
+
+        # Cover cache limit (issue #404): applied to the live cache now.
+        if hasattr(self, "_cache_limit"):
+            limit_mb = int(self._cache_limit.value())
+            cfg.set("gui.cover_cache_max_mb", limit_mb)
+            try:
+                self.app.cover_cache.set_disk_limit_mb(limit_mb)
+            except Exception:
+                logger.exception("Could not apply the cover cache limit")
+            self._refresh_cache_size()
+
         cfg.save()
-        Toast(self, "Settings saved", kind="success")
+        kindle_notice = _kindle_format_toast_text(cfg)
+        if password_in_config:
+            # Issue #247: no keyring, so say where the password went.
+            text = _plaintext_password_toast_text(cfg.config_path)
+            if kindle_notice:
+                text += "\n\n" + kindle_notice
+            Toast(self, text, kind="warning", duration=10000)
+        elif kindle_notice:
+            Toast(self, "Settings saved.\n" + kindle_notice,
+                  kind="warning", duration=10000)
+        else:
+            Toast(self, "Settings saved", kind="success")
 
     def _reset_to_defaults(self):
         cfg = self.app.config
         defaults = cfg._default_config()
         # A reset restores preferences, not the user's group block list.
         removed_groups = list(cfg.get("mangadex.removed_group_ids", []) or [])
+        had_custom_hosts = bool(cfg.get("gui.network_check_hosts", []))
         for section in ("delivery", "email", "cron", "gui", "partial_chapters",
                         "reader", "mangadex"):
             cfg.set(section, defaults[section])
         cfg.set("mangadex.removed_group_ids", removed_groups)
         cfg.save()
+        network = getattr(self.app, "network", None)
+        if network is not None:
+            network.set_enabled(bool(cfg.get("gui.network_check", True)))
+        try:
+            self.app.cover_cache.set_disk_limit_mb(
+                cfg.get("gui.cover_cache_max_mb"))
+        except Exception:
+            logger.exception("Could not apply the cover cache limit")
         self._load_config_into_widgets()
-        Toast(self, "Settings reset to defaults", kind="success")
+        if had_custom_hosts:
+            # Issue #337: say that the user's own probe hosts are gone.
+            Toast(self, "Settings reset to defaults.\nYour connection-check "
+                        "hosts were cleared; the built-in hosts are used "
+                        "after a restart.", kind="success", duration=10000)
+        else:
+            Toast(self, "Settings reset to defaults", kind="success")
+
+    def reload_from_config(self):
+        """Show the saved settings again, dropping unsaved edits. For
+        code that changed the config from outside this page."""
+        self._load_config_into_widgets()
 
     def _load_config_into_widgets(self):
         cfg = self.app.config
@@ -975,6 +592,7 @@ class SettingsPage(BasePage):
             self._radio_email.setChecked(True)
         else:
             self._radio_local.setChecked(True)
+        self._load_kindle_scope()
 
         self._dir_entry.setText(str(cfg.download_dir))
         self._format_combo.setCurrentText(cfg.output_format)
@@ -983,29 +601,26 @@ class SettingsPage(BasePage):
         self._concurrent_slider.setValue(
             max(1, min(8, int(cfg.get("gui.max_concurrent_downloads", 2))))
         )
-        self._naming_entry.setText(
-            cfg.get("delivery.naming_template", "{title} - Chapter {chapter}")
-        )
+        delivery = cfg.delivery
+        self._naming_entry.setText(delivery.naming_template)
 
-        self._entry_kindle_email.setText(cfg.get("email.kindle_email", ""))
-        self._entry_sender_email.setText(cfg.get("email.sender_email", ""))
-        self._entry_smtp_server.setText(cfg.get("email.smtp_server", "smtp.gmail.com"))
+        # str(): a hand-edited value of another type is shown so it can
+        # be corrected here, and must not stop the page from opening.
+        self._entry_kindle_email.setText(str(cfg.get("email.kindle_email", "")))
+        self._entry_sender_email.setText(str(cfg.get("email.sender_email", "")))
+        self._entry_smtp_server.setText(str(cfg.get("email.smtp_server", "smtp.gmail.com")))
         self._entry_smtp_port.setText(str(cfg.get("email.smtp_port", 587)))
         self._password_entry.clear()
-        self._delete_after_check.setChecked(cfg.get("delivery.delete_after_send", False))
+        self._delete_after_check.setChecked(delivery.delete_after_send)
 
-        self._cron_check.setChecked(cfg.get("cron.enabled", False))
-        self._cron_time.setText(cfg.get("cron.time", "06:00"))
+        self._cron_check.setChecked(cfg.cron_enabled)
+        # str(): YAML reads an unquoted 7:30 as a number.
+        self._cron_time.setText(str(cfg.get("cron.time", "06:00")))
 
-        self._post_processing_check.setChecked(
-            cfg.get("delivery.post_processing.enabled", False)
-        )
-        self._post_processing_command.setText(
-            cfg.get("delivery.post_processing.command", "")
-        )
+        self._post_processing_check.setChecked(delivery.post_processing.enabled)
+        self._post_processing_command.setText(delivery.post_processing.command)
         self._post_processing_fail_check.setChecked(
-            cfg.get("delivery.post_processing.fail_on_error", False)
-        )
+            delivery.post_processing.fail_on_error)
         self._refresh_post_processing_enabled()
 
         if hasattr(self, "_partial_check"):
@@ -1018,199 +633,274 @@ class SettingsPage(BasePage):
 
         if hasattr(self, "_remove_after_read_check"):
             self._remove_after_read_check.setChecked(
-                cfg.get("reader.remove_after_read", False)
+                cfg.reader_remove_after_read
             )
+
+        if hasattr(self, "_network_check"):
+            self._network_check.setChecked(
+                bool(cfg.get("gui.network_check", True)))
+        if hasattr(self, "_mangadex_cover_check"):
+            self._mangadex_cover_check.setChecked(
+                bool(cfg.get("gui.mangadex_cover_fallback", True)))
+        if hasattr(self, "_search_chapter_counts_check"):
+            self._search_chapter_counts_check.setChecked(
+                bool(cfg.get("gui.search_chapter_counts", True)))
+        if hasattr(self, "_network_hint"):
+            self._network_hint.setText(self._network_hint_text())
+        if hasattr(self, "_cache_limit"):
+            from ..cache import disk_limit_mb
+            self._cache_limit.setValue(
+                disk_limit_mb(cfg.get("gui.cover_cache_max_mb")))
+        self._refresh_browser_status()
 
         self._refresh_filename_preview()
 
-    def _test_email(self):
-        self._test_label.setText("Testing...")
-        self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.FG_MUTED};")
-
+    def _email_test_inputs(self, need_kindle: bool):
+        """The typed settings for an email test as ``(kindle, sender,
+        server, port, password, override)``, ``override`` being
+        app_password_override()'s result; or None after showing what is
+        missing."""
+        self._test_label.setToolTip("")
+        kindle = self._entry_kindle_email.text().strip()
         sender = self._entry_sender_email.text().strip()
         smtp_server = self._entry_smtp_server.text().strip()
         smtp_port = self._entry_smtp_port.text().strip()
         pw = self._password_entry.text().strip()
 
+        if need_kindle and not kindle:
+            self._show_test_status("Fill Kindle email", T.ERROR)
+            return None
         if not sender or not smtp_server:
-            self._test_label.setText("Fill sender + server")
-            self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
-            return
-        if not pw:
-            from ...config import get_app_password
+            self._show_test_status("Fill sender + server", T.ERROR)
+            return None
+        # Issue #247: test the password delivery will use. An injected
+        # one wins over the typed field, as it does when sending.
+        from ...config import (AppPasswordError, app_password_override,
+                               get_app_password)
+        try:
+            override = app_password_override()
+        except AppPasswordError as e:
+            self._show_test_status("Password variable unusable", T.ERROR)
+            self._test_label.setToolTip(str(e))
+            return None
+        if override:
+            pw = override[1]
+            self._test_label.setToolTip(
+                f"{override[0]} is set, so it is used instead of the "
+                "password field, as when sending.")
+        elif not pw:
             pw = get_app_password(self.app.config)
         if not pw:
-            self._test_label.setText("No password")
-            self._test_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {T.ERROR};")
-            return
+            self._show_test_status("No password", T.ERROR)
+            return None
+
+        # Issue #342: the password must not reach the error details.
+        from ...output import register_secret
+        register_secret(pw)
+        return kindle, sender, smtp_server, smtp_port, pw, override
+
+    def _run_email_test(self, action, success: str, success_detail: str = ""):
+        """Run ``action()`` off the UI thread and report its outcome."""
+        self._set_email_tests_enabled(False)
 
         def _test():
-            import smtplib
-            import ssl
+            from ...emailer import EmailAuthError, EmailTimeoutError
             try:
-                context = ssl.create_default_context()
-                server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=10)
-                server.ehlo()
-                server.starttls(context=context)
-                server.login(sender, pw)
-                server.quit()
-                self._email_test_signals.result.emit("Success!", "success")
-            except smtplib.SMTPAuthenticationError:
-                self._email_test_signals.result.emit("Auth failed", "error")
+                action()
+                self._email_test_signals.result.emit(
+                    success, "success", success_detail)
+            except EmailAuthError as e:
+                self._email_test_signals.result.emit("Auth failed", "error", str(e))
+            except EmailTimeoutError as e:
+                self._email_test_signals.result.emit("Timed out", "error", str(e))
             except Exception as e:
-                msg = str(e)[:30]
-                self._email_test_signals.result.emit(f"Failed: {msg}", "error")
+                self._email_test_signals.result.emit(
+                    f"Failed: {summarize_error(e, 40)}", "error", str(e))
 
         threading.Thread(target=_test, daemon=True).start()
 
-    @Slot(str, str)
-    def _set_email_test_result(self, text: str, kind: str):
+    def _test_email(self):
+        """Check Login: sign in to the SMTP server; nothing is sent."""
+        self._show_test_status("Testing...", T.FG_MUTED)
+        inputs = self._email_test_inputs(need_kindle=False)
+        if inputs is None:
+            return
+        _, sender, smtp_server, smtp_port, pw, override = inputs
+        if override:
+            self._test_label.setText(f"Testing password from {override[0]}...")
+
+        # Issue #361: the same bounded login as delivery and doctor.
+        timeout = self.app.config.get("email.smtp_timeout")
+        # Issue #366: "auto" picks implicit TLS for a typed port 465.
+        smtp_tls = self.app.config.get("email.smtp_tls")
+
+        def _login():
+            from ...emailer import smtp_login
+            smtp_login(sender, smtp_server, int(smtp_port), pw,
+                       timeout=timeout, smtp_tls=smtp_tls)
+        self._run_email_test(_login, "Signed in")
+
+    def _send_test_email(self):
+        """Send Test PDF (issue #365): email a tiny PDF to the typed
+        Kindle address the way delivery sends chapters."""
+        self._show_test_status("Sending test PDF...", T.FG_MUTED)
+        inputs = self._email_test_inputs(need_kindle=True)
+        if inputs is None:
+            return
+        kindle, sender, smtp_server, smtp_port, pw, override = inputs
+        if override:
+            self._test_label.setText(
+                f"Sending test PDF with password from {override[0]}...")
+        timeout = self.app.config.get("email.smtp_timeout")
+        smtp_tls = self.app.config.get("email.smtp_tls")
+
+        from ...emailer import TEST_DELIVERY_NOTE
+
+        def _send():
+            from ...emailer import send_test_document
+            send_test_document(kindle, sender, smtp_server, int(smtp_port),
+                               pw, timeout=timeout, smtp_tls=smtp_tls)
+        self._run_email_test(_send, "Test PDF accepted; check your Kindle",
+                             TEST_DELIVERY_NOTE)
+
+    @Slot(str, str, str)
+    def _set_email_test_result(self, text: str, kind: str, detail: str = ""):
+        self._set_email_tests_enabled(True)
         color = T.SUCCESS if kind == "success" else T.ERROR
-        self._test_label.setText(text)
-        self._test_label.setStyleSheet(
-            f"font-size: {T.FONT_SIZE_XS}pt; color: {color};"
-        )
+        self._show_test_status(text, color)
+        if detail and kind == "success":
+            # Issue #365: what acceptance means, also in Notifications.
+            self._test_label.setToolTip(detail_tooltip(detail))
+            notify_error(self.app, "Test PDF accepted by the mail server",
+                         detail, ntype="kindle")
+        elif detail:
+            # Issue #342: the server's full reply, on hover and in
+            # Notifications (keyboard and screen-reader reachable).
+            self._test_label.setToolTip(detail_tooltip(detail))
+            notify_error(self.app, "Email test failed", detail)
+            logger.error("Email test failed: %s", detail)
+
+    def _error_toast(self, prefix: str, error) -> None:
+        """Issue #342: a short toast; the full error goes to Notifications
+        and the (redacted) log."""
+        notify_error(self.app, prefix, error)
+        logger.error("%s: %s", prefix, error)
+        Toast(self, f"{prefix}: {summarize_error(error, 40) or 'Unknown error'}"
+                    " (details in Notifications)", kind="error")
 
     # ── Cron ──
 
+    def _apply_scheduling_capability(self):
+        """Turn off installing a scheduled check where this build cannot
+        run one (issues #324, #336) and say why. Remove and Status stay
+        available so a check set up by an earlier version can still be
+        inspected and removed."""
+        supported = scheduled_checks_supported()
+        reason = "" if supported else SCHEDULING_UNAVAILABLE_TEXT
+        for widget in (self._cron_check, self._cron_time,
+                       self._cron_install_btn):
+            widget.setEnabled(supported)
+            widget.setToolTip(reason)
+            widget.setAccessibleDescription(reason)
+        self._cron_unavailable_hint.setVisible(not supported)
+
     def _install_cron(self):
+        if not scheduled_checks_supported():
+            Toast(self, "Scheduled checks need the command-line version",
+                  kind="info")
+            return
         cron_time = self._cron_time.text().strip()
-        if not self._validate_time(cron_time):
+        parsed = parse_schedule_time(cron_time)
+        if parsed is None:
             Toast(self, "Invalid time", kind="error")
             return
-        hour, minute = cron_time.split(":")
+        hour, minute = parsed
 
-        if platform.system() == "Windows":
-            self._install_cron_windows(cron_time)
-        else:
-            self._install_cron_unix(hour, minute)
-
-    def _install_cron_unix(self, hour, minute):
         # Issue #232: run the current interpreter and log to the config
         # root, never into the package install directory.
-        cron_cmd = build_cron_line(minute, hour, self.app.config.config_dir,
-                                   sys.executable,
-                                   source_root=source_checkout_root())
-        try:
-            result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-            existing = read_crontab(result)
-            if existing is None:
-                # Issue #231: never overwrite a crontab we could not read.
-                Toast(self, "Could not read crontab; nothing changed", kind="error")
-                return
-            # Issue #231: only the managed line is replaced.
-            proc = subprocess.run(
-                ["crontab", "-"], input=replace_managed_line(existing, cron_cmd),
-                capture_output=True, text=True
-            )
-            if proc.returncode == 0:
-                self.app.config.set("cron.enabled", True)
-                self.app.config.set("cron.time", f"{hour}:{minute}")
-                self.app.config.save()
-                if unmanaged_memanga_lines(existing):
-                    Toast(self, "Cron set; an older MeManga cron line is still "
-                          "there, remove it with crontab -e", kind="warning",
-                          duration=6000)
-                else:
-                    Toast(self, f"Cron: daily at {hour}:{minute}", kind="success")
-            else:
-                Toast(self, f"Failed: {proc.stderr[:40]}", kind="error")
-        except Exception as e:
-            Toast(self, f"Error: {str(e)[:40]}", kind="error")
+        result = install_schedule(
+            hour, minute, runtime_dir=self.app.config.config_dir,
+            config_dir=self._explicit_config_dir(),
+            source_root=source_checkout_root(), runner=_run_scheduler)
+        if result.status is ScheduleStatus.UNREADABLE:
+            # Issue #231: never overwrite a crontab we could not read.
+            self._unreadable_scheduler_toast(result)
+            return
+        if not result.ok:
+            self._error_toast("Task setup failed" if result.windows
+                              else "Cron setup failed", result.detail)
+            return
 
-    def _install_cron_windows(self, cron_time):
-        from .._subprocess import no_window_kwargs
-        task_name = "MeManga_AutoCheck"
-        # Issue #232: the running interpreter, not a checkout-local venv.
-        cmd = build_task_command(sys.executable,
-                                 source_root=source_checkout_root())
+        label = "Task" if result.windows else "Cron"
         try:
-            # no_window_kwargs(): release exe is console=False, so any
-            # naked subprocess.run() would flash a black cmd box for a
-            # frame. schtasks runs headless on a normal admin install,
-            # but we still want zero visual noise.
-            subprocess.run(
-                ["schtasks", "/Delete", "/TN", task_name, "/F"],
-                capture_output=True, text=True, **no_window_kwargs(),
-            )
-            result = subprocess.run(
-                ["schtasks", "/Create", "/TN", task_name, "/SC", "DAILY",
-                 "/ST", cron_time, "/TR", cmd, "/F"],
-                capture_output=True, text=True, **no_window_kwargs(),
-            )
-            if result.returncode == 0:
-                self.app.config.set("cron.enabled", True)
-                self.app.config.set("cron.time", cron_time)
-                self.app.config.save()
-                Toast(self, f"Task: daily at {cron_time}", kind="success")
-            else:
-                Toast(self, f"Failed: {result.stderr[:40]}", kind="error")
+            self.app.config.set("cron.enabled", True)
+            self.app.config.set("cron.time", cron_time)
+            self.app.config.save()
         except Exception as e:
-            Toast(self, f"Error: {str(e)[:40]}", kind="error")
+            # The scheduled check is already in place; only remembering
+            # it in config.yaml failed, so say exactly that.
+            self._error_toast(f"{label} installed, but its settings could "
+                              "not be saved", e)
+            return
+        if result.unmanaged:
+            Toast(self, "Cron set; an older MeManga cron line is still "
+                  "there, remove it with crontab -e", kind="warning",
+                  duration=6000)
+        else:
+            Toast(self, f"{label}: daily at {cron_time}", kind="success")
+
+    def _unreadable_scheduler_toast(self, result):
+        """Nothing was changed because the scheduler could not be read;
+        the reason goes to Notifications (issue #342)."""
+        what = "scheduled tasks" if result.windows else "crontab"
+        self._error_toast(f"Could not read {what}; nothing changed",
+                          result.detail)
+
+    def _explicit_config_dir(self):
+        """The --config-dir / $MEMANGA_CONFIG_DIR choice the window runs
+        on, pinned into the scheduled check like `memanga cron install`
+        does (issue #221); None keeps the default location."""
+        return getattr(self.app, "explicit_config_dir", None)
 
     def _remove_cron(self):
-        if platform.system() == "Windows":
-            from .._subprocess import no_window_kwargs
-            try:
-                subprocess.run(
-                    ["schtasks", "/Delete", "/TN", "MeManga_AutoCheck", "/F"],
-                    capture_output=True, text=True, **no_window_kwargs(),
-                )
-                Toast(self, "Task removed", kind="success")
-            except Exception:
-                Toast(self, "Failed", kind="error")
-        else:
-            try:
-                result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-                existing = result.stdout if result.returncode == 0 else ""
-                # Issue #231: only the managed line is removed; the
-                # crontab is not rewritten when there is none.
-                new_crontab, removed = remove_managed_lines(existing)
-                if removed:
-                    proc = subprocess.run(
-                        ["crontab", "-"], input=new_crontab,
-                        capture_output=True, text=True,
-                    )
-                    if proc.returncode != 0:
-                        Toast(self, f"Failed: {proc.stderr[:40]}", kind="error")
-                        return
-                    Toast(self, "Cron removed", kind="success")
-                else:
-                    # Nothing MeManga owns was removed: keep config as-is,
-                    # like `memanga cron remove`.
-                    Toast(self, "No managed cron found", kind="info")
-                    return
-            except Exception:
-                Toast(self, "Failed", kind="error")
-                return
+        result = remove_schedule(runner=_run_scheduler)
+        if result.status is ScheduleStatus.UNREADABLE:
+            self._unreadable_scheduler_toast(result)
+            return
+        if result.status is ScheduleStatus.FAILED:
+            self._error_toast("Task removal failed" if result.windows
+                              else "Cron removal failed", result.detail)
+            return
+        if result.status is ScheduleStatus.NOT_FOUND:
+            # Nothing MeManga owns was removed: keep config as-is,
+            # like `memanga cron remove`.
+            Toast(self, "No scheduled task found" if result.windows
+                  else "No managed cron found", kind="info")
+            return
+
+        Toast(self, "Task removed" if result.windows else "Cron removed",
+              kind="success")
         self.app.config.set("cron.enabled", False)
         self.app.config.save()
+        if not scheduled_checks_supported():
+            # The disabled checkbox cannot be unticked by hand; show the
+            # removed state (issue #324).
+            self._cron_check.setChecked(False)
 
     def _check_cron_status(self):
-        if platform.system() == "Windows":
-            from .._subprocess import no_window_kwargs
-            try:
-                result = subprocess.run(
-                    ["schtasks", "/Query", "/TN", "MeManga_AutoCheck"],
-                    capture_output=True, text=True, **no_window_kwargs(),
-                )
-                text = "Task installed" if result.returncode == 0 else "No task found"
-                color = T.SUCCESS if result.returncode == 0 else T.WARNING
-            except Exception:
-                text, color = "Check failed", T.ERROR
+        result = schedule_status(runner=_run_scheduler)
+        if result.status is ScheduleStatus.INSTALLED:
+            text = "Task installed" if result.windows else "Cron installed"
+            color = T.SUCCESS
+        elif result.status is ScheduleStatus.NOT_FOUND:
+            text = "No task found" if result.windows else "No cron found"
+            color = T.WARNING
         else:
-            try:
-                result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-                existing = result.stdout if result.returncode == 0 else ""
-                found = bool(managed_lines(existing))
-                text = "Cron installed" if found else "No cron found"
-                color = T.SUCCESS if found else T.WARNING
-                if unmanaged_memanga_lines(existing):
-                    # Issue #231: lines MeManga does not manage may still run.
-                    text += "; unmanaged MeManga line found, edit with crontab -e"
-                    color = T.WARNING
-            except Exception:
-                text, color = "Check failed", T.ERROR
+            text, color = "Check failed", T.ERROR
+        if result.unmanaged:
+            # Issue #231: lines MeManga does not manage may still run.
+            text += "; unmanaged MeManga line found, edit with crontab -e"
+            color = T.WARNING
         self._cron_status_label.setText(text)
         self._cron_status_label.setStyleSheet(f"font-size: {T.FONT_SIZE_XS}pt; color: {color};")
 
@@ -1233,7 +923,7 @@ class SettingsPage(BasePage):
                 json.dump(data, f, indent=2, default=str)
             Toast(self, f"Exported {len(data['manga'])} manga", kind="success")
         except Exception as e:
-            Toast(self, f"Export failed: {str(e)[:40]}", kind="error")
+            self._error_toast("Export failed", e)
 
     def _import(self, replace=False):
         path, _ = QFileDialog.getOpenFileName(self, "Import", "", "JSON (*.json)")
@@ -1286,4 +976,4 @@ class SettingsPage(BasePage):
         except json.JSONDecodeError:
             Toast(self, "Invalid JSON", kind="error")
         except Exception as e:
-            Toast(self, f"Failed: {str(e)[:40]}", kind="error")
+            self._error_toast("Import failed", e)

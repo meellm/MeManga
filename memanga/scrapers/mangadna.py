@@ -8,13 +8,12 @@ General manga/manhwa aggregator with clean image CDN.
 
 import re
 import logging
-import cloudscraper
 from pathlib import Path
 from bs4 import BeautifulSoup
 from typing import List, Optional
 from urllib.parse import urljoin
 
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT, CLOUDSCRAPER_CHROME_DESKTOP
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +24,7 @@ class MangaDNAScraper(BaseScraper):
     
     def __init__(self):
         super().__init__()
-        self.scraper = cloudscraper.create_scraper(
-            browser={
-                'browser': 'chrome',
-                'platform': 'windows',
-                'desktop': True
-            }
-        )
-        self.session = self.scraper
+        self.scraper = self._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
     
     def search(self, query: str) -> List[Manga]:
         """Search for manga by title."""
@@ -187,7 +179,7 @@ class MangaDNAScraper(BaseScraper):
                         seen.add(src)
                         pages.append(src)
             
-            logger.info(f"Found {len(pages)} pages for {chapter_url}")
+            logger.debug("Found %s pages for %s", len(pages), chapter_url)
             return pages
             
         except Exception as e:
@@ -199,7 +191,7 @@ class MangaDNAScraper(BaseScraper):
         try:
             headers = {
                 'Referer': self.BASE_URL + '/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'User-Agent': BROWSER_USER_AGENT,
                 'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
             }
             response = self.scraper.get(url, headers=headers, timeout=60)

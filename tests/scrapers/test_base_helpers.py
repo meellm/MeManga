@@ -8,13 +8,29 @@ sniffer shared with the GUI cover fetch.
 
 from __future__ import annotations
 
+import io
 import time
 import pytest
 import requests
+from PIL import Image
+
+from datetime import datetime, timezone
 
 from memanga.scrapers.base import (
-    BaseScraper, Chapter, Manga, _retry, is_retryable_request_error, looks_like_image,
+    BaseScraper, Chapter, Manga, MAX_RETRY_AFTER, _retry, is_image_file,
+    is_retryable_request_error, looks_like_image, parse_retry_after,
 )
+
+
+
+def _image_bytes(fmt: str) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (32, 32), (200, 40, 40)).save(buf, fmt)
+    return buf.getvalue()
+
+
+_JPEG = _image_bytes("JPEG")
+_PNG = _image_bytes("PNG")
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -139,6 +155,172 @@ class TestRetryableRequestError:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# HTTP 429 Retry-After
+# ──────────────────────────────────────────────────────────────────────
+
+
+_NOW = datetime(2015, 10, 21, 7, 28, 0, tzinfo=timezone.utc)
+
+
+class TestParseRetryAfter:
+    @pytest.mark.parametrize("value,expected", [
+        ("0", 0.0),
+        ("120", 120.0),
+        ("  7 ", 7.0),
+    ])
+    def test_delay_seconds(self, value, expected):
+        assert parse_retry_after(value, now=_NOW) == expected
+
+    @pytest.mark.parametrize("value", [
+        "Wed, 21 Oct 2015 07:28:30 GMT",      # IMF-fixdate
+        "Wednesday, 21-Oct-15 07:28:30 GMT",  # obsolete RFC 850
+        "Wed Oct 21 07:28:30 2015",           # obsolete asctime (no zone = UTC)
+    ])
+    def test_http_date_forms(self, value):
+        assert parse_retry_after(value, now=_NOW) == 30.0
+
+    def test_http_date_in_the_past_means_no_wait(self):
+        assert parse_retry_after("Wed, 21 Oct 2015 07:00:00 GMT", now=_NOW) == 0.0
+
+    def test_http_date_defaults_to_local_utc_clock(self):
+        wait = parse_retry_after("Fri, 01 Jan 2100 00:00:00 GMT")
+        assert wait is not None and wait > MAX_RETRY_AFTER
+
+    @pytest.mark.parametrize("value", [
+        None, "", "   ", "-5", "1.5", "+3", "1e3", "\u0663", "soon",
+        "5, 10",  # two Retry-After headers folded into one value
+        "Wed, 32 Oct 2015 07:28:30 GMT",
+    ])
+    def test_missing_or_malformed_is_none(self, value):
+        assert parse_retry_after(value, now=_NOW) is None
+
+
+def _rate_limited(retry_after=None, date=None, url="https://cdn.example.test/ch/1.jpg?token=secret"):
+    response = requests.Response()
+    response.status_code = 429
+    response.url = url
+    if retry_after is not None:
+        response.headers["Retry-After"] = retry_after
+    if date is not None:
+        response.headers["Date"] = date
+    return requests.HTTPError("429 Client Error", response=response)
+
+
+class TestRetryHonorsRetryAfter:
+    @pytest.fixture
+    def sleeps(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr("memanga.scrapers.base.time.sleep", sleeps.append)
+        return sleeps
+
+    def _flaky(self, *errors):
+        """Callable raising each error in turn, then returning "ok"."""
+        pending = list(errors)
+        calls = []
+        def fn():
+            calls.append(1)
+            if pending:
+                raise pending.pop(0)
+            return "ok"
+        return fn, calls
+
+    def test_waits_for_retry_after_seconds(self, sleeps):
+        fn, calls = self._flaky(_rate_limited("5"))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [5.0]
+        assert len(calls) == 2
+
+    def test_waits_until_http_date_measured_from_server_date(self, sleeps):
+        # Local clock is irrelevant: the wait is Retry-After minus Date.
+        fn, _ = self._flaky(_rate_limited(
+            "Wed, 21 Oct 2015 07:28:12 GMT", date="Wed, 21 Oct 2015 07:28:00 GMT",
+        ))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [12.0]
+
+    def test_backoff_is_a_floor_for_short_retry_after(self, sleeps):
+        fn, _ = self._flaky(_rate_limited("0"), _rate_limited("1"))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [1.0, 2.0]
+
+    def test_wait_at_the_cap_is_honored(self, sleeps):
+        fn, _ = self._flaky(_rate_limited(str(int(MAX_RETRY_AFTER))))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [MAX_RETRY_AFTER]
+
+    @pytest.mark.parametrize("retry_after", [
+        str(int(MAX_RETRY_AFTER) + 1),
+        "Fri, 01 Jan 2100 00:00:00 GMT",
+    ])
+    def test_wait_over_the_cap_raises_without_retrying(self, sleeps, retry_after):
+        fn, calls = self._flaky(_rate_limited(retry_after))
+        with pytest.raises(requests.HTTPError):
+            _retry(fn, max_attempts=3, base_delay=1.0)
+        assert sleeps == []
+        assert len(calls) == 1
+
+    @pytest.mark.parametrize("retry_after", [None, "soon", "-1"])
+    def test_missing_or_malformed_retry_after_keeps_backoff(self, sleeps, retry_after):
+        fn, calls = self._flaky(_rate_limited(retry_after), _rate_limited(retry_after))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [1.0, 2.0]
+        assert len(calls) == 3
+
+    def test_persistent_429_raises_after_max_attempts(self, sleeps):
+        fn, calls = self._flaky(*[_rate_limited("2") for _ in range(3)])
+        with pytest.raises(requests.HTTPError):
+            _retry(fn, max_attempts=3, base_delay=1.0)
+        assert sleeps == [2.0, 2.0]
+        assert len(calls) == 3
+
+    def test_other_errors_ignore_retry_after(self, sleeps):
+        error = _rate_limited("30")
+        error.response.status_code = 503
+        fn, _ = self._flaky(error, IOError("reset"))
+        assert _retry(fn, max_attempts=3, base_delay=1.0) == "ok"
+        assert sleeps == [1.0, 2.0]
+
+    def test_logs_rate_limiting_with_host_only(self, sleeps, caplog):
+        fn, _ = self._flaky(_rate_limited("5"))
+        with caplog.at_level("INFO", logger="memanga.scrapers.base"):
+            _retry(fn, max_attempts=3, base_delay=1.0)
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("cdn.example.test" in m and "429" in m and "5.0s" in m for m in messages)
+        assert not any("token" in m or "/ch/" in m for m in messages)
+
+    def test_logs_a_warning_when_the_wait_is_too_long(self, sleeps, caplog):
+        fn, _ = self._flaky(_rate_limited("3600"))
+        with caplog.at_level("INFO", logger="memanga.scrapers.base"):
+            with pytest.raises(requests.HTTPError):
+                _retry(fn, max_attempts=3, base_delay=1.0)
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1
+        assert "3600s" in warnings[0].getMessage()
+        assert "token" not in warnings[0].getMessage()
+
+    def test_request_honors_retry_after(self, monkeypatch, sleeps):
+        s = _DummyScraper()
+        s._rate_limit = 0
+        responses = []
+        def fake_get(url, **kw):
+            response = requests.Response()
+            response.url = url
+            response._content = b"ok"
+            if not responses:
+                response.status_code = 429
+                response.headers["Retry-After"] = "4"
+            else:
+                response.status_code = 200
+            responses.append(response)
+            return response
+        monkeypatch.setattr(s.session, "get", fake_get)
+
+        assert s._request("https://dummy.test/page").status_code == 200
+        assert len(responses) == 2
+        assert sleeps == [4.0]
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Concrete subclass for testing BaseScraper instance behavior
 # ──────────────────────────────────────────────────────────────────────
 
@@ -236,10 +418,51 @@ class TestDownloadImage:
     def test_writes_to_disk_on_success(self, monkeypatch, tmp_path, fake_response):
         s = _DummyScraper()
         monkeypatch.setattr(s, "_request",
-                             lambda *a, **k: fake_response(content=b"data"))
+                             lambda *a, **k: fake_response(content=_JPEG))
         ok = s.download_image("https://x", tmp_path / "p.jpg")
         assert ok is True
-        assert (tmp_path / "p.jpg").read_bytes() == b"data"
+        assert (tmp_path / "p.jpg").read_bytes() == _JPEG
+
+    @pytest.mark.parametrize("body,ctype", [
+        (b"<!DOCTYPE html><html><body>Just a moment...</body></html>",
+         "text/html; charset=UTF-8"),
+        # The header is not trusted: markup labeled as an image is still markup.
+        (b"<html>hotlink blocked</html>", "image/jpeg"),
+        (b"", "image/jpeg"),
+        (b"", ""),
+    ])
+    def test_non_image_body_is_a_failed_page(self, monkeypatch, tmp_path,
+                                             fake_response, body, ctype):
+        # Issue #229: a 200 block page or empty body must not be saved
+        # as page bytes and reported as success.
+        s = _DummyScraper()
+        monkeypatch.setattr(s, "_request", lambda *a, **k: fake_response(
+            content=body, headers={"Content-Type": ctype}))
+        path = tmp_path / "page_007.jpg"
+        assert s.download_image("https://x", path) is False
+        assert not path.exists()
+
+    def test_image_without_image_content_type_is_kept(self, monkeypatch, tmp_path,
+                                                      fake_response):
+        # TIFF has no sniffed magic number and some CDNs label images
+        # application/octet-stream; Pillow still recognises the bytes.
+        s = _DummyScraper()
+        tiff = _image_bytes("TIFF")
+        monkeypatch.setattr(s, "_request", lambda *a, **k: fake_response(
+            content=tiff, headers={"Content-Type": "application/octet-stream"}))
+        path = tmp_path / "p.tif"
+        assert s.download_image("https://x", path) is True
+        assert path.read_bytes() == tiff
+
+    def test_non_image_body_removes_stale_file(self, monkeypatch, tmp_path,
+                                               fake_response):
+        s = _DummyScraper()
+        path = tmp_path / "page_007.jpg"
+        path.write_bytes(_JPEG)
+        monkeypatch.setattr(s, "_request", lambda *a, **k: fake_response(
+            content=b"<html>hotlink blocked</html>"))
+        assert s.download_image("https://x", path) is False
+        assert not path.exists()
 
     def test_failure_returns_false(self, monkeypatch, tmp_path):
         s = _DummyScraper()
@@ -296,3 +519,185 @@ class TestLooksLikeImage:
     ])
     def test_rejects_non_images(self, body, ctype):
         assert looks_like_image(body, ctype) is False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# is_image_file — saved-page check used by the downloader (issue #229)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class TestIsImageFile:
+    @pytest.mark.parametrize("fmt", ["JPEG", "PNG", "GIF", "BMP", "TIFF"])
+    def test_decodable_images_pass(self, tmp_path, fmt):
+        p = tmp_path / "page"
+        p.write_bytes(_image_bytes(fmt))
+        assert is_image_file(p) is True
+
+    def test_webp_passes(self, tmp_path):
+        from PIL import features
+        if not features.check("webp"):
+            pytest.skip("Pillow built without WebP")
+        p = tmp_path / "p.webp"
+        p.write_bytes(_image_bytes("WEBP"))
+        assert is_image_file(p) is True
+
+    @pytest.mark.parametrize("body", [
+        b"",
+        b"<!DOCTYPE html><html><body>Forbidden</body></html>",
+        b"<html>blocked</html>",
+    ])
+    def test_rejects_non_image_bytes(self, tmp_path, body):
+        p = tmp_path / "p.jpg"
+        p.write_bytes(body)
+        assert is_image_file(p) is False
+
+    @pytest.mark.parametrize("body", [
+        b"\xff\xd8\xff\xe0" + b"\x00" * 16,   # JPEG signature, no image
+        _JPEG[: len(_JPEG) // 2],              # body cut short
+        b"\x89PNG\r\n\x1a\n" + b"\x00" * 16,  # PNG signature, no image
+        _PNG[:-20],                            # IDAT/IEND cut off
+    ], ids=["jpeg-signature-only", "jpeg-truncated",
+            "png-signature-only", "png-truncated"])
+    def test_rejects_corrupt_bytes_behind_a_valid_signature(self, tmp_path, body):
+        # Issue #229: a signature alone is not an image; CBZ/ZIP would
+        # store these bytes verbatim as a page nobody can open.
+        p = tmp_path / "p.img"
+        p.write_bytes(body)
+        assert is_image_file(p) is False
+
+    _AVIF_SIGNATURE = b"\x00\x00\x00 ftypavifmif1" + b"\x00" * 8
+
+    def test_format_without_a_decoder_is_judged_by_signature(
+            self, tmp_path, monkeypatch):
+        # A Pillow build without AVIF support cannot decode the page, so
+        # its signature is all there is to go on.
+        from PIL import features
+        try:
+            from PIL import AvifImagePlugin
+            monkeypatch.setattr(AvifImagePlugin, "SUPPORTED", False)
+        except ImportError:
+            pass  # older Pillow: no AVIF plugin at all
+        real = features.check_module
+        monkeypatch.setattr(features, "check_module",
+                            lambda name: name != "avif" and real(name))
+        p = tmp_path / "p.avif"
+        p.write_bytes(self._AVIF_SIGNATURE)
+        assert is_image_file(p) is True
+
+    def test_format_with_a_decoder_must_decode(self, tmp_path):
+        from PIL import features
+        if "avif" not in features.modules or not features.check_module("avif"):
+            pytest.skip("Pillow built without AVIF")
+        p = tmp_path / "p.avif"
+        p.write_bytes(self._AVIF_SIGNATURE)
+        assert is_image_file(p) is False
+
+    def test_missing_file(self, tmp_path):
+        assert is_image_file(tmp_path / "nope.jpg") is False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Page pixel limit (issue #386)
+# ──────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.filterwarnings("ignore::PIL.Image.DecompressionBombWarning")
+class TestPagePixelLimit:
+    @pytest.mark.parametrize("size", [(2048, 65536), (100_000, 100_000)],
+                             ids=["just-over", "far-over"])
+    def test_over_limit_page_raises_instead_of_failing_silently(
+            self, tmp_path, declared_png, size):
+        from memanga.image_limits import ImageTooLargeError
+        p = tmp_path / "page.png"
+        p.write_bytes(declared_png(*size))
+        with pytest.raises(ImageTooLargeError):
+            is_image_file(p)
+
+    def test_over_limit_page_still_identifies_as_an_image(self, declared_png):
+        # Its download is kept so the page check can say why it's refused.
+        from memanga.scrapers.base import _identifies_as_image
+        assert _identifies_as_image(declared_png(100_000, 100_000)) is True
+
+    def test_page_at_the_limit_is_decoded_as_before(self, tmp_path,
+                                                    monkeypatch):
+        from memanga import image_limits
+        monkeypatch.setattr(image_limits, "MAX_PAGE_PIXELS", 32 * 32)
+        p = tmp_path / "page"
+        p.write_bytes(_image_bytes("PNG"))
+        assert is_image_file(p) is True
+
+
+# ──────────────────────────────────────────────────────────────────────
+# cloudscraper sessions (issue #214)
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _FakeCloudscraper:
+    """Stand-in for the cloudscraper module: records create_scraper calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    def create_scraper(self, **kwargs):
+        self.calls.append(kwargs)
+        return requests.Session()
+
+
+@pytest.fixture
+def fake_cloudscraper(monkeypatch):
+    import sys
+    fake = _FakeCloudscraper()
+    monkeypatch.setitem(sys.modules, "cloudscraper", fake)
+    return fake
+
+
+class TestUseCloudscraper:
+    def test_default_profile_replaces_session(self, fake_cloudscraper):
+        s = _DummyScraper()
+        base = s.session
+        session = s._use_cloudscraper()
+        assert fake_cloudscraper.calls == [{}]
+        assert session is s.session
+        assert session is not base
+
+    def test_browser_profile_is_passed_as_a_copy(self, fake_cloudscraper):
+        from memanga.scrapers.base import CLOUDSCRAPER_CHROME_DESKTOP
+        _DummyScraper()._use_cloudscraper(CLOUDSCRAPER_CHROME_DESKTOP)
+        (call,) = fake_cloudscraper.calls
+        assert call == {"browser": {"browser": "chrome", "platform": "windows",
+                                    "desktop": True}}
+        assert call["browser"] is not CLOUDSCRAPER_CHROME_DESKTOP
+
+    def test_without_cloudscraper_the_base_session_stays(self, monkeypatch):
+        import sys
+        monkeypatch.setitem(sys.modules, "cloudscraper", None)
+        s = _DummyScraper()
+        base = s.session
+        assert s._use_cloudscraper() is base
+        assert s.session is base
+
+    def test_scrapers_keep_their_own_profile_and_headers(self, fake_cloudscraper):
+        from memanga.scrapers.mangadna import MangaDNAScraper
+        from memanga.scrapers.mangafire import MangaFireScraper
+        from memanga.scrapers.readjjkcom import ReadJJKComScraper
+
+        fire = MangaFireScraper()
+        assert fake_cloudscraper.calls[-1] == {"browser": {
+            "browser": "chrome", "platform": "windows", "mobile": False}}
+        assert fire.session.headers["Accept-Language"] == "en-US,en;q=0.9"
+
+        readjjk = ReadJJKComScraper()
+        assert fake_cloudscraper.calls[-1] == {}
+        assert readjjk.session.headers["Referer"] == "https://read-jjk.com"
+
+        dna = MangaDNAScraper()
+        assert dna.scraper is dna.session
+        assert fake_cloudscraper.calls[-1]["browser"]["desktop"] is True
+
+    def test_worker_copy_builds_a_fresh_cloudscraper_session(self, fake_cloudscraper):
+        from memanga.scrapers.mangadna import MangaDNAScraper
+        s = MangaDNAScraper()
+        clone = s.worker_copy()
+        assert len(fake_cloudscraper.calls) == 2
+        assert clone.session is not s.session
+        assert clone.scraper is clone.session

@@ -6,12 +6,15 @@ A friendly CLI for tracking and downloading manga chapters.
 
 import argparse
 import json
+import logging
 import os
-import platform
 import re
 import shutil
+import signal
 import sys
 import subprocess
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,6 +25,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm, IntPrompt
 from rich.table import Table
+from rich.text import Text
 from rich import box
 
 from .backup import (
@@ -31,20 +35,42 @@ from .backup import (
     validate_backup,
     validate_backup_contents,
 )
-from .config import (CONFIG_KEYS, Config, ConfigError, UnknownConfigKey,
-                     config_key_spec, config_section_problems,
-                     config_value_problem, get_app_password,
-                     parse_config_value, set_app_password)
-from .cron import (build_cron_line, build_task_command, managed_lines,
-                   read_crontab,
-                   remove_managed_lines, replace_managed_line,
-                   source_checkout_root, unmanaged_memanga_lines)
-from . import __version__, completion, doctor
-from .state import State, _chapter_number, _chapter_sort_key
-from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, ChapterWithSource, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
-from .scrapers import get_scraper
+from .config import (CONFIG_DIR_ENV, CONFIG_KEYS, AppPasswordError, Config,
+                     ConfigError, UnknownConfigKey, app_password_override,
+                     config_key_spec, config_problems, default_config_dir,
+                     default_root_moved, explicit_config_dir,
+                     get_app_password, parse_config_value,
+                     plaintext_password_notice, set_app_password)
+from .cron import (CONTAINER_SCHEDULING_TEXT, ScheduleStatus, install_schedule,
+                   parse_schedule_time, remove_schedule, running_in_container,
+                   schedule_status, scheduled_checks_supported,
+                   source_checkout_root)
+from . import __version__, completion, doctor, watch
+from .persist import SaveError
+from .process_lock import (LOCK_FILENAME, ConfigDirBusy, ConfigDirLock,
+                           ConfigDirLockError)
+from .chapters import ChapterWithSource, chapter_order_key, chapter_sort_key, chapter_value
+from .state import State
+from .downloader import DEFAULT_FALLBACK_DELAY_DAYS, DEFAULT_PAGE_RETRIES, check_for_updates, download_chapter, get_supported_sources, DownloaderError, restart_browsers, _find_chapter_on_backup, _get_sources_from_manga, _configure_mangadex
+from .scrapers import UnsupportedSourceError, get_scraper
+from .scrapers.catalog import source_catalog, source_coverage
 from .search import compute_search_sources, probe_chapter_counts, sweep
-from .emailer import send_to_kindle, EmailError
+from .email_settings import (EmailSettings, kindle_scope, manga_sends_to_kindle,
+                             proposed_kindle_scope)
+from .emailer import (TEST_DELIVERY_NOTE, EmailError, email_size_limit,
+                      kindle_file_error, kindle_format_error,
+                      raw_attachment_limit, send_test_document, send_to_kindle,
+                      smtp_timeout, smtp_tls_mode)
+from .chapter_pipeline import (ChapterPipeline, ChapterReporter, ChapterStatus,
+                               DeliveryStatus, PipelineOptions,
+                               manga_auto_downloads)
+from .output import (LOG_FILE_NAME, LOG_LEVEL_ENV, RICH_MARKUP,
+                     configure_logging, ensure_utf8_streams,
+                     invalid_log_level_env, is_plain_console,
+                     logging_configured, make_console, resolve_log_level,
+                     set_console_renderer, stream_is_plain)
+
+logger = logging.getLogger(__name__)
 
 console = Console()
 # Issue #239: diagnostics (errors, refused or degraded work) go to stderr
@@ -57,6 +83,7 @@ EXIT_ERROR = 1          # operational error: not found, invalid input, refused
 EXIT_USAGE = 2          # usage error (raised by argparse itself)
 EXIT_PARTIAL = 3        # check / failed retry ran but some chapters failed
 EXIT_INTERRUPTED = 130  # Ctrl-C
+EXIT_TERMINATED = 143   # SIGTERM (128 + 15): cron timeout, service stop
 
 
 def _esc(value) -> str:
@@ -65,16 +92,126 @@ def _esc(value) -> str:
     return escape(str(value))
 
 
+def _panel(text: str, **kwargs):
+    """A Panel, or just its text when stdout is plain (issue #226)."""
+    if is_plain_console(console):
+        return text
+    return Panel(text, **kwargs)
+
+
+def _table(*args, **kwargs) -> Table:
+    """A Table, borderless when stdout is plain (issue #226)."""
+    if is_plain_console(console):
+        kwargs.update(box=None, show_lines=False)
+    return Table(*args, **kwargs)
+
+
+def _log_level(args) -> int:
+    """Console log level for the parsed command line.
+
+    Only the global ``memanga -q`` quiets logging. ``check --quiet``
+    keeps its own meaning (never prompt), so the scheduled
+    ``check --auto --quiet`` still records degraded sources.
+    """
+    default = logging.INFO if getattr(args, "gui", False) else logging.WARNING
+    return resolve_log_level(getattr(args, "verbose", 0),
+                             getattr(args, "log_quiet", False), default)
+
+
+def _render_on_err_console(markup: str) -> None:
+    err_console.print(markup)
+
+
+def _configure_output(args) -> None:
+    """Set up consoles and logging for this run (issue #226).
+
+    Output to a pipe, file or cron, ``--plain`` or ``TERM=dumb`` is plain
+    text: no colour, emoji, borders or hard wrapping. ``NO_COLOR`` only
+    turns colour off. Log records go to stderr; ``-v``/``-vv``/``-q``,
+    then ``MEMANGA_LOG_LEVEL``, choose the level (default WARNING, INFO
+    with ``--gui``). On an interactive stderr, command warnings and
+    errors (see :func:`_diagnostic`) keep their Rich rendering.
+    """
+    global console, err_console
+    ensure_utf8_streams()
+    plain = getattr(args, "plain", False)
+    if stream_is_plain(sys.stdout, plain):
+        console = make_console(plain=True)
+    if stream_is_plain(sys.stderr, plain):
+        err_console = make_console(stderr=True, plain=True)
+
+    configure_logging(_log_level(args))
+    if not is_plain_console(err_console):
+        set_console_renderer(_render_on_err_console)
+    bad = invalid_log_level_env()
+    if bad is not None:
+        logger.warning("Ignoring %s=%r: use DEBUG, INFO, WARNING, ERROR or "
+                       "CRITICAL", LOG_LEVEL_ENV, bad)
+
+
+def _enable_log_file(args, root: Path) -> None:
+    """Also log to the rotating ``diagnostics.log`` in ``root`` when
+    ``--log-file`` was given. A file that can't be opened only warns."""
+    if not getattr(args, "log_file", False):
+        return
+    path = root / LOG_FILE_NAME
+    try:
+        configure_logging(_log_level(args), log_file=path)
+    except OSError as e:
+        sys.stderr.write(f"warning: cannot write log file {path}: "
+                         f"{e.strerror or e}\n")
+
+
+def _diagnostic(level: int, markup: str, message: str, *args) -> None:
+    """Report a command's warning or error (issue #226).
+
+    It is a log record on ``memanga.cli``: ``memanga -q`` and
+    ``MEMANGA_LOG_LEVEL`` decide whether it shows, redirected stderr and
+    ``--log-file`` get one plain line with a timestamp and level, and an
+    interactive terminal still shows ``markup``. When main() did not set
+    up logging (a command function called directly), ``markup`` is
+    printed as before.
+    """
+    if not logging_configured():
+        err_console.print(markup)
+        return
+    logger.log(level, message, *args, extra={RICH_MARKUP: markup})
+
+
 def _stdin_is_tty() -> bool:
     """True only when someone can answer a prompt (issue #258).
 
     Cron, pipes and CI run with stdin closed or redirected; prompting
     there either blocks or dies with EOFError, so callers must bail.
+    On Windows isatty() is also true for the NUL device (Task Scheduler,
+    `< NUL`), so a stdin backed by a file descriptor must be a console
+    there too. A stdin without one (an IDE's shell) cannot be the NUL
+    device; its isatty() answer stands, as on other systems.
     """
     try:
-        return sys.stdin is not None and sys.stdin.isatty()
-    except (AttributeError, ValueError):
+        if sys.stdin is None or not sys.stdin.isatty():
+            return False
+        if sys.platform == "win32":
+            try:
+                fd = sys.stdin.fileno()
+            except (AttributeError, ValueError, OSError):
+                return True
+            return _is_windows_console(fd)
+        return True
+    except (AttributeError, ValueError, OSError):
         return False
+
+
+def _is_windows_console(fd: int) -> bool:
+    """True when ``fd`` is a Windows console; only a console handle has
+    a console mode."""
+    import ctypes
+    import msvcrt
+
+    mode = ctypes.c_ulong()
+    handle = msvcrt.get_osfhandle(fd)
+    return bool(ctypes.windll.kernel32.GetConsoleMode(
+        ctypes.c_void_p(handle), ctypes.byref(mode)))
 
 
 def _non_interactive_error(message: str) -> int:
@@ -87,10 +224,6 @@ def _error(message: str) -> int:
     """Print a Rich-markup diagnostic to stderr; return EXIT_ERROR."""
     err_console.print(message)
     return EXIT_ERROR
-
-# Issue #221: `--config-dir DIR` wins over $MEMANGA_CONFIG_DIR, which
-# wins over the default ~/.config/memanga.
-CONFIG_DIR_ENV = "MEMANGA_CONFIG_DIR"
 
 
 @dataclass
@@ -110,25 +243,131 @@ config: Optional[Config] = None
 state: Optional[State] = None
 
 
+# Issue #221: `--config-dir DIR` wins over $MEMANGA_CONFIG_DIR, which
+# wins over the platform default (issue #249). The selection lives in
+# memanga.config so the GUI shares it.
 def resolve_config_dir(cli_value=None) -> Optional[Path]:
     """Return the selected config root, or None for the default."""
-    value = cli_value or os.environ.get(CONFIG_DIR_ENV)
-    if not value:
-        return None
-    return Path(value).expanduser().absolute()
+    return explicit_config_dir(cli_value)
 
 
-def build_context(config_dir=None) -> CliContext:
+def build_context(config_dir=None, recover_state=True, root=None) -> CliContext:
     """Build Config and State under ``config_dir`` (None = default).
 
+    ``root`` is the directory main() already resolved and locked for the
+    default case, so Config and State never pick the default twice.
     Config is tolerant so a broken config.yaml still reaches `doctor`;
-    main() refuses every other command (issue #250).
+    main() refuses every other command (issue #250). ``recover_state``
+    is False when the config directory is not locked (issue #244): a
+    damaged state.json is then left as it is.
     """
+    root = config_dir or root or default_config_dir()
     return CliContext(
-        config=Config(config_dir, tolerate_errors=True),
-        state=State(config_dir),
+        config=Config(root, tolerate_errors=True),
+        state=State(root, recover=recover_state),
         config_dir=config_dir,
     )
+
+
+# Issue #244: commands that only read config.yaml/state.json run while
+# another process holds the config directory lock. Everything else,
+# including any command added later, takes the lock.
+READ_ONLY_COMMANDS = ("list", "ls", "status", "path", "open", "sources",
+                      "export", "doctor")
+READ_ONLY_CONFIG_ACTIONS = ("show", "get", "path")
+
+# Held from before Config/State are loaded until main() has saved the
+# last state; released by main().
+_config_lock: Optional[ConfigDirLock] = None
+
+
+def _needs_config_lock(args) -> bool:
+    """True when the parsed command may change config or state."""
+    if args.gui:
+        return True
+    if args.command in READ_ONLY_COMMANDS:
+        return False
+    if args.command == "config":
+        action = getattr(args, "config_action", None)
+        if action:
+            return action not in READ_ONLY_CONFIG_ACTIONS
+        return not args.show
+    if args.command == "failed":
+        return _failed_action(args) != "list"
+    if args.command == "send":
+        return not (args.list or args.dry_run)
+    if args.command == "cron":
+        return args.action != "status"
+    if args.command == "search":
+        # Only --add or the interactive prompt add a manga.
+        return not args.json or args.add is not None
+    return True
+
+
+def _acquire_config_lock(config_dir: Path, required: bool = True) -> bool:
+    """Lock ``config_dir`` for this process or exit 1 (issue #244).
+
+    Nothing has been loaded or written yet when this refuses. With
+    ``required=False`` a lock that cannot be taken returns False instead.
+    """
+    global _config_lock
+    lock = ConfigDirLock(config_dir)
+    try:
+        lock.acquire()
+    except ConfigDirBusy:
+        if not required:
+            return False
+        sys.stderr.write(
+            f"error: another MeManga process is using {config_dir} "
+            "(a running check, the desktop app or another command).\n"
+            "Wait for it to finish, then retry. Read-only commands such as "
+            "`memanga list` and `memanga status` still work.\n"
+        )
+        sys.exit(EXIT_ERROR)
+    except ConfigDirLockError as e:
+        if not required:
+            return False
+        sys.stderr.write(
+            f"error: cannot lock {config_dir}: {e.error.strerror or e.error}\n"
+            "MeManga needs a config directory on a file system that "
+            "supports file locks.\n"
+        )
+        sys.exit(EXIT_ERROR)
+    _config_lock = lock
+    return True
+
+
+def _revalidate_default_root(root: Path, locked: bool) -> Path:
+    """Return the default root to load, after the lock (issue #249).
+
+    Another process may move the legacy ~/.config/memanga to the
+    platform folder between default_config_dir() and taking the lock;
+    this process would then lock a recreated, empty legacy folder and
+    save where no normal start looks. Switch to the platform folder
+    (locked when ``locked``) instead, or exit 1 if that is not possible.
+    Nothing has been loaded yet.
+    """
+    if not default_root_moved(root):
+        return root
+    if locked:
+        _release_config_lock()
+    new_root = default_config_dir()
+    if default_root_moved(new_root):
+        sys.stderr.write(
+            f"error: MeManga's config folder was just moved from {root}; "
+            "nothing was changed. Retry the command.\n"
+        )
+        sys.exit(EXIT_ERROR)
+    if locked:
+        _acquire_config_lock(new_root)
+    return new_root
+
+
+def _release_config_lock():
+    global _config_lock
+    if _config_lock is not None:
+        _config_lock.release()
+        _config_lock = None
 
 
 def use_context(ctx: CliContext) -> CliContext:
@@ -254,7 +493,7 @@ def _list_sort_value(entry: Dict[str, Any], key: str):
     if key == "last-chapter":
         if entry["last_chapter"] is None:
             return None
-        return _chapter_number(entry["last_chapter"])
+        return chapter_value(entry["last_chapter"])
     if key == "downloaded":
         return entry["downloaded_count"]
     return entry["n"]
@@ -269,6 +508,7 @@ def _list_entries(statuses=None, sort: str = DEFAULT_LIST_SORT, reverse: bool = 
     status, no numeric last chapter) go last in either direction.
     """
     entries = []
+    scope = kindle_scope(config)
     for i, manga in enumerate(config.get("manga", []), 1):
         title = manga["title"]
         sources = [s for s in _get_sources_from_manga(manga) if s.get("url")]
@@ -284,7 +524,7 @@ def _list_entries(statuses=None, sort: str = DEFAULT_LIST_SORT, reverse: bool = 
             "last_chapter": state.get_last_chapter(title),
             "downloaded_count": len(state.get_downloaded_chapters(title)),
             "mode": manga.get("mode") or "auto",
-            "send_to_kindle": bool(manga.get("send_to_kindle", True)),
+            "send_to_kindle": manga_sends_to_kindle(manga, scope),
             "backup_count": max(len(sources) - 1, 0),
         })
     if statuses:
@@ -319,7 +559,7 @@ def cmd_list(args):
         return
 
     if not config.get("manga", []):
-        console.print("[dim]No manga tracked yet. Use [cyan]memanga add[/cyan] to add some![/dim]")
+        console.print("[dim]No manga tracked yet. Use [cyan]memanga add[/cyan] to add one.[/dim]")
         return
 
     entries = _list_entries(statuses, sort, reverse)
@@ -327,7 +567,7 @@ def cmd_list(args):
         console.print(f"[dim]No manga with status {_esc(', '.join(statuses))}.[/dim]")
         return
     
-    table = Table(
+    table = _table(
         title="📚 Tracked Manga",
         box=box.ROUNDED,
         show_lines=True,
@@ -412,11 +652,16 @@ def cmd_add(args):
         url = args.url
         backup_url = getattr(args, 'backup', None)
         fallback_days = getattr(args, 'fallback_days', None)
-        if fallback_days is None:
-            fallback_days = DEFAULT_FALLBACK_DELAY_DAYS
         
         if not title or not url:
             return _error("[red]Error:[/red] --title and --url required (or use --interactive)")
+        if fallback_days is not None and not backup_url:
+            return _error(
+                "[red]Error:[/red] --fallback-days needs a backup source "
+                "(add one with --backup URL)"
+            )
+        if fallback_days is None:
+            fallback_days = DEFAULT_FALLBACK_DELAY_DAYS
     
     # Extract source from URL
     parsed = urlparse(url)
@@ -458,7 +703,8 @@ def cmd_add(args):
         }
 
     # Issue #347: policy fields are written only when given, so a plain
-    # `add` keeps the legacy defaults (reading / auto / Kindle on).
+    # `add` keeps the legacy defaults (reading / auto) and, for Kindle,
+    # follows email.kindle_scope (#345).
     status = getattr(args, 'status', None)
     mode = getattr(args, 'mode', None)
     kindle = getattr(args, 'send_to_kindle', None)
@@ -484,8 +730,18 @@ def cmd_add(args):
     # Check for exact duplicate
     for m in manga_list:
         if m["title"].lower() == title.lower():
-            err_console.print(f"[yellow]⚠️  '{_esc(title)}' already exists![/yellow]")
+            err_console.print(f"[yellow]'{_esc(title)}' already exists.[/yellow]")
             return EXIT_ERROR
+
+    # Issue #246: titles that differ only in characters a file name drops
+    # ("A:B" and "AB") would share one download folder and overwrite each
+    # other's chapter files, so --force does not override this.
+    owner = _download_folder_owner(title, manga_list)
+    if owner is not None:
+        return _error(
+            f"[red]Error:[/red] '{_esc(title)}' would use the same download "
+            f"folder as '{_esc(owner['title'])}'; pick another title"
+        )
 
     # Check for similar titles (substring match)
     new_lower = title.lower()
@@ -574,15 +830,21 @@ def _target_error(target: str, candidates: list) -> int:
 
 
 def _shares_download_dir(title: str, others) -> bool:
-    """True if another tracked manga writes to the same download folder.
+    """True if another tracked manga writes to the same download folder."""
+    return _download_folder_owner(title, others) is not None
+
+
+def _download_folder_owner(title: str, others):
+    """The tracked manga in ``others`` that writes to the same download
+    folder as ``title``, or None.
 
     Sanitizing can map different titles to one folder ("A:B" and "AB"),
     and case-insensitive filesystems merge "x" and "X" too.
     """
-    from .downloader import _sanitize_filename
-    name = _sanitize_filename(title).casefold()
-    return any(_sanitize_filename(m.get("title", "")).casefold() == name
-               for m in others)
+    from .downloader import _download_folder_key
+    key = _download_folder_key(title)
+    return next((m for m in others
+                 if _download_folder_key(m.get("title", "")) == key), None)
 
 
 def cmd_remove(args):
@@ -664,6 +926,8 @@ def cmd_remove(args):
         if title in manga_state:
             del manga_state[title]
             state.set("manga", manga_state)
+        # Issue #392: the Downloads History rows are history too.
+        state.remove_download_history(title)
 
     console.print(f"[red]🗑️  Removed:[/red] {_esc(title)}")
     if purge_history:
@@ -798,12 +1062,12 @@ def cmd_read(args):
     if args.all:
         if mark_read:
             chapters = sorted(dict.fromkeys(str(ch) for ch in downloaded),
-                              key=_chapter_sort_key)
+                              key=chapter_sort_key)
             if not chapters:
                 console.print(f"[dim]No downloaded chapters of {_esc(title)} to mark read.[/dim]")
                 return None
         else:
-            chapters = sorted(read_set, key=_chapter_sort_key)
+            chapters = sorted(read_set, key=chapter_sort_key)
             if not chapters:
                 console.print(f"[dim]No chapters of {_esc(title)} are marked read.[/dim]")
                 return None
@@ -1084,9 +1348,24 @@ def cmd_update(args):
         title = title.strip()
         if not title:
             return _error("[red]Error:[/red] --title cannot be empty")
-        for i, m in enumerate(manga_list):
-            if i != found_idx and m["title"].lower() == title.lower():
+        others = [m for i, m in enumerate(manga_list) if i != found_idx]
+        for m in others:
+            if m["title"].lower() == title.lower():
                 return _error(f"[red]Error:[/red] '{_esc(m['title'])}' already exists; pick another title")
+        # Same folder as another manga: see cmd_add (issue #246).
+        owner = _download_folder_owner(title, others)
+        if owner is not None:
+            return _error(
+                f"[red]Error:[/red] '{_esc(title)}' would use the same download "
+                f"folder as '{_esc(owner['title'])}'; pick another title"
+            )
+        # Issue #392: history saved under that title (an earlier manga's)
+        # can't be told apart from this manga's once they share it.
+        if title != old_title and state.has_manga_history(title):
+            return _error(
+                f"[red]Error:[/red] '{_esc(title)}' still has history from an "
+                f"earlier manga; pick another title"
+            )
 
     # Legacy entries keep `source`/`url`; multi-source entries keep a
     # `sources` list whose items are dicts or bare URL strings.
@@ -1169,7 +1448,9 @@ def cmd_update(args):
     if mode is not None and mode != (found.get("mode") or "auto"):
         edited["mode"] = mode
         changes.append(f"Mode → {mode}")
-    if kindle is not None and kindle != bool(found.get("send_to_kindle", True)):
+    # Issue #345: an explicit choice is stored even when it matches what
+    # the scope gives now, so it still holds after the scope changes.
+    if kindle is not None and found.get("send_to_kindle") is not kindle:
         edited["send_to_kindle"] = kindle
         changes.append(f"Kindle → {'on' if kindle else 'off'}")
 
@@ -1200,9 +1481,95 @@ def cmd_update(args):
         console.print(f"  {_esc(c)}")
 
 
-def _pipeline_options(output_format=None, max_retries=DEFAULT_PAGE_RETRIES,
-                      allow_partial=None, partial_threshold=None):
-    """Download settings shared by `check` and `failed retry` (#352).
+def _chapter_label(ch) -> str:
+    """`Chapter N` or `Chapter N: title`, escaped for Rich markup
+    (chapter titles are scraped data)."""
+    label = f"Chapter {ch.number}"
+    if ch.title:
+        label += f": {ch.title}"
+    return _esc(label)
+
+
+class _ConsoleChapterReporter(ChapterReporter):
+    """Prints chapter-pipeline progress the way `check` always has:
+    progress and saves on stdout; warnings and failures are log records
+    on stderr (see :func:`_diagnostic`)."""
+
+    def downloading(self, chapter):
+        source_info = ""
+        if isinstance(chapter, ChapterWithSource) and chapter.is_backup:
+            source_info = f" [yellow](from backup: {_esc(chapter.source)})[/yellow]"
+        console.print(f"     [dim]⬇️  Downloading {_chapter_label(chapter)}...{source_info}[/dim]")
+
+    def trying_backup(self, error, backup_chapter):
+        _diagnostic(
+            logging.WARNING,
+            f"     [yellow]⚠️  Primary failed ({_esc(error)}), trying backup ({_esc(backup_chapter.source)})...[/yellow]",
+            "Chapter %s: primary failed (%s), trying backup (%s)",
+            backup_chapter.number, error, backup_chapter.source,
+        )
+
+    def backup_failed(self, error):
+        _diagnostic(logging.ERROR,
+                    f"     [red]❌ Backup also failed: {_esc(error)}[/red]",
+                    "Backup also failed: %s", error)
+
+    def saved(self, outcome):
+        path = outcome.path
+        name = f"{path.parent.name}/{path.name}/" if path.is_dir() else path.name
+        label = _esc(name)
+        src = " from backup" if outcome.from_backup else ""
+        if outcome.status is ChapterStatus.PARTIAL:
+            miss = outcome.missing_pages
+            _diagnostic(
+                logging.WARNING,
+                f"     [yellow]⚠️  Saved partial{src}: {label} — "
+                f"{len(miss)}/{outcome.total_pages} page(s) missing (pages {_esc(miss)})[/yellow]",
+                "Saved partial%s: %s — %d/%d page(s) missing (pages %s)",
+                src, name, len(miss), outcome.total_pages, miss,
+            )
+        else:
+            console.print(f"     [green]✅ Saved{src}: {label}[/green]")
+
+    def email_skipped_format(self, path, reason):
+        console.print(f"     [dim]📧 Not sent to Kindle: {_esc(reason)}[/dim]")
+
+    def email_sending(self, path):
+        console.print("     [dim]📧 Sending to Kindle...[/dim]")
+
+    def email_part_sent(self, path, part, total):
+        # Issue #364: the mail server took this part; it may still be on
+        # its way to the Kindle.
+        console.print(f"     [dim]📧 Part {part}/{total} accepted by the mail server[/dim]")
+
+    def email_sent(self, path):
+        console.print("     [green]Sent to Kindle.[/green]")
+
+    def deleted_after_send(self, path):
+        console.print("     [dim]🗑️  Deleted local copy[/dim]")
+
+    def delete_failed(self, path, error):
+        _diagnostic(
+            logging.WARNING,
+            f"     [yellow]⚠️  Could not delete local copy: {_esc(error)}[/yellow]",
+            "Could not delete local copy %s: %s", path, error,
+        )
+
+    def email_failed(self, error):
+        _diagnostic(logging.ERROR,
+                    f"     [red]📧 Email failed: {_esc(error)}[/red]",
+                    "Email failed: %s", error)
+
+    def failed(self, outcome):
+        _diagnostic(logging.ERROR,
+                    f"     [red]❌ Failed: {_esc(outcome.error)}[/red]",
+                    "Chapter %s: Failed: %s", outcome.chapter, outcome.error)
+
+
+def _chapter_pipeline(output_format=None, max_retries=DEFAULT_PAGE_RETRIES,
+                      allow_partial=None, partial_threshold=None) -> ChapterPipeline:
+    """The chapter pipeline shared by `check` and `failed retry` (#352,
+    #222), configured from config and printing to the console.
 
     Partial-chapter tolerance (issue #86) comes from config unless the
     caller overrides it for a single run.
@@ -1211,232 +1578,143 @@ def _pipeline_options(output_format=None, max_retries=DEFAULT_PAGE_RETRIES,
         allow_partial = config.partial_enabled
     if partial_threshold is None:
         partial_threshold = config.partial_threshold
-    return {
-        "delivery_mode": config.delivery_mode,
-        "download_dir": config.download_dir,
-        "output_format": output_format or config.output_format,
-        "email_cfg": config.get("email", {}),
-        "post_processing": config.get("delivery.post_processing"),
-        "max_retries": max_retries,
-        "allow_partial": allow_partial,
-        "partial_threshold": partial_threshold,
-    }
+    options = PipelineOptions(
+        download_dir=config.download_dir,
+        output_format=output_format or config.output_format,
+        max_retries=max_retries,
+        post_processing=config.get("delivery.post_processing"),
+        allow_partial=allow_partial,
+        partial_threshold=partial_threshold,
+        delivery_mode=config.delivery_mode,
+        # The password is looked up only when a chapter is sent.
+        email=EmailSettings.from_config(config, resolve_password=False),
+        delete_after_send=config.delivery.delete_after_send,
+    )
+    # Bind the collaborators imported here rather than the pipeline's
+    # defaults, so this module stays the one place to replace them.
+    return ChapterPipeline(
+        options=options,
+        state=state,
+        reporter=_ConsoleChapterReporter(),
+        download=download_chapter,
+        find_backup=_find_chapter_on_backup,
+        send=send_to_kindle,
+        app_password=lambda: get_app_password(config),
+    )
 
 
-def _download_chapter_pipeline(manga, ch, ch_label, opts) -> bool:
-    """Download one chapter the way `check` does, shared with `failed
-    retry` (#352): primary source, then a complete copy from the backup,
-    then (with partial tolerance) the best partial. Saves are announced,
-    emailed when delivery is email and recorded in state; a chapter that
-    nothing could save is recorded as failed.
+class StateCheckpointError(Exception):
+    """state.json could not be written after a chapter (issue #230)."""
 
-    Returns True when the chapter was saved.
+
+def _checkpoint_state():
+    """Write state now; raise StateCheckpointError on failure.
+
+    save(), not flush(): some mutators save() without marking state
+    dirty, so after one of them failed flush() would see nothing to
+    write. The write is atomic; a failure leaves the previous file.
     """
-    title = manga["title"]
-    delivery_mode = opts["delivery_mode"]
-    download_dir = opts["download_dir"]
-    output_format = opts["output_format"]
-    email_cfg = opts["email_cfg"]
-    post_processing = opts["post_processing"]
-    max_retries = opts["max_retries"]
-    allow_partial = opts["allow_partial"]
-    partial_threshold = opts["partial_threshold"]
-
-
-    # Captures partial-download details from download_chapter so
-    # we can surface which pages are missing without parsing the
-    # log line. Reset per attempt.
-    partial_info = {}
-
-    def _capture_partial(failed_pages, total, _info=partial_info):
-        _info["failed_pages"] = failed_pages
-        _info["total"] = total
-
-    def _deliver_email(file_path):
-        """Send to Kindle if configured (skips image folders)."""
-        if not (delivery_mode == "email" and email_cfg.get("kindle_email")):
-            return
-        if file_path.is_dir():
-            console.print("     [dim]📧 Skipped email (image folders cannot be emailed)[/dim]")
-            return
-        console.print("     [dim]📧 Sending to Kindle...[/dim]")
-        try:
-            send_to_kindle(
-                pdf_path=file_path,
-                kindle_email=email_cfg["kindle_email"],
-                sender_email=email_cfg["sender_email"],
-                smtp_server=email_cfg.get("smtp_server", "smtp.gmail.com"),
-                smtp_port=email_cfg.get("smtp_port", 587),
-                app_password=get_app_password(config),
-            )
-            console.print("     [green]📬 Sent to Kindle![/green]")
-            if config.get("delivery.delete_after_send", False):
-                file_path.unlink()
-                console.print("     [dim]🗑️  Deleted local copy[/dim]")
-        except EmailError as email_e:
-            err_console.print(f"     [red]📧 Email failed: {_esc(email_e)}[/red]")
-
-    def _announce_saved(file_path, from_backup, partial, source=None):
-        """Print the save line and, for partials, warn + log which
-        pages are missing so headless runs leave a trail."""
-        label = _esc(f"{file_path.parent.name}/{file_path.name}/" if file_path.is_dir() else file_path.name)
-        src = " from backup" if from_backup else ""
-        if partial:
-            miss = partial.get("failed_pages", [])
-            total = partial.get("total", 0)
-            err_console.print(
-                f"     [yellow]⚠️  Saved partial{src}: {label} — "
-                f"{len(miss)}/{total} page(s) missing (pages {_esc(miss)})[/yellow]"
-            )
-            state.add_notification(
-                "warn",
-                f"'{title}' Chapter {ch.number} saved as partial: "
-                f"{len(miss)}/{total} page(s) missing (pages {miss}).",
-            )
-            state.add_partial_chapter(
-                title,
-                ch.number,
-                source=source or "",
-                failed_pages=miss,
-                total_pages=total,
-                path=str(file_path),
-                from_backup=from_backup,
-            )
-        else:
-            state.clear_partial_chapter(title, ch.number)
-            console.print(f"     [green]✅ Saved{src}: {label}[/green]")
-
     try:
-        # Show source info if from backup
-        source_info = ""
-        if isinstance(ch, ChapterWithSource) and ch.is_backup:
-            source_info = f" [yellow](from backup: {_esc(ch.source)})[/yellow]"
+        state.save()
+    except Exception as e:
+        raise StateCheckpointError(str(e)) from e
 
-        console.print(f"     [dim]⬇️  Downloading {ch_label}...{source_info}[/dim]")
 
-        # Only accept a partial straight away when there's no
-        # backup to try first — otherwise we prefer a complete
-        # download from the backup (issue #86 direction).
-        is_from_backup = isinstance(ch, ChapterWithSource) and ch.is_backup
-        has_backup = (not is_from_backup) and len(_get_sources_from_manga(manga)) > 1
-        primary_allow_partial = allow_partial and not has_backup
+def _process_chapter(pipeline: ChapterPipeline, manga, chapter):
+    """Run one chapter through ``pipeline`` and persist the result before
+    the caller moves on (issue #230).
 
-        partial_info.clear()
-        file_path = download_chapter(
-            manga, ch, download_dir, output_format,
-            state=state,
-            max_retries=max_retries,
-            post_processing=post_processing,
-            allow_partial=primary_allow_partial,
-            partial_threshold=partial_threshold,
-            on_partial=_capture_partial,
+    The pipeline only marks state dirty (the GUI batches its writes), so
+    without this a CLI process killed later in a long run lost chapters
+    it had already saved and sent, and the next run sent them again.
+    The checkpoint also runs when the chapter raised, so whatever was
+    recorded before the error is kept. If it fails, StateCheckpointError
+    propagates past the per-manga error handling and ends the command:
+    continuing would download and deliver chapters that cannot be
+    recorded.
+    """
+    try:
+        outcome = pipeline.process(manga, chapter)
+    except Exception:
+        _checkpoint_state()
+        raise
+    _checkpoint_state()
+    return outcome
+
+
+def _check_summary_line(dry_run, checked, new, downloaded, failed,
+                        errored, unconfirmed, undelivered=0, manual=0) -> str:
+    """The single plain-text summary of a `check` run (issue #226).
+
+    When something is left to do it ends with ``; next: <action>``
+    (issue #372), so a cron run that hides warnings still says what to
+    run. Unconfirmed chapters and failed chapters never occur in the same
+    run: the first only happens when nothing is downloaded. ``manual``
+    counts new chapters of manual-mode manga that were only listed
+    (#341); they are not part of ``new``.
+    """
+    if dry_run:
+        line = f"Dry run: {new} chapter(s) available for download"
+    elif new == 0:
+        line = ("Summary: no chapters to download" if manual
+                else "Summary: no new chapters found")
+    else:
+        line = (f"Summary: {downloaded}/{new} chapters downloaded, "
+                f"{failed} failed")
+        if undelivered:
+            line += f", {undelivered} not sent to Kindle"
+    line += f"; checked {checked} manga, {errored} could not be checked"
+    if manual:
+        line += f", {manual} chapter(s) of manual-mode manga not downloaded"
+    if unconfirmed:
+        line += (f", {unconfirmed} chapter(s) need confirmation"
+                 "; next: rerun with --download")
+    elif failed:
+        line += "; next: run 'memanga failed' for details"
+    elif undelivered:
+        line += "; next: run 'memanga send --pending'"
+    return line
+
+
+def _warn_undelivered(count: int) -> None:
+    """Saved chapters whose Kindle delivery failed in this run (#360)."""
+    if count:
+        _diagnostic(
+            logging.WARNING,
+            f"[yellow]⚠️  {count} chapter(s) saved but not sent to Kindle — "
+            "run 'memanga send --pending' to send them again.[/yellow]",
+            "%d chapter(s) saved but not sent to Kindle — run "
+            "'memanga send --pending' to send them again.", count,
         )
-        _announce_saved(
-            file_path,
-            from_backup=False,
-            partial=dict(partial_info),
-            source=getattr(ch, "source", None) or "unknown",
-        )
-        _deliver_email(file_path)
 
-        # Update state
-        state.add_downloaded_chapter(title, ch.number)
-        state.clear_pending_backup(title, ch.number)
-        state.clear_failed_chapter(title, ch.number)
-        return True
 
-    except DownloaderError as e:
-        ch_source = ch.source if isinstance(ch, ChapterWithSource) else "unknown"
-        is_from_backup = isinstance(ch, ChapterWithSource) and ch.is_backup
+def _warn_kindle_format(reason: str, hint: str) -> None:
+    """Kindle delivery is on but the output format can't be sent (#362):
+    chapters are saved and kept, never emailed."""
+    message = (f"{reason} Chapters are saved but not sent to Kindle; "
+               f"{hint}.")
+    _diagnostic(logging.WARNING, f"[yellow]⚠️  {_esc(message)}[/yellow]",
+                "%s", message)
 
-        backup_ch = None
-        if not is_from_backup:
-            backup_ch = _find_chapter_on_backup(manga, ch.number, state)
 
-        saved = False
-        backup_e = None
+def _warn_config_kindle_format(cfg=None) -> None:
+    """Warn when the saved delivery mode and output format conflict
+    (#362). The values are kept: the format is still valid locally."""
+    cfg = config if cfg is None else cfg
+    if cfg.delivery_mode != "email":
+        return
+    reason = kindle_format_error(cfg.output_format)
+    if reason:
+        _warn_kindle_format(
+            reason, "set delivery.output_format to pdf or epub to send them")
 
-        # 1) Try a complete download from the backup source.
-        if backup_ch:
-            err_console.print(f"     [yellow]⚠️  Primary failed ({_esc(e)}), trying backup ({_esc(backup_ch.source)})...[/yellow]")
-            try:
-                file_path = download_chapter(
-                    manga, backup_ch, download_dir, output_format,
-                    state=state,
-                    max_retries=max_retries,
-                    post_processing=post_processing,
-                )
-                _announce_saved(
-                    file_path,
-                    from_backup=True,
-                    partial=None,
-                    source=getattr(backup_ch, "source", None),
-                )
-                _deliver_email(file_path)
-                state.add_downloaded_chapter(title, ch.number)
-                state.clear_pending_backup(title, ch.number)
-                state.clear_failed_chapter(title, ch.number)
-                saved = True
-            except DownloaderError as be:
-                backup_e = be
-                err_console.print(f"     [red]❌ Backup also failed: {_esc(be)}[/red]")
 
-        # 2) Both sources failed to deliver a complete chapter.
-        #    If partial tolerance is on, salvage the best partial
-        #    (backup first, then primary) within the threshold.
-        if not saved and allow_partial:
-            salvage = []
-            if backup_ch:
-                salvage.append((backup_ch, True))
-            # Skip the primary here if we already tried it with
-            # partial enabled above (no backup case).
-            if not primary_allow_partial:
-                salvage.append((ch, False))
-            for cand, from_backup in salvage:
-                partial_info.clear()
-                try:
-                    file_path = download_chapter(
-                        manga, cand, download_dir, output_format,
-                        state=state,
-                        max_retries=max_retries,
-                        post_processing=post_processing,
-                        allow_partial=True,
-                        partial_threshold=partial_threshold,
-                        on_partial=_capture_partial,
-                    )
-                except DownloaderError:
-                    continue
-                _announce_saved(
-                    file_path,
-                    from_backup=from_backup,
-                    partial=dict(partial_info),
-                    source=getattr(cand, "source", None),
-                )
-                _deliver_email(file_path)
-                state.add_downloaded_chapter(title, ch.number)
-                state.clear_pending_backup(title, ch.number)
-                state.clear_failed_chapter(title, ch.number)
-                saved = True
-                break
-
-        # 3) Nothing worked — record the failure.
-        if not saved:
-            if backup_ch and backup_e is not None:
-                err_console.print(f"     [red]❌ Failed: {_esc(e)}[/red]")
-                state.add_failed_chapter(
-                    title, ch.number,
-                    f"{ch_source}+{backup_ch.source}",
-                    f"Primary: {e}; Backup: {backup_e}",
-                    failed_pages=getattr(e, "failed_pages", None),
-                )
-            else:
-                err_console.print(f"     [red]❌ Failed: {_esc(e)}[/red]")
-                state.add_failed_chapter(
-                    title, ch.number, ch_source, str(e),
-                    failed_pages=getattr(e, "failed_pages", None),
-                )
-            return False
-        return True
+def _quoted_title(title: str) -> str:
+    """``title`` quoted for a command line on this platform."""
+    if sys.platform == "win32":
+        return subprocess.list2cmdline([title])
+    import shlex
+    return shlex.quote(title)
 
 
 def cmd_check(args):
@@ -1450,11 +1728,16 @@ def cmd_check(args):
         prompting.
       - otherwise: ask per chapter on a terminal. Without a terminal, or
         with ``--quiet``, nothing is downloaded and the run exits 1.
+
+    Without a TARGET, manual-mode manga (#341) are checked and their new
+    chapters listed, but never downloaded unless the user is asked per
+    chapter, like the desktop app's background check. Naming the manga
+    downloads it as usual.
     """
     manga_list = config.get("manga", [])
     
     if not manga_list and not args.title:
-        console.print("[yellow]No manga tracked. Use 'memanga add' first![/yellow]")
+        console.print("[yellow]No manga tracked. Add one with 'memanga add'.[/yellow]")
         return
     
     # Filter to specific manga if provided
@@ -1481,13 +1764,13 @@ def cmd_check(args):
     console.print(f"[dim]=== {datetime.now().strftime('%Y-%m-%d %H:%M')} ===[/dim]")
 
     if dry_run:
-        console.print(Panel("[bold]🔍 Dry Run — Check Only (nothing is downloaded or recorded)[/bold]", border_style="yellow"))
+        console.print(_panel("[bold]🔍 Dry Run — Check Only (nothing is downloaded or recorded)[/bold]", border_style="yellow"))
     elif from_chapter is not None and from_chapter == 0:
-        console.print(Panel("[bold]📥 Downloading All Chapters[/bold]", border_style="green"))
+        console.print(_panel("[bold]📥 Downloading All Chapters[/bold]", border_style="green"))
     elif from_chapter is not None:
-        console.print(Panel(f"[bold]📥 Downloading from Chapter {from_chapter}[/bold]", border_style="green"))
+        console.print(_panel(f"[bold]📥 Downloading from Chapter {from_chapter}[/bold]", border_style="green"))
     else:
-        console.print(Panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
+        console.print(_panel("[bold]🔍 Checking for New Chapters[/bold]", border_style="blue"))
     console.print()
     
     total_new = 0
@@ -1498,6 +1781,10 @@ def cmd_check(args):
     total_errored = 0
     # Chapters left undownloaded because no one could confirm them (#258).
     total_unconfirmed = 0
+    # Saved chapters whose Kindle delivery failed (#360).
+    total_undelivered = 0
+    # New chapters of manual-mode manga, listed but not downloaded (#341).
+    total_manual = 0
 
     # Partial-chapter tolerance (issue #86). Config is the source of truth;
     # `check` flags can override it for a single run.
@@ -1506,14 +1793,22 @@ def cmd_check(args):
         allow_partial = True
     if getattr(args, 'no_partial', False):
         allow_partial = False
-    pipeline = _pipeline_options(
+    pipeline = _chapter_pipeline(
         output_format=getattr(args, 'format', None),
         max_retries=getattr(args, 'retries', DEFAULT_PAGE_RETRIES),
         allow_partial=allow_partial,
         partial_threshold=getattr(args, 'partial_threshold', None),
     )
-    delivery_mode = pipeline["delivery_mode"]
-    download_dir = pipeline["download_dir"]
+    delivery_mode = pipeline.options.delivery_mode
+    download_dir = pipeline.options.download_dir
+    # A dry run downloads and sends nothing, so it has nothing to warn of.
+    kindle_reason = None if dry_run else pipeline.kindle_format_error()
+    if kindle_reason:
+        # Said once, before anything is downloaded (#362).
+        _warn_kindle_format(
+            kindle_reason,
+            "use --format pdf or epub, or 'memanga config set "
+            "delivery.output_format pdf'")
 
     for manga in manga_list:
         title = manga["title"]
@@ -1547,46 +1842,65 @@ def cmd_check(args):
             else:
                 suspicious = state.get_suspicious_batch(title) if from_chapter is None else None
             if suspicious:
-                err_console.print(
-                    f"  [yellow]└─ Warning: Suspicious chapter batch detected: "
-                    f"{_esc(suspicious.get('count'))} chapter(s) up to "
-                    f"{_esc(suspicious.get('highest'))} "
-                    f"(last tracked: {_esc(suspicious.get('last_chapter'))})[/yellow]"
-                )
-                for reason in suspicious.get("reasons", []):
-                    err_console.print(f"     [dim]- {_esc(reason)}[/dim]")
-                err_console.print(f"     [dim]- {_esc(suspicious.get('backup_status'))}[/dim]")
+                reasons = list(suspicious.get("reasons", []))
+                reasons.append(suspicious.get("backup_status"))
                 if dry_run:
-                    err_console.print(
-                        "     [yellow]A download run would skip these chapters. Run "
-                        "'memanga check --download --force-suspicious' to accept anyway.[/yellow]"
-                    )
+                    advice = ("A download run would skip these chapters. Run "
+                              "'memanga check --download --force-suspicious' "
+                              "to accept anyway.")
                 else:
-                    err_console.print(
-                        "     [yellow]Skipped auto-delivery. Run "
-                        "'memanga check --force-suspicious' to accept anyway.[/yellow]"
-                    )
+                    advice = ("Skipped auto-delivery. Run "
+                              "'memanga check --force-suspicious' to accept anyway.")
+                markup = "\n".join(
+                    [f"  [yellow]└─ Warning: Suspicious chapter batch detected: "
+                     f"{_esc(suspicious.get('count'))} chapter(s) up to "
+                     f"{_esc(suspicious.get('highest'))} "
+                     f"(last tracked: {_esc(suspicious.get('last_chapter'))})[/yellow]"]
+                    + [f"     [dim]- {_esc(reason)}[/dim]" for reason in reasons]
+                    + [f"     [yellow]{_esc(advice)}[/yellow]"]
+                )
+                _diagnostic(
+                    logging.WARNING, markup,
+                    "%s: Suspicious chapter batch detected: %s chapter(s) up to "
+                    "%s (last tracked: %s); %s; %s",
+                    title, suspicious.get("count"), suspicious.get("highest"),
+                    suspicious.get("last_chapter"),
+                    "; ".join(str(r) for r in reasons), advice,
+                )
             elif dry_run and report.get("forced"):
-                err_console.print(
+                _diagnostic(
+                    logging.WARNING,
                     f"  [yellow]└─ --force-suspicious: includes {_esc(report['forced'])} "
                     "chapter(s) from a suspicious batch; a download run with "
-                    "this flag would accept it.[/yellow]"
+                    "this flag would accept it.[/yellow]",
+                    "%s: --force-suspicious: includes %s chapter(s) from a "
+                    "suspicious batch; a download run with this flag would "
+                    "accept it.", title, report["forced"],
                 )
 
             if not new_chapters:
                 if not suspicious:
                     console.print("  [dim]└─ No new chapters[/dim]")
                 continue
-            
-            console.print(f"  [green]└─ {len(new_chapters)} new chapter(s)![/green]")
+
+            # Manual mode (#341): a library-wide run that would not ask
+            # per chapter only lists them. A dry run previews that run.
+            if (not args.title and not manga_auto_downloads(manga)
+                    and (dry_run or download or not can_prompt)):
+                console.print(
+                    f"  [cyan]└─ {len(new_chapters)} new chapter(s) — manual mode, "
+                    f"not downloaded. Download with: memanga check "
+                    f"{_esc(_quoted_title(title))} --download[/cyan]",
+                    soft_wrap=True,
+                )
+                total_manual += len(new_chapters)
+                continue
+
+            console.print(f"  [green]└─ {len(new_chapters)} new chapter(s)[/green]")
             total_new += len(new_chapters)
             
             for ch in new_chapters:
-                ch_label = f"Chapter {ch.number}"
-                if ch.title:
-                    ch_label += f": {ch.title}"
-                # Chapter titles are scraped data; escape before markup use.
-                ch_label = _esc(ch_label)
+                ch_label = _chapter_label(ch)
 
                 # Dry run: just list chapters
                 if dry_run:
@@ -1609,7 +1923,10 @@ def cmd_check(args):
                 if not should_download:
                     continue
 
-                if _download_chapter_pipeline(manga, ch, ch_label, pipeline):
+                outcome = _process_chapter(pipeline, manga, ch)
+                if outcome.delivery is DeliveryStatus.FAILED:
+                    total_undelivered += 1
+                if outcome.saved:
                     total_downloaded += 1
                     # Safe mode: restart browser every 3 chapters to free memory
                     if getattr(args, 'safe', False) and total_downloaded % 3 == 0:
@@ -1617,11 +1934,18 @@ def cmd_check(args):
                 else:
                     total_failed += 1
 
+        except StateCheckpointError:
+            # Ends the run (#230): no further chapter may be downloaded or
+            # delivered once results can't be recorded.
+            raise
         except DownloaderError as e:
-            err_console.print(f"  [red]└─ Error: {_esc(e)}[/red]")
+            _diagnostic(logging.ERROR, f"  [red]└─ Error: {_esc(e)}[/red]",
+                        "%s: Error: %s", title, e)
             total_errored += 1
         except Exception as e:
-            err_console.print(f"  [red]└─ Unexpected error: {_esc(e)}[/red]")
+            _diagnostic(logging.ERROR,
+                        f"  [red]└─ Unexpected error: {_esc(e)}[/red]",
+                        "%s: Unexpected error: %s", title, e)
             total_errored += 1
     
     # Record check history with actual counts. A dry run is a preview:
@@ -1630,19 +1954,41 @@ def cmd_check(args):
         state.update_last_check(new_chapters=total_new, downloaded=total_downloaded)
 
     # Summary
-    console.print()
-    if total_new == 0:
-        console.print("[dim]No new chapters found.[/dim]")
-    elif dry_run:
-        console.print(f"[yellow]📊 Dry run: {total_new} chapter(s) available for download[/yellow]")
+    if is_plain_console(console):
+        # Issue #226: one greppable line for cron and pipes.
+        console.print(_check_summary_line(
+            dry_run, total_checked, total_new, total_downloaded,
+            total_failed, total_errored, total_unconfirmed,
+            total_undelivered, total_manual,
+        ), markup=False)
     else:
-        console.print(f"[green]📊 Summary: {total_downloaded}/{total_new} chapters downloaded[/green]")
-        if delivery_mode == "local":
-            console.print(f"[dim]📁 Downloads: {_esc(download_dir)}[/dim]")
+        console.print()
+        if total_new == 0:
+            if not total_manual:
+                console.print("[dim]No new chapters found.[/dim]")
+        elif dry_run:
+            console.print(f"[yellow]📊 Dry run: {total_new} chapter(s) available for download[/yellow]")
+        else:
+            console.print(f"[green]📊 Summary: {total_downloaded}/{total_new} chapters downloaded[/green]")
+            if delivery_mode == "local":
+                console.print(f"[dim]📁 Downloads: {_esc(download_dir)}[/dim]")
+        if total_manual:
+            console.print(f"[cyan]📋 {total_manual} chapter(s) of manual-mode manga "
+                          "not downloaded[/cyan]")
     if total_failed > 0:
-        err_console.print(f"[yellow]⚠️  {total_failed} chapter(s) failed — run 'memanga failed' for details.[/yellow]")
+        _diagnostic(
+            logging.WARNING,
+            f"[yellow]⚠️  {total_failed} chapter(s) failed — run 'memanga failed' for details.[/yellow]",
+            "%d chapter(s) failed — run 'memanga failed' for details.",
+            total_failed,
+        )
+    _warn_undelivered(total_undelivered)
     if total_errored:
-        err_console.print(f"[yellow]⚠️  {total_errored}/{total_checked} manga could not be checked.[/yellow]")
+        _diagnostic(
+            logging.WARNING,
+            f"[yellow]⚠️  {total_errored}/{total_checked} manga could not be checked.[/yellow]",
+            "%d/%d manga could not be checked.", total_errored, total_checked,
+        )
     if total_unconfirmed:
         return _non_interactive_error(
             f"skipped {total_unconfirmed} chapter(s) that need confirmation; "
@@ -1650,15 +1996,18 @@ def cmd_check(args):
             "prompting, or --dry-run to only list them"
         )
     # Issue #239: nothing could be checked is an error; some chapters or
-    # manga failing while the rest ran is a partial failure.
+    # manga failing while the rest ran is a partial failure. So is a
+    # chapter that was saved but never reached the Kindle (#360).
     if total_checked and total_errored == total_checked:
         return EXIT_ERROR
-    if total_failed or total_errored:
+    if total_failed or total_errored or total_undelivered:
         return EXIT_PARTIAL
 
 
 def _status_payload() -> Dict[str, Any]:
     """`status --json` payload. Never includes the SMTP password."""
+    email = EmailSettings.from_config(config, resolve_password=False)
+    delivery = config.delivery
     return {
         "schema_version": JSON_SCHEMA_VERSION,
         "paths": {
@@ -1671,17 +2020,18 @@ def _status_payload() -> Dict[str, Any]:
         "delivery": {
             "mode": config.delivery_mode,
             "download_dir": str(config.download_dir),
-            "delete_after_send": bool(config.get("delivery.delete_after_send", False)),
+            "delete_after_send": delivery.delete_after_send,
         },
         "email": {
-            "kindle_email": config.get("email.kindle_email") or None,
-            "sender_email": config.get("email.sender_email") or None,
-            "smtp_server": config.get("email.smtp_server", "smtp.gmail.com"),
-            "smtp_port": config.get("email.smtp_port", 587),
+            "kindle_email": email.kindle_email or None,
+            "sender_email": email.sender_email or None,
+            "smtp_server": email.smtp_server,
+            "smtp_port": email.smtp_port,
+            "smtp_tls": email.smtp_tls,
         },
         "post_processing": {
-            "enabled": bool(config.get("delivery.post_processing.enabled")),
-            "fail_on_error": bool(config.get("delivery.post_processing.fail_on_error", False)),
+            "enabled": delivery.post_processing.enabled,
+            "fail_on_error": delivery.post_processing.fail_on_error,
         },
         "partial_chapters": {
             "enabled": config.partial_enabled,
@@ -1701,11 +2051,11 @@ def cmd_status(args):
         _print_json(_status_payload())
         return
 
-    console.print(Panel("[bold]📊 MeManga Status[/bold]", border_style="blue"))
+    console.print(_panel("[bold]📊 MeManga Status[/bold]", border_style="blue"))
     console.print()
     
     # Configuration
-    table = Table(title="Configuration", box=box.SIMPLE, show_header=False)
+    table = _table(title="Configuration", box=box.SIMPLE, show_header=False)
     table.add_column(style="dim", width=18)
     table.add_column(style="white")
     
@@ -1719,12 +2069,13 @@ def cmd_status(args):
     if delivery_mode == "local":
         table.add_row("Download dir", _esc(config.download_dir))
     else:
-        kindle_email = config.get("email.kindle_email")
-        sender_email = config.get("email.sender_email")
+        email = EmailSettings.from_config(config, resolve_password=False)
+        kindle_email = email.kindle_email
+        sender_email = email.sender_email
         table.add_row("Kindle email", _esc(kindle_email) if kindle_email else "[red]not set[/red]")
         table.add_row("Sender email", _esc(sender_email) if sender_email else "[red]not set[/red]")
-    
-    pp_enabled = bool(config.get("delivery.post_processing.enabled"))
+
+    pp_enabled = config.delivery.post_processing.enabled
     pp_status = "enabled" if pp_enabled else "disabled"
     table.add_row(
         "Post-processing",
@@ -1748,13 +2099,30 @@ def cmd_status(args):
         console.print(f"[dim]Last check:[/dim] {_esc(last_check)}")
 
 
+# Issue #247: `config show` output is often pasted into issue reports.
+_MASKED_EMAIL_KEYS = ("kindle_email", "sender_email")
+
+
+def _mask_email(value):
+    """``***@domain`` for an address: the domain helps diagnose, the
+    mailbox name is personal."""
+    if not isinstance(value, str) or not value:
+        return value
+    _, at, domain = value.rpartition("@")
+    return f"***@{domain}" if at else "***"
+
+
 def _masked_config_data():
-    """A copy of the loaded config with the app password masked."""
+    """A copy of the loaded config with the app password and email
+    addresses masked."""
     import copy
     display = copy.deepcopy(config._data)
-    pw = display.get("email", {}).get("app_password", "")
-    if pw:
-        display["email"]["app_password"] = "****"
+    email = display.get("email", {})
+    if email.get("app_password", ""):
+        email["app_password"] = "****"
+    for key in _MASKED_EMAIL_KEYS:
+        if key in email:
+            email[key] = _mask_email(email[key])
     return display
 
 
@@ -1780,8 +2148,11 @@ def _config_show(args):
         _print_json(_masked_config_data())
         return
     import yaml
-    console.print(Panel("[bold]Current Configuration[/bold]", border_style="cyan"))
+    console.print(_panel("[bold]Current Configuration[/bold]", border_style="cyan"))
     console.print(_esc(yaml.dump(_masked_config_data(), default_flow_style=False)))
+    console.print("[dim]The app password and email addresses are hidden; "
+                  "`memanga config get KEY` prints one value. Check for "
+                  "personal details before sharing this output.[/dim]")
 
 
 def _config_get(args):
@@ -1814,6 +2185,25 @@ def _read_secret(args):
     return Prompt.ask("App password", password=True)
 
 
+def _report_app_password_storage(stored: str):
+    """Warn on stderr when a just-saved app password is in plain text or
+    will not be used (issue #247)."""
+    messages = []
+    if stored == "config":
+        messages.append(plaintext_password_notice(config))
+    try:
+        override = app_password_override()
+    except AppPasswordError as e:
+        messages.append(f"App password from the environment is unusable: {e}")
+    else:
+        if override:
+            messages.append(f"{override[0]} is set and is used instead of "
+                            "the saved app password.")
+    for message in messages:
+        _diagnostic(logging.WARNING, f"[yellow]⚠️  {_esc(message)}[/yellow]",
+                    "%s", message)
+
+
 def _config_set(args):
     try:
         spec = config_key_spec(args.key)
@@ -1827,8 +2217,9 @@ def _config_set(args):
         secret = _read_secret(args)
         if secret is None:
             return EXIT_ERROR
-        set_app_password(config, secret)
+        stored = set_app_password(config, secret)
         console.print(f"[green]✅ {_esc(args.key)} updated[/green]")
+        _report_app_password_storage(stored)
         return
 
     if args.value is None:
@@ -1837,9 +2228,41 @@ def _config_set(args):
         value = parse_config_value(args.key, args.value)
     except ValueError as e:
         return _config_error(f"invalid value for {args.key}: {e}")
+    turns_email_on = (args.key == "delivery.mode" and value == "email"
+                      and config.delivery_mode != "email")
     config.set(args.key, value)
+    if turns_email_on and config.get("email.kindle_scope") is None:
+        # Issue #345: there is no one to ask, so take the safe choice
+        # and say so, rather than sending the whole library.
+        config.set("email.kindle_scope", "selected")
     config.save()
     console.print(f"[green]✅ {_esc(args.key)} = {_esc(_config_value_text(value))}[/green]")
+    if turns_email_on:
+        _print_kindle_scope_note()
+    if args.key in ("delivery.mode", "delivery.output_format"):
+        _warn_config_kindle_format()
+
+
+_KINDLE_SCOPE_TEXT = {
+    "selected": "only manga with Kindle turned on",
+    "all": "every manga unless its Kindle toggle is off",
+}
+
+
+def _print_kindle_scope_note(cfg=None) -> None:
+    """Which manga email delivery now applies to and how to change it
+    (issue #345)."""
+    if kindle_scope(cfg or config) == "selected":
+        console.print(
+            "[dim]Kindle delivery applies to "
+            f"{_KINDLE_SCOPE_TEXT['selected']}: turn it on with "
+            "`memanga update TITLE --kindle`, or send every manga with "
+            "`memanga config set email.kindle_scope all`.[/dim]")
+    else:
+        console.print(
+            "[dim]Kindle delivery applies to "
+            f"{_KINDLE_SCOPE_TEXT['all']}; send only chosen manga with "
+            "`memanga config set email.kindle_scope selected`.[/dim]")
 
 
 def _config_edit(args):
@@ -1855,6 +2278,9 @@ def _config_edit(args):
     path = config.config_path
     if not path.exists():
         config.save()  # start from the defaults
+    # Issue #345: known only when the file loaded; a broken file's mode
+    # is unknown, so it is never treated as turning email on.
+    was_email = config.load_error is not None or config.delivery_mode == "email"
     try:
         command = shlex.split(editor, posix=os.name != "nt")
         result = subprocess.run(command + [str(path)])
@@ -1873,40 +2299,53 @@ def _config_edit(args):
         return _config_error(
             f"{path} is not valid: {e}\nRun `memanga config edit` again to fix it."
         )
-    # Loading merges defaults over sections that are not mappings, so
-    # check the file's own structure before the merged values.
-    problems = config_section_problems(raw)
-    for key in CONFIG_KEYS:
-        value = edited.get(key)
-        if value is None:
-            continue  # unset: the default applies
-        problem = config_value_problem(key, value)
-        if problem:
-            problems.append(f"{key}: {problem}")
+    # The file's own content: an empty section is reported here, though
+    # it loads, so an edit that blanks one by accident is caught.
+    problems = config_problems(raw)
     if problems:
         for problem in problems:
             sys.stderr.write(f"error: {problem}\n")
         sys.stderr.write("Run `memanga config edit` again to fix it.\n")
         return EXIT_ERROR
     console.print(f"[green]✅ {_esc(path)} is valid[/green]")
+    if not was_email and edited.delivery_mode == "email":
+        if edited.get("email.kindle_scope") is None:
+            # Issue #345: turning email on by hand is still turning it
+            # on, so take the safe choice, as `config set` does.
+            edited.set("email.kindle_scope", "selected")
+            edited.save()
+        _print_kindle_scope_note(edited)
+    _warn_config_kindle_format(edited)
 
 
 def _config_email(args):
+    settings = EmailSettings.from_config(config, resolve_password=False)
     password_set = bool(get_app_password(config))
-    table = Table(title="Email delivery", box=box.SIMPLE, show_header=False)
+    table = _table(title="Email delivery", box=box.SIMPLE, show_header=False)
     table.add_column(style="dim", width=18)
     table.add_column(style="white")
     table.add_row("Delivery mode", _esc(config.delivery_mode))
-    for label, key in (("Kindle email", "email.kindle_email"),
-                       ("Sender email", "email.sender_email")):
-        value = config.get(key)
+    table.add_row("Send to Kindle", _KINDLE_SCOPE_TEXT[settings.kindle_scope])
+    for label, value in (("Kindle email", settings.kindle_email),
+                         ("Sender email", settings.sender_email)):
         table.add_row(label, _esc(value) if value else "[red]not set[/red]")
-    table.add_row("SMTP server", _esc(config.get("email.smtp_server", "smtp.gmail.com")))
-    table.add_row("SMTP port", _esc(config.get("email.smtp_port", 587)))
+    table.add_row("SMTP server", _esc(settings.smtp_server))
+    table.add_row("SMTP port", _esc(settings.smtp_port))
+    table.add_row("SMTP security", _smtp_tls_label(settings))
+    table.add_row("SMTP timeout",
+                  f"{smtp_timeout(settings.smtp_timeout):g} seconds")
+    email_limit = email_size_limit(settings.max_email_mb)
+    table.add_row("Email size limit",
+                  f"{email_limit / 2**20:g} MB (files up to "
+                  f"{raw_attachment_limit(email_limit) / 2**20:.1f} MB)")
     table.add_row("App password", "set" if password_set else "[red]not set[/red]")
     console.print(table)
+    if getattr(args, "send_test", False):
+        return _send_test_document()
     if not args.test:
-        console.print("[dim]Pass --test to try logging in to the SMTP server.[/dim]")
+        console.print("[dim]Pass --test for a quick SMTP login check (sends "
+                      "nothing), or --send-test to email a small test PDF to "
+                      "your Kindle.[/dim]")
         return
 
     with console.status("[dim]Logging in to the SMTP server...[/dim]"):
@@ -1915,6 +2354,52 @@ def _config_email(args):
         console.print(f"[green]✅ {_esc(result.message)}[/green]")
         return
     return _error(f"[red]❌ {_esc(result.message)}[/red]")
+
+
+_SMTP_TLS_NAMES = {"starttls": "STARTTLS", "implicit": "implicit TLS"}
+
+
+def _smtp_tls_label(settings) -> str:
+    """The email.smtp_tls row of `config email`: the setting and, for
+    auto, what it picks for the configured port (issue #366)."""
+    try:
+        mode = smtp_tls_mode(settings.smtp_tls, settings.smtp_port)
+    except EmailError:
+        return (f"[red]{_esc(settings.smtp_tls)} (invalid; use auto, "
+                f"starttls or implicit)[/red]")
+    value = settings.smtp_tls
+    if value is None or str(value).strip().lower() == "auto":
+        return f"auto ({_SMTP_TLS_NAMES[mode]} on port {_esc(settings.smtp_port)})"
+    return _SMTP_TLS_NAMES[mode]
+
+
+def _send_test_document():
+    """`config email --send-test` (issue #365): email a tiny PDF to the
+    configured Kindle address with the password delivery uses."""
+    try:
+        app_password_override()
+    except AppPasswordError as e:
+        return _error(f"[red]❌ App password from the environment is "
+                      f"unusable: {_esc(e)}[/red]")
+    settings = EmailSettings.from_config(config, resolve_password=False)
+    try:
+        with console.status("[dim]Sending a test PDF to your Kindle...[/dim]"):
+            subject = send_test_document(
+                settings.kindle_email,
+                settings.sender_email,
+                settings.smtp_server,
+                settings.smtp_port,
+                get_app_password(config),
+                timeout=settings.smtp_timeout,
+                smtp_tls=settings.smtp_tls,
+            )
+    except EmailError as e:
+        return _error(f"[red]❌ Test PDF not sent: {_esc(e)}[/red]")
+    except (TypeError, ValueError) as e:
+        return _error(f"[red]❌ Test PDF not sent: invalid SMTP setting "
+                      f"({_esc(e)})[/red]")
+    console.print(f"[green]✅ Sent \"{_esc(subject)}\"[/green]")
+    console.print(f"[dim]{_esc(TEST_DELIVERY_NOTE)}[/dim]")
 
 
 _CONFIG_ACTIONS = {
@@ -1985,11 +2470,13 @@ def cmd_config(args):
             "`config set KEY VALUE` or a config flag"
         )
 
-    console.print(Panel("[bold]⚙️  Configure MeManga[/bold]", border_style="yellow"))
+    console.print(_panel("[bold]⚙️  Configure MeManga[/bold]", border_style="yellow"))
     console.print()
     
     # Delivery mode
     current_mode = config.delivery_mode
+    # Issue #345: read before the mode below changes what it proposes.
+    current_scope = proposed_kindle_scope(config)
     console.print(f"[bold]Delivery Mode[/bold] (current: [cyan]{_esc(current_mode)}[/cyan])")
     console.print("  [1] local  - Download PDFs to a directory")
     console.print("  [2] email  - Send PDFs to Kindle via email")
@@ -2024,24 +2511,40 @@ def cmd_config(args):
 
         if Confirm.ask("Update app password?"):
             app_password = Prompt.ask("App password", password=True)
-            set_app_password(config, app_password)
+            _report_app_password_storage(set_app_password(config, app_password))
+
+        library_size = len(config.get("manga", []) or [])
+        console.print("\n[bold]Send to Kindle[/bold]")
+        console.print(f"[dim]Your library has {library_size} manga. A manga "
+                      "you already turned Kindle on or off for keeps that "
+                      "choice.[/dim]")
+        console.print("  [1] selected - only manga you turn on "
+                      "(`memanga update TITLE --kindle`)")
+        console.print("  [2] all      - every manga in the library")
+        scope_choice = Prompt.ask(
+            "Send which manga", choices=["1", "2"],
+            default="2" if current_scope == "all" else "1",
+        )
+        config.set("email.kindle_scope",
+                   "all" if scope_choice == "2" else "selected")
 
         delete_after = Confirm.ask(
             "Delete files after sending to Kindle?",
-            default=config.get("delivery.delete_after_send", False)
+            default=config.delivery.delete_after_send
         )
         config.set("delivery.delete_after_send", delete_after)
 
     # Output format
     current_format = config.output_format
     console.print(f"\n[bold]Output Format[/bold] (current: [cyan]{_esc(current_format)}[/cyan])")
+    console.print("[dim]Only pdf and epub can be sent to Kindle.[/dim]")
     console.print("  [1] pdf   - Portable Document Format")
     console.print("  [2] epub  - E-reader format (Kindle optimized)")
-    console.print("  [3] cbz   - Comic Book ZIP archive")
-    console.print("  [4] zip   - ZIP archive of images")
-    console.print("  [5] jpg   - JPEG images (folder per chapter)")
-    console.print("  [6] png   - PNG images (folder per chapter)")
-    console.print("  [7] webp  - WebP images (folder per chapter)")
+    console.print("  [3] cbz   - Comic Book ZIP archive (not for Kindle)")
+    console.print("  [4] zip   - ZIP archive of images (not for Kindle)")
+    console.print("  [5] jpg   - JPEG images (folder per chapter, not for Kindle)")
+    console.print("  [6] png   - PNG images (folder per chapter, not for Kindle)")
+    console.print("  [7] webp  - WebP images (folder per chapter, not for Kindle)")
     fmt_choice = Prompt.ask("Select format", choices=["1", "2", "3", "4", "5", "6", "7", ""], default="")
 
     if fmt_choice == "1":
@@ -2058,6 +2561,7 @@ def cmd_config(args):
         config.set("delivery.output_format", "png")
     elif fmt_choice == "7":
         config.set("delivery.output_format", "webp")
+    _warn_config_kindle_format()
 
     current_quality = "data-saver" if config.get("mangadex.data_saver", False) else "original"
     quality = Prompt.ask(
@@ -2067,7 +2571,8 @@ def cmd_config(args):
     config.set("mangadex.data_saver", quality == "data-saver")
 
     # Post-processing hook (optional, disabled by default)
-    pp_enabled = bool(config.get("delivery.post_processing.enabled"))
+    post_processing = config.delivery.post_processing
+    pp_enabled = post_processing.enabled
     console.print(
         f"\n[bold]Post-processing[/bold] (current: "
         f"[cyan]{'enabled' if pp_enabled else 'disabled'}[/cyan])"
@@ -2088,11 +2593,11 @@ def cmd_config(args):
         )
         pp_command = Prompt.ask(
             "Command",
-            default=config.get("delivery.post_processing.command", "")
+            default=post_processing.command
         )
         pp_fail = Confirm.ask(
             "Mark chapter as failed if the command fails?",
-            default=config.get("delivery.post_processing.fail_on_error", False)
+            default=post_processing.fail_on_error
         )
         config.set("delivery.post_processing.enabled", True)
         config.set("delivery.post_processing.command", pp_command)
@@ -2130,19 +2635,24 @@ def cmd_config(args):
         config.set("partial_chapters.enabled", False)
 
     config.save()
-    console.print("\n[green]✅ Configuration saved![/green]")
+    console.print("\n[green]Configuration saved.[/green]")
 
 
 def cmd_cron(args):
-    """Manage scheduled task for automatic checking."""
-    if platform.system() == "Windows":
-        return _cmd_cron_windows(args)
-    return _cmd_cron_unix(args)
+    """Manage the scheduled daily check (cron, or Task Scheduler on Windows).
+
+    The scheduler work is shared with the GUI Settings page (issue #297);
+    this only words the result.
+    """
+    if args.action == "status":
+        return _cron_status()
+    if args.action == "install":
+        return _cron_install(args)
+    return _cron_remove()
 
 
-def _print_unmanaged_cron_lines(crontab):
+def _print_unmanaged_cron_lines(lines):
     """Point out MeManga lines that cron install/remove leave alone."""
-    lines = unmanaged_memanga_lines(crontab)
     if not lines:
         return
     console.print("[yellow]These crontab lines mention MeManga but are not "
@@ -2151,206 +2661,379 @@ def _print_unmanaged_cron_lines(crontab):
         console.print(f"[dim]{_esc(line)}[/dim]")
 
 
-def _cmd_cron_unix(args):
-    """Manage cron job (macOS/Linux)."""
+def _scheduler_error(message, detail):
+    """Report a failed scheduler action with its error text, if any."""
+    if detail:
+        message = f"{message}: {_esc(detail)}"
+    return _error(f"[red]{message}[/red]")
 
-    if args.action == "status":
-        result = subprocess.run(
-            ["crontab", "-l"],
-            capture_output=True,
-            text=True,
-        )
 
-        # Issue #231: only the marked line counts as the installed job.
-        existing = result.stdout if result.returncode == 0 else ""
-        owned = managed_lines(existing)
-        if owned:
-            console.print("[green]✅ Cron job is installed[/green]")
-            for line in owned:
-                console.print(f"[dim]{_esc(line)}[/dim]")
-        else:
-            console.print("[yellow]⚠️  No cron job found[/yellow]")
-            console.print("[dim]Use 'memanga cron install' to set up automatic checking.[/dim]")
-        _print_unmanaged_cron_lines(existing)
+def _unreadable_error(result):
+    # Never overwrite a crontab we could not read (issue #231).
+    what = "scheduled tasks" if result.windows else "current crontab"
+    return _scheduler_error(f"Could not read the {what}; nothing was changed",
+                            result.detail)
+
+
+def _cron_status():
+    result = schedule_status()
+    if result.status is ScheduleStatus.UNREADABLE:
+        if result.windows:
+            return _scheduler_error("Could not query the scheduled task",
+                                    result.detail)
+        return _scheduler_error("Could not read the current crontab",
+                                result.detail)
+    if result.status is ScheduleStatus.INSTALLED:
+        installed = ("Scheduled task is installed" if result.windows
+                     else "Cron job is installed")
+        console.print(f"[green]✅ {installed}[/green]")
+        for line in result.entries:
+            console.print(f"[dim]{_esc(line)}[/dim]")
+    else:
+        missing = "No scheduled task found" if result.windows else "No cron job found"
+        console.print(f"[yellow]⚠️  {missing}[/yellow]")
+        console.print("[dim]Use 'memanga cron install' to set up automatic checking.[/dim]")
+    _print_unmanaged_cron_lines(result.unmanaged)
+
+
+def _container_cron_error():
+    # Issue #335: no cron daemon runs in a container; point to `watch`.
+    return _error(f"[red]{_esc(CONTAINER_SCHEDULING_TEXT)}[/red]")
+
+
+def _cron_install(args):
+    # Before asking for a time: no answer would make it work here.
+    if running_in_container():
+        return _container_cron_error()
+    time_str = args.time or config.get("cron.time", "06:00")
+
+    if not args.time:
+        if not _stdin_is_tty():
+            return _non_interactive_error(
+                "cron install needs a terminal to ask for the time; pass --time HH:MM"
+            )
+        time_str = Prompt.ask("Check time (HH:MM)", default=time_str)
+
+    parsed = parse_schedule_time(time_str)
+    if parsed is None:
+        return _error("[red]Invalid time format. Use HH:MM[/red]")
+    hour, minute = parsed
+
+    # Issue #232: run the current interpreter and log to the config
+    # root, never into the package install directory.
+    result = install_schedule(
+        hour, minute, runtime_dir=config.config_dir,
+        config_dir=_context.config_dir,
+        source_root=source_checkout_root(Path(__file__).resolve().parent))
+
+    if result.status is ScheduleStatus.UNSUPPORTED:
+        return _container_cron_error()
+    if result.status is ScheduleStatus.UNREADABLE:
+        return _unreadable_error(result)
+    if not result.ok:
+        failed = ("Failed to create scheduled task" if result.windows
+                  else "Failed to install cron job")
+        return _scheduler_error(failed, result.detail)
+
+    config.set("cron.enabled", True)
+    config.set("cron.time", time_str)
+    config.save()
+    if result.windows:
+        console.print(f"[green]Scheduled task installed. Checks run daily at {time_str}.[/green]")
+        return
+    console.print(f"[green]Cron job installed. Checks run daily at {time_str}.[/green]")
+    for line in result.entries:
+        console.print(f"[dim]{_esc(line)}[/dim]")
+    _print_unmanaged_cron_lines(result.unmanaged)
+
+
+def _cron_remove():
+    result = remove_schedule()
+    job = "scheduled task" if result.windows else "cron job"
+    if result.status is ScheduleStatus.UNREADABLE:
+        return _unreadable_error(result)
+    if result.status is ScheduleStatus.FAILED:
+        return _scheduler_error(f"Failed to remove {job}", result.detail)
+    if result.status is ScheduleStatus.NOT_FOUND:
+        console.print(f"[yellow]No MeManga {job} found[/yellow]")
+        _print_unmanaged_cron_lines(result.unmanaged)
         return
 
-    elif args.action == "install":
-        time_str = args.time or config.get("cron.time", "06:00")
+    config.set("cron.enabled", False)
+    config.save()
+    removed = "Scheduled task removed" if result.windows else "Cron job removed"
+    console.print(f"[green]✅ {removed}[/green]")
 
-        if not args.time:
-            if not _stdin_is_tty():
-                return _non_interactive_error(
-                    "cron install needs a terminal to ask for the time; pass --time HH:MM"
-                )
-            time_str = Prompt.ask("Check time (HH:MM)", default=time_str)
 
-        try:
-            hour, minute = time_str.split(":")
-            hour, minute = int(hour), int(minute)
-        except ValueError:
-            return _error("[red]Invalid time format. Use HH:MM[/red]")
+def _watch_interval_arg(value):
+    try:
+        seconds = watch.parse_duration(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
+    if seconds < watch.MIN_INTERVAL:
+        raise argparse.ArgumentTypeError(
+            f"must be at least {watch.format_duration(watch.MIN_INTERVAL)}")
+    return seconds
 
-        # Issue #232: run the current interpreter and log to the config
-        # root, never into the package install directory.
-        cron_line = build_cron_line(
-            minute, hour, config.config_dir, sys.executable,
-            config_dir=_context.config_dir,
-            source_root=source_checkout_root(Path(__file__).resolve().parent))
 
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-        existing = read_crontab(result)
-        if existing is None:
-            # Never overwrite a crontab we could not read (issue #231).
-            return _error("[red]Could not read the current crontab; nothing "
-                          f"was changed: {_esc((result.stderr or '').strip())}[/red]")
+def _watch_jitter_arg(value):
+    try:
+        return watch.parse_duration(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e))
 
-        # Issue #231: replace only the line a previous install marked as
-        # managed; every other entry, comment and blank line is kept.
-        new_crontab = replace_managed_line(existing, cron_line)
-        process = subprocess.Popen(
-            ["crontab", "-"],
-            stdin=subprocess.PIPE,
-            text=True,
-        )
-        process.communicate(input=new_crontab)
 
-        if process.returncode == 0:
-            config.set("cron.enabled", True)
-            config.set("cron.time", time_str)
-            config.save()
+def _clock_text(delay=0) -> str:
+    """Local wall-clock time ``delay`` seconds from now."""
+    return (datetime.fromtimestamp(datetime.now().timestamp() + delay)
+            .strftime("%Y-%m-%d %H:%M"))
 
-            console.print(f"[green]✅ Cron job installed! Will check daily at {time_str}[/green]")
-            console.print(f"[dim]{_esc(cron_line)}[/dim]")
-            _print_unmanaged_cron_lines(existing)
+
+def _watch_report(event, code=None, elapsed=None, delay=None):
+    if event == "start":
+        console.print(f"[dim]{_clock_text()} Checking for new chapters[/dim]")
+    elif event == "finished":
+        took = watch.format_duration(elapsed)
+        if code == EXIT_OK:
+            console.print(f"[dim]{_clock_text()} Check finished in {took}[/dim]")
         else:
-            return _error("[red]Failed to install cron job[/red]")
-
-    elif args.action == "remove":
-        result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
-        if result.returncode != 0:
-            console.print("[yellow]No crontab found[/yellow]")
-            return
-
-        new_crontab, removed = remove_managed_lines(result.stdout)
-
-        if not removed:
-            console.print("[yellow]No MeManga cron job found[/yellow]")
-            _print_unmanaged_cron_lines(result.stdout)
-            return
-
-        if not new_crontab.strip():
-            write = subprocess.run(["crontab", "-r"], capture_output=True)
-        else:
-            write = subprocess.Popen(["crontab", "-"], stdin=subprocess.PIPE, text=True)
-            write.communicate(input=new_crontab)
-        if write.returncode != 0:
-            return _error("[red]Failed to remove cron job[/red]")
-
-        config.set("cron.enabled", False)
-        config.save()
-
-        console.print("[green]✅ Cron job removed[/green]")
+            _diagnostic(
+                logging.WARNING,
+                f"[yellow]⚠️  Check exited {code} after {took}; "
+                "the schedule continues[/yellow]",
+                "Check exited %s after %s; the schedule continues", code, took)
+    elif event == "waiting":
+        console.print(f"[dim]Next check at {_clock_text(delay)} "
+                      f"(in {watch.format_duration(delay)})[/dim]")
 
 
-def _cmd_cron_windows(args):
-    """Manage Windows Task Scheduler task."""
-    task_name = "MeManga_AutoCheck"
+def cmd_watch(args):
+    """Run `check --auto --quiet` now and then on a fixed interval
+    (issue #327), for containers and other hosts without cron.
 
-    if args.action == "status":
-        result = subprocess.run(
-            ["schtasks", "/query", "/tn", task_name],
-            capture_output=True, text=True,
-        )
-        if result.returncode == 0:
-            console.print("[green]✅ Scheduled task is installed[/green]")
-            for line in result.stdout.strip().split("\n"):
-                if line.strip():
-                    console.print(f"[dim]{_esc(line.strip())}[/dim]")
-        else:
-            console.print("[yellow]⚠️  No scheduled task found[/yellow]")
-            console.print("[dim]Use 'memanga cron install' to set up automatic checking.[/dim]")
+    Runs before the config directory is locked or loaded: each check is
+    its own process and takes the lock only while it works.
+    """
+    if not scheduled_checks_supported():
+        return _error(
+            "[red]watch needs the command-line version of MeManga; the "
+            "desktop app has no command line.[/red]")
+    # Absolute, so it still holds when the check runs from the source
+    # checkout (issue #232); also passes $MEMANGA_CONFIG_DIR on.
+    argv = watch.build_check_argv(
+        sys.executable, resolve_config_dir(args.config_dir),
+        verbose=args.verbose,
+        log_quiet=args.log_quiet, plain=args.plain, log_file=args.log_file)
+    jitter = (f" plus up to {watch.format_duration(args.jitter)}"
+              if args.jitter else "")
+    console.print(
+        f"[bold]Checking every {watch.format_duration(args.every)}{jitter}. "
+        "Stop with Ctrl-C or docker stop.[/bold]")
+    watch.run_watch(
+        argv, args.every, args.jitter, report=_watch_report,
+        cwd=source_checkout_root(Path(__file__).resolve().parent))
 
-    elif args.action == "install":
-        time_str = args.time or config.get("cron.time", "06:00")
 
-        if not args.time:
-            if not _stdin_is_tty():
-                return _non_interactive_error(
-                    "cron install needs a terminal to ask for the time; pass --time HH:MM"
-                )
-            time_str = Prompt.ask("Check time (HH:MM)", default=time_str)
+SOURCE_HEALTH_STATUSES = ["ok", "warning", "error", "unknown"]
+SOURCE_SEARCH_FILTERS = ["included", "not-searched"]
+_HEALTH_STYLES = {"ok": "green", "warning": "yellow", "error": "red",
+                  "unknown": "dim"}
 
-        try:
-            hour, minute = time_str.split(":")
-            int(hour), int(minute)
-        except ValueError:
-            return _error("[red]Invalid time format. Use HH:MM[/red]")
 
-        # Delete existing task if present
-        subprocess.run(
-            ["schtasks", "/delete", "/tn", task_name, "/f"],
-            capture_output=True, text=True,
-        )
+def _source_health(source, all_health):
+    """Saved health for one catalog row, or None if never checked.
 
-        # Issue #232: the running interpreter, not a checkout-local venv.
-        cmd = build_task_command(
-            sys.executable, _context.config_dir,
-            source_root=source_checkout_root(Path(__file__).resolve().parent))
-        result = subprocess.run(
-            [
-                "schtasks", "/create",
-                "/tn", task_name,
-                "/tr", cmd,
-                "/sc", "daily",
-                "/st", time_str,
-                "/f",
-            ],
-            capture_output=True, text=True,
-        )
+    Library checks record health under the domain a manga was saved
+    with, which can be an alias, so every domain of the scraper counts.
+    When several have entries, the most recently checked one wins.
+    """
+    best_domain, best = None, None
+    for domain in (source.domain,) + source.aliases:
+        for key in (domain, "www." + domain):
+            info = all_health.get(key)
+            if not info:
+                continue
+            checked = max(str(info.get("last_success") or ""),
+                          str(info.get("last_error") or ""))
+            if best is None or checked > best[0]:
+                best_domain, best = key, (checked, info)
+    if best is None:
+        return None
+    info = best[1]
+    status = info.get("status")
+    return {
+        "status": status if status in ("ok", "warning", "error") else "unknown",
+        "domain": best_domain,
+        "last_success": info.get("last_success"),
+        "last_error": info.get("last_error"),
+        "last_error_msg": info.get("last_error_msg"),
+        "error_count": info.get("error_count", 0),
+        "latency_ms": info.get("latency_ms"),
+    }
 
-        if result.returncode == 0:
-            config.set("cron.enabled", True)
-            config.set("cron.time", time_str)
-            config.save()
-            console.print(f"[green]✅ Scheduled task installed! Will check daily at {time_str}[/green]")
-        else:
-            return _error(f"[red]Failed to create scheduled task: {_esc(result.stderr.strip())}[/red]")
 
-    elif args.action == "remove":
-        result = subprocess.run(
-            ["schtasks", "/delete", "/tn", task_name, "/f"],
-            capture_output=True, text=True,
-        )
-
-        if result.returncode == 0:
-            config.set("cron.enabled", False)
-            config.save()
-            console.print("[green]✅ Scheduled task removed[/green]")
-        else:
-            console.print("[yellow]No MeManga scheduled task found[/yellow]")
+def _source_matches(source, health, query, search, statuses) -> bool:
+    """True when a catalog row passes every `sources` filter given."""
+    if query:
+        needle = query.lower()
+        if not any(needle in d for d in (source.domain,) + source.aliases):
+            return False
+    if search == "included" and not source.searchable:
+        return False
+    if search == "not-searched" and source.searchable:
+        return False
+    if statuses and (health["status"] if health else "unknown") not in statuses:
+        return False
+    return True
 
 
 def cmd_sources(args):
-    """List supported manga sources."""
-    sources = get_supported_sources()
-    
-    console.print(Panel("[bold]🌐 Supported Sources[/bold]", border_style="cyan"))
+    """List supported manga sources with their saved health.
+
+    Read-only and offline: health is whatever earlier library checks and
+    the desktop app's source checks saved in state.
+    """
+    catalog = source_catalog()
+    all_health = state.get_all_source_health()
+    query = getattr(args, "query", None)
+    search = getattr(args, "search", None)
+    statuses = getattr(args, "health", None)
+    rows = []
+    for source in catalog:
+        health = _source_health(source, all_health)
+        if _source_matches(source, health, query, search, statuses):
+            rows.append((source, health))
+
+    if args.json:
+        # Issue #266: parser_tests and live_probe are added keys; the
+        # existing ones keep their names and types.
+        _print_json({"schema_version": JSON_SCHEMA_VERSION,
+                     "sources": [dict(s.to_dict(), health=h,
+                                      **source_coverage(s.domain))
+                                 for s, h in rows]})
+        return
+
+    console.print(_panel("[bold]🌐 Supported Sources[/bold]", border_style="cyan"))
     console.print()
-    
-    table = Table(box=box.SIMPLE)
-    table.add_column("Source", style="cyan")
-    table.add_column("Type", style="dim")
-    table.add_column("Best For")
-    
-    table.add_row("[bold]tcbonepiecechapters.com[/bold]", "Requests", "Jump manga (One Piece, JJK, MHA)")
-    table.add_row("[bold]weebcentral.com[/bold]", "Hybrid", "Large library (1000+ series)")
-    table.add_row("[bold]asurascans.com[/bold]", "API", "Manhwa / Webtoons")
-    table.add_row("[bold]mangakatana.com[/bold]", "Playwright", "General manga library")
-    table.add_row("[bold]mangadex.org[/bold]", "API", "Fan translations (skip Shueisha)")
-    
-    console.print(table)
+
+    if not rows:
+        console.print("[dim]No sources match these filters.[/dim]")
+        return
+
+    coverage = getattr(args, "coverage", False)
+    tally = dict.fromkeys(SOURCE_HEALTH_STATUSES, 0)
+    if coverage:
+        # Issue #266: one short block per source instead of a wide table,
+        # so it reads in an 80-column terminal and in plain output.
+        for source, health in rows:
+            status = health["status"] if health else "unknown"
+            tally[status] += 1
+            for line in _source_coverage_block(source, health,
+                                               source_coverage(source.domain)):
+                console.print(line, soft_wrap=True)
+            console.print()
+    else:
+        table = _table(box=box.SIMPLE)
+        table.add_column("Source", style="cyan")
+        table.add_column("Engine", style="dim")
+        table.add_column("Language")
+        table.add_column("Search")
+        table.add_column("Health")
+        table.add_column("Notes")
+        for source, health in rows:
+            search_text = source.search_status
+            notes = _source_notes(source)
+            status = health["status"] if health else "unknown"
+            tally[status] += 1
+            health_text = f"[{_HEALTH_STYLES[status]}]{status}[/]"
+            checked = _health_checked(health)
+            if checked:
+                health_text += f"\n[dim]{_esc(checked)}[/dim]"
+            table.add_row(source.domain, source.engine,
+                          source.language or "—", search_text, health_text,
+                          _esc(notes))
+        console.print(table)
     console.print()
-    console.print(f"[dim]Total: {len(sources)} sources • All tested and working![/dim]")
+    if len(rows) == len(catalog):
+        console.print(f"[dim]Total: {len(catalog)} scrapers, "
+                      f"{len(get_supported_sources())} domains[/dim]")
+    else:
+        console.print(f"[dim]Showing {len(rows)} of {len(catalog)} scrapers[/dim]")
+    console.print("[dim]Health: " + ", ".join(
+        f"{tally[s]} {s}" for s in SOURCE_HEALTH_STATUSES) + "[/dim]")
+    console.print("[dim]Health is the last saved check result, not a live test.[/dim]")
+    console.print("[dim]Unknown means the source was never checked.[/dim]")
+    if coverage:
+        for line in (
+                "Parser tests: parts that offline tests run on saved site",
+                "responses, for this scraper (own) or for code it shares",
+                "with other sites (shared).",
+                "Live probe: steps the weekly health check runs after the",
+                "home page; being in it is not a result."):
+            console.print(f"[dim]{line}[/dim]")
+    else:
+        console.print("[dim]Add --coverage to show parser tests and live probe "
+                      "steps.[/dim]")
+
+
+def _source_notes(source) -> str:
+    notes = source.note
+    if source.nsfw:
+        notes = "NSFW · " + notes
+    if source.default_enabled:
+        notes = "default · " + notes
+    return notes
+
+
+def _health_checked(health) -> str:
+    """Local time of the newest saved check, or an empty string."""
+    if not health:
+        return ""
+    checked = max(str(health["last_success"] or ""),
+                  str(health["last_error"] or ""))
+    return _local_time_text(checked) if checked else ""
+
+
+def _parser_tests_text(parts) -> str:
+    text = "; ".join(f"{kind} {', '.join(parts[kind])}"
+                     for kind in ("own", "shared") if parts[kind])
+    return text or "none"
+
+
+def _live_probe_text(steps) -> str:
+    if steps is None:
+        return "not in the probe"
+    return ", ".join(steps) or "home page only"
+
+
+def _source_coverage_block(source, health, facts):
+    """Lines of one source in `memanga sources --coverage`.
+
+    Short labelled lines rather than table cells, so each fact stays on
+    one line in an 80-column terminal and in plain output. A long note
+    continues under itself.
+    """
+    status = health["status"] if health else "unknown"
+    checked = _health_checked(health)
+    health_text = f"[{_HEALTH_STYLES[status]}]{status}[/]"
+    if checked:
+        health_text += f", checked {_esc(checked)}"
+    lines = [
+        f"[cyan]{_esc(source.domain)}[/cyan]",
+        f"  Search:       {_esc(source.search_status)}",
+        f"  Health:       {health_text}",
+        f"  Parser tests: {_parser_tests_text(facts['parser_tests'])}",
+        f"  Live probe:   {_live_probe_text(facts['live_probe'])}",
+    ]
+    notes = _source_notes(source)
+    if notes:
+        label = "  Notes:        "
+        # Wrapped before escaping, so a break cannot split an escape.
+        wrapped = Text(notes).wrap(console, 80 - len(label), overflow="fold")
+        for number, part in enumerate(wrapped):
+            prefix = " " * len(label) if number else label
+            lines.append(f"{prefix}{_esc(part.plain.rstrip())}")
+    return lines
 
 
 def _add_search_result(result, status=None):
@@ -2363,6 +3046,11 @@ def _add_search_result(result, status=None):
     for m in manga_list:
         if m["title"].lower() == result.title.lower():
             return False, f"'{result.title}' already exists"
+    # Same folder as another manga: see cmd_add (issue #246).
+    owner = _download_folder_owner(result.title, manga_list)
+    if owner is not None:
+        return False, (f"'{result.title}' would use the same download folder "
+                       f"as '{owner['title']}'")
 
     entry = {
         "title": result.title,
@@ -2396,7 +3084,7 @@ def cmd_search(args):
             source = source[4:]
         try:
             get_scraper(source)
-        except ValueError:
+        except UnsupportedSourceError:
             err_console.print(f"[red]Unknown source:[/red] {_esc(source)}")
             err_console.print("[dim]Use 'memanga sources' to see supported sources.[/dim]")
             return EXIT_ERROR
@@ -2479,7 +3167,7 @@ def cmd_search(args):
         err_console.print(f"[dim]{_esc(summary)}[/dim]")
         return EXIT_ERROR
 
-    table = Table(box=box.SIMPLE)
+    table = _table(box=box.SIMPLE)
     table.add_column("#", style="dim", justify="right")
     table.add_column("Source", style="green")
     table.add_column("Title", style="cyan bold")
@@ -2530,6 +3218,75 @@ def cmd_search(args):
     return _error(f"[yellow]⚠️  {_esc(message)}[/yellow]")
 
 
+# Issue #244: export runs without the config directory lock, so it must
+# never write over the files MeManga itself keeps there (also their
+# backups and recovery copies).
+_OWN_FILES = ("config.yaml", "state.json", LOCK_FILENAME)
+
+
+def _is_own_file_name(name: str) -> bool:
+    """config.yaml, state.json, memanga.lock, or one of their backups,
+    recovery copies or temps (``<own name>.<anything>``)."""
+    name = name.casefold()
+    return name in _OWN_FILES or name.startswith(
+        tuple(f"{own}." for own in _OWN_FILES))
+
+
+class _UnverifiedTarget(Exception):
+    """An existing export destination could not be told apart from
+    MeManga's own files."""
+
+
+def _own_file_target(path: Path) -> bool:
+    """True when writing ``path`` would write one of MeManga's own files,
+    also through a symlink, a hard link or another spelling of the
+    config directory.
+
+    Raises _UnverifiedTarget when ``path`` exists but its identity, or
+    that of the files in the config directory, cannot be established:
+    a hard link has a name of its own, so only the identity tells.
+    """
+    root = config.config_dir
+    target = Path(os.path.realpath(path))
+    try:
+        in_root = os.path.samefile(target.parent, root)
+    except OSError:
+        in_root = False
+    if in_root and _is_own_file_name(target.name):
+        return True
+    try:
+        target_stat = os.stat(target)
+    except FileNotFoundError:
+        return False  # a new file is no alias
+    except OSError as e:
+        raise _UnverifiedTarget(e.strerror or e) from e
+    # Identity is st_dev + st_ino (os.path.samestat); a zero st_ino means
+    # the file system gives no file ID to compare.
+    if not target_stat.st_ino:
+        raise _UnverifiedTarget("the file system reports no file ID")
+    # Compare with every own file in the config directory, backups and
+    # recovery copies included. os.stat(), not DirEntry.stat(): on
+    # Windows the latter leaves st_ino at zero.
+    try:
+        with os.scandir(root) as entries:
+            own = [entry.path for entry in entries
+                   if _is_own_file_name(entry.name)]
+    except OSError as e:
+        raise _UnverifiedTarget(e.strerror or e) from e
+    for own_path in own:
+        try:
+            own_stat = os.stat(own_path)
+        except FileNotFoundError:
+            continue  # replaced or removed since the listing
+        except OSError as e:
+            raise _UnverifiedTarget(e.strerror or e) from e
+        if not own_stat.st_ino:
+            raise _UnverifiedTarget("the file system reports no file ID")
+        if os.path.samestat(target_stat, own_stat):
+            return True
+    return False
+
+
 def cmd_export(args):
     """Export manga list and download state to JSON.
 
@@ -2557,7 +3314,22 @@ def cmd_export(args):
 
     output_path = Path(output_file)
     try:
-        with open(output_path, "w") as f:
+        own_target = _own_file_target(output_path)
+    except _UnverifiedTarget as e:
+        return _error(
+            f"[red]Cannot export to {_esc(output_path)}:[/red] MeManga "
+            "could not make sure it is not one of its own files in "
+            f"{_esc(config.config_dir)} ({_esc(e)}). "
+            "Nothing was written. Export to a new file name instead."
+        )
+    if own_target:
+        return _error(
+            f"[red]Cannot export to {_esc(output_path)}:[/red] it is one of "
+            f"MeManga's own files in {_esc(config.config_dir)}. Choose "
+            "another file name."
+        )
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(export_data, f, indent=2, default=str)
     except OSError as exc:
         return _error(f"[red]Cannot export:[/red] {_esc(exc)}")
@@ -2571,7 +3343,10 @@ def _plan_import_merge(existing_manga, imported_manga):
     Returns (merged_list, added_titles, skipped_titles, state_title_aliases).
     ``merged_list`` is a new list; ``existing_manga`` is left as-is so a
     dry run can't leak into the live config (Config.get returns its own
-    object).
+    object). It holds the existing entries first, in their order, followed
+    by the added ones, so ``merged_list[len(merged_list) - len(added_titles):]``
+    are exactly the added entries; cmd_import's download-folder check
+    (_import_folder_clash) relies on this order.
     """
     merged = list(existing_manga)
     existing_titles = {
@@ -2596,6 +3371,32 @@ def _plan_import_merge(existing_manga, imported_manga):
     return merged, added, skipped, state_title_aliases
 
 
+def _import_folder_clash(manga_list, first_new=0):
+    """Error text when an entry the import adds would share a download
+    folder with another entry of the resulting ``manga_list``, else None
+    (issue #246).
+
+    Entries from index ``first_new`` on are the imported ones; clashes
+    only among the entries before it were already tracked and are left
+    alone. Titles like "A:B" and "AB", or "x" and "X" in a replaced list,
+    would write their chapter files into one folder and overwrite each
+    other.
+    """
+    from .downloader import _download_folder_key
+    seen = {}
+    for index, entry in enumerate(manga_list):
+        title = entry.get("title", "")
+        key = _download_folder_key(title)
+        if key in seen and index >= first_new:
+            return (
+                f"[red]Cannot import:[/red] '{_esc(seen[key])}' and "
+                f"'{_esc(title)}' would use the same download folder; rename "
+                "one first. Nothing was changed."
+            )
+        seen.setdefault(key, title)
+    return None
+
+
 def cmd_import(args):
     """Import manga list and download state from JSON.
 
@@ -2612,7 +3413,11 @@ def cmd_import(args):
     if from_stdin:
         source_label = "stdin"
         try:
-            raw = sys.stdin.read()
+            # Decode the bytes as UTF-8 like a file import, not with the
+            # console's code page (Windows).
+            buffer = getattr(sys.stdin, "buffer", None)
+            raw = (buffer.read().decode("utf-8-sig") if buffer is not None
+                   else sys.stdin.read())
         except (OSError, UnicodeDecodeError) as exc:
             return _error(f"[red]Cannot import:[/red] {_esc(exc)}")
     else:
@@ -2621,7 +3426,9 @@ def cmd_import(args):
         if not import_path.exists():
             return _error(f"[red]File not found:[/red] {_esc(import_path)}")
         try:
-            with open(import_path, "r") as f:
+            # utf-8-sig: also accept a backup re-saved with a BOM by an
+            # editor such as Windows Notepad.
+            with open(import_path, "r", encoding="utf-8-sig") as f:
                 raw = f.read()
         except (OSError, UnicodeDecodeError) as exc:
             return _error(f"[red]Cannot import:[/red] {_esc(exc)}")
@@ -2639,6 +3446,9 @@ def cmd_import(args):
 
     if args.replace:
         current_count = len(config.get("manga", []))
+        clash = _import_folder_clash(imported_manga)
+        if clash:
+            return _error(clash)
         if dry_run:
             console.print(
                 f"[cyan]Dry run:[/cyan] would replace {current_count} manga with "
@@ -2670,6 +3480,11 @@ def cmd_import(args):
     merged_manga, added, skipped, state_title_aliases = _plan_import_merge(
         config.get("manga", []), imported_manga,
     )
+    # _plan_import_merge appends the added entries after the existing ones.
+    clash = _import_folder_clash(merged_manga,
+                                 first_new=len(merged_manga) - len(added))
+    if clash:
+        return _error(clash)
 
     # Rehearse the state merge before anything is saved (and before a dry
     # run reports success), so a backup that still can't merge with local
@@ -2707,17 +3522,18 @@ def cmd_import(args):
 
 
 def _chapter_order(item):
-    """Sort key for (chapter_number, info) pairs; non-numeric labels first."""
-    number = item[0]
-    return float(number) if number.replace('.', '', 1).isdigit() else 0
+    """Sort key for (chapter_number, info) pairs; non-numeric labels first,
+    labelled chapters such as "10 Part 1" by their chapter number."""
+    return chapter_order_key(item[0])
 
 
-def _resolve_failed_target(target):
+def _resolve_failed_target(target, recorded=None):
     """Resolve a `failed` TARGET with the same rules as `check -t` (#352).
 
     `#N` picks the Nth entry in `memanga list`. A title also matches manga
-    that are no longer tracked but still have failure or partial records,
-    so those records stay reachable.
+    that are no longer tracked but still have failure or partial records
+    (or the titles in ``recorded``, when given), so those records stay
+    reachable.
 
     Returns (title, None), or (None, exit code) after reporting the error.
     """
@@ -2727,9 +3543,10 @@ def _resolve_failed_target(target):
         candidates = manga_list
     else:
         tracked = {m["title"].casefold() for m in manga_list}
-        recorded = sorted(
-            set(state.get_all_failed_chapters()) | set(state.get_all_partial_chapters())
-        )
+        if recorded is None:
+            recorded = (set(state.get_all_failed_chapters())
+                        | set(state.get_all_partial_chapters()))
+        recorded = sorted(recorded)
         candidates = list(manga_list) + [
             {"title": t} for t in recorded if t.casefold() not in tracked
         ]
@@ -2804,6 +3621,25 @@ def _failed_payload(retryable, title_filter=None) -> Dict[str, Any]:
     }
 
 
+def _primary_chapters(src):
+    """Chapters listed on a manga's primary source ``src``, by number.
+    Empty when the listing fails, so `failed retry` falls back to the
+    backup sources."""
+    chapters = {}
+    try:
+        scraper = get_scraper(src["source"])
+        _configure_mangadex(scraper, state)
+        # Reading the entries stays inside the guard: a listing whose
+        # entries are not Chapter objects (some scrapers return dicts)
+        # counts as failed, so retry still reaches the backup sources.
+        for ch in scraper.get_chapters(src["url"]):
+            # The first listing of a number wins, as before.
+            chapters.setdefault(ch.number, ch)
+    except Exception:
+        return {}
+    return chapters
+
+
 def _failed_action(args) -> str:
     """`list`, `retry` or `clear`: the subcommand, else the legacy
     `--clear`/`--retry` alias (`--clear` wins, as it always did)."""
@@ -2842,7 +3678,7 @@ def cmd_failed(args):
         console.print("[dim]No failed or partial chapters recorded.[/dim]")
         return
 
-    table = Table(
+    table = _table(
         title="⚠️  Retryable Chapter Downloads",
         box=box.ROUNDED,
         show_lines=True,
@@ -2894,42 +3730,57 @@ def cmd_failed(args):
     if action == "retry":
         manga_list = config.get("manga", [])
         manga_by_title = {m["title"]: m for m in manga_list}
-        # Retries go through the same chapter pipeline as `check` (#352).
-        pipeline = _pipeline_options()
+        # Retries go through the same chapter pipeline as `check` (#352, #222).
+        pipeline = _chapter_pipeline()
         retried = 0
         succeeded = 0
+        undelivered = 0
 
         for manga_title, chapters in retryable.items():
             manga = manga_by_title.get(manga_title)
             if not manga:
-                err_console.print(f"  [yellow]⚠️  Manga not found in config: {_esc(manga_title)}[/yellow]")
+                _diagnostic(
+                    logging.WARNING,
+                    f"  [yellow]⚠️  Manga not found in config: {_esc(manga_title)}[/yellow]",
+                    "Manga not found in config: %s", manga_title,
+                )
                 # Unretryable records still count as unrecovered (#239).
                 retried += len(chapters)
                 continue
 
+            sources = _get_sources_from_manga(manga)
+            # One primary listing per manga, not per failed chapter (#222).
+            src = sources[0] if sources else None
+            primary = _primary_chapters(src) if src and chapters else {}
+
             for chapter_num, info in sorted(chapters.items(), key=_chapter_order):
-                sources = _get_sources_from_manga(manga)
                 if not sources:
-                    err_console.print(f"  [yellow]⚠️  No source to retry Chapter {_esc(chapter_num)} of {_esc(manga_title)}[/yellow]")
+                    _diagnostic(
+                        logging.WARNING,
+                        f"  [yellow]⚠️  No source to retry Chapter {_esc(chapter_num)} of {_esc(manga_title)}[/yellow]",
+                        "No source to retry Chapter %s of %s",
+                        chapter_num, manga_title,
+                    )
                     retried += 1
                     continue
 
-                # Build a minimal Chapter object from primary source
-                src = sources[0]
-                try:
-                    scraper = get_scraper(src["source"])
-                    _configure_mangadex(scraper, state)
-                    all_chapters = scraper.get_chapters(src["url"])
-                    ch_obj = next((c for c in all_chapters if c.number == chapter_num), None)
-                except Exception:
-                    ch_obj = None
-
+                ch_obj = primary.get(chapter_num)
                 if not ch_obj:
-                    err_console.print(f"  [yellow]⚠️  Could not find Chapter {_esc(chapter_num)} of {_esc(manga_title)} on primary source[/yellow]")
+                    _diagnostic(
+                        logging.WARNING,
+                        f"  [yellow]⚠️  Could not find Chapter {_esc(chapter_num)} of {_esc(manga_title)} on primary source[/yellow]",
+                        "Could not find Chapter %s of %s on primary source",
+                        chapter_num, manga_title,
+                    )
                     # Try backup directly
                     ch_obj = _find_chapter_on_backup(manga, chapter_num, state)
                     if not ch_obj:
-                        err_console.print(f"  [red]❌ Chapter {_esc(chapter_num)} not found on any source[/red]")
+                        _diagnostic(
+                            logging.ERROR,
+                            f"  [red]❌ Chapter {_esc(chapter_num)} not found on any source[/red]",
+                            "Chapter %s of %s not found on any source",
+                            chapter_num, manga_title,
+                        )
                         retried += 1
                         continue
                 else:
@@ -2937,18 +3788,373 @@ def cmd_failed(args):
 
                 console.print(f"  [dim]⬇️  Retrying {_esc(manga_title)} Chapter {_esc(chapter_num)}...[/dim]")
                 retried += 1
-                ch_label = f"Chapter {ch_obj.number}"
-                if ch_obj.title:
-                    ch_label += f": {ch_obj.title}"
-                saved = _download_chapter_pipeline(manga, ch_obj, _esc(ch_label), pipeline)
+                outcome = _process_chapter(pipeline, manga, ch_obj)
                 # Saved again as a partial is not a recovery: the record stays.
-                if saved and state.get_partial_chapter(manga_title, chapter_num) is None:
+                if outcome.status is ChapterStatus.COMPLETE:
                     succeeded += 1
+                if outcome.delivery is DeliveryStatus.FAILED:
+                    undelivered += 1
 
         console.print()
         console.print(f"[green]📊 Retry summary: {succeeded}/{retried} chapters recovered[/green]")
-        if succeeded < retried:
+        _warn_undelivered(undelivered)
+        if succeeded < retried or undelivered:
             return EXIT_PARTIAL
+
+
+def _local_time_text(value) -> str:
+    """``YYYY-MM-DD HH:MM`` in local time; delivery records store UTC
+    (legacy records a naive local time, shown as written)."""
+    text = str(value or "")
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return text[:16].replace("T", " ")
+    if when.tzinfo is not None:
+        when = when.astimezone()
+    return when.strftime("%Y-%m-%d %H:%M")
+
+
+_KINDLE_NOT_SET_UP = (
+    "[red]Kindle delivery is not set up: the delivery mode must be "
+    "'email' with a Kindle address. See 'memanga config email'.[/red]"
+)
+
+
+@dataclass(frozen=True)
+class _SendItem:
+    """One chapter of `send TARGET CHAPTER...` (issue #355)."""
+
+    chapter: str
+    path: Optional[Path]
+    # Why it can't be sent, or None.
+    problem: Optional[str]
+    # The title its undelivered record is kept under (#360), or None.
+    record_title: Optional[str] = None
+
+
+def _undelivered_records(title: str) -> Dict[str, Any]:
+    """Undelivered records of ``title`` by chapter, as (record title,
+    record). Records match the tracked title in any case, like
+    `send --pending TARGET`; one under the exact title wins."""
+    key = title.casefold()
+    pending = state.failures.get_all_undelivered()
+    records = {}
+    for record_title in sorted(pending, key=lambda t: t != title):
+        if record_title.casefold() != key:
+            continue
+        for chapter, info in pending[record_title].items():
+            records.setdefault(str(chapter), (record_title, info))
+    return records
+
+
+def _send_item(manga, chapter: str, record, known) -> _SendItem:
+    """The file to send for ``chapter`` of ``manga`` (issue #355).
+
+    A chapter on the undelivered list uses its record's file, as
+    `send --pending` does. Any other is looked up only in the manga's
+    download folder (see find_chapter_downloads), never under a name
+    that could belong to another of the ``known`` chapters; a copy in a
+    format Kindle accepts wins over one it doesn't. Raises
+    UnsafeDownloadPathError when that folder can't be used safely.
+    """
+    from .downloader.folders import find_chapter_downloads
+
+    if record is not None:
+        record_title, info = record
+        recorded = str(info.get("path") or "")
+        path = Path(recorded) if recorded else None
+        if path is None or not path.is_file():
+            problem = f"The saved file is no longer there: {recorded or '(unknown)'}"
+        else:
+            problem = kindle_file_error(path)
+        return _SendItem(chapter, path, problem, record_title)
+
+    title = manga["title"]
+    key = title.casefold()
+    recorded, claimed = [], []
+    for entry in state.get_download_history(limit=state.activity.MAX_DOWNLOADS):
+        if str(entry.get("title", "")).casefold() != key or not entry.get("path"):
+            continue
+        if str(entry.get("chapter")) == chapter:
+            recorded.append(str(entry["path"]))
+        else:
+            claimed.append(str(entry["path"]))
+    sources = [src.get("source") for src in _get_sources_from_manga(manga)]
+    sources.append(manga.get("source"))
+    lookup = dict(
+        templates=[config.delivery.naming_template],
+        sources=[s for s in sources if isinstance(s, str) and s],
+        recorded=recorded,
+    )
+    candidates = find_chapter_downloads(
+        config.download_dir, title, chapter,
+        others=known, claimed=claimed, **lookup)
+    if not candidates:
+        shared = find_chapter_downloads(config.download_dir, title, chapter,
+                                        **lookup)
+        if shared:
+            return _SendItem(
+                chapter, shared[0],
+                "The saved file's name could also belong to another chapter, "
+                "so it is not sent")
+        return _SendItem(chapter, None,
+                         "No saved file was found in the download folder")
+    for path in candidates:
+        if kindle_file_error(path) is None:
+            return _SendItem(chapter, path, None)
+    return _SendItem(chapter, candidates[0], kindle_file_error(candidates[0]))
+
+
+def _send_chapters(args):
+    """`send TARGET CHAPTER...`: send saved chapters to Kindle (#355).
+
+    Every CHAPTER must name a downloaded chapter (or one on the
+    undelivered list) of the tracked TARGET, and Kindle delivery must be
+    on for it, before anything is sent. A chapter whose file is missing
+    or in a format Kindle doesn't accept is reported while the others
+    are still sent. Sending several chapters asks first, unless --yes;
+    --dry-run only shows what would be sent and writes nothing. Chapters
+    are sent again even when an earlier send worked, and nothing is
+    downloaded.
+    """
+    from .downloader import UnsafeDownloadPathError
+
+    manga_list = config.get("manga", [])
+    if not manga_list:
+        return _error("[yellow]No manga tracked.[/yellow]")
+    manga, _, candidates = _find_manga(args.target, manga_list)
+    if not manga:
+        return _target_error(args.target, candidates)
+    title = manga["title"]
+
+    records = _undelivered_records(title)
+    known = [str(ch) for ch in state.get_downloaded_chapters(title)] + list(records)
+    chapters, unknown, ambiguous = _chapter_lookup(args.chapters, known)
+    if unknown or ambiguous:
+        for token in unknown:
+            err_console.print(
+                f"[red]Not downloaded:[/red] {_esc(token)} is not a downloaded "
+                f"chapter of {_esc(title)}"
+            )
+        for token, matches in ambiguous.items():
+            err_console.print(
+                f"[red]Ambiguous chapter:[/red] {_esc(token)} matches "
+                f"{_chapter_list_text(matches)}; give the exact label"
+            )
+        err_console.print("[dim]Nothing was sent.[/dim]")
+        return EXIT_ERROR
+
+    pipeline = _chapter_pipeline()
+    if not pipeline.delivers_to_kindle():
+        return _error(_KINDLE_NOT_SET_UP)
+    if not pipeline.delivers_to_kindle(manga):
+        quoted = _esc(_quoted_title(title))
+        return _error(
+            f"[red]Kindle delivery is off for {_esc(title)}.[/red] Turn it on "
+            f"with 'memanga update {quoted} --kindle'."
+        )
+
+    try:
+        items = [_send_item(manga, ch, records.get(ch), known) for ch in chapters]
+    except (UnsafeDownloadPathError, OSError) as e:
+        return _error(
+            f"[red]Refusing to send from the download folder of "
+            f"{_esc(title)}:[/red] {_esc(e)}"
+        )
+    # A chapter on the undelivered list is always tried, so its record
+    # counts the attempt as `send --pending` would.
+    to_send = [item for item in items if item.record_title or not item.problem]
+    ask = len(to_send) > 1 and not args.yes and not args.dry_run
+    if ask and not _stdin_is_tty():
+        return _non_interactive_error(
+            f"refusing to send {len(to_send)} chapters of '{title}' without "
+            "confirmation; pass --yes (or --dry-run to preview)"
+        )
+
+    table = _table(
+        title=f"📧 Send to Kindle: {_esc(title)}",
+        box=box.ROUNDED,
+        show_lines=True,
+    )
+    table.add_column("Chapter", style="yellow", justify="center")
+    table.add_column("File", style="green", no_wrap=False, max_width=50)
+    table.add_column("Status", no_wrap=False, max_width=50)
+    for item in items:
+        if item.problem:
+            status = f"[red]{_esc(item.problem)}[/red]"
+        elif item.record_title:
+            status = "ready (not sent to Kindle yet)"
+        else:
+            status = "ready"
+        table.add_row(_esc(item.chapter),
+                      _esc(item.path.name if item.path else "—"), status)
+    console.print(table)
+    console.print()
+
+    problems = sum(1 for item in items if item.problem)
+    if args.dry_run:
+        console.print(
+            f"Dry run: {len(items) - problems}/{len(items)} chapter(s) would be "
+            "sent to Kindle; nothing was sent"
+        )
+        return EXIT_PARTIAL if problems else None
+
+    if ask and not Confirm.ask(
+            f"Send {len(to_send)} chapters of [cyan]{_esc(title)}[/cyan] to Kindle?"):
+        return None
+
+    sent = 0
+    for item in items:
+        console.print(f"  [dim]{_esc(title)} Chapter {_esc(item.chapter)}[/dim]")
+        if item.problem and not item.record_title:
+            _diagnostic(
+                logging.ERROR,
+                f"     [red]❌ Not sent: {_esc(item.problem)}[/red]",
+                "Chapter %s of %s not sent: %s", item.chapter, title, item.problem,
+            )
+            continue
+        try:
+            if item.record_title:
+                status = pipeline.redeliver(item.record_title, item.chapter, manga)
+            else:
+                status = pipeline.send_saved(title, item.chapter, item.path, manga)
+        finally:
+            # Like `check` (#230): a send that went out must stay recorded.
+            _checkpoint_state()
+        if status is DeliveryStatus.SENT:
+            sent += 1
+
+    console.print()
+    console.print(f"[green]📊 Send summary: {sent}/{len(items)} chapters sent to Kindle[/green]")
+    if sent < len(items):
+        return EXIT_PARTIAL
+
+
+def cmd_send(args):
+    """Send saved chapters to Kindle again (issues #360, #355).
+
+    `send TARGET CHAPTER...` sends chapters of a tracked manga that are
+    already saved; see `_send_chapters`. `send --pending [TARGET]` resends
+    every chapter whose Kindle delivery failed, through the same delivery
+    step as `check`, so delete-after-send still only removes a file once
+    it was sent. `--list` only lists them and `--clear` forgets the
+    records; the files stay on disk.
+    """
+    if not args.pending:
+        return _send_chapters(args)
+    pending = state.failures.get_all_undelivered()
+    title = None
+    if args.target:
+        title, error = _resolve_failed_target(args.target, recorded=set(pending))
+        if error:
+            return error
+        key = title.casefold()
+        pending = {t: chapters for t, chapters in pending.items()
+                   if t.casefold() == key}
+
+    if not pending:
+        console.print("[dim]No chapters are waiting to be sent to Kindle.[/dim]")
+        return
+
+    table = _table(
+        title="📧 Not Sent to Kindle",
+        box=box.ROUNDED,
+        show_lines=True,
+    )
+    table.add_column("Manga", style="cyan bold")
+    table.add_column("Chapter", style="yellow", justify="center")
+    table.add_column("Failed At", style="dim")
+    table.add_column("Attempts", justify="center")
+    table.add_column("File", style="green", no_wrap=False, max_width=40)
+    table.add_column("Reason", style="red", no_wrap=False, max_width=40)
+    for manga_title, chapters in sorted(pending.items()):
+        for chapter_num, info in sorted(chapters.items(), key=_chapter_order):
+            table.add_row(
+                _esc(manga_title),
+                _esc(chapter_num),
+                _esc(_local_time_text(info.get("failed_at"))),
+                _esc(info.get("attempts", 1)),
+                _esc(Path(str(info.get("path") or "")).name or "—"),
+                _esc(info.get("error", "")),
+            )
+    console.print(table)
+    console.print()
+
+    if args.list:
+        return
+
+    if args.clear:
+        for manga_title, chapters in pending.items():
+            for chapter_num in list(chapters):
+                state.failures.clear_undelivered(manga_title, chapter_num)
+        target_text = f" for {_esc(title)}" if title else ""
+        console.print(f"[green]✅ Cleared the Kindle delivery records{target_text}; "
+                      "the files stay on disk.[/green]")
+        return
+
+    pipeline = _chapter_pipeline()
+    if not pipeline.delivers_to_kindle():
+        return _error(_KINDLE_NOT_SET_UP)
+
+    # Records are keyed by the title they were saved under, which may
+    # differ in case from the tracked entry (targets match that way too).
+    tracked = config.get("manga", [])
+    manga_by_title = {m["title"]: m for m in tracked}
+    manga_by_key = {}
+    for m in tracked:
+        manga_by_key.setdefault(m["title"].casefold(), m)
+    sent = 0
+    attempted = 0
+    opted_out = 0
+    for manga_title, chapters in sorted(pending.items()):
+        manga = (manga_by_title.get(manga_title)
+                 or manga_by_key.get(manga_title.casefold()))
+        if manga is not None and not pipeline.delivers_to_kindle(manga):
+            # The manga opted out of Kindle delivery (#341): nothing is
+            # sent and its records stay until the user decides.
+            quoted = _esc(_quoted_title(manga_title))
+            console.print(
+                f"  [dim]Skipped {_esc(manga_title)}: Kindle delivery is off for "
+                f"this manga ({len(chapters)} chapter(s) kept). Turn it on with "
+                f"'memanga update {quoted} --kindle' or forget them with "
+                f"'memanga send --pending --clear {quoted}'.[/dim]",
+                soft_wrap=True,
+            )
+            opted_out += len(chapters)
+            continue
+        if manga is None and not pipeline.delivers_to_kindle({}):
+            # Issue #345: no longer tracked, so never turned on, and only
+            # manga turned on are sent.
+            quoted = _esc(_quoted_title(manga_title))
+            console.print(
+                f"  [dim]Skipped {_esc(manga_title)}: not in the library and "
+                f"Kindle delivery applies only to manga turned on "
+                f"({len(chapters)} chapter(s) kept). Send them with "
+                f"'memanga config set email.kindle_scope all' or forget them "
+                f"with 'memanga send --pending --clear {quoted}'.[/dim]",
+                soft_wrap=True,
+            )
+            opted_out += len(chapters)
+            continue
+        for chapter_num in sorted(chapters, key=chapter_order_key):
+            console.print(f"  [dim]{_esc(manga_title)} Chapter {_esc(chapter_num)}[/dim]")
+            attempted += 1
+            try:
+                status = pipeline.redeliver(manga_title, chapter_num, manga)
+            finally:
+                # Like `check` (#230): a send that went out must stay recorded.
+                _checkpoint_state()
+            if status is DeliveryStatus.SENT:
+                sent += 1
+
+    console.print()
+    console.print(f"[green]📊 Send summary: {sent}/{attempted} chapters sent to Kindle[/green]")
+    if opted_out:
+        console.print(f"[dim]{opted_out} chapter(s) skipped: Kindle delivery is "
+                      "not on for their manga[/dim]")
+    if sent < attempted:
+        return EXIT_PARTIAL
 
 
 _DOCTOR_ICONS = {
@@ -2956,6 +4162,14 @@ _DOCTOR_ICONS = {
     doctor.WARNING: "[yellow]⚠️[/yellow]",
     doctor.FAIL: "[red]❌[/red]",
     doctor.SKIP: "[dim]➖[/dim]",
+}
+
+# Plain output drops the icons (issue #226), so it names the status.
+_DOCTOR_LABELS = {
+    doctor.OK: "OK",
+    doctor.WARNING: "WARN",
+    doctor.FAIL: "FAIL",
+    doctor.SKIP: "SKIP",
 }
 
 
@@ -2981,15 +4195,17 @@ def cmd_doctor(args):
     with console.status("[dim]Running checks...[/dim]"):
         results = run()
 
-    table = Table(title="🩺 MeManga Doctor", box=box.SIMPLE, show_header=False)
-    table.add_column(width=2)
+    plain = is_plain_console(console)
+    table = _table(title="🩺 MeManga Doctor", box=box.SIMPLE, show_header=False)
+    table.add_column(width=None if plain else 2)
     table.add_column(style="cyan")
     table.add_column(no_wrap=False)
+    status_cells = _DOCTOR_LABELS if plain else _DOCTOR_ICONS
     for r in results:
         message = _esc(r.message)
         if r.status == doctor.SKIP:
             message = f"[dim]{message}[/dim]"
-        table.add_row(_DOCTOR_ICONS[r.status], _esc(r.name), message)
+        table.add_row(status_cells[r.status], _esc(r.name), message)
     console.print(table)
 
     report = doctor.build_report(results)
@@ -3003,6 +4219,43 @@ def cmd_doctor(args):
     else:
         console.print(f"[green]✅ All checks passed[/green] [dim]({summary})[/dim]")
     return doctor.exit_code(results, strict=args.strict)
+
+
+def cmd_setup(args):
+    """Prepare a first run (issue #217); safe to repeat.
+
+    Exit code: 0 when every step is done, 1 when one still needs the
+    user (the message says what to run).
+    """
+    from . import first_run
+
+    plain = is_plain_console(console)
+    status_cells = _DOCTOR_LABELS if plain else _DOCTOR_ICONS
+
+    def report(result):
+        console.print(f"{status_cells[result.status]} [cyan]{_esc(result.name)}[/cyan]: "
+                      f"{_esc(result.message)}")
+
+    def confirm(question):
+        return Confirm.ask(_esc(question), default=True)
+
+    def notify(text):
+        console.print(f"[dim]{_esc(text)}[/dim]")
+
+    console.print("[bold]📖 MeManga setup[/bold]")
+    results = first_run.run_setup(
+        config, report=report,
+        install=args.install_browsers, can_prompt=_stdin_is_tty(),
+        confirm=confirm, notify=notify,
+    )
+    if doctor.overall_status(results) == doctor.FAIL:
+        console.print("[red]❌ Setup is not complete.[/red] Fix the items above, "
+                      "then run 'memanga setup' again.")
+        return EXIT_ERROR
+    console.print("[green]✅ Setup complete.[/green] Next: 'memanga add -i' to track "
+                  "a manga, 'memanga check' for new chapters, 'memanga --help' for "
+                  "every command.")
+    return EXIT_OK
 
 
 def cmd_tui(args):
@@ -3049,7 +4302,7 @@ def cmd_tui(args):
         choice = Prompt.ask("Select", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9", "e", "i", "q"], default="4")
         
         if choice == "q":
-            console.print("[dim]Goodbye! 📖[/dim]")
+            console.print("[dim]Goodbye.[/dim]")
             break
         
         console.print()
@@ -3166,6 +4419,15 @@ def cmd_completion(args):
 # ============================================================================
 
 def main():
+    # Issue #244: the config directory lock outlives _main() so the
+    # interrupt handlers below still save state while holding it.
+    try:
+        _run_main()
+    finally:
+        _release_config_lock()
+
+
+def _run_main():
     # Issue #239: handled here, not under __main__, so `python -m memanga`
     # and the installed `memanga` script also exit 130 without a traceback.
     try:
@@ -3174,13 +4436,75 @@ def main():
         _flush_state_on_interrupt()
         err_console.print("\n[dim]Interrupted.[/dim]")
         sys.exit(EXIT_INTERRUPTED)
+    except TerminationRequested:
+        _flush_state_on_interrupt()
+        err_console.print("\n[dim]Terminated.[/dim]")
+        sys.exit(EXIT_TERMINATED)
+    except StateCheckpointError as e:
+        stopped = ("Stopped: nothing more is downloaded or sent while "
+                   "results can't be recorded.")
+        _diagnostic(
+            logging.ERROR,
+            f"[red]❌ Could not save state: {_esc(e)}[/red]\n[red]{stopped}[/red]",
+            "Could not save state: %s. %s", e, stopped,
+        )
+        sys.exit(EXIT_ERROR)
+    except SaveError as e:
+        # Issue #243: a failed config/state save (full disk, permissions)
+        # ends the command with a message instead of a traceback.
+        reason = e.error.strerror or e.error
+        advice = ("and its backup were not changed by this save. Free up "
+                  "disk space or check the folder's permissions, then retry.")
+        _diagnostic(
+            logging.ERROR,
+            f"[red]❌ Could not save {_esc(e.path.name)}: {_esc(reason)}[/red]\n"
+            f"[red]{_esc(e.path)} {advice}[/red]",
+            "Could not save %s: %s. %s %s", e.path.name, reason, e.path, advice,
+        )
+        sys.exit(EXIT_ERROR)
+
+
+class TerminationRequested(BaseException):
+    """Raised by the CLI's SIGTERM handler (issue #230).
+
+    A BaseException, like KeyboardInterrupt, so the commands' ``except
+    Exception`` handlers let it through to main(), which saves state.
+    """
+
+
+def _raise_termination(signum, frame):
+    raise TerminationRequested(signum)
+
+
+@contextmanager
+def _sigterm_as_shutdown():
+    """Turn SIGTERM into TerminationRequested while a CLI command runs.
+
+    Python's default SIGTERM action exits without cleanup, so a cron
+    `timeout` or a service stop lost state not yet written (issue #230).
+    Only the main thread may install handlers, and the GUI never runs
+    under this, so Qt keeps its own shutdown. The previous handler is
+    restored afterwards.
+    """
+    if (not hasattr(signal, "SIGTERM")
+            or threading.current_thread() is not threading.main_thread()):
+        yield
+        return
+    previous = signal.signal(signal.SIGTERM, _raise_termination)
+    try:
+        yield
+    finally:
+        # None: the handler wasn't installed from Python.
+        signal.signal(signal.SIGTERM,
+                      signal.SIG_DFL if previous is None else previous)
 
 
 def _flush_state_on_interrupt():
-    """Persist state marked dirty before Ctrl-C (issue #234).
+    """Persist state marked dirty before Ctrl-C (issue #234) or SIGTERM
+    (issue #230).
 
-    `check` only saves at the end via update_last_check(), so chapters
-    already recorded as downloaded would otherwise be lost. Best effort:
+    Each finished chapter is already checkpointed; this keeps whatever
+    else was marked dirty before the signal (e.g. notifications). Best effort:
     a failed write must not replace the interrupt with a traceback.
     """
     if state is None:
@@ -3188,7 +4512,9 @@ def _flush_state_on_interrupt():
     try:
         state.flush()
     except Exception as e:
-        err_console.print(f"[yellow]⚠️  Could not save state: {_esc(e)}[/yellow]")
+        _diagnostic(logging.WARNING,
+                    f"[yellow]⚠️  Could not save state: {_esc(e)}[/yellow]",
+                    "Could not save state: %s", e)
 
 
 def _subparser(parser, name):
@@ -3213,12 +4539,16 @@ Examples:
   memanga check "Solo Leveling"         # Check one manga (same as -t)
   memanga check --download              # Download new chapters, no prompts
   memanga check --dry-run               # Only list new chapters
+  memanga send "Solo Leveling" 12       # Send a downloaded chapter to Kindle
+  memanga send --pending                # Resend chapters Kindle never got
   memanga edit "#1" --status on-hold    # Change a manga's status
   memanga read "Solo Leveling" 1 2      # Mark chapters read (unread undoes)
   memanga path "Solo Leveling"          # Print its download folder
   memanga open "Solo Leveling"          # Open its download folder
+  memanga setup                         # Prepare a first run (browsers too)
   memanga doctor                        # Diagnose setup problems
   memanga cron install                  # Set up daily checks
+  memanga watch --every 6h              # Check every 6 hours (Docker)
   memanga config                        # Configure settings
   memanga config set KEY VALUE          # Change one setting
   memanga --config-dir DIR status       # Use another config directory
@@ -3231,7 +4561,7 @@ Examples:
     # `memanga` script and `python -m memanga` (issue #248).
     parser = argparse.ArgumentParser(
         prog="memanga",
-        description="📖 MeManga - Automatic manga downloader",
+        description="MeManga - Automatic manga downloader",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=_epilog,
     )
@@ -3240,15 +4570,42 @@ Examples:
     )
     parser.add_argument(
         "--config-dir", metavar="DIR",
-        help=f"Use DIR for config.yaml and state.json (default: ${CONFIG_DIR_ENV} "
-             "or ~/.config/memanga). Goes before the command.",
+        help=f"Use DIR for config.yaml and state.json"
+             f"{'' if _cli_only else ', also with --gui'} "
+             f"(default: ${CONFIG_DIR_ENV} or the platform config folder). "
+             "Goes before the command.",
     )
-    # In CLI-only Docker images (MEMANGA_CLI_ONLY=1) the GUI is not installed;
+    # In CLI-only Docker images (MEMANGA_CLI_ONLY=1) Qt is not installed;
     # suppress the flag from help and reject it at runtime with a clear message.
     parser.add_argument(
         "--gui",
         action="store_true",
-        help=argparse.SUPPRESS if _cli_only else "Launch the graphical user interface",
+        help=(argparse.SUPPRESS if _cli_only else
+              "Launch the graphical user interface (needs the gui extra)"),
+    )
+    # Issue #226: output and logging. Like --config-dir these go before
+    # the command; `check -q` keeps its own meaning (never prompt).
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help="Show more diagnostics on stderr (-v progress, -vv debug). "
+             f"Overrides ${LOG_LEVEL_ENV}. Goes before the command.",
+    )
+    verbosity.add_argument(
+        "-q", "--quiet", dest="log_quiet", action="store_true",
+        help="Hide warning, progress and debug diagnostics; errors still "
+             f"show. Overrides ${LOG_LEVEL_ENV}. Goes before the command.",
+    )
+    parser.add_argument(
+        "--plain", action="store_true",
+        help="Plain text output: no colour, emoji, borders or line wrapping "
+             "(automatic when output is not a terminal). Goes before the "
+             "command.",
+    )
+    parser.add_argument(
+        "--log-file", action="store_true",
+        help=f"Also write diagnostics to {LOG_FILE_NAME} in the config "
+             "directory (rotated, with timestamps). Goes before the command.",
     )
     
     subparsers = parser.add_subparsers(dest="command", title="commands")
@@ -3272,16 +4629,16 @@ Examples:
     p_add.add_argument("-u", "--url", help="Primary source URL")
     p_add.add_argument("-b", "--backup", help="Backup source URL")
     p_add.add_argument("--fallback-days", type=_non_negative_int_arg,
-                       default=DEFAULT_FALLBACK_DELAY_DAYS,
-                       help="Days to wait before using backup (0 or more; "
-                            f"default: {DEFAULT_FALLBACK_DELAY_DAYS})")
+                       help="Days to wait before using the backup (0 or more; "
+                            f"default: {DEFAULT_FALLBACK_DELAY_DAYS}); needs --backup")
     p_add.add_argument("--status", choices=VALID_STATUSES,
                        help="Initial status (default: reading)")
     p_add.add_argument("--mode", choices=["auto", "manual"],
                        help="Desktop-app download mode (default: auto)")
     p_add_kindle = p_add.add_mutually_exclusive_group()
     p_add_kindle.add_argument("--kindle", dest="send_to_kindle", action="store_const", const=True,
-                              help="Turn the desktop app's per-manga Kindle toggle on (default)")
+                              help="Turn the desktop app's per-manga Kindle toggle on "
+                                   "(without either flag, email.kindle_scope decides)")
     p_add_kindle.add_argument("--no-kindle", dest="send_to_kindle", action="store_const", const=False,
                               help="Turn the desktop app's per-manga Kindle toggle off")
     p_add.add_argument("-i", "--interactive", action="store_true",
@@ -3415,8 +4772,9 @@ Examples:
             "they don't download by themselves.\n\n"
             "Exit codes: 0 no new chapters, chapters listed or all downloaded, or a\n"
             "suspicious batch withheld (warning on stderr); 1 every checked manga\n"
-            "failed, the target was not found, or chapters needed confirmation;\n"
-            "2 usage error; 3 some chapters or manga failed; 130 interrupted."
+            "failed, the target was not found, chapters needed confirmation, or\n"
+            "state.json could not be written; 2 usage error; 3 some chapters or\n"
+            "manga failed; 130 interrupted; 143 terminated (SIGTERM)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -3429,7 +4787,8 @@ Examples:
     p_check.add_argument("--download", "-a", "--auto", "-y", "--yes", dest="download", action="store_true",
                          help="Download new chapters without prompting (--auto and --yes are aliases)")
     p_check.add_argument("-q", "--quiet", action="store_true",
-                         help="Never prompt; without --download, new chapters are skipped and the run exits 1")
+                         help="Never prompt; without --download, new chapters are skipped and the run exits 1 "
+                              "(to hide warnings, use `memanga -q check`)")
     p_check.add_argument("-s", "--safe", action="store_true", help="Safe mode: restart browser every 3 chapters (for bulk downloads)")
     p_check.add_argument("-n", "--dry-run", action="store_true",
                          help="Check only: list what would be downloaded; no downloads or state changes (wins over --download)")
@@ -3440,7 +4799,7 @@ Examples:
     # Partial-chapter tolerance (issue #86) — config is the source of truth;
     # these override it for a single run.
     partial_grp = p_check.add_mutually_exclusive_group()
-    partial_grp.add_argument("--allow-partial", action="store_true", help="Keep a chapter with a few missing pages instead of discarding it (issue #86)")
+    partial_grp.add_argument("--allow-partial", action="store_true", help="Keep a chapter with a few missing pages instead of discarding it")
     partial_grp.add_argument("--no-partial", action="store_true", help="Force-discard any chapter with missing pages, even if partial tolerance is enabled in config")
     p_check.add_argument("--partial-threshold", type=_partial_threshold_arg, metavar="PCT", help="Max %% of pages allowed to fail before a partial is refused, 0-100 (default: config value)")
     p_check.set_defaults(func=cmd_check)
@@ -3477,7 +4836,7 @@ Examples:
     config_keys_help = "KEY is one of: " + ", ".join(CONFIG_KEYS)
     config_actions = p_config.add_subparsers(dest="config_action", title="actions", metavar="ACTION")
     p_cfg_show = config_actions.add_parser(
-        "show", help="Show the current config (app password masked)")
+        "show", help="Show the current config (app password and email addresses masked)")
     p_cfg_show.add_argument("--json", action="store_true", help="Machine-readable JSON output")
     p_cfg_get = config_actions.add_parser(
         "get", help="Print one setting's value", description=config_keys_help)
@@ -3494,17 +4853,56 @@ Examples:
         "edit", help="Open config.yaml in $VISUAL or $EDITOR, then check it")
     p_cfg_email = config_actions.add_parser(
         "email", help="Show email delivery settings (app password masked)")
-    p_cfg_email.add_argument("--test", action="store_true",
-                             help="Log in to the configured SMTP server (network)")
+    email_test = p_cfg_email.add_mutually_exclusive_group()
+    email_test.add_argument("--test", action="store_true",
+                            help="Connection check only: log in to the "
+                                 "configured SMTP server; sends nothing (network)")
+    email_test.add_argument("--send-test", action="store_true",
+                            help="Email a small test PDF to the configured "
+                                 "Kindle address (network). Mail server "
+                                 "acceptance does not prove Kindle delivery")
     
     # cron
     p_cron = subparsers.add_parser("cron", help="Manage cron job")
     p_cron.add_argument("action", choices=["status", "install", "remove"], help="Action")
     p_cron.add_argument("--time", help="Check time (HH:MM) for install")
     p_cron.set_defaults(func=cmd_cron)
+
+    p_watch = subparsers.add_parser(
+        "watch",
+        help="Keep running and check on an interval (containers)",
+        description=(
+            "Stay in the foreground and run 'check --auto --quiet' now and then\n"
+            "every --every interval, start to start, for Docker and other hosts\n"
+            "without cron. Checks never overlap; a failed check is reported and\n"
+            "the schedule continues. Each check locks the config directory only\n"
+            "while it runs, so other commands work in between. SIGTERM or Ctrl-C\n"
+            "lets a running check save its state, then exits 143 or 130.\n\n"
+            "Durations: a number with d, h, m or s, e.g. 6h, 90m or 1h30m."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_watch.add_argument(
+        "--every", type=_watch_interval_arg, default=6 * 3600, metavar="DURATION",
+        help="Time between check starts (default: 6h, at least 15m)")
+    p_watch.add_argument(
+        "--jitter", type=_watch_jitter_arg, default=0, metavar="DURATION",
+        help="Add a random delay of up to DURATION to each wait (default: 0)")
+    p_watch.set_defaults(func=cmd_watch)
     
     # sources
     p_sources = subparsers.add_parser("sources", help="List supported sources")
+    p_sources.add_argument("query", nargs="?",
+                           help="Only show sources whose domain or alias contains this text")
+    p_sources.add_argument("--json", action="store_true", help="Machine-readable JSON output")
+    p_sources.add_argument("--search", choices=SOURCE_SEARCH_FILTERS,
+                           help="Only show sources the search sweep includes or skips")
+    p_sources.add_argument("--health", action="append", choices=SOURCE_HEALTH_STATUSES,
+                           help="Only show sources with this saved health (repeat for several); "
+                                "unknown means never checked")
+    p_sources.add_argument("--coverage", action="store_true",
+                           help="List each source with its offline parser tests, "
+                                "live probe steps and saved health")
     p_sources.set_defaults(func=cmd_sources)
 
     # search
@@ -3520,7 +4918,8 @@ Examples:
     p_search.add_argument("--limit", type=int, metavar="N", help="Cap results per source")
     p_search.add_argument("--add", type=int, metavar="N", help="Add result #N without prompting")
     p_search.add_argument("--status", choices=VALID_STATUSES, help="Status for the added manga (with --add or the prompt)")
-    p_search.add_argument("--no-chips", action="store_true", help="Skip chapter-count probes (faster)")
+    p_search.add_argument("--no-chips", action="store_true",
+                          help="Skip chapter counts: no chapter-list fetch per result, which can take several requests each (faster, less traffic)")
     p_search.set_defaults(func=cmd_search)
 
     # export
@@ -3578,6 +4977,56 @@ Examples:
             p_action.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                                   help="Machine-readable JSON output")
 
+    # send (issues #360, #355)
+    p_send = subparsers.add_parser(
+        "send",
+        help="Send downloaded chapters to Kindle",
+        description=(
+            "Send saved chapters to Kindle.\n\n"
+            "  send TARGET CHAPTER...           send these downloaded chapters\n"
+            "  send TARGET CHAPTER... --dry-run only show what would be sent\n"
+            "  send --pending [TARGET]          send every chapter whose Kindle\n"
+            "                                   delivery failed\n"
+            "  send --pending --list [TARGET]   only list them\n"
+            "  send --pending --clear [TARGET]  forget the records; the files stay\n\n"
+            "CHAPTER is a downloaded chapter's number or label, e.g. 12 or 10.5.\n"
+            "Every CHAPTER is checked before anything is sent; its saved file is\n"
+            "taken from the manga's download folder, and nothing is downloaded.\n"
+            "A chapter is sent again even if an earlier send worked. Sending more\n"
+            "than one chapter asks first; --yes skips that, and is required when\n"
+            "no one can answer.\n\n"
+            "A chapter that was saved but could not be emailed stays on the\n"
+            "--pending list until it is sent. 'delivery.delete_after_send' removes\n"
+            "a file only after it was sent. TARGET is a title or '#N' from\n"
+            "'memanga list', matched like 'check -t'; with --pending and no\n"
+            "TARGET every manga is included.\n\n"
+            "Exit codes: 0 success, nothing to send, or sending was declined at\n"
+            "the question; 1 the target or a chapter was not found or is\n"
+            "ambiguous, Kindle delivery is not set up, or several chapters were\n"
+            "given without --yes and no one can answer; 2 usage error; 3 some\n"
+            "chapters could not be sent (with --dry-run: would not be sent)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_send.add_argument("target", nargs="?", metavar="TARGET",
+                        help="Title or #N from 'memanga list' (with --pending, "
+                             "default: every manga)")
+    p_send.add_argument("chapters", nargs="*", metavar="CHAPTER",
+                        help="Downloaded chapter number or label, e.g. 12 or 10.5")
+    p_send.add_argument("--pending", action="store_true",
+                        help="Chapters whose Kindle delivery failed")
+    send_mode = p_send.add_mutually_exclusive_group()
+    send_mode.add_argument("--list", action="store_true",
+                           help="With --pending: only list them; send nothing")
+    send_mode.add_argument("--clear", action="store_true",
+                           help="With --pending: forget the records without "
+                                "sending; the files stay")
+    send_mode.add_argument("--dry-run", action="store_true",
+                           help="Only show what would be sent; send nothing")
+    p_send.add_argument("-y", "--yes", action="store_true",
+                        help="Send several chapters without asking")
+    p_send.set_defaults(func=cmd_send)
+
     # doctor (issue #250)
     p_doctor = subparsers.add_parser(
         "doctor",
@@ -3596,6 +5045,31 @@ Examples:
                           help="Launch Firefox and Chromium headless instead of only checking they are installed")
     p_doctor.add_argument("--strict", action="store_true", help="Also exit non-zero on warnings")
     p_doctor.set_defaults(func=cmd_doctor)
+
+    # setup (issue #217)
+    p_setup = subparsers.add_parser(
+        "setup",
+        help="Prepare a first run: config, download folder and browsers",
+        description=(
+            "Create the config file and download folder when missing, and\n"
+            "check that the Firefox and Chromium builds the scrapers use are\n"
+            "installed and start. Missing browsers are downloaded only with\n"
+            "--install-browsers or after you agree on a terminal; without a\n"
+            "terminal nothing is downloaded. Missing system libraries are\n"
+            "reported with the command that installs them; setup never runs\n"
+            "sudo or a package manager. Safe to run again at any time.\n\n"
+            "Exits 0 when everything is ready, 1 when something still needs\n"
+            "you."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p_setup.add_argument(
+        "--install-browsers", action=argparse.BooleanOptionalAction, default=None,
+        help="Download missing browsers without asking (--install-browsers) or "
+             "never download them (--no-install-browsers). Default: ask on a "
+             "terminal, don't download otherwise",
+    )
+    p_setup.set_defaults(func=cmd_setup)
 
     # tui (default if no command)
     p_tui = subparsers.add_parser("tui", help="Interactive terminal UI")
@@ -3633,6 +5107,7 @@ def _main():
     p_failed = _subparser(parser, "failed")
 
     args = parser.parse_args()
+    _configure_output(args)
 
     if args.command == "check":
         if args.target and args.title and args.target != args.title:
@@ -3657,6 +5132,21 @@ def _main():
         if not args.all and not args.chapters:
             _subparser(parser, args.command).error("give at least one CHAPTER, or --all")
 
+    if args.command == "send":
+        p_send = _subparser(parser, "send")
+        if args.pending:
+            if args.chapters:
+                p_send.error("CHAPTER cannot be combined with --pending")
+            if args.dry_run:
+                p_send.error("--dry-run cannot be combined with --pending; use --list")
+            if args.yes:
+                p_send.error("--yes cannot be combined with --pending")
+        else:
+            if args.list or args.clear:
+                p_send.error("--list and --clear need --pending")
+            if not args.target or not args.chapters:
+                p_send.error("give TARGET and at least one CHAPTER, or --pending")
+
     if args.command == "config" and args.config_action:
         legacy = [flag for flag, value in (
             ("--show", args.show),
@@ -3669,17 +5159,35 @@ def _main():
             p_config.error(f"{legacy[0]} cannot be combined with the "
                            f"'{args.config_action}' action")
 
-    # The GUI builds its own Config/State under the default root.
-    if args.gui and args.config_dir:
-        parser.error("--config-dir is not supported with --gui")
-
     # Needs no config or state, so it works before setup and never
     # writes to the config directory.
     if args.command == "completion" and not args.gui:
         sys.exit(args.func(args))
-    use_context(build_context(
-        None if args.gui else resolve_config_dir(args.config_dir)
-    ))
+    # Issue #327: the watcher loads and locks nothing; each check it
+    # starts is its own process that does.
+    if args.command == "watch" and not args.gui:
+        with _sigterm_as_shutdown():
+            sys.exit(args.func(args))
+    # The GUI selects the same way (issue #249): main() loads Config/State
+    # in the selected root and hands them, and an explicit choice, to
+    # launch_gui().
+    config_dir = resolve_config_dir(args.config_dir)
+    # Issue #244: lock before loading, so no other process can write
+    # between this load and our last save.
+    lock_dir = config_dir or default_config_dir()
+    locked = _needs_config_lock(args)
+    if locked:
+        _acquire_config_lock(lock_dir)
+    if config_dir is None:
+        lock_dir = _revalidate_default_root(lock_dir, locked)
+    ctx = build_context(config_dir, recover_state=locked, root=lock_dir)
+    # A read-only command found a damaged state.json: repair it only
+    # while holding the lock (kept until main() ends), else leave it
+    # untouched and report it through state.load_error.
+    if ctx.state.needs_recovery and _acquire_config_lock(lock_dir, required=False):
+        ctx = build_context(config_dir, root=lock_dir)
+    use_context(ctx)
+    _enable_log_file(args, lock_dir)
 
     # Only doctor and `config path/edit` may run on fallback defaults;
     # anything else could act on an empty manga list or overwrite the
@@ -3694,6 +5202,24 @@ def _main():
             "Fix or move the file, then retry. Run `memanga doctor` for details.\n"
         )
         sys.exit(1)
+    # Issue #243: same rule for a state file that could not be loaded,
+    # copied aside or restored; a damaged file that was copied aside and
+    # replaced only warns.
+    if state.load_error and not broken_config_ok:
+        sys.stderr.write(
+            f"error: cannot load state file: {state.load_error}\n"
+            "Fix or move the file, then retry. Run `memanga doctor` for details.\n"
+        )
+        sys.exit(1)
+    if state.recovery_notice:
+        sys.stderr.write(f"warning: {state.recovery_notice}\n")
+    # Issue #293: a bad value does not stop the command, but is not silent.
+    # `doctor` and `config edit` report it themselves; the desktop app
+    # shows it in a dialog.
+    if not broken_config_ok and not args.gui:
+        settings_notice = config.validation_notice
+        if settings_notice:
+            sys.stderr.write(f"warning: {settings_notice}\n")
 
     if args.gui:
         if _cli_only:
@@ -3702,21 +5228,24 @@ def _main():
             )
             sys.exit(1)
         from .gui import launch_gui
-        launch_gui()
+        # Hand over the loaded state so the GUI can show its recovery
+        # notice; a second State() would find the repaired file.
+        launch_gui(config=config, state=state, explicit_config_dir=config_dir)
         return
 
-    if args.command is None:
-        # Default to TUI, but never drop automation into the menu (#258).
-        if not _stdin_is_tty():
-            parser.print_help(sys.stderr)
-            sys.exit(cmd_tui(args))
-        cmd_tui(args)
-    elif hasattr(args, 'func'):
-        result = args.func(args)
-        if result:
-            sys.exit(result)
-    else:
-        parser.print_help()
+    with _sigterm_as_shutdown():
+        if args.command is None:
+            # Default to TUI, but never drop automation into the menu (#258).
+            if not _stdin_is_tty():
+                parser.print_help(sys.stderr)
+                sys.exit(cmd_tui(args))
+            cmd_tui(args)
+        elif hasattr(args, 'func'):
+            result = args.func(args)
+            if result:
+                sys.exit(result)
+        else:
+            parser.print_help()
 
 
 if __name__ == "__main__":

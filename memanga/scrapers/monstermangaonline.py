@@ -186,5 +186,5 @@ class MonsterMangaOnlineScraper(BaseScraper):
                     src = "https:" + src if src.startswith("//") else src
                 pages.append(src)
         
-        logger.info(f"Found {len(pages)} pages in chapter")
+        logger.debug("Found %s pages in chapter", len(pages))
         return pages

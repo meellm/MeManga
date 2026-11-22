@@ -7,6 +7,10 @@ always returns a usable cover for popular series, so we use it as a
 fallback when the primary source can't provide one.
 
 This module is intentionally GUI-only — the CLI never touches it.
+
+Every caller asks `mangadex_fallback_allowed` first (issue #337): the
+lookup contacts MangaDex, so it stays off when the user turned
+MangaDex off in Sources or turned the lookup off in Settings.
 """
 
 import re
@@ -19,6 +23,42 @@ from ..scrapers.mangadex import USER_AGENT
 _MANGADEX_API = "https://api.mangadex.org/manga"
 _COVER_BASE = "https://uploads.mangadex.org/covers"
 _TIMEOUT = 10
+_MANGADEX_DOMAIN = "mangadex.org"
+
+
+def mangadex_fallback_allowed(config) -> bool:
+    """Whether the MangaDex cover lookup may run.
+
+    Needs ``gui.mangadex_cover_fallback`` on (the default) and
+    mangadex.org not in ``sources.disabled``.
+    """
+    if config is None:
+        return False
+    if not config.get("gui.mangadex_cover_fallback", True):
+        return False
+    disabled = config.get("sources.disabled", []) or []
+    return _MANGADEX_DOMAIN not in disabled
+
+
+def find_cover(config, domain: str, url: str, title: str) -> Optional[str]:
+    """Cover URL for a library entry: the entry's own source first,
+    then MangaDex when `mangadex_fallback_allowed`. Used by Add Manga
+    and by Detail after a rename.
+    """
+    cover = None
+    try:
+        from ..scrapers import get_scraper
+        scraper = get_scraper(domain)
+        if hasattr(scraper, "get_cover_url") and url:
+            cover = scraper.get_cover_url(url)
+    except Exception:
+        cover = None
+    if not cover and mangadex_fallback_allowed(config):
+        try:
+            cover = fetch_mangadex_cover(title)
+        except Exception:
+            cover = None
+    return cover
 
 
 def _normalize(text: str) -> str:

@@ -139,6 +139,232 @@ class TestCheckConnectivity:
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Settings: probe hosts and the on/off switch (issue #337)
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestConfiguredEndpoints:
+    def test_default_is_builtin_list(self, config):
+        from memanga.gui import network_status as ns
+        assert ns.configured_endpoints(config) == ns.PROBE_ENDPOINTS
+
+    def test_custom_hosts_replace_builtin(self, config):
+        from memanga.gui import network_status as ns
+        config.set("gui.network_check_hosts",
+                   ["192.0.2.1:80", "[2001:db8::1]:443"])
+        assert ns.configured_endpoints(config) == (
+            ("192.0.2.1", 80), ("2001:db8::1", 443))
+
+    def test_invalid_entries_skipped(self, config):
+        from memanga.gui import network_status as ns
+        config.set("gui.network_check_hosts",
+                   ["https://example.test", "example.test:443", "nope"])
+        assert ns.configured_endpoints(config) == (("example.test", 443),)
+
+    @pytest.mark.parametrize("raw", [[], None])
+    def test_unset_or_empty_uses_builtin(self, config, raw):
+        from memanga.gui import network_status as ns
+        config.set("gui.network_check_hosts", raw)
+        assert ns.configured_endpoints(config) == ns.PROBE_ENDPOINTS
+        assert ns.invalid_hosts(config) == []
+
+    @pytest.mark.parametrize("raw", [
+        ["bad"], ["https://example.test", "example.test"], "example.test:443",
+    ])
+    def test_no_valid_entry_probes_nothing(self, config, raw):
+        # A typo in the user's own list must never send probes to the
+        # built-in third-party hosts it replaced.
+        from memanga.gui import network_status as ns
+        config.set("gui.network_check_hosts", raw)
+        assert ns.configured_endpoints(config) == ()
+        assert ns.invalid_hosts(config) == (raw if isinstance(raw, list)
+                                            else [raw])
+
+    def test_invalid_hosts_lists_only_bad_entries(self, config):
+        from memanga.gui import network_status as ns
+        config.set("gui.network_check_hosts", ["example.test:443", "nope"])
+        assert ns.invalid_hosts(config) == ["nope"]
+
+    def test_monitor_without_endpoints_sends_nothing(self, event_bus,
+                                                     monkeypatch):
+        from memanga.gui import network_status as ns
+        calls = []
+        monkeypatch.setattr(ns, "_tcp_probe",
+                            lambda *a, **k: calls.append(a) or False)
+        m = ns.NetworkMonitor(event_bus, endpoints=())
+        seen = []
+        event_bus.subscribe("network_offline", lambda d: seen.append(d))
+        m.start()
+        m._probe_and_publish()
+        m.force_recheck()
+        time.sleep(0.2)
+        event_bus.poll()
+        assert m._thread is None
+        assert calls == []
+        assert seen == []
+        assert m.is_online is True
+
+    def test_monitor_probes_only_given_endpoints(self, event_bus, monkeypatch):
+        from memanga.gui import network_status as ns
+        calls = []
+        monkeypatch.setattr(
+            ns, "_tcp_probe",
+            lambda h, p, t: bool(calls.append((h, p))))
+        m = ns.NetworkMonitor(event_bus, endpoints=(("192.0.2.1", 80),))
+        m._probe_and_publish()
+        assert calls == [("192.0.2.1", 80)]
+
+
+class TestSetEnabled:
+    def test_disable_while_offline_restores_online(self, event_bus, monkeypatch):
+        from memanga.gui import network_status as ns
+        monkeypatch.setattr(ns, "_tcp_probe", lambda *a, **k: False)
+        m = ns.NetworkMonitor(event_bus)
+        m._probe_and_publish()
+        event_bus.poll()
+        assert m.is_online is False
+
+        seen = []
+        event_bus.subscribe("network_online", lambda d: seen.append(d))
+        m.set_enabled(False)
+        event_bus.poll()
+        assert m.is_online is True
+        assert seen == [{}]
+
+    def test_disable_while_online_publishes_nothing(self, event_bus):
+        from memanga.gui import network_status as ns
+        m = ns.NetworkMonitor(event_bus)
+        seen = []
+        event_bus.subscribe("network_online", lambda d: seen.append(d))
+        m.set_enabled(False)
+        event_bus.poll()
+        assert m.is_online is True
+        assert seen == []
+
+    def test_probe_finishing_after_disable_is_ignored(self, event_bus,
+                                                      monkeypatch):
+        from memanga.gui import network_status as ns
+        m = ns.NetworkMonitor(event_bus)
+
+        def probe_then_disabled(*a, **k):
+            m.stop()  # the user turned the check off mid-probe
+            return False
+
+        monkeypatch.setattr(ns, "_tcp_probe", probe_then_disabled)
+        m._probe_and_publish()
+        assert m.is_online is True
+
+    def test_quick_off_then_on_keeps_monitor_running(self, event_bus,
+                                                     monkeypatch):
+        from memanga.gui import network_status as ns
+        monkeypatch.setattr(ns, "_tcp_probe", lambda *a, **k: True)
+        m = ns.NetworkMonitor(event_bus)
+        m.start()
+        try:
+            m.set_enabled(False)
+            m.set_enabled(True)  # before the old thread noticed the stop
+            assert not m._stop.is_set()
+            time.sleep(0.8)  # longer than one sleep slice of the loop
+            assert m._thread.is_alive()
+        finally:
+            m.stop()
+
+    def test_stale_probe_cannot_publish_after_off_then_on(self, event_bus,
+                                                          monkeypatch):
+        # A probe that started before the user turned the check off must
+        # not count once it is turned back on before the probe returns.
+        from types import SimpleNamespace
+        from memanga.gui import network_status as ns
+        m = ns.NetworkMonitor(event_bus)
+        # Pretend the monitor thread is still alive so start() only
+        # re-arms it and spawns nothing: the test stays single-threaded.
+        m._thread = SimpleNamespace(is_alive=lambda: True)
+
+        def slow_probe_spanning_toggle(*a, **k):
+            m.set_enabled(False)
+            m.set_enabled(True)
+            return False  # stale "offline" result
+
+        monkeypatch.setattr(ns, "_tcp_probe", slow_probe_spanning_toggle)
+        seen = []
+        event_bus.subscribe("network_offline", lambda d: seen.append(d))
+        m._probe_and_publish()
+        event_bus.poll()
+        assert not m._stop.is_set()  # re-enabled
+        assert m.is_online is True
+        assert seen == []
+
+    def test_enable_starts_thread(self, event_bus, monkeypatch):
+        from memanga.gui import network_status as ns
+        monkeypatch.setattr(ns, "_tcp_probe", lambda *a, **k: True)
+        m = ns.NetworkMonitor(event_bus)
+        m.set_enabled(True)
+        try:
+            assert m._thread is not None and m._thread.is_alive()
+        finally:
+            m.stop()
+
+
+class TestAppNetworkCheckSetting:
+    def _make_app(self, config):
+        from memanga.gui.app import MeMangaApp
+        return MeMangaApp(config=config)
+
+    def test_disabled_check_never_starts_monitor(self, qapp, theme, config,
+                                                 monkeypatch):
+        from memanga.gui import network_status as ns
+        calls = []
+        monkeypatch.setattr(ns, "_tcp_probe",
+                            lambda *a, **k: calls.append(a) or True)
+        config.set("gui.network_check", False)
+        w = self._make_app(config)
+        try:
+            assert w.network._thread is None
+            assert w.network.is_online is True
+            time.sleep(0.2)
+            assert calls == []
+        finally:
+            w.worker.shutdown()
+            w.close()
+
+    def test_default_starts_monitor_with_configured_hosts(
+            self, qapp, theme, config, monkeypatch):
+        from memanga.gui import network_status as ns
+        monkeypatch.setattr(ns, "_tcp_probe", lambda *a, **k: True)
+        config.set("gui.network_check_hosts", ["192.0.2.1:80"])
+        w = self._make_app(config)
+        try:
+            assert w.network._thread is not None
+            assert w.network._endpoints == (("192.0.2.1", 80),)
+        finally:
+            w.worker.shutdown()
+            w.close()
+
+    def test_all_invalid_hosts_probe_nothing_and_say_so(
+            self, qapp, theme, config, monkeypatch):
+        from PySide6.QtWidgets import QLabel
+        from memanga.gui import network_status as ns
+        calls = []
+        monkeypatch.setattr(ns, "_tcp_probe",
+                            lambda *a, **k: calls.append(a) or True)
+        config.set("gui.network_check_hosts", ["https://router.test"])
+        w = self._make_app(config)
+        try:
+            assert w.network._endpoints == ()
+            assert w.network._thread is None
+            time.sleep(0.2)
+            assert calls == []
+            page = w._pages["settings"]
+            texts = " ".join(l.text() for l in page.findChildren(QLabel))
+            assert "no valid host" in texts
+            assert "https://router.test" in texts
+            assert "1.1.1.1:53" not in texts
+        finally:
+            w.worker.shutdown()
+            w.close()
+
+
+# ─────────────────────────────────────────────────────────────────────
 # BackgroundWorker offline gates
 # ─────────────────────────────────────────────────────────────────────
 

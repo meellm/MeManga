@@ -10,7 +10,7 @@ from typing import List, Optional
 from bs4 import BeautifulSoup
 import requests
 
-from .base import BaseScraper, Chapter, Manga
+from .base import BaseScraper, Chapter, Manga, BROWSER_USER_AGENT
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class ReadOPMScraper(BaseScraper):
         self.base_url = "https://ww6.readopm.com"
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "User-Agent": BROWSER_USER_AGENT,
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Referer": self.base_url,
@@ -113,7 +113,7 @@ class ReadOPMScraper(BaseScraper):
             # Sort by chapter number descending
             unique_chapters.sort(key=lambda x: float(x.number) if x.number.replace(".", "").isdigit() else 0, reverse=True)
             
-            logger.info(f"Found {len(unique_chapters)} chapters")
+            logger.debug("Found %s chapters", len(unique_chapters))
             return unique_chapters
             
         except Exception as e:
@@ -157,7 +157,7 @@ class ReadOPMScraper(BaseScraper):
                             if src not in pages:
                                 pages.append(src)
             
-            logger.info(f"Found {len(pages)} pages in chapter")
+            logger.debug("Found %s pages in chapter", len(pages))
             return pages
             
         except Exception as e:
@@ -168,7 +168,7 @@ class ReadOPMScraper(BaseScraper):
         """Download image with proper headers."""
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "User-Agent": BROWSER_USER_AGENT,
                 "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
                 "Referer": self.base_url,
             }
