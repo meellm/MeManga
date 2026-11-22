@@ -14,6 +14,12 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-image.yml"
 
 SMOKE_TAG = "memanga:smoke"
 
+# The image entrypoint is already ``memanga``; arguments start at ``doctor``.
+BROWSER_SMOKE_COMMAND = (
+    "docker run --rm memanga:smoke "
+    "doctor --check browsers --launch-browsers --json"
+)
+
 
 def _steps():
     data = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
@@ -40,10 +46,7 @@ def _is_smoke_run(step):
 
 
 def _is_browser_smoke_run(step):
-    return (
-        "docker run --rm memanga:smoke memanga doctor --check browsers"
-        in str(step.get("run", ""))
-    )
+    return str(step.get("run", "")).strip() == BROWSER_SMOKE_COMMAND
 
 
 def _publish_build_indices():

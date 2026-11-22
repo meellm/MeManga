@@ -87,7 +87,7 @@ jobs:
         run: docker run --rm memanga:smoke --help
 
       - name: Smoke test browsers
-        run: docker run --rm memanga:smoke memanga doctor --check browsers --launch-browsers --json
+        run: docker run --rm memanga:smoke doctor --check browsers --launch-browsers --json
 
       - name: Build image without publishing
         if: github.event_name == 'workflow_dispatch' && !inputs.push
