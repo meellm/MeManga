@@ -297,18 +297,18 @@ def test_targz_roundtrip_preserves_executable_bit(tmp_path):
 def test_install_page_documents_linux_targz_launch_path():
     """The install page must point Linux users at the tarball and show how
     to run it, so the download has a clear launch path (issue #167): the
-    released single file, and the folder the workflow now packs."""
+    folder the workflow packs."""
     assets = RELEASE_DATA.read_text(encoding="utf-8")
     text = INSTALL_PAGE.read_text(encoding="utf-8")
     flat = " ".join(text.split())
     # The release's Linux download is the archive, not a bare binary.
     assert "'MeManga-linux-x64.tar.gz'" in assets
-    # Concrete extract + run instructions for the released single file.
+    # Concrete extract + run instructions for the released folder.
     assert "tar -xzf MeManga-linux-x64.tar.gz" in text
-    assert "./MeManga-linux-x64\n" in text
+    assert "./MeManga-linux-x64/MeManga\n" in text
     # The chmod fallback for tools that strip the bit.
-    assert "chmod +x MeManga-linux-x64`" in flat
-    # The development build's archive holds a folder with the program.
+    assert "chmod +x MeManga-linux-x64/MeManga`" in flat
+    # The release archive holds a folder with the program.
     assert 'tar -czf "${base}.tar.gz" "$base"' in WORKFLOW.read_text(encoding="utf-8")
     assert "`MeManga-linux-x64` with `MeManga`" in flat
 

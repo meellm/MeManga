@@ -1,9 +1,5 @@
 # Use a backup source
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 A backup source is a second site with the same series. MeManga uses it in
 two ways:
 
@@ -49,11 +45,7 @@ memanga edit "TITLE" --fallback-days 1
 `edit --backup` replaces the first backup and keeps any further ones. All
 options are in the [command reference](../reference/cli#memanga-edit).
 
-The command is called `memanga update` <Badge type="info" :text="`In ${release.tag}`" />
-and takes only `--backup`, so on the command line the
-delay is set when the series is added. `memanga add --backup` and
-`--fallback-days` work as above, and the desktop app's **Edit** form changes
-the delay in both versions.
+The desktop app's **Edit** form changes the delay too.
 
 ## When MeManga uses the backup
 

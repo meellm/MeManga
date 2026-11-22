@@ -50,7 +50,7 @@ File format of downloaded chapters: a `pdf` or `epub` document, a `cbz` or `zip`
 
 ### delivery.naming_template
 
-Name of each chapter file, without the extension. `{title}`, `{chapter}` and `{source}` are replaced with the series title, the chapter number and the source. A folder of images is always named `Chapter` and the chapter number.
+Name of each chapter file the desktop app saves, without the extension. `{title}`, `{chapter}` and `{source}` are replaced with the series title, the chapter number and the source. Command-line downloads use the default name. A folder of images is always named `Chapter` and the chapter number.
 
 - **Type:** text, not empty
 - **Default:** `{title} - Chapter {chapter}`
@@ -118,8 +118,6 @@ The port of the mail server.
 
 ### email.smtp_tls
 
-<Badge type="info" text="Not in v0.4.4" />
-
 How the connection to the mail server is encrypted. `auto` uses implicit TLS on port 465 and STARTTLS on every other port; `starttls` and `implicit` always use that method.
 
 - **Type:** one of `auto`, `starttls`, `implicit`
@@ -128,8 +126,6 @@ How the connection to the mail server is encrypted. `auto` uses implicit TLS on 
 
 ### email.smtp_timeout
 
-<Badge type="info" text="Not in v0.4.4" />
-
 Seconds to wait for the mail server at each step of sending.
 
 - **Type:** whole number from 1 to 600
@@ -137,8 +133,6 @@ Seconds to wait for the mail server at each step of sending.
 - **Change it:** `memanga config set email.smtp_timeout VALUE`.
 
 ### email.max_email_mb
-
-<Badge type="info" text="Not in v0.4.4" />
 
 The largest email your mail provider accepts, in MB. A PDF that does not fit is split into parts that are sent one after another; an EPUB that does not fit is not sent, and a warning says why.
 
@@ -156,8 +150,6 @@ The password for the mail server, usually an app password. Leave it empty here: 
 - **Change it:** in the desktop app, Settings → Kindle / Email; `memanga config` (asks questions); `memanga config set email.app_password` (asks for it, or reads it from standard input with `-`).
 
 ### email.kindle_scope
-
-<Badge type="info" text="Not in v0.4.4" />
 
 Which manga are sent: `all` sends every manga, `selected` only the manga whose Kindle toggle is on. A manga that has its own Kindle choice always follows it.
 
@@ -223,8 +215,6 @@ While you read a manga in manual mode, download its next available chapter in th
 
 ### gui.network_check
 
-<Badge type="info" text="Not in v0.4.4" />
-
 Let the desktop app find out whether it is online by opening a connection to a well-known host. No data is sent over it.
 
 - **Type:** `true` or `false`
@@ -232,8 +222,6 @@ Let the desktop app find out whether it is online by opening a connection to a w
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config set gui.network_check VALUE`.
 
 ### gui.network_check_hosts
-
-<Badge type="info" text="Not in v0.4.4" />
 
 The hosts for that test, as `host:port` entries; IPv6 addresses go in square brackets. An empty list means MeManga's built-in hosts.
 
@@ -243,8 +231,6 @@ The hosts for that test, as `host:port` entries; IPv6 addresses go in square bra
 
 ### gui.mangadex_cover_fallback
 
-<Badge type="info" text="Not in v0.4.4" />
-
 Look for missing or broken covers on MangaDex. This is skipped while mangadex.org is turned off on the Sources page.
 
 - **Type:** `true` or `false`
@@ -253,8 +239,6 @@ Look for missing or broken covers on MangaDex. This is skipped while mangadex.or
 
 ### gui.search_chapter_counts
 
-<Badge type="info" text="Not in v0.4.4" />
-
 Show how many chapters each search result has. This loads the chapter list of every result.
 
 - **Type:** `true` or `false`
@@ -262,8 +246,6 @@ Show how many chapters each search result has. This loads the chapter list of ev
 - **Change it:** in the desktop app, Settings → Advanced; `memanga config set gui.search_chapter_counts VALUE`.
 
 ### gui.cover_cache_max_mb
-
-<Badge type="info" text="Not in v0.4.4" />
 
 Disk space for saved cover images, in MB. Beyond it, the covers used longest ago are removed; they are loaded again when needed.
 
@@ -305,8 +287,6 @@ Setting from earlier versions: show two pages side by side. It is only read whil
 
 ### gui.browser_install_skipped
 
-<Badge type="info" text="Not in v0.4.4" />
-
 Records that you skipped the download of the browser components when the desktop app first asked, so it does not ask again. Installing the components clears it.
 
 - **Type:** `true` or `false`
@@ -314,8 +294,6 @@ Records that you skipped the download of the browser components when the desktop
 - **Change it:** MeManga sets it; leave it as it is.
 
 ### gui.download_dir_confirmed
-
-<Badge type="info" text="Not in v0.4.4" />
 
 Records that the desktop app has asked where to save downloads, so it does not ask again.
 
@@ -341,8 +319,6 @@ Options for chapters from MangaDex.
 
 ### mangadex.data_saver
 
-<Badge type="info" text="Not in v0.4.4" />
-
 Download MangaDex chapters as smaller, compressed images.
 
 - **Type:** `true` or `false`
@@ -350,8 +326,6 @@ Download MangaDex chapters as smaller, compressed images.
 - **Change it:** in the desktop app, Settings → General; `memanga config` (asks questions); `memanga config --mangadex-quality {original,data-saver}`; `memanga config set mangadex.data_saver VALUE`.
 
 ### mangadex.removed_group_ids
-
-<Badge type="info" text="Not in v0.4.4" />
 
 MangaDex scanlation groups whose chapters are skipped, by group ID. Resetting the settings to their defaults keeps this list.
 
@@ -412,8 +386,6 @@ Records that a one-time change to `sources.disabled` has been made, so it is nev
 The keys at the top of the file.
 
 ### schema_version
-
-<Badge type="info" text="Not in v0.4.4" />
 
 Layout version of this file. MeManga upgrades an older file when it saves it, and refuses a file from a newer version instead of overwriting it. Leave it as it is.
 

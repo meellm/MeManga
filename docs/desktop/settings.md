@@ -1,15 +1,8 @@
 # Settings
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 This page covers the settings of the desktop app that you are most likely to
 change. Open **Settings** in the sidebar of the app. Changes apply when you
 choose **Save settings**, except the theme, which switches at once.
-
-Unless a section says otherwise, everything here works the same in
-{{ release.tag }} and in the development version.
 
 ![The General settings with theme cards, delivery mode, download folder, output format, concurrent downloads and file naming](/media/settings-general.png)
 
@@ -96,10 +89,7 @@ Two groups of settings are described where they are used:
   reader page.
 - [Partial chapters](./library#partial-chapters), on the library page.
 
-## What is different in the development version
-
-These are not in {{ release.tag }}:
+## Cover cache limit and version details {#what-is-different-in-the-development-version}
 
 - The cover cache has a size limit that you can change.
-- The **Network & Privacy** settings.
 - **Settings → About** can copy version details for a bug report.

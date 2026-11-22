@@ -4,14 +4,14 @@
 import { release } from '../.vitepress/release'
 </script>
 
-There are three ways to run MeManga. Pick the one that fits you.
+There are four ways to run MeManga. Pick the one that fits you.
 
 | You want | Use | Status |
 |---|---|---|
 | The desktop app | [A release download](#desktop-app) | Available |
 | The command line, for example on a server | [An install from source](#command-line-from-source) | Available |
 | A container | [Docker](#docker) | Available |
-| `pip`, `pipx` or `uv` from a package index | [Not available yet](#package-installs) | Coming soon |
+| `pip`, `pipx` or `uv` from PyPI | [Package installs](#package-installs) | Available |
 
 ## Desktop app
 
@@ -37,15 +37,15 @@ the [command line](#command-line-from-source) or [Docker](#docker) there.
 
 ### Start the app {#start-it}
 
-These steps are for the v0.4.4 files. None of them is an installer: you run
-the program straight from where you saved it.
+None of these files is an installer: you run the program straight from where
+you unpacked it.
 
 ::: code-group
 
 ```text [Windows]
-Run the downloaded file:
+Unzip the download. It contains a folder. Run the program in it:
 
-MeManga-windows-x64.exe
+MeManga-windows-x64\MeManga.exe
 ```
 
 ```sh [macOS]
@@ -55,19 +55,19 @@ open MeManga.app
 ```
 
 ```sh [Linux]
-# The archive contains one program file.
+# The archive contains a folder with the program.
 tar -xzf MeManga-linux-x64.tar.gz
-./MeManga-linux-x64
+./MeManga-linux-x64/MeManga
 ```
 
 :::
 
 On Linux, if the program does not start because the tool you extracted it
 with dropped its permission to run, restore it with
-`chmod +x MeManga-linux-x64`.
+`chmod +x MeManga-linux-x64/MeManga`.
 
-::: warning macOS: the v0.4.4 builds are not signed
-The v0.4.4 macOS builds were published without Apple signing or
+::: warning macOS: the builds may not be signed
+MeManga's macOS builds can be published without Apple signing or
 notarization, so macOS may warn about the app or refuse to open it the first
 time. [Troubleshooting](./troubleshooting#macos-says-the-app-cannot-be-opened)
 shows how to open it.
@@ -76,21 +76,18 @@ shows how to open it.
 ### First start: browser components
 
 Some sources only work through a real browser, so MeManga uses its own
-copies of Firefox and Chromium. The first time you start v0.4.4 it asks to
+copies of Firefox and Chromium. The first time you start the app it asks to
 download them. This is a large download; the app's own prompt estimates it
 at about 250 MB.
 
-In v0.4.4 the app needs this download to continue. If you answer no, it
-offers to quit.
+If you skip it, MeManga opens right away. Sources that need a browser fail
+until you install the components from **Settings → Advanced**.
 
 ### What changes after v0.4.4
 
-<Badge type="warning" text="Development version" />
+If you are moving from v0.4.4, these things work differently:
 
-The development version already works differently. These changes are not in
-the v0.4.4 download:
-
-- The Windows download becomes a `.zip` and the Linux archive holds a folder
+- The Windows download is a `.zip` and the Linux archive holds a folder
   instead of a single file: `MeManga-windows-x64` with `MeManga.exe`, and
   `MeManga-linux-x64` with `MeManga`. Keep the `_internal` folder next to
   the program.
@@ -188,11 +185,33 @@ image, where your data is kept, and how to check on a schedule.
 
 ## Package installs
 
-<Badge type="info" text="Coming soon" />
+MeManga is on [PyPI](https://pypi.org/project/memanga/) as `memanga`. It needs
+Python 3.11.5 or newer. The default install is the command line only.
 
-Installing MeManga with `pip`, `pipx` or `uv` from a package index is planned
-and **not available yet**. There is no package to install today. Progress is
-tracked in [issue 218](https://github.com/meellm/MeManga/issues/218).
+::: code-group
+
+```sh [pipx]
+pipx install memanga
+memanga setup
+```
+
+```sh [uv]
+uv tool install memanga
+memanga setup
+```
+
+```sh [pip]
+# In a virtual environment.
+python -m pip install memanga
+memanga setup
+```
+
+:::
+
+`memanga setup` prepares the first run, as described
+[above](#command-line-from-source). For the desktop app, install the `gui`
+extra, for example `pipx install "memanga[gui]"`, and start it with
+`memanga --gui`.
 
 ## Third-party licenses
 
@@ -200,8 +219,7 @@ MeManga's own code is under the MIT license. The desktop downloads and the
 Docker image also contain third-party software under its own licenses.
 Among them, Qt, PySide6, Shiboken6 and img2pdf are used under the GNU LGPL.
 
-Downloads and images built from the development version <Badge type="info" :text="`Not in ${release.tag}`" />
-come with a `THIRD_PARTY_NOTICES.txt`
+The downloads and the Docker image come with a `THIRD_PARTY_NOTICES.txt`
 that reproduces those licenses, links the source code of the LGPL
 components, and explains how to use a modified version of them:
 
@@ -214,9 +232,6 @@ On Windows and Linux the app is a folder, so the LGPL components are
 separate files under `_internal` that you can replace. On macOS the app is
 a single program file; to use a modified component you build the app from
 source, as the notices file describes.
-
-The {{ release.tag }} downloads and image came out before these notices
-files.
 
 Firefox and Chromium, which some sources need, are also third-party software
 under their own licenses: the Docker image includes them, and the desktop app
@@ -239,7 +254,7 @@ The config folder is `.config/memanga` in your user folder, on every system:
 Downloads go to `Downloads/MeManga` in your user folder unless you choose
 another folder in the settings.
 
-### In the development version
+### From v0.5.0 {#in-the-development-version}
 
 The config folder follows the convention of each system:
 
@@ -257,6 +272,6 @@ You can also:
 - use another config folder with `--config-dir DIR` before the command, or
   with the `MEMANGA_CONFIG_DIR` environment variable.
 
-If your settings are still in `~/.config/memanga`, the development version
-moves that folder to the new location once, when it can do so safely.
+If your settings are still in `~/.config/memanga`, MeManga moves that folder
+to the new location once, when it can do so safely.
 Otherwise it keeps using the old folder.

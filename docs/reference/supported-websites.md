@@ -1,15 +1,11 @@
 # Supported websites
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 These are the websites MeManga can read, grouped by what they publish.
 Within each group, better-known sites come first. That order is an editorial
 judgement, not a traffic measurement.
 
 ::: info Before you use this list
-- The list is generated from the **development version**. {{ release.tag }} has its own list of sources.
+- The list is generated from the **development version**.
 - Being listed means MeManga has a scraper for the site. It does not mean the site works today: sites change, block automated readers or go offline without notice. See [how to find out whether a source works now](./sources#find-out-whether-a-source-works-now).
 - MeManga does not host any manga and is not affiliated with these sites. Listing a site is not an endorsement. See [Using sources responsibly](./sources#using-sources-responsibly).
 :::

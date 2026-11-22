@@ -1,9 +1,5 @@
 # Python API
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 `memanga.api` reads a MeManga library from Python: the tracked series,
 their sources, the chapters downloaded and the chapters that failed. It
 never changes the library. To check, download or edit, use the command
@@ -11,11 +7,10 @@ line; [Use MeManga in scripts](./scripting) describes its exit codes and
 JSON output.
 
 ::: info Availability
-`memanga.api` is in the **development version** only, not in
-{{ release.tag }}. Install it with the
+`memanga.api` is part of the `memanga` package. Install it with
+[`pip` from PyPI](../guide/install#package-installs) or the
 [command line from source](../guide/install#command-line-from-source); it
-is then importable in that virtual environment. Installing from a package
-index is [not available yet](../guide/install#package-installs).
+is then importable in that virtual environment.
 :::
 
 ```python
@@ -38,7 +33,7 @@ for series in library.series(status="reading"):
 | `memanga.api.Series` | One tracked series |
 | `memanga.api.Source` | One source of a series |
 | `memanga.api.LibraryError` | Raised when the library cannot be read |
-| `memanga.__version__` | The version, as a string such as `"0.4.4"` |
+| `memanga.__version__` | The version, as a string such as `"0.5.0"` |
 
 These names, listed in `memanga.api.__all__`, and `memanga.__version__`
 are the only supported Python interface. Every other module of the

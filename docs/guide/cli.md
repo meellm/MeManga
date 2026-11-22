@@ -1,9 +1,5 @@
 # Use the command line
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 This page follows one ordinary journey with the `memanga` command: find a
 series, add it, check for new chapters, download them, and deal with the
 chapters that did not work.
@@ -12,18 +8,13 @@ It is not a list of every command and option: that is the
 [command reference](../reference/cli). Each command also explains itself
 with `--help`, for example `memanga check --help`.
 
-::: info Which version this describes
-This page describes the development version, which is what you get when you
-[install from source](./install). The command line of {{ release.tag }} is
-smaller; see [Differences in {{ release.tag }}](#differences-in-the-latest-release).
-:::
-
 ## Before you start
 
 - Install MeManga and run `memanga setup` once, as described in
   [Download and install](./install) and [First steps](./first-steps).
-- The `memanga` command is available while the virtual environment from the
-  install steps is active. `python -m memanga` runs the same program.
+- After an install into a virtual environment, the `memanga` command is
+  available while that environment is active. `python -m memanga` runs the
+  same program there.
 - In the examples, words in capitals are placeholders. Replace `TITLE` with
   the title of a series and `SERIES-URL` with the address of its page on a
   source.
@@ -302,27 +293,17 @@ the [command reference](../reference/cli#memanga-completion).
 To turn it off in the current session, run `complete -r memanga`. To stop
 loading it, remove the line from `~/.bashrc`.
 
-## Differences in the latest release
+## Moving from v0.4.4 {#differences-in-the-latest-release}
 
-The command line of {{ release.tag }} has the same journey with fewer
-commands and options.
+These spellings from v0.4.4 still work:
 
-- **Not in {{ release.tag }}:** the commands `setup`, `doctor`, `edit`,
-  `read`, `unread`, `path`, `open`, `send` and `completion`; the spellings
-  `failed retry`, `failed clear`, `check --download` and `check "TITLE"`;
-  the options of `sources`; and the option `--config-dir`.
-- **Use instead in {{ release.tag }}:**
-  - `memanga check -t "TITLE"` to check one series
-  - `memanga check --auto` to download without asking
-  - `memanga set "TITLE" on-hold` to change the status
-  - `memanga update "TITLE" -u "SERIES-URL"` to change the address
-  - `memanga failed --retry` and `memanga failed --clear`
-- `search`, `add`, `list`, `status`, `check --dry-run`, `--from`, `--all`,
-  `--force-suspicious`, `--retries`, the partial options and `remove` exist
-  in both. Details of how they behave can differ.
+- `memanga check -t "TITLE"` to check one series
+- `memanga check --auto` to download without asking
+- `memanga set "TITLE" on-hold` to change the status
+- `memanga update "TITLE" -u "SERIES-URL"` to change the address
+- `memanga failed --retry` and `memanga failed --clear`
 
-These older spellings still work in the development version. `set` is the
-exception: it is being replaced by `edit`.
+`set` is the exception: it is being replaced by `edit`.
 
 ## Where to go next
 

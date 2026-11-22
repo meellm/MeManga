@@ -1,6 +1,5 @@
 # Development setup: builds the image from this source checkout and has
-# the scheduler service, which needs `memanga watch` from the development
-# version.
+# the scheduler service, which runs `memanga watch`.
 #
 # Use it by naming the file on every command:
 #   docker compose -f compose.dev.yaml build

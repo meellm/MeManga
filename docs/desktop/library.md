@@ -1,15 +1,8 @@
 # Library and downloads
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 This page covers following series and downloading chapters in the desktop
 app. The [reader](./reader) and the [settings](./settings) have their own
 pages.
-
-Unless a section says otherwise, everything here works the same in
-{{ release.tag }} and in the development version.
 
 ## Follow a series
 
@@ -23,7 +16,7 @@ There are two ways to add a series to your library.
 
 ![The Library with tracked series, their reading status and new-chapter counts](/media/app-library.png)
 
-<small>The Library. Desktop app, version label v0.4.4; the development version may look different. Series titles and artwork on this page belong to their owners and appear only to demonstrate the app. See [Using sources responsibly](../reference/sources#using-sources-responsibly).</small>
+<small>The Library. Desktop app, version label v0.5.0; the development version may look different. Series titles and artwork on this page belong to their owners and appear only to demonstrate the app. See [Using sources responsibly](../reference/sources#using-sources-responsibly).</small>
 
 The add dialog asks for:
 
@@ -60,7 +53,7 @@ number you give (use `0` for all chapters from the beginning), and
 
 ![A series page with its source, status, mode, reader layout, download buttons and chapter list](/media/app-detail.png)
 
-<small>A series page with its controls and chapter list. Desktop app, version label v0.4.4; the development version may look different.</small>
+<small>A series page with its controls and chapter list. Desktop app, version label v0.5.0; the development version may look different.</small>
 
 ## Chapters you read elsewhere
 
@@ -141,9 +134,7 @@ after asking.
 Themes, the download folder, file names, backups and more are described on
 the [settings](./settings) page.
 
-## What is different in the development version
-
-These are not in {{ release.tag }}:
+## Removing a series and failed sends {#what-is-different-in-the-development-version}
 
 - **Remove** on a series' page keeps your read progress and download history
   unless you choose **Also delete progress and history**. Downloaded files

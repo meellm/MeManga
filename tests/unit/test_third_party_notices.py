@@ -1179,10 +1179,9 @@ def test_workflow_checks_linux_archive_keeps_lgpl_files_replaceable():
 
 
 def test_docs_document_onedir_downloads_and_lgpl_replacement():
-    """The install page keeps the release's single-file Windows download
-    apart from the development build's one-folder .zip, and says where the
-    LGPL components can be replaced, as the notices do. The README states
-    the LGPL use and links that section."""
+    """The install page describes the release's one-folder Windows .zip
+    and says where the LGPL components can be replaced, as the notices do.
+    The README states the LGPL use and links that section."""
     def flat(path):
         return " ".join((REPO_ROOT / path).read_text(encoding="utf-8").split())
 
@@ -1190,10 +1189,10 @@ def test_docs_document_onedir_downloads_and_lgpl_replacement():
     workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
     install = flat("docs/guide/install.md")
     readme = flat("README.md")
-    # Released: one .exe. Development builds: a .zip holding the folder.
-    assert "'MeManga-windows-x64.exe'" in assets
+    # Released: a .zip holding the folder.
+    assert "'MeManga-windows-x64.zip'" in assets
     assert "asset_name: MeManga-windows-x64.zip" in workflow
-    assert "The Windows download becomes a `.zip`" in install
+    assert "The Windows download is a `.zip`" in install
     assert "`MeManga-windows-x64` with `MeManga.exe`" in install
     # LGPL use and replacement, matching what the notices file says.
     assert "are used under the GNU LGPL" in install

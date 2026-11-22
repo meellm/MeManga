@@ -4,10 +4,6 @@ pageClass: config-reference
 
 # Settings reference
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 <style>
 /* Each key is a plain heading (so its permalink label is plain text) set
    in the code font, as keys are elsewhere on the site. */
@@ -25,10 +21,6 @@ says where the file is; `memanga config path` prints it.
 
 ::: info How to read this page
 - This page describes the **development version**.
-- Settings marked <Badge type="info" :text="`Not in ${release.tag}`" /> are not used by {{ release.tag }}.
-- `memanga config get`, `config set`, `config path` and `config edit` are
-  not in {{ release.tag }} either; there, change settings in the desktop
-  app or with `memanga config`.
 - Types, choices, limits and defaults are taken from the program itself.
 - A **default** is the value in a new config file. A setting that is missing
   from your file uses its default. A few keys are not in a new file at all;
@@ -60,15 +52,7 @@ has the same values; you do not need to copy this file.
 
 ## When a setting is not valid
 
-::: warning Not in a release or on main yet
-This section describes the configuration-validation update
-([#293](https://github.com/meellm/MeManga/issues/293),
-[pull request 552](https://github.com/meellm/MeManga/pull/552)). It is not
-in {{ release.tag }} and not yet in the development version on `main`.
-:::
-
-With this update, MeManga checks the settings it knows each time it loads
-`config.yaml`:
+MeManga checks the settings it knows each time it loads `config.yaml`:
 
 | In the file | What MeManga does |
 |---|---|
@@ -97,9 +81,8 @@ What a wrong value does depends on the setting:
 `delivery.post_processing.enabled` and
 `delivery.post_processing.fail_on_error` delete files or control your
 download command, so only a real `true` turns them on. Quoted text such as
-`"true"` and numbers such as `1` count as off. In {{ release.tag }} and on
-`main` today, a quoted `"false"` can count as on, so always write these
-without quotes.
+`"true"` and numbers such as `1` count as off, so always write these without
+quotes.
 
 **Save settings** in the desktop app and the questions of `memanga config`
 write new values, so they can replace a wrong value.

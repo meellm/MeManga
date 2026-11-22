@@ -37,10 +37,11 @@ delivery:
   # files are sent to a Kindle.
   output_format: "pdf"
 
-  # Name of each chapter file, without the extension. {title}, {chapter}
-  # and {source} are replaced with the series title, the chapter number
-  # and the source. A folder of images is always named Chapter and the
-  # chapter number.
+  # Name of each chapter file the desktop app saves, without the
+  # extension. {title}, {chapter} and {source} are replaced with the
+  # series title, the chapter number and the source. Command-line
+  # downloads use the default name. A folder of images is always named
+  # Chapter and the chapter number.
   naming_template: "{title} - Chapter {chapter}"
 
   post_processing:

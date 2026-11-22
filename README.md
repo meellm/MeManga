@@ -67,8 +67,8 @@ for new chapters. It knows
   <img src="docs/public/media/cli-demo.gif" alt="Terminal recording: memanga search adds Blue Lock from weebcentral.com, memanga check downloads chapters 368 and 369 as PDF files, and memanga list shows the tracked series" width="760">
 </p>
 
-Installing with `pip`, `pipx` or `uv` from a package index is
-[not available yet](https://meellm.github.io/MeManga/guide/install#package-installs).
+Installing with `pip`, `pipx` or `uv` from PyPI is
+[also available](https://meellm.github.io/MeManga/guide/install#package-installs).
 If something does not work, see
 [Troubleshooting](https://meellm.github.io/MeManga/guide/troubleshooting).
 

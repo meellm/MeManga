@@ -1,19 +1,8 @@
 # Keyboard
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 The shortcuts of the desktop app and how keyboard focus moves between its
 controls. The reader has keys of its own; they are listed under
 [Keyboard](./reader#keyboard) on the Reader page.
-
-::: info Which version
-In {{ release.tag }}, **Ctrl+K** and the usual keys of buttons, text fields
-and dialogs already work. The other shortcuts, the keys for Library cards,
-rows and theme cards, the keyboard-only focus ring and the rules for where
-focus goes are in the development version.
-:::
 
 ## Shortcuts
 

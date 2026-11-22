@@ -15,8 +15,8 @@ import { release } from '../.vitepress/release'
 
 **Get started**
 
-- [Download and install](./install): the desktop download, the command line
-  from source, and what is not available yet.
+- [Download and install](./install): the desktop download, the PyPI package
+  and the command line from source.
 - [First steps](./first-steps): start MeManga and check that it works.
 - [Supported websites](../reference/supported-websites): the sites MeManga
   can read, grouped by what they publish.
@@ -56,16 +56,12 @@ on the development branch, so there are two versions to keep apart:
 
 - **Latest release:** <a :href="release.url">{{ release.tag }}</a>, published
   on {{ release.published }}. The desktop downloads are built from it.
-- **Development version:** the `main` branch of the repository. It contains
-  changes made after {{ release.tag }} that are not in any download yet.
+- **Development version:** the `main` branch of the repository. It can
+  contain changes made after {{ release.tag }} that are not in any download
+  yet.
 
 This site follows the development version. When a page describes something
 that is not in the latest release, it says so.
-
-For example, these commands exist in the development version but not in
-{{ release.tag }}: `memanga setup`, `memanga doctor`, `memanga watch`,
-`memanga send` and `memanga completion`. The same is true of the Python
-interface in `memanga.api`.
 
 ## Download the desktop app
 
@@ -83,10 +79,3 @@ downloads:
     </tr>
   </tbody>
 </table>
-
-## Coming soon
-
-These are planned and not available yet:
-
-- **Installing from a package index** with pip, pipx or uv. Tracked in
-  [issue 218](https://github.com/meellm/MeManga/issues/218).

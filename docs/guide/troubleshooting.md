@@ -9,9 +9,7 @@ repair the browser download, what to put in a bug report, and how to move
 or remove MeManga.
 
 ::: info How to read this page
-Most of it applies to {{ release.tag }} and to the development version.
-Where they differ, the page says so. Steps for the command line need the
-[command line from source](./install#command-line-from-source).
+Steps for the command line need a [command-line install](./install).
 :::
 
 ## Find MeManga's files
@@ -22,7 +20,7 @@ folder can be inside one of the other folders.
 
 | What | Where | What is in it |
 |---|---|---|
-| Config folder | {{ release.tag }}: `.config/memanga` in your user folder. Development version: see [where MeManga keeps its files](./install#where-memanga-keeps-its-files). | Settings and library (`config.yaml`), downloads and reading history (`state.json`), log files, the cover cache (`covers`) |
+| Config folder | See [where MeManga keeps its files](./install#where-memanga-keeps-its-files). | Settings and library (`config.yaml`), downloads and reading history (`state.json`), log files, the cover cache (`covers`) |
 | Download folder | Shown in **Settings → General → Download Directory**. It starts as `Downloads/MeManga` in your user folder, and it is that folder too when `config.yaml` has no `delivery.download_dir` setting. Only when the setting is there without a value (`download_dir:` or `null`) is it `downloads` inside the config folder. | The chapters you downloaded |
 | Browser components | Windows: `%LOCALAPPDATA%\ms-playwright`. macOS: `~/Library/Caches/ms-playwright`. Linux: `ms-playwright` in `$XDG_CACHE_HOME`, or `~/.cache/ms-playwright` | Firefox and Chromium for MeManga, and possibly for other programs that use Playwright |
 | The program | Where you saved or unpacked it | The desktop app, or the folder you installed the command line in |
@@ -43,9 +41,9 @@ first time. If you downloaded the file from the
 
 ### macOS says the app cannot be opened
 
-The {{ release.tag }} macOS builds are not signed or notarized, so macOS may
-refuse to open them, for example with the message **MeManga is damaged and
-can't be opened**. Apple describes how to open such an app
+macOS may refuse to open a build that is not signed or notarized, for example
+with the message **MeManga is damaged and can't be opened**. Apple describes
+how to open such an app
 ([Apple Support](https://support.apple.com/en-us/102445)):
 
 1. Try to open **MeManga.app** once, and close the message.
@@ -78,24 +76,19 @@ On a Raspberry Pi or another 64-bit ARM Linux system, use the
 
 ### MeManga is already running
 
-The message **MeManga is already running for this library** <Badge type="info" :text="`Not in ${release.tag}`" />
-means another MeManga program is using
-the config folder: a second window, a check that is running, or a command.
+The message **MeManga is already running for this library** means another
+MeManga program is using the config folder: a second window, a check that is
+running, or a command.
 Close it or let it finish, then start MeManga again.
 
 ### The settings or the library cannot be read
 
-MeManga shows a message and stops instead of starting with empty settings <Badge type="info" :text="`Not in ${release.tag}`" />.
-The message names the
-file. [When state.json cannot be read](../reference/state#when-state-json-cannot-be-read)
+MeManga shows a message and stops instead of starting with empty settings.
+The message names the file.
+[When state.json cannot be read](../reference/state#when-state-json-cannot-be-read)
 explains how to get back to the previous copy.
 
 ### A setting is not valid
-
-This applies with the configuration-validation update
-([#293](https://github.com/meellm/MeManga/issues/293),
-[pull request 552](https://github.com/meellm/MeManga/pull/552)), which is not
-in {{ release.tag }} and not yet on `main`.
 
 - **`expected a section`:** a known section, such as `email`, holds a value
   or list instead of a group of settings. Commands that use the configuration
@@ -140,7 +133,7 @@ Look in runtime.log in the config folder instead; see Log files below.
 
 ```sh [Linux]
 # In the folder where you unpacked the download.
-./MeManga-linux-x64
+./MeManga-linux-x64/MeManga
 ```
 
 :::
@@ -152,10 +145,10 @@ All of these are in the config folder.
 | File | Written by | Content |
 |---|---|---|
 | `crash.log` | The desktop app | Errors that closed the app. New entries are added at the end. |
-| `runtime.log` | The desktop app on Windows | What the app reports while it runs. {{ release.tag }} starts the file again at every start; the development version keeps the three sessions before as `runtime.log.1` to `runtime.log.3`. On macOS and Linux the same messages go to the terminal you start the app from. |
-| `diagnostics.log` | The command line with `--log-file` <Badge type="info" :text="`Not in ${release.tag}`" /> | Diagnostic messages of commands |
+| `runtime.log` | The desktop app on Windows | What the app reports while it runs. The three sessions before are kept as `runtime.log.1` to `runtime.log.3`. On macOS and Linux the same messages go to the terminal you start the app from. |
+| `diagnostics.log` | The command line with `--log-file` | Diagnostic messages of commands |
 | `memanga.log` | Scheduled checks on Linux and macOS | The output of each check; see [Check on a schedule](./schedule#where-the-output-goes) |
-| `error-details` | The desktop app <Badge type="info" :text="`Not in ${release.tag}`" /> | The full text of long error messages shown in **Notifications** |
+| `error-details` | The desktop app | The full text of long error messages shown in **Notifications** |
 
 ## Browser components
 
@@ -166,12 +159,10 @@ browser folder listed under
 
 ### The components are missing {#they-are-missing}
 
-- {{ release.tag }}: the desktop app asks to download them at every start
-  until they are there.
-- Development version <Badge type="info" :text="`Not in ${release.tag}`" />:
-  if you skipped the download, choose **Settings → Advanced → Install browser
-  components**. On the command line, `memanga setup` installs them after you
-  agree.
+The desktop app offers the download when it starts, until you install them
+or skip it. If you skipped it, choose **Settings → Advanced → Install browser
+components**. On the command line, `memanga setup` installs them after you
+agree.
 
 If the download fails, the app shows what went wrong and offers to try
 again. Check the internet connection first.
@@ -198,8 +189,8 @@ broken browser again:
    of both browsers.
 3. Rename only that folder, for example to `firefox-1234.old`. Leave the
    rest of `ms-playwright` as it is.
-4. Start MeManga. It finds the browser missing and offers the download; in
-   the development version you can also use **Install browser components**.
+4. Start MeManga. It finds the browser missing and offers the download. If
+   you skipped it earlier, use **Install browser components**.
 5. Keep the renamed folder until sources that need the browser work again.
    Delete it only then.
 
@@ -246,7 +237,7 @@ ask it to.
 Open an issue on [GitHub](https://github.com/meellm/MeManga/issues) and
 include:
 
-- the MeManga version and your system. <Badge type="info" :text="`Not in ${release.tag}`" />
+- the MeManga version and your system.
   **Settings → About → Copy diagnostics** copies the version, the system,
   and the state of the browser components and the keyring, without folder
   paths;
@@ -265,8 +256,7 @@ describes.
 ## Move to another computer
 
 1. Note where the download folder is: **Settings → General → Download
-   Directory**, or `memanga config get delivery.download_dir`
-   <Badge type="info" :text="`Not in ${release.tag}`" />.
+   Directory**, or `memanga config get delivery.download_dir`.
 2. Close MeManga on both computers, including any `memanga watch`.
 3. Copy the config folder and the download folder to the new computer. If
    the download folder is inside the config folder, it comes along with it.
@@ -290,9 +280,9 @@ download folder is set.
 Some records keep the full path a file was saved under, and still point to
 the old place:
 
-- **Chapters waiting for Kindle delivery.** <Badge type="info" :text="`Not in ${release.tag}`" /> `memanga send --pending`
-  and `memanga send "TITLE" CHAPTER` both use the path saved with such a chapter, so they say the
-  saved file is no longer there. Setting the new download folder does not
+- **Chapters waiting for Kindle delivery.** `memanga send --pending` and
+  `memanga send "TITLE" CHAPTER` both use the path saved with such a chapter,
+  so they say the saved file is no longer there. Setting the new download folder does not
   change that path.
 - **Partly downloaded chapters** and the **download history** keep the old
   path.
@@ -318,15 +308,16 @@ download folder is outside the folders you remove, so check that first.
    `memanga cron remove`, or **Settings → Advanced → Scheduled Checks →
    Remove**. Stop any `memanga watch`.
 2. **Find the download folder**: **Settings → General → Download
-   Directory**, or `memanga config get delivery.download_dir`
-   <Badge type="info" :text="`Not in ${release.tag}`" />.
+   Directory**, or `memanga config get delivery.download_dir`.
 3. Close MeManga. **If the download folder is inside the config folder or
    inside the program's folder**, move it somewhere else, or copy it to a
    safe place, before you go on. This is the case, for example, for a
    `downloads` folder in the config folder.
 4. **Delete the program**: the file or folder of the desktop app, or the
    folder of the command line from source with its virtual environment. For
-   Docker, see [Docker](./docker).
+   a package install, run `pipx uninstall memanga` or
+   `uv tool uninstall memanga`, or remove its virtual environment. For Docker,
+   see [Docker](./docker).
 5. **Rename the config folder**, for example to `memanga-removed`, and
    delete it once you are sure you do not need it, and only after step 3.
    It holds your settings, library, reading history and logs. If you might
