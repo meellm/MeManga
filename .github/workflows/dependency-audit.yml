@@ -1,13 +1,14 @@
 name: Dependency audit
 
-# Known vulnerabilities in the pinned dependencies (issue #385). Every
-# package any install uses is a row of requirements/*.txt, for every
-# platform: the CLI and the Docker image's Python packages (cli.txt), the
-# desktop app (gui.txt), the test tools (dev.txt) and the release builds
-# (build.txt). OSV-Scanner checks them against the OSV database, which
-# includes the PyPI and GitHub advisories, and fails on any known
-# vulnerability. An advisory that does not apply is listed with its reason
-# in .github/osv-scanner.toml.
+# Known vulnerabilities in the pinned dependencies (issue #385): the rows
+# of requirements/*.txt, for every platform, which are the CLI and the
+# Docker image's Python packages (cli.txt), the desktop app (gui.txt), the
+# test tools (dev.txt) and the release builds (build.txt), and the npm
+# packages that build the documentation site (docs/package-lock.json).
+# OSV-Scanner checks them against the OSV database, which includes the
+# PyPI and GitHub advisories, and fails on any known vulnerability. An
+# advisory that does not apply is listed with its reason in
+# .github/osv-scanner.toml.
 #
 # It runs when the dependencies change, every week for advisories
 # published since, by hand, and before every release.
@@ -18,6 +19,8 @@ on:
     paths:
       - "requirements/**"
       - "pyproject.toml"
+      - "docs/package.json"
+      - "docs/package-lock.json"
       - ".github/osv-scanner.toml"
       - ".github/workflows/dependency-audit.yml"
   pull_request:
@@ -25,6 +28,8 @@ on:
     paths:
       - "requirements/**"
       - "pyproject.toml"
+      - "docs/package.json"
+      - "docs/package-lock.json"
       - ".github/osv-scanner.toml"
       - ".github/workflows/dependency-audit.yml"
   schedule:
@@ -57,4 +62,5 @@ jobs:
             --lockfile=requirements.txt:requirements/cli.txt \
             --lockfile=requirements.txt:requirements/gui.txt \
             --lockfile=requirements.txt:requirements/dev.txt \
-            --lockfile=requirements.txt:requirements/build.txt
+            --lockfile=requirements.txt:requirements/build.txt \
+            --lockfile=package-lock.json:docs/package-lock.json

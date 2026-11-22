@@ -30,8 +30,16 @@ env:
   DOCKERHUB_IMAGE: docker.io/meellm/memanga
 
 jobs:
+  audit:
+    # Issue #385: no image with a known vulnerability in its locks. A tag
+    # also starts the release workflow, but its audit does not stop this one.
+    uses: ./.github/workflows/dependency-audit.yml
+    permissions:
+      contents: read
+
   build:
     name: Build Docker image
+    needs: audit
     runs-on: ubuntu-latest
 
     steps:
