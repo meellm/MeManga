@@ -14,7 +14,7 @@ import requests
 from PIL import Image
 
 from memanga.downloader.formats.cbz import _manga_language
-from memanga.scrapers import _SCRAPER_PATHS, SCRAPERS, get_scraper, senmanga
+from memanga.scrapers import SCRAPERS, get_scraper, senmanga
 from memanga.scrapers.catalog import source_catalog
 from memanga.scrapers.senmanga import (
     SenMangaScraper, SenMangaSourceError, chapter_ids, series_slug)
@@ -518,9 +518,8 @@ class TestMetadata:
         assert isinstance(get_scraper("raw.senmanga.com"), SenMangaScraper)
         assert [d for d in SCRAPERS
                 if d == "senmanga.com" or d.endswith(".senmanga.com")] == ["raw.senmanga.com"]
+        assert [d for d, cls in SCRAPERS.items() if cls is SenMangaScraper] == ["raw.senmanga.com"]
         # Rawkuma is a separate source with its own scraper.
-        assert [d for d, path in _SCRAPER_PATHS.items()
-                if path == "senmanga:SenMangaScraper"] == ["raw.senmanga.com"]
         assert SCRAPERS["rawkuma.net"] is not SenMangaScraper
 
     def test_catalog_states_direct_url_only(self):
