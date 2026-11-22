@@ -725,6 +725,11 @@ def launch_gui(config=None, state=None, explicit_config_dir=None):
         notice = state.recovery_notice
         QTimer.singleShot(
             0, lambda: QMessageBox.warning(window, "MeManga", notice))
+    # Issue #293: the app runs, but a setting it ignores is not silent.
+    settings_notice = config.validation_notice
+    if settings_notice:
+        QTimer.singleShot(
+            0, lambda: QMessageBox.warning(window, "MeManga", settings_notice))
     # After the window is on screen, so the question appears over the
     # app it is about.
     QTimer.singleShot(0, lambda: _first_run_setup(window, config))

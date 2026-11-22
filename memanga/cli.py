@@ -37,8 +37,7 @@ from .backup import (
 )
 from .config import (CONFIG_DIR_ENV, CONFIG_KEYS, AppPasswordError, Config,
                      ConfigError, UnknownConfigKey, app_password_override,
-                     config_key_spec, config_section_problems,
-                     config_value_problem, default_config_dir,
+                     config_key_spec, config_problems, default_config_dir,
                      default_root_moved, explicit_config_dir,
                      get_app_password, parse_config_value,
                      plaintext_password_notice, set_app_password)
@@ -1589,7 +1588,7 @@ def _chapter_pipeline(output_format=None, max_retries=DEFAULT_PAGE_RETRIES,
         delivery_mode=config.delivery_mode,
         # The password is looked up only when a chapter is sent.
         email=EmailSettings.from_config(config, resolve_password=False),
-        delete_after_send=config.get("delivery.delete_after_send", False),
+        delete_after_send=config.delivery.delete_after_send,
     )
     # Bind the collaborators imported here rather than the pipeline's
     # defaults, so this module stays the one place to replace them.
@@ -2008,6 +2007,7 @@ def cmd_check(args):
 def _status_payload() -> Dict[str, Any]:
     """`status --json` payload. Never includes the SMTP password."""
     email = EmailSettings.from_config(config, resolve_password=False)
+    delivery = config.delivery
     return {
         "schema_version": JSON_SCHEMA_VERSION,
         "paths": {
@@ -2020,7 +2020,7 @@ def _status_payload() -> Dict[str, Any]:
         "delivery": {
             "mode": config.delivery_mode,
             "download_dir": str(config.download_dir),
-            "delete_after_send": bool(config.get("delivery.delete_after_send", False)),
+            "delete_after_send": delivery.delete_after_send,
         },
         "email": {
             "kindle_email": email.kindle_email or None,
@@ -2030,8 +2030,8 @@ def _status_payload() -> Dict[str, Any]:
             "smtp_tls": email.smtp_tls,
         },
         "post_processing": {
-            "enabled": bool(config.get("delivery.post_processing.enabled")),
-            "fail_on_error": bool(config.get("delivery.post_processing.fail_on_error", False)),
+            "enabled": delivery.post_processing.enabled,
+            "fail_on_error": delivery.post_processing.fail_on_error,
         },
         "partial_chapters": {
             "enabled": config.partial_enabled,
@@ -2069,12 +2069,13 @@ def cmd_status(args):
     if delivery_mode == "local":
         table.add_row("Download dir", _esc(config.download_dir))
     else:
-        kindle_email = config.get("email.kindle_email")
-        sender_email = config.get("email.sender_email")
+        email = EmailSettings.from_config(config, resolve_password=False)
+        kindle_email = email.kindle_email
+        sender_email = email.sender_email
         table.add_row("Kindle email", _esc(kindle_email) if kindle_email else "[red]not set[/red]")
         table.add_row("Sender email", _esc(sender_email) if sender_email else "[red]not set[/red]")
-    
-    pp_enabled = bool(config.get("delivery.post_processing.enabled"))
+
+    pp_enabled = config.delivery.post_processing.enabled
     pp_status = "enabled" if pp_enabled else "disabled"
     table.add_row(
         "Post-processing",
@@ -2298,16 +2299,9 @@ def _config_edit(args):
         return _config_error(
             f"{path} is not valid: {e}\nRun `memanga config edit` again to fix it."
         )
-    # Loading merges defaults over sections that are not mappings, so
-    # check the file's own structure before the merged values.
-    problems = config_section_problems(raw)
-    for key in CONFIG_KEYS:
-        value = edited.get(key)
-        if value is None:
-            continue  # unset: the default applies
-        problem = config_value_problem(key, value)
-        if problem:
-            problems.append(f"{key}: {problem}")
+    # The file's own content: an empty section is reported here, though
+    # it loads, so an edit that blanks one by accident is caught.
+    problems = config_problems(raw)
     if problems:
         for problem in problems:
             sys.stderr.write(f"error: {problem}\n")
@@ -2536,7 +2530,7 @@ def cmd_config(args):
 
         delete_after = Confirm.ask(
             "Delete files after sending to Kindle?",
-            default=config.get("delivery.delete_after_send", False)
+            default=config.delivery.delete_after_send
         )
         config.set("delivery.delete_after_send", delete_after)
 
@@ -2577,7 +2571,8 @@ def cmd_config(args):
     config.set("mangadex.data_saver", quality == "data-saver")
 
     # Post-processing hook (optional, disabled by default)
-    pp_enabled = bool(config.get("delivery.post_processing.enabled"))
+    post_processing = config.delivery.post_processing
+    pp_enabled = post_processing.enabled
     console.print(
         f"\n[bold]Post-processing[/bold] (current: "
         f"[cyan]{'enabled' if pp_enabled else 'disabled'}[/cyan])"
@@ -2598,11 +2593,11 @@ def cmd_config(args):
         )
         pp_command = Prompt.ask(
             "Command",
-            default=config.get("delivery.post_processing.command", "")
+            default=post_processing.command
         )
         pp_fail = Confirm.ask(
             "Mark chapter as failed if the command fails?",
-            default=config.get("delivery.post_processing.fail_on_error", False)
+            default=post_processing.fail_on_error
         )
         config.set("delivery.post_processing.enabled", True)
         config.set("delivery.post_processing.command", pp_command)
@@ -3885,11 +3880,10 @@ def _send_item(manga, chapter: str, record, known) -> _SendItem:
             recorded.append(str(entry["path"]))
         else:
             claimed.append(str(entry["path"]))
-    template = config.get("delivery.naming_template")
     sources = [src.get("source") for src in _get_sources_from_manga(manga)]
     sources.append(manga.get("source"))
     lookup = dict(
-        templates=[template] if isinstance(template, str) and template else [],
+        templates=[config.delivery.naming_template],
         sources=[s for s in sources if isinstance(s, str) and s],
         recorded=recorded,
     )
@@ -5219,6 +5213,13 @@ def _main():
         sys.exit(1)
     if state.recovery_notice:
         sys.stderr.write(f"warning: {state.recovery_notice}\n")
+    # Issue #293: a bad value does not stop the command, but is not silent.
+    # `doctor` and `config edit` report it themselves; the desktop app
+    # shows it in a dialog.
+    if not broken_config_ok and not args.gui:
+        settings_notice = config.validation_notice
+        if settings_notice:
+            sys.stderr.write(f"warning: {settings_notice}\n")
 
     if args.gui:
         if _cli_only:

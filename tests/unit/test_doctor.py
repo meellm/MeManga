@@ -177,6 +177,30 @@ class TestLocalPathChecks:
         config.config_path.write_text("- just\n- a list\n", encoding="utf-8")
         assert doctor.check_config(config).status == doctor.FAIL
 
+    def test_invalid_setting_warns_without_its_value(self, config):
+        # Issue #293.
+        from memanga.config import Config
+        config.config_path.write_text(
+            "email:\n  smtp_port: bad-port-value\n  app_password: 987654321\n",
+            encoding="utf-8")
+        loaded = Config(config.config_dir, tolerate_errors=True)
+        result = doctor.check_config(loaded)
+        assert result.status == doctor.WARNING
+        assert "email.smtp_port" in result.message
+        assert "email.app_password" in result.message
+        shown = repr(result.to_dict())
+        assert "bad-port-value" not in shown
+        assert "987654321" not in shown
+
+    def test_section_that_is_not_a_mapping_fails(self, config):
+        # Issue #293: loading it would lose the section on the next save.
+        from memanga.config import Config
+        config.config_path.write_text("email: oops\n", encoding="utf-8")
+        loaded = Config(config.config_dir, tolerate_errors=True)
+        result = doctor.check_config(loaded)
+        assert result.status == doctor.FAIL
+        assert "email: expected a section" in result.message
+
     def test_newer_config_schema_fails(self, config):
         """Issue #409: valid YAML that Config refuses to load is not OK."""
         from memanga.config import Config

@@ -491,3 +491,212 @@ class TestConfigKeys:
     def test_section_problems(self, data, expected):
         from memanga.config import config_section_problems
         assert config_section_problems(data) == expected
+
+
+class TestValidationAtLoad:
+    """Issue #293: known keys are checked when the file is loaded."""
+
+    @staticmethod
+    def _load(config, text, **kwargs):
+        from memanga.config import Config
+        config.config_path.write_text(text, encoding="utf-8")
+        return Config(config.config_dir, **kwargs)
+
+    @pytest.mark.parametrize("text,problem", [
+        ("email: oops\n", "email: expected a section"),
+        ("gui: []\n", "gui: expected a section"),
+        ("delivery:\n  post_processing: 5\n",
+         "delivery.post_processing: expected a section"),
+    ])
+    def test_broken_section_is_refused_and_kept(self, config, text, problem):
+        from memanga.config import ConfigError
+        with pytest.raises(ConfigError, match=problem):
+            self._load(config, text)
+        loaded = self._load(config, text, tolerate_errors=True)
+        assert problem in loaded.load_error
+        with pytest.raises(ConfigError):
+            loaded.save()
+        assert config.config_path.read_text(encoding="utf-8") == text
+
+    def test_empty_section_takes_its_defaults(self, config):
+        loaded = self._load(config, "delivery:\nemail:\n")
+        assert loaded.load_error is None
+        assert loaded.get("delivery.output_format") == "pdf"
+        assert loaded.get("email.smtp_port") == 587
+        assert loaded.validation_problems == []
+
+    def test_defaults_fill_nested_sections(self, config):
+        loaded = self._load(
+            config, "delivery:\n  post_processing:\n    enabled: true\n")
+        assert loaded.get("delivery.post_processing") == {
+            "enabled": True, "command": "", "fail_on_error": False}
+
+    def test_invalid_value_is_reported_and_kept(self, config):
+        loaded = self._load(config, "email:\n  smtp_port: nope\n")
+        assert loaded.load_error is None
+        assert loaded.validation_problems == [
+            "email.smtp_port: expected a whole number"]
+        assert "email.smtp_port" in loaded.validation_notice
+        loaded.save()
+        loaded.reload()
+        assert loaded.get("email.smtp_port") == "nope"
+
+    def test_unknown_keys_survive_a_save(self, config):
+        loaded = self._load(
+            config, "future:\n  flag: 1\ndelivery:\n  new_option: x\n")
+        assert loaded.validation_problems == []
+        loaded.save()
+        loaded.reload()
+        assert loaded.get("future.flag") == 1
+        assert loaded.get("delivery.new_option") == "x"
+
+    def test_problems_never_contain_the_value(self, config):
+        loaded = self._load(
+            config,
+            "email:\n  app_password: 987654321\n"
+            "gui:\n  network_check_hosts: ['user:s3cret-token@host']\n")
+        notice = loaded.validation_notice
+        assert "email.app_password" in notice
+        assert "gui.network_check_hosts" in notice
+        assert "987654321" not in notice
+        assert "s3cret-token" not in notice
+
+    def test_valid_file_has_no_notice(self, config):
+        assert self._load(config, "manga: []\n").validation_notice is None
+
+    @pytest.mark.parametrize("value", [
+        float("nan"), float("inf"), float("-inf"), 10 ** 400])
+    def test_threshold_must_be_a_finite_number_in_range(self, value):
+        from memanga.config import config_value_problem
+        assert config_value_problem(
+            "partial_chapters.threshold_percent", value)
+
+    def test_nan_threshold_does_not_allow_every_page_to_fail(self, config):
+        loaded = self._load(
+            config, "partial_chapters:\n  threshold_percent: .nan\n")
+        assert loaded.partial_threshold == 5.0
+
+    @pytest.mark.parametrize("value", [
+        float("inf"), float("-inf"), 10 ** 400,
+    ], ids=["infinity", "negative-infinity", "too-large-for-float"])
+    def test_unusable_threshold_uses_the_default(self, config, value):
+        config.set("partial_chapters.threshold_percent", value)
+        assert config.partial_threshold == 5.0
+        assert config.get("partial_chapters.threshold_percent") == value
+
+    @pytest.mark.parametrize("key,name", [
+        ("reader.remove_after_read", "reader_remove_after_read"),
+        ("cron.enabled", "cron_enabled"),
+    ], ids=["reader", "cron"])
+    def test_flag_is_only_on_for_a_real_true(self, config, key, name):
+        for value in ("no", "false", 1):
+            config.set(key, value)
+            assert getattr(config, name) is False
+            assert config.get(key) == value
+        config.set(key, True)
+        assert getattr(config, name) is True
+
+
+class TestTypedDelivery:
+    """Issue #293: ``Config.delivery`` is the checked view of delivery.*."""
+
+    def test_defaults(self, config):
+        from memanga.config import PostProcessingSettings
+        delivery = config.delivery
+        assert delivery.mode == "local"
+        assert delivery.download_dir == config.download_dir
+        assert delivery.delete_after_send is False
+        assert delivery.output_format == "pdf"
+        assert delivery.naming_template == "{title} - Chapter {chapter}"
+        assert delivery.post_processing == PostProcessingSettings()
+
+    @pytest.mark.parametrize("key,value,field,expected", [
+        # Truthy text must never delete a file.
+        ("delivery.delete_after_send", "no", "delete_after_send", False),
+        ("delivery.mode", "fax", "mode", "local"),
+        ("delivery.output_format", "mobi", "output_format", "pdf"),
+        ("delivery.naming_template", 5, "naming_template",
+         "{title} - Chapter {chapter}"),
+        ("delivery.naming_template", "  ", "naming_template",
+         "{title} - Chapter {chapter}"),
+    ])
+    def test_invalid_value_reads_as_the_default(self, config, key, value,
+                                                field, expected):
+        config.set(key, value)
+        assert getattr(config.delivery, field) == expected
+        # The stored value is not touched.
+        assert config.get(key) == value
+
+    @pytest.mark.parametrize("raw", [
+        {"enabled": "false", "command": "run"},
+        {"enabled": 1, "command": "run"},
+        {"enabled": None, "command": "run"},
+        "oops",
+        None,
+    ])
+    def test_post_processing_stays_off_for_bad_values(self, raw):
+        from memanga.config import PostProcessingSettings
+        assert PostProcessingSettings.from_mapping(raw).enabled is False
+
+    def test_post_processing_bad_fields_read_as_unset(self):
+        from memanga.config import PostProcessingSettings
+        settings = PostProcessingSettings.from_mapping(
+            {"enabled": True, "command": ["run"], "fail_on_error": "yes"})
+        assert settings == PostProcessingSettings(enabled=True)
+
+    def test_command_is_not_in_the_repr(self):
+        from memanga.config import PostProcessingSettings
+        settings = PostProcessingSettings(enabled=True, command="run --token x")
+        assert "--token" not in repr(settings)
+
+    @pytest.mark.parametrize("value", ["", "   ", 5, ["a"]])
+    def test_bad_download_dir_is_not_the_current_directory(self, config, value):
+        config.set("delivery.download_dir", value)
+        assert config.download_dir == config.config_dir / "downloads"
+        assert config.delivery.download_dir == config.download_dir
+
+    def test_unresolvable_download_dir_does_not_hide_other_settings(
+            self, config, monkeypatch):
+        from memanga import config as config_mod
+
+        def no_home(self):
+            raise RuntimeError("Could not determine home directory.")
+        config.set("delivery.delete_after_send", True)
+        monkeypatch.setattr(config_mod.Path, "expanduser", no_home)
+        delivery = config.delivery
+        assert delivery.download_dir is None
+        assert delivery.delete_after_send is True
+
+    def test_follows_set_reload_and_reset(self, config):
+        config.set("delivery.output_format", "epub")
+        assert config.delivery.output_format == "epub"
+        config.save()
+        config.set("delivery.output_format", "cbz")
+        assert config.delivery.output_format == "cbz"
+        config.reload()
+        assert config.delivery.output_format == "epub"
+        config.reset()
+        assert config.delivery.output_format == "pdf"
+
+    def test_is_read_only(self, config):
+        import dataclasses
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.delivery.mode = "email"
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            config.delivery.post_processing.enabled = True
+
+    def test_fields_match_the_schema(self):
+        from dataclasses import fields
+        from memanga.config import (CONFIG_KEYS, DeliverySettings,
+                                    PostProcessingSettings)
+        names = {f"delivery.{f.name}" for f in fields(DeliverySettings)
+                 if f.name != "post_processing"}
+        names |= {f"delivery.post_processing.{f.name}"
+                  for f in fields(PostProcessingSettings)}
+        assert names == {k for k in CONFIG_KEYS if k.startswith("delivery.")}
+
+    def test_post_processing_defaults_match_the_config_defaults(self, config):
+        from dataclasses import asdict
+        from memanga.config import PostProcessingSettings
+        assert (asdict(PostProcessingSettings())
+                == config._default_config()["delivery"]["post_processing"])

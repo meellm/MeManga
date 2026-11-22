@@ -233,7 +233,7 @@ class ReaderNavigationMixin:
             output_format=cfg.output_format,
             state=self.app.app_state,
             kindle_cfg=kindle_delivery_settings(cfg, self._manga),
-            naming_template=cfg.get("delivery.naming_template"),
+            naming_template=cfg.delivery.naming_template,
             post_processing=cfg.get("delivery.post_processing"),
             allow_partial=cfg.partial_enabled,
             partial_threshold=cfg.partial_threshold,

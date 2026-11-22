@@ -594,9 +594,11 @@ class DownloadsPage(BasePage):
         Toast(self, f"Found {total} new chapter(s), downloading...", kind="success")
 
         from ...email_settings import kindle_delivery_settings
-        naming_template = self.app.config.get("delivery.naming_template")
+        delivery = self.app.config.delivery
+        naming_template = delivery.naming_template
+        # The live section: turning the hook off also stops queued chapters.
         post_processing = self.app.config.get("delivery.post_processing")
-        delete_after_send = self.app.config.get("delivery.delete_after_send", False)
+        delete_after_send = delivery.delete_after_send
 
         skipped = 0
         jobs = []

@@ -3,12 +3,14 @@ Configuration management for MeManga
 """
 
 import logging
+import math
 import os
 import sys
 import threading
 import yaml
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Optional
+from typing import Any, List, Mapping, Optional
 
 from .perf import timed
 from .persist import atomic_write_text
@@ -213,6 +215,51 @@ class ConfigError(Exception):
     """The config file exists but cannot be loaded."""
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PostProcessingSettings:
+    """The checked ``delivery.post_processing`` settings (issue #293).
+
+    A value of the wrong type counts as unset, so a quoted ``"false"``
+    can never turn the command on.
+    """
+
+    enabled: bool = False
+    # Often holds paths or tokens, so it is not part of the repr.
+    command: str = field(default="", repr=False)
+    fail_on_error: bool = False
+
+    @classmethod
+    def from_mapping(cls, raw: Any) -> "PostProcessingSettings":
+        """The settings in ``raw``, a ``delivery.post_processing`` value."""
+        if not isinstance(raw, Mapping):
+            return cls()
+        values = {}
+        for item in fields(cls):
+            value = raw.get(item.name)
+            key = f"delivery.post_processing.{item.name}"
+            if value is not None and config_value_problem(key, value) is None:
+                values[item.name] = value
+        return cls(**values)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeliverySettings:
+    """The checked ``delivery.*`` settings at one moment (issue #293).
+
+    Read it from :attr:`Config.delivery` each time: it does not follow
+    later changes. Keys it does not cover stay available through
+    :meth:`Config.get`. ``download_dir`` is None when the configured
+    path cannot be resolved (``~name`` for an unknown user).
+    """
+
+    mode: str
+    download_dir: Optional[Path]
+    delete_after_send: bool
+    output_format: str
+    naming_template: str
+    post_processing: PostProcessingSettings
+
+
 class Config:
     """Manages configuration file.
 
@@ -226,6 +273,13 @@ class Config:
     ``load_error`` and ``save()`` refuses to write, so the broken file is
     never overwritten. The CLI uses this so `memanga doctor` can still
     report the problem.
+
+    Issue #293: a known section that is not a mapping makes the file
+    invalid, since merging defaults over it would lose it on the next
+    save. A single bad value does not: it stays in the file, is listed
+    by ``validation_problems``, and typed access (``delivery``) uses the
+    default instead. Keys outside the schema are kept as they are and
+    remain available through ``get`` and ``set``.
     """
 
     def __init__(self, config_dir=None, tolerate_errors=False):
@@ -259,26 +313,21 @@ class Config:
                                           _CONFIG_MIGRATIONS, "config")
                 except SchemaVersionError as e:
                     raise ConfigError(str(e)) from None
+                # Issue #293: checked before defaults are merged over them.
+                # An empty section is what commenting out its keys leaves.
+                broken = config_section_problems(data, allow_empty=True)
+                if broken:
+                    raise ConfigError("; ".join(broken))
             except (OSError, UnicodeDecodeError, yaml.YAMLError, ConfigError) as e:
                 if not self._tolerate_errors:
                     raise
                 self.load_error = str(e)
                 return self._default_config()
             # Merge with defaults to ensure new fields exist
-            defaults = self._default_config()
-            for key, value in defaults.items():
-                if key not in data:
-                    data[key] = value
-                elif isinstance(value, dict) and isinstance(data[key], dict):
-                    for k, v in value.items():
-                        if k not in data[key]:
-                            data[key][k] = v
-                elif isinstance(value, dict) and not isinstance(data[key], dict):
-                    # User config has wrong type — replace with default
-                    data[key] = value
+            _fill_defaults(data, self._default_config())
             return data
         return self._default_config()
-    
+
     def _default_config(self):
         """Return default configuration."""
         return {
@@ -444,24 +493,79 @@ class Config:
             self._data = self._default_config()
             self.save()
     
+    @property
+    def validation_problems(self) -> List[str]:
+        """Known settings with an invalid value, as ``key: reason``.
+
+        Never contains the value, which may be a secret (issue #293).
+        """
+        with self._lock:
+            return config_problems(self._data)
+
+    @property
+    def validation_notice(self) -> Optional[str]:
+        """What to tell the user about invalid settings, or None."""
+        problems = self.validation_problems
+        if not problems:
+            return None
+        lines = "\n".join(f"  {problem}" for problem in problems)
+        return (f"Some settings in {self.config_path} are not valid and may "
+                f"be ignored:\n{lines}\nFix them in that file, or run "
+                "`memanga config edit`.")
+
+    def _known(self, key):
+        """The stored value of schema key ``key``, or its default when it
+        is unset or invalid."""
+        value = self.get(key)
+        if value is not None and config_value_problem(key, value) is None:
+            return value
+        node = self._default_config()
+        for part in key.split("."):
+            node = node[part]
+        return node
+
+    @property
+    def delivery(self) -> DeliverySettings:
+        """The checked ``delivery.*`` settings, read now (issue #293)."""
+        with self._lock:
+            try:
+                download_dir = self.download_dir
+            except (RuntimeError, ValueError):
+                # Reading another setting must not fail over this one.
+                download_dir = None
+            return DeliverySettings(
+                mode=self.delivery_mode,
+                download_dir=download_dir,
+                delete_after_send=self._known("delivery.delete_after_send"),
+                output_format=self.output_format,
+                naming_template=self._known("delivery.naming_template"),
+                post_processing=PostProcessingSettings.from_mapping(
+                    self.get("delivery.post_processing")),
+            )
+
     # Convenience properties
     @property
     def delivery_mode(self):
-        return self.get("delivery.mode", "local")
-    
+        return self._known("delivery.mode")
+
     @property
     def download_dir(self):
-        return Path(self.get("delivery.download_dir", str(self.config_dir / "downloads"))).expanduser()
-    
+        value = self.get("delivery.download_dir")
+        # Issue #293: an empty path would mean the current directory.
+        if value is None or config_value_problem("delivery.download_dir", value):
+            value = str(self.config_dir / "downloads")
+        return Path(value).expanduser()
+
     @property
     def email_enabled(self):
         # bool() matters: `and` would otherwise leak the kindle_email
         # string, which Qt setters like setChecked() reject (issue #55).
         return self.delivery_mode == "email" and bool(self.get("email.kindle_email"))
-    
+
     @property
     def output_format(self):
-        return self.get("delivery.output_format", "pdf")
+        # An unknown format has always been saved as a PDF, the default.
+        return self._known("delivery.output_format")
 
     @property
     def partial_enabled(self):
@@ -475,7 +579,11 @@ class Config:
         out-of-range values persisted by an older/hand-edited config."""
         try:
             value = float(self.get("partial_chapters.threshold_percent", 5))
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
+            return 5.0
+        # Clamping would turn NaN or infinity into 100: every page
+        # allowed to fail.
+        if not math.isfinite(value):
             return 5.0
         return max(0.0, min(100.0, value))
 
@@ -484,6 +592,17 @@ class Config:
         """Whether the reader prefetches the next manual-mode chapter
         while reading (issue #107)."""
         return bool(self.get("gui.reader_prefetch_next", False))
+
+    @property
+    def reader_remove_after_read(self) -> bool:
+        """Whether a finished chapter is removed (issue #104). Only a
+        real ``true`` turns it on: text like ``"no"`` is truthy (#293)."""
+        return self._known("reader.remove_after_read")
+
+    @property
+    def cron_enabled(self) -> bool:
+        """``cron.enabled`` as a real boolean, for a checkbox (#293)."""
+        return self._known("cron.enabled")
 
 
 _KEYRING_SERVICE = "memanga"
@@ -779,12 +898,12 @@ def parse_config_value(key, text):
     raise ValueError("cannot be set from the command line")
 
 
-def config_section_problems(data):
+def config_section_problems(data, *, allow_empty=False):
     """Sections on the way to a known key that are not mappings.
 
-    ``data`` is the raw YAML mapping, before defaults are merged in:
-    loading quietly replaces or skips a section that is not a mapping,
-    so its values would never be checked.
+    ``data`` is the raw YAML mapping, before defaults are merged in, so
+    a section that is not a mapping is still visible. With
+    ``allow_empty``, a section with no value (YAML null) is accepted.
     """
     problems = []
     for key in CONFIG_KEYS:
@@ -794,12 +913,46 @@ def config_section_problems(data):
             if part not in node:
                 break
             node = node[part]
+            if node is None and allow_empty:
+                break
             if not isinstance(node, dict):
                 problem = f"{'.'.join(parts[:depth])}: expected a section"
                 if problem not in problems:
                     problems.append(problem)
                 break
     return problems
+
+
+def config_problems(data) -> List[str]:
+    """Every problem with the known keys in ``data``, as ``key: reason``.
+
+    Unset keys and keys outside CONFIG_KEYS are not problems. The text
+    never contains a value, which may be a secret (issue #293).
+    """
+    problems = config_section_problems(data)
+    for key in CONFIG_KEYS:
+        node = data
+        for part in key.split("."):
+            node = node.get(part) if isinstance(node, dict) else None
+        if node is None:
+            continue
+        problem = config_value_problem(key, node)
+        if problem:
+            problems.append(f"{key}: {problem}")
+    return problems
+
+
+def _fill_defaults(data, defaults) -> None:
+    """Add what ``data`` lacks from ``defaults``, at every level. A value
+    already there is kept; only an empty section takes its default."""
+    for key, value in defaults.items():
+        if key not in data:
+            data[key] = value
+        elif isinstance(value, dict):
+            if isinstance(data[key], dict):
+                _fill_defaults(data[key], value)
+            else:
+                data[key] = value
 
 
 def config_value_problem(key, value):
@@ -815,6 +968,8 @@ def config_value_problem(key, value):
         types = (int,) if kind == "int" else (int, float)
         if isinstance(value, bool) or not isinstance(value, types):
             return "expected a whole number" if kind == "int" else "expected a number"
+        if isinstance(value, float) and not math.isfinite(value):
+            return "expected a number"
         return _range_problem(spec, value)
     if kind == "choice":
         if value not in spec["choices"]:
@@ -828,7 +983,7 @@ def config_value_problem(key, value):
         if spec.get("items") == "host_port":
             for item in value:
                 if parse_host_port(item) is None:
-                    return f"expected host:port entries, got {item!r}"
+                    return "expected host:port entries"
         return None
     if not isinstance(value, str):
         return "expected text"

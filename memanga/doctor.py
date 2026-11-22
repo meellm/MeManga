@@ -33,6 +33,7 @@ import yaml
 from . import __version__
 from .config import AppPasswordError, app_password_override, get_app_password
 from .cron import WINDOWS_TASK_NAME, is_managed_line
+from .email_settings import EmailSettings
 from .emailer import EmailAuthError, kindle_format_error, smtp_login
 from .first_run import missing_host_dependencies
 
@@ -264,6 +265,13 @@ def check_config(config, state=None) -> CheckResult:
         return CheckResult("config", FAIL, f"Config directory is not writable: {error}", details)
     if not path.exists():
         return CheckResult("config", OK, "No config file yet; defaults are in use", details)
+    # Issue #293: key and reason only, never the value.
+    problems = getattr(config, "validation_problems", None)
+    if problems:
+        details["invalid_settings"] = list(problems)
+        return CheckResult("config", WARNING,
+                           "Config file has invalid settings, which may be ignored: "
+                           + "; ".join(problems), details)
     return CheckResult("config", OK, "Config file is readable and its directory is writable", details)
 
 
@@ -343,12 +351,13 @@ def check_email(config, state=None) -> CheckResult:
                            f"App password from the environment is unusable: {e}",
                            {"delivery_mode": mode})
 
+    email = EmailSettings.from_config(config, resolve_password=False)
     details = {
         "delivery_mode": mode,
-        "kindle_email_set": bool(config.get("email.kindle_email")),
-        "sender_email_set": bool(config.get("email.sender_email")),
-        "smtp_server": config.get("email.smtp_server", "smtp.gmail.com"),
-        "smtp_port": config.get("email.smtp_port", 587),
+        "kindle_email_set": bool(email.kindle_email),
+        "sender_email_set": bool(email.sender_email),
+        "smtp_server": email.smtp_server,
+        "smtp_port": email.smtp_port,
         "app_password_set": bool(get_app_password(config)),
         "output_format": config.output_format,
     }
@@ -433,15 +442,16 @@ def _smtp_login(server: str, port: int, user: str, password: str,
 
 
 def check_smtp(config, state=None, live: bool = False) -> CheckResult:
-    server = config.get("email.smtp_server", "smtp.gmail.com")
-    port = config.get("email.smtp_port", 587)
-    smtp_tls = config.get("email.smtp_tls", "auto")
+    email = EmailSettings.from_config(config, resolve_password=False)
+    server = email.smtp_server
+    port = email.smtp_port
+    smtp_tls = email.smtp_tls
     details = {"smtp_server": server, "smtp_port": port,
                "smtp_tls": smtp_tls, "live": live}
 
     if not live:
         return CheckResult("smtp", SKIP, "Login test not run; pass --smtp to try it", details)
-    sender = config.get("email.sender_email")
+    sender = email.sender_email
     password = get_app_password(config)
     if not sender or not password:
         return CheckResult("smtp", FAIL,
@@ -449,7 +459,7 @@ def check_smtp(config, state=None, live: bool = False) -> CheckResult:
 
     try:
         _smtp_login(server, int(port), sender, password,
-                    timeout=config.get("email.smtp_timeout"),
+                    timeout=email.smtp_timeout,
                     smtp_tls=smtp_tls)
     except EmailAuthError:
         return CheckResult("smtp", FAIL,

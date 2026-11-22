@@ -90,6 +90,34 @@ The message names the
 file. [When state.json cannot be read](../reference/state#when-state-json-cannot-be-read)
 explains how to get back to the previous copy.
 
+### A setting is not valid
+
+This applies with the configuration-validation update
+([#293](https://github.com/meellm/MeManga/issues/293),
+[pull request 552](https://github.com/meellm/MeManga/pull/552)), which is not
+in {{ release.tag }} and not yet on `main`.
+
+- **`expected a section`:** a known section, such as `email`, holds a value
+  or list instead of a group of settings. Commands that use the configuration
+  stop, except for the recovery commands below, and the desktop app does not start
+  until the file is fixed. The file is not overwritten.
+- **`Some settings in … are not valid and may be ignored`:** one or more values
+  are wrong. MeManga keeps running, and each line names a setting and what it
+  expects. [What a wrong value does](../reference/config#when-a-setting-is-not-valid)
+  depends on the setting.
+
+To fix the file:
+
+1. Close the desktop app and stop any `memanga watch`.
+2. Find `config.yaml`. The message names it, and `memanga config path` prints
+   it even when the file cannot be loaded. See also
+   [where MeManga keeps its files](./install#where-memanga-keeps-its-files).
+3. Open it in any text editor, correct the setting and save. In a terminal
+   with `$VISUAL` or `$EDITOR` set, `memanga config edit` opens the file and
+   checks it when you close the editor.
+4. Run `memanga doctor --check config` to see what is still wrong. Without the
+   command line, start the desktop app again: it shows any remaining problem.
+
 ### The window closes right away
 
 Look in the config folder for `crash.log`. When an error in MeManga closes

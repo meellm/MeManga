@@ -822,6 +822,19 @@ class TestPostProcessing:
                          post_processing=pp)
         assert not marker.exists()
 
+    @pytest.mark.parametrize("enabled", ["false", "no", 1])
+    def test_enabled_of_the_wrong_type_does_not_run(
+            self, tmp_path, patch_get_scraper, fake_state, enabled):
+        # Issue #293: a quoted "false" is truthy text.
+        from memanga.downloader import download_chapter
+        manga, chapter = self._manga_and_chapter()
+        marker = tmp_path / "ran.txt"
+        pp = {"enabled": enabled, "command": f'touch "{marker}"',
+              "fail_on_error": False}
+        download_chapter(manga, chapter, tmp_path, "pdf", fake_state,
+                         post_processing=pp)
+        assert not marker.exists()
+
     def test_none_config_is_noop(self, tmp_path, patch_get_scraper, fake_state):
         from memanga.downloader import download_chapter
         manga, chapter = self._manga_and_chapter()

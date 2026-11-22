@@ -47,6 +47,15 @@ else and is easy to remove.
 To turn it off, untick the box, or run
 `memanga config set delivery.post_processing.enabled false`.
 
+If you edit `config.yaml` by hand, write `enabled` and `fail_on_error` as
+`true` or `false` without quotes. With the
+[configuration-validation update](../reference/config#when-a-setting-is-not-valid)
+([#293](https://github.com/meellm/MeManga/issues/293),
+[pull request 552](https://github.com/meellm/MeManga/pull/552)), which is not
+in {{ release.tag }} and not yet on `main`, a quoted value or a number counts
+as off and MeManga warns about it. Without that update, a quoted `"false"` can
+turn the command on.
+
 ## How the command is run
 
 - **No shell.** MeManga splits the command into the program and its
