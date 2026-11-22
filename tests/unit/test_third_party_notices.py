@@ -1119,6 +1119,31 @@ def test_notices_skip_only_the_exact_python_framework_plist(tmp_path):
         assert _notices_input(collected, "darwin", str(link)) == kept
 
 
+def _without_system_ucrt(binaries, is_windows):
+    # The spec's own filter, over a fake Analysis.
+    text = SPEC.read_text(encoding="utf-8")
+    block = text[text.index("_UCRT_DLLS = "):
+                 text.index("from PySide6.QtCore import qVersion")]
+    scope = {"_IS_WINDOWS": is_windows, "a": SimpleNamespace(binaries=list(binaries))}
+    exec(block, scope)
+    assert len(scope["_UCRT_DLLS"]) == 43
+    return scope["a"].binaries
+
+
+def test_windows_build_leaves_out_only_the_system_ucrt():
+    def entries(*names):
+        return [(name, f"C:/runner/path/{name}", "BINARY") for name in names]
+
+    ucrt = entries("ucrtbase.dll", "api-ms-win-crt-runtime-l1-1-0.dll",
+                   "api-ms-win-core-synch-l1-2-0.dll",
+                   "API-MS-WIN-CRT-HEAP-L1-1-0.DLL")
+    kept = entries("vcruntime140.dll", "msvcp140.dll", "python312.dll",
+                   "api-ms-win-core-unlisted-l1-1-0.dll", "PySide6/ucrtbase.dll",
+                   "PySide6/api-ms-win-crt-runtime-l1-1-0.dll")
+    assert _without_system_ucrt(ucrt + kept, True) == kept
+    assert _without_system_ucrt(ucrt + kept, False) == ucrt + kept
+
+
 def test_build_app_collects_onedir_and_checks_it():
     text = BUILD_APP.read_text(encoding="utf-8")
     assert 'ONEDIR = platform.system() != "Darwin"' in text
