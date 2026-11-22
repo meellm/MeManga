@@ -68,7 +68,7 @@ for new chapters. It knows
 <p align="center">
   <img src="docs/public/media/cli-demo.gif" alt="Terminal recording: memanga search adds Blue Lock from weebcentral.com, memanga check downloads chapters 368 and 369 as PDF files, and memanga list shows the tracked series" width="760">
   <br>
-  <sub>The command line in MeManga v0.4.4.</sub>
+  <sub>The command line in the development version.</sub>
 </p>
 
 Installing with `pip`, `pipx` or `uv` from a package index is
