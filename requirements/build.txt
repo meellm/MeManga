@@ -2,7 +2,7 @@
 # pinned with hashes. Made from pyproject.toml; to change it,
 # edit pyproject.toml and run:
 #    python scripts/lock_dependencies.py
-# input-digest: sha256:a7dd2a87c373f9083a3bcc783c46f62bece0fd007b5683ed78be45f9a83b7e18
+# input-digest: sha256:904baec496de6e835ef651bc45dd8d73e6a53aa2c9d02dfb3b2412c34938c1ea
 # Do not edit by hand.
 altgraph==0.17.5 \
     --hash=sha256:c87b395dd12fabde9c99573a9749d67da8d29ef9de0125c7f536699b4a9bc9e7 \
@@ -591,9 +591,9 @@ more-itertools==11.1.0 \
     # via
     #   jaraco-classes
     #   jaraco-functools
-packaging==26.2 \
-    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e \
-    --hash=sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661
+packaging==26.3 \
+    --hash=sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
     # via
     #   pikepdf
     #   pyinstaller

@@ -1,0 +1,50 @@
+# Checks that run on `git commit` (#289). They need the dev install
+# (requirements/dev.txt); in that environment, once per clone:
+#
+#   pre-commit install
+#
+# To run them on every file without committing:
+#
+#   pre-commit run --all-files
+#
+# Ruff and mypy read their settings from pyproject.toml, so a hook and the
+# same command run by hand agree.
+
+# The README files are left exactly as they are written.
+exclude: (^|/)README\.md$
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Licenses and captured fixtures stay as they are, as in
+      # .editorconfig.
+      - id: end-of-file-fixer
+        exclude: ^(LICENSE$|packaging/licenses/|tests/(.*/)?fixtures/)
+      - id: check-yaml
+        exclude: ^tests/(.*/)?fixtures/
+
+  # The same ruff as requirements/dev.txt and the CI lint job; change the
+  # three together.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.4
+    hooks:
+      - id: ruff-check
+        types_or: [python, pyi]
+      # Python files only: by default this hook also rewrites the code
+      # blocks of Markdown files.
+      - id: ruff-format
+        types_or: [python, pyi]
+
+  # mypy from the dev install, so it is the version of
+  # requirements/dev.txt and sees the installed packages. It checks the
+  # files listed under [tool.mypy], not only the ones in the commit.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: python -m mypy
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(memanga/.*\.pyi?|pyproject\.toml)$

@@ -156,12 +156,36 @@ The workflows in `.github/workflows/` run on GitHub:
   3.13 on Linux and on Python 3.12 on Windows. On macOS (Python 3.12) only
   for pushes to `main`, runs by hand and releases, not for pull requests.
 
-To run the lint check as CI does:
+## Local quality checks
+
+The dev install includes Ruff, mypy and pre-commit. With that environment
+active, run these from the repository root:
 
 ```sh
-python -m pip install "ruff==0.17.4"
-ruff check --select E9,F63,F7,F82 --target-version py311 .
+ruff check .
+ruff format --check .
+mypy
 ```
+
+`ruff check .` uses the same lint rules as CI. Formatting and type checking
+are introduced gradually: `[tool.ruff.format] exclude` in `pyproject.toml`
+lists paths not yet formatted, and `[tool.mypy] files` and `exclude` define
+the type-checking scope. Markdown is excluded from Ruff. To format another
+path, remove its exclusion and commit the changes from `ruff format PATH`
+separately. To type-check more code, extend the mypy scope and fix the
+reported errors.
+
+Install the commit hooks once per clone, then run them by hand when needed:
+
+```sh
+pre-commit install
+pre-commit run --all-files
+```
+
+Keep the dev environment active when committing: the local mypy hook uses
+`python -m mypy` from that environment. The hooks also check YAML and file
+endings; formatting and file-ending hooks can rewrite files, so inspect
+their changes before committing. CI does not yet run formatting or mypy.
 
 ## Generated files
 
