@@ -6,6 +6,8 @@ All notable changes are recorded here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-22
+
 ### Added
 - #255 Pushes and pull requests to `main` run CI: a lint for syntax
   errors and undefined names, a check that the sdist and wheel build,
@@ -20,11 +22,11 @@ All notable changes are recorded here. Format loosely follows
   gated yet: its own workflow still builds and publishes it for every
   tag, whatever the tests show, until this is coordinated with the
   Docker workflow changes in #477.
-- Part of #285: the GitHub Release text is the version's section of
-  this changelog, followed by GitHub's list of merged pull requests. A
-  tag whose version has no section here fails within seconds, before
-  the tests and release builds start. Syncing the `cli` branch is not
-  automated yet.
+- Part of #285: a tag whose version has no section in this changelog,
+  or no short announcement in `.github/release-announcements/`, fails
+  within seconds, before the tests and release builds start. The
+  announcement is the GitHub Release text. Syncing the `cli` branch is
+  not automated yet.
 - #218 After a successful GitHub Release, a stable `vX.Y.Z` tag from
   `v0.5.0` on whose commit is on `main` uploads the `memanga` sdist and
   wheel to PyPI. These are the files CI already checked, with no second
@@ -1267,7 +1269,8 @@ The oldest tagged and published release is v0.2.0, so this changelog
 starts there. Earlier work, including the untagged version 0.1.0, is in
 the git history.
 
-[Unreleased]: https://github.com/meellm/MeManga/compare/v0.4.4...main
+[Unreleased]: https://github.com/meellm/MeManga/compare/v0.5.0...main
+[0.5.0]: https://github.com/meellm/MeManga/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/meellm/MeManga/compare/v0.4.3...v0.4.4
 [0.4.3]: https://github.com/meellm/MeManga/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/meellm/MeManga/compare/v0.4.1...v0.4.2

@@ -877,7 +877,7 @@ def test_changelog_163_entry_describes_optional_notarization():
     if "- #163" in text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]:
         section = text.split("## [Unreleased]", 1)[1].split("\n## [", 1)[0]
     else:
-        section = text.split("\n## [", 2)[2].split("\n## [", 1)[0]
+        section = text.split("\n## [0.4.4]", 1)[1].split("\n## [", 1)[0]
     entry = section.split("- #163", 1)[1].split("\n- #", 1)[0]
     assert "optionally" in entry and "paid" in entry
     assert "unsigned" in entry and "xattr" in entry

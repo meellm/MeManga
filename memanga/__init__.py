@@ -5,4 +5,4 @@ every other module is internal and may change in any release.
 """
 
 # The one place the version is set; pyproject.toml reads it at build time.
-__version__ = "0.4.4"
+__version__ = "0.5.0"
