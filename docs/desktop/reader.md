@@ -24,6 +24,10 @@ The toolbar has three layouts:
 The layout is remembered for each series. You can also set it on the series'
 page under **Reader layout**.
 
+![The reader showing page 1 of Blue Lock chapter 368, with the layout and zoom controls in the toolbar](/media/app-reader.png)
+
+<small>The reader. Desktop app, version label v0.4.4; the development version may look different. The page shown is from Blue Lock, which belongs to its owners and appears only to demonstrate the reader. See [Using sources responsibly](../reference/sources#using-sources-responsibly).</small>
+
 ## Zoom
 
 Use the zoom buttons in the toolbar or the keyboard. Zoom goes from 50% to
@@ -63,7 +67,7 @@ a **Next** button at the end of the chapter.
 ## Where you left off
 
 The reader remembers your place in each chapter. When you open a chapter
-again, it continues from there.
+again, it continues from about where you stopped.
 
 A chapter counts as read when you reach its end. After that it opens from
 the first page again.
@@ -81,16 +85,18 @@ This setting is off by default.
 ## Remove chapters after reading
 
 With **Settings → Advanced → Reader → Remove chapters after reading** turned
-on, a chapter's file is removed from your download folder once you finish it
-in the reader. Your read progress is kept, and the chapter goes back to
-**Not downloaded** on the series' page, so you can download it again.
+on, a chapter's file is removed from your download folder after you finish it
+in the reader. Your read progress is kept. The chapter's row still says
+**Read** and has a **Download** button again, and the chapter is counted under
+the **Not downloaded** filter.
 
-This setting is off by default. What "removed" means depends on the version:
+This setting is off by default. When and how the file is removed depends on
+the version:
 
 | Version | What happens to the file |
 |---|---|
-| Release v0.4.4 | It is deleted. |
-| Development version | It is moved to the Recycle Bin on Windows or the Trash on macOS and Linux, so you can restore it. If it cannot be moved there, it is kept. |
+| Release v0.4.4 | It is deleted as soon as the chapter counts as read. |
+| Development version | When you leave the finished chapter, it is moved to the Recycle Bin on Windows or the Trash on macOS and Linux, so you can restore it. If it cannot be moved there, it is kept. |
 
 ## What the reader can open
 

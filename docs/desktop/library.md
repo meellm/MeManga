@@ -21,13 +21,17 @@ There are two ways to add a series to your library.
 - **Add manga.** In **Library**, choose **Add manga** and paste the address
   of the series page on a supported source.
 
+![The Library with tracked series, their reading status and new-chapter counts](/media/app-library.png)
+
+<small>The Library. Desktop app, version label v0.4.4; the development version may look different. Series titles and artwork on this page belong to their owners and appear only to demonstrate the app. See [Using sources responsibly](../reference/sources#using-sources-responsibly).</small>
+
 The add dialog asks for:
 
 | Field | What it does |
 |---|---|
 | Source URL | The series page on the source. The title is detected from it; you can type your own instead. |
 | I'm currently on chapter | Optional. See [chapters you read elsewhere](#chapters-you-read-elsewhere). |
-| Reading status | Reading, Plan to read, On hold, Completed or Dropped. |
+| Reading status | Reading, Plan to read or Paused, which is saved as On hold. Set Completed or Dropped after adding, with the status picker on the series' page. |
 | Add backup source | Optional second site with the same series. See [Use a backup source](../guide/backup-sources). |
 | Fallback delay (days) | How many days a new chapter found only on the backup waits for the main source before it is taken from the backup. |
 
@@ -53,6 +57,10 @@ leaves them for you to pick.
 A series' page also has **Download from…**, which downloads from a chapter
 number you give (use `0` for all chapters from the beginning), and
 **Download all**.
+
+![A series page with its source, status, mode, reader layout, download buttons and chapter list](/media/app-detail.png)
+
+<small>A series page with its controls and chapter list. Desktop app, version label v0.4.4; the development version may look different.</small>
 
 ## Chapters you read elsewhere
 

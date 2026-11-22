@@ -11,6 +11,10 @@ choose **Save settings**, except the theme, which switches at once.
 Unless a section says otherwise, everything here works the same in
 {{ release.tag }} and in the development version.
 
+![The General settings with theme cards, delivery mode, download folder, output format, concurrent downloads and file naming](/media/settings-general.png)
+
+<small>The General settings in the development version. The download folder is a sample value, not the default. [File names](#file-names) explains the `{date}` chip.</small>
+
 ## Theme
 
 **Settings → General → Appearance** offers a dark and a light theme.
@@ -32,9 +36,13 @@ source limits you.
 ## File names
 
 **File Naming** takes a template for the file name of each chapter. The
-default is `{title} - Chapter {chapter}`. The variables are `{title}`,
-`{chapter}`, `{source}` and `{date}`. A preview under the field shows the
-name your template produces.
+default is `{title} - Chapter {chapter}`. Saved file names can use `{title}`,
+`{chapter}` and `{source}`, and a preview under the field shows the name
+they produce.
+
+The field also offers a `{date}` chip, and the preview fills in the date, but
+the saved file name keeps the literal text `{date}`. Leave it out of your
+template.
 
 ## Storage and cover cache
 
