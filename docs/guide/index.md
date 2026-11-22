@@ -13,24 +13,32 @@ import { release } from '../.vitepress/release'
 
 ## Start here
 
+**Get started**
+
 - [Download and install](./install): the desktop download, the command line
   from source, and what is not available yet.
 - [First steps](./first-steps): start MeManga and check that it works.
-- [Troubleshooting](./troubleshooting): when MeManga does not start, log
-  files, the browser download, moving and uninstalling.
+- [Supported websites](../reference/supported-websites): the sites MeManga
+  can read, grouped by what they publish.
+- [Sources](../reference/sources): the technical catalog of those sites.
+
+**Use MeManga**
+
 - [Library and downloads](../desktop/library), [Reader](../desktop/reader)
   and [Settings](../desktop/settings): the desktop app in detail.
 - [Use the command line](./cli): search, add, check and download from a
   terminal. The [command reference](../reference/cli) lists every command
   and option, and [Use MeManga in scripts](../reference/scripting) covers
   exit codes and JSON output.
+
+**Go further**
+
 - [Run MeManga in Docker](./docker): the published image, your data and
   scheduled checks.
 - [Send chapters to a Kindle](./kindle): email delivery from setup to
   troubleshooting.
-- [Supported websites](../reference/supported-websites): the sites MeManga
-  can read, grouped by what they publish.
-- [Sources](../reference/sources): the technical catalog of those sites.
+- [Troubleshooting](./troubleshooting): when MeManga does not start, log
+  files, the browser download, moving and uninstalling.
 
 ## Documents on GitHub
 

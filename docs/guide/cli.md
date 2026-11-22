@@ -182,13 +182,14 @@ memanga check "TITLE" --download --force-suspicious
 ## When chapters fail
 
 A chapter fails when its pages cannot be downloaded. At the end of a run
-MeManga tells you how many chapters failed.
+MeManga tells you how many chapters failed. To list them with the reason,
+run:
 
 ```sh
 memanga failed
 ```
 
-lists them with the reason. Then choose:
+Then choose what to do with them:
 
 - `memanga failed retry` downloads the listed chapters again, without
   asking. It uses the network.

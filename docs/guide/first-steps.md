@@ -87,7 +87,7 @@ When you are ready to download, run `memanga check` without `--dry-run`.
 What you download, and from where, is your decision and your
 responsibility.
 
-### Look at your library, or undo
+### View your library or remove a series {#look-at-your-library-or-undo}
 
 List the series you follow:
 
@@ -109,12 +109,12 @@ unless you tell it otherwise.
 Running `memanga` with no command opens a menu in the terminal. It needs a
 real terminal, so use the commands above in scripts.
 
-## Where things went
+## Where your files are {#where-things-went}
 
 Your settings, library and downloads are in the folders listed under
 [where MeManga keeps its files](./install#where-memanga-keeps-its-files).
 
-## Next
+## Where to go next {#next}
 
 - [Library and downloads](../desktop/library), [Reader](../desktop/reader)
   and [Settings](../desktop/settings) describe the desktop app.

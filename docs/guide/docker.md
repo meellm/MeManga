@@ -441,7 +441,7 @@ that, so the commands on this page pass `--init`, which makes Docker add a
 small helper. An image built from source has this built in; `--init` is not
 needed there and does no harm.
 
-## Update
+## Update the image {#update}
 
 Your data is in the volumes or folders, not in the image, so updating is
 pulling a newer image and using its tag from then on:

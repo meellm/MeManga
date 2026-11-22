@@ -127,9 +127,10 @@ All of these are in the config folder.
 
 Some sources only work through a browser, so MeManga uses its own copies of
 Firefox and Chromium. They are downloaded once, about 250 MB, into the
-browser folder listed [above](#find-memanga-s-files).
+browser folder listed under
+[Find MeManga's files](#find-memanga-s-files).
 
-### They are missing
+### The components are missing {#they-are-missing}
 
 - {{ release.tag }}: the desktop app asks to download them at every start
   until they are there.
@@ -141,7 +142,7 @@ browser folder listed [above](#find-memanga-s-files).
 If the download fails, the app shows what went wrong and offers to try
 again. Check the internet connection first.
 
-### They are broken
+### The components are broken {#they-are-broken}
 
 When the download was cut off or the files were damaged, sources that need
 a browser fail, often with a message that an executable does not exist or
@@ -294,9 +295,9 @@ download folder is outside the folders you remove, so check that first.
    folder of the command line from source with its virtual environment. For
    Docker, see [Docker](./docker).
 5. **Rename the config folder**, for example to `memanga-removed`, and
-   delete it once you are sure you do not need it, and only after step 3. It holds your settings,
-   library, reading history and logs. If you might use MeManga again, keep
-   it, or export your library first.
+   delete it once you are sure you do not need it, and only after step 3.
+   It holds your settings, library, reading history and logs. If you might
+   use MeManga again, keep it, or export your library first.
 6. **Delete the app password from the keyring**, if you set up email
    delivery. The entry belongs to the service `memanga` and the account
    `app_password`:

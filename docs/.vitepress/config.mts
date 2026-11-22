@@ -45,9 +45,7 @@ export default defineConfig({
           { text: 'Docs overview', link: '/guide/' },
           { text: 'Download and install', link: '/guide/install' },
           { text: 'First steps', link: '/guide/first-steps' },
-          { text: 'Supported websites', link: '/reference/supported-websites' },
-          { text: 'Use a backup source', link: '/guide/backup-sources' },
-          { text: 'Troubleshooting', link: '/guide/troubleshooting' }
+          { text: 'Supported websites', link: '/reference/supported-websites' }
         ]
       },
       {
@@ -63,20 +61,19 @@ export default defineConfig({
         text: 'Command line',
         items: [
           { text: 'Use the command line', link: '/guide/cli' },
-          { text: 'Check on a schedule', link: '/guide/schedule' },
           { text: 'Command reference', link: '/reference/cli' },
           { text: 'Use MeManga in scripts', link: '/reference/scripting' }
         ]
       },
       {
-        text: 'Servers',
-        items: [{ text: 'Run MeManga in Docker', link: '/guide/docker' }]
-      },
-      {
-        text: 'Delivery',
+        text: 'How-to guides',
         items: [
-          { text: 'Send to a Kindle', link: '/guide/kindle' },
-          { text: 'Run a command after each download', link: '/guide/post-processing' }
+          { text: 'Use a backup source', link: '/guide/backup-sources' },
+          { text: 'Check on a schedule', link: '/guide/schedule' },
+          { text: 'Send chapters to a Kindle', link: '/guide/kindle' },
+          { text: 'Run a command after each download', link: '/guide/post-processing' },
+          { text: 'Run MeManga in Docker', link: '/guide/docker' },
+          { text: 'Troubleshooting', link: '/guide/troubleshooting' }
         ]
       },
       {

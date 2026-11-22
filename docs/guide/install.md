@@ -35,7 +35,7 @@ Download the file for your system from the
 There is no desktop download for Linux on ARM, such as a Raspberry Pi. Use
 the [command line](#command-line-from-source) or [Docker](#docker) there.
 
-### Start it
+### Start the app {#start-it}
 
 These steps are for the v0.4.4 files. None of them is an installer: you run
 the program straight from where you saved it.

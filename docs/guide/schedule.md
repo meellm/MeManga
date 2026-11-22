@@ -18,7 +18,7 @@ command that keeps running. Both run the same command,
   instead.
 :::
 
-## Choose a way
+## Choose a method {#choose-a-way}
 
 | | Daily scheduled check | `memanga watch` |
 |---|---|---|
@@ -63,7 +63,7 @@ which chapter you are on, or run the first check yourself with
 
 ## Daily scheduled check
 
-### Set it up
+### Set up the daily check {#set-it-up}
 
 Run this once, with the time of day for the check:
 
@@ -94,7 +94,7 @@ The check uses:
 If you move or delete the folder with the program or its virtual
 environment, run `memanga cron install` again.
 
-### See and remove it
+### View or remove the daily check {#see-and-remove-it}
 
 ```sh
 memanga cron status
@@ -147,7 +147,7 @@ The exit codes are listed in [Exit codes](../reference/scripting#exit-codes):
 for example `1` when every check failed or MeManga was busy, and `3` when
 some chapters failed.
 
-## memanga watch
+## Check on an interval with memanga watch {#memanga-watch}
 
 `memanga watch` stays in the foreground and checks for new chapters at the
 start and then again after each interval:
@@ -226,7 +226,7 @@ recorded as soon as it is saved, so the next check carries on from there.
   `NAME=value` above MeManga's line.
 - `memanga failed` lists chapters that failed.
 
-## In release v0.4.4
+## Differences in release v0.4.4 {#in-release-v0-4-4}
 
 - **`memanga cron install` and `remove` in {{ release.tag }} delete every
   crontab line that contains the word `memanga`**, including lines you wrote
