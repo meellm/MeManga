@@ -146,3 +146,8 @@ version = {attr = "memanga.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["memanga*"]
+
+# The desktop app's icon set. Built packages leave out non-Python files
+# that are not listed here.
+[tool.setuptools.package-data]
+"memanga.gui" = ["assets/icon/*.png"]

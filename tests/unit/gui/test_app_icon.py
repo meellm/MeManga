@@ -39,8 +39,8 @@ def test_packaging_ico_and_icns_present():
     files break the build before any asset is staged."""
     assert Path("packaging/icon.ico").exists(), \
         "packaging/icon.ico missing — Windows build will fail"
-    # icns only exists on macOS build hosts (iconutil); on CI Linux
-    # hosts the spec falls back to .ico, so it isn't required here.
+    assert Path("packaging/icon.icns").exists(), \
+        "packaging/icon.icns missing — macOS build will fail"
 
 
 def test_packaging_ico_contains_multiple_resolutions():
@@ -53,7 +53,7 @@ def test_packaging_ico_contains_multiple_resolutions():
     expects are actually present.
     """
     from PIL import Image
-    expected = {(16, 16), (32, 32), (48, 48),
+    expected = {(16, 16), (24, 24), (32, 32), (48, 48),
                 (64, 64), (128, 128), (256, 256)}
     with Image.open("packaging/icon.ico") as im:
         present = set(im.info.get("sizes", set()))
@@ -62,3 +62,62 @@ def test_packaging_ico_contains_multiple_resolutions():
         f"packaging/icon.ico is missing sizes {sorted(missing)} — "
         f"present: {sorted(present)}. Re-run scripts/generate_icon.py."
     )
+
+
+def test_packaging_icns_contains_standard_and_retina_sizes():
+    from PIL import Image
+    expected = {(16, 16, 2), (32, 32, 2),
+                (128, 128, 1), (128, 128, 2),
+                (256, 256, 1), (256, 256, 2),
+                (512, 512, 1), (512, 512, 2)}
+    with Image.open("packaging/icon.icns") as im:
+        present = set(im.info.get("sizes", set()))
+    missing = expected - present
+    assert not missing, (
+        f"packaging/icon.icns is missing sizes {sorted(missing)} — "
+        f"present: {sorted(present)}. Re-run scripts/generate_icon.py."
+    )
+
+
+def _assert_shows_artwork(image, label):
+    """``image`` must match the master artwork resized to its size."""
+    from PIL import Image, ImageChops, ImageStat
+    with Image.open("packaging/icon-source.png") as source:
+        expected = source.convert("RGB").resize(
+            image.size, Image.Resampling.LANCZOS)
+    difference = ImageChops.difference(image.convert("RGB"), expected)
+    worst = max(ImageStat.Stat(difference).mean)
+    assert worst < 2, f"{label} differs from the artwork by {worst:.2f}"
+
+
+@pytest.mark.parametrize("name", [
+    "icon.png", "icon-16.png", "icon-32.png", "icon-48.png", "icon-64.png",
+    "icon-128.png", "icon-256.png", "icon-512.png", "icon-1024.png",
+])
+def test_runtime_png_shows_the_artwork(name):
+    from PIL import Image
+    with Image.open(f"memanga/gui/assets/icon/{name}") as im:
+        _assert_shows_artwork(im, name)
+
+
+def test_ico_frames_show_the_artwork():
+    from PIL import Image
+    with Image.open("packaging/icon.ico") as im:
+        for size in sorted(im.info["sizes"]):
+            _assert_shows_artwork(im.ico.getimage(size), f"icon.ico {size}")
+
+
+def test_icns_shows_the_artwork():
+    from PIL import Image
+    with Image.open("packaging/icon.icns") as im:
+        im.load()
+        assert im.size == (1024, 1024)
+        _assert_shows_artwork(im, "icon.icns")
+
+
+def test_built_packages_include_the_icon_set():
+    """Without this entry a pip install has no window or sidebar icon."""
+    import tomllib
+    config = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    package_data = config["tool"]["setuptools"]["package-data"]
+    assert "assets/icon/*.png" in package_data["memanga.gui"]

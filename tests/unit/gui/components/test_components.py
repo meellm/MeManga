@@ -35,6 +35,23 @@ class TestBrandMark:
         theme.set_theme("dark", qapp)
         b.update()
 
+    def test_paints_the_app_artwork(self, theme):
+        from PySide6.QtCore import QSize
+        from memanga.gui import _load_app_icon
+        from memanga.gui.components.brand_mark import BrandMark
+        b = BrandMark(size=34)
+        ratio = b.devicePixelRatioF()
+        painted = b.grab().toImage()
+        expected = _load_app_icon().pixmap(QSize(34, 34), ratio).toImage()
+        # Points inside the rounded corners, across the artwork.
+        for x, y in ((8, 17), (17, 8), (17, 17), (26, 17), (17, 26)):
+            px, py = int(x * ratio), int(y * ratio)
+            got = painted.pixelColor(px, py)
+            want = expected.pixelColor(px, py)
+            assert abs(got.red() - want.red()) <= 16
+            assert abs(got.green() - want.green()) <= 16
+            assert abs(got.blue() - want.blue()) <= 16
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # Sidebar
