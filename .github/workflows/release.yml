@@ -13,7 +13,8 @@ jobs:
   notes:
     # Issue #285: a tag whose version has no CHANGELOG.md section fails
     # here, in seconds, before the tests, the audit and the release builds
-    # start. The release job writes the same section as the release text.
+    # start. So does a tag without its short announcement, which the
+    # release job uses as the release text.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -23,6 +24,11 @@ jobs:
 
       - name: Check the release notes in CHANGELOG.md
         run: python3 scripts/release_notes.py "${{ github.ref_name }}" > /dev/null
+
+      - name: Check the release announcement
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: grep -q '[^[:space:]]' ".github/release-announcements/${RELEASE_TAG}.md"
 
   tests:
     # Issue #317: the routine CI of the tag's tree, the full suite on Linux
@@ -638,12 +644,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Release notes from CHANGELOG.md
-        # Issue #285: the release body is the tag's CHANGELOG.md section;
-        # GitHub's list of merged pull requests follows it. A tag without a
-        # section fails here, before anything is published.
-        run: python3 scripts/release_notes.py "${{ github.ref_name }}" --output "$RUNNER_TEMP/release-notes.md"
-
       - name: Download the app artifacts
         # Only the desktop downloads: the sdist and wheel go to PyPI.
         uses: actions/download-artifact@v8
@@ -660,8 +660,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          body_path: ${{ runner.temp }}/release-notes.md
-          generate_release_notes: true
+          body_path: .github/release-announcements/${{ github.ref_name }}.md
+          generate_release_notes: false
           files: release/*
 
   publish-pypi:

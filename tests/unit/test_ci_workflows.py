@@ -237,9 +237,13 @@ def test_changelog_section_is_checked_before_anything_else_runs(release):
     notes = jobs["notes"]
     assert "needs" not in notes
     assert notes["permissions"] == {"contents": "read"}
-    (run,) = [r for r in _runs(notes) if r]
-    assert run.strip() == (
+    changelog, announcement = [r.strip() for r in _runs(notes) if r]
+    assert changelog == (
         'python3 scripts/release_notes.py "${{ github.ref_name }}" > /dev/null')
+    assert announcement == (
+        "grep -q '[^[:space:]]' "
+        '".github/release-announcements/${RELEASE_TAG}.md"')
+    assert notes["steps"][-1]["env"] == {"RELEASE_TAG": "${{ github.ref_name }}"}
     for name in ("tests", "audit", "locks"):
         assert jobs[name]["needs"] == "notes", name
     # Every other job waits for it, directly or through another job.
@@ -266,19 +270,15 @@ def test_only_the_release_job_can_write(release):
             assert "write" not in permissions.values(), name
 
 
-def test_release_body_is_the_changelog_section(release):
+def test_release_body_is_the_tag_announcement(release):
     steps = release["jobs"]["release"]["steps"]
-    (notes,) = [i for i, s in enumerate(steps)
-                if "scripts/release_notes.py" in s.get("run", "")]
-    (publish,) = [i for i, s in enumerate(steps)
+    assert not [s for s in steps if "scripts/release_notes.py" in s.get("run", "")]
+    (publish,) = [s for s in steps
                   if str(s.get("uses", "")).startswith("softprops/action-gh-release@")]
-    assert notes < publish
-    run = steps[notes]["run"]
-    assert '"${{ github.ref_name }}"' in run
-    assert '--output "$RUNNER_TEMP/release-notes.md"' in run
-    with_ = steps[publish]["with"]
-    assert with_["body_path"] == "${{ runner.temp }}/release-notes.md"
-    assert with_["generate_release_notes"] is True
+    with_ = publish["with"]
+    assert with_["body_path"] == (
+        ".github/release-announcements/${{ github.ref_name }}.md")
+    assert with_["generate_release_notes"] is False
     assert str(steps[0].get("uses", "")).startswith("actions/checkout@")
 
 
