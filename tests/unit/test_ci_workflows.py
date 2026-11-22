@@ -3,6 +3,7 @@ health run, the documentation site and how the release workflow depends
 on them (#255, #317, #285, #385, #423)."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -285,8 +286,25 @@ def test_audit_scans_every_lock(audit):
     scanned = set(re.findall(r"--lockfile=requirements\.txt:(requirements/\S+)", run))
     locks = {f"requirements/{p.name}" for p in (ROOT / "requirements").glob("*.txt")}
     assert locks and scanned == locks
+    assert "--lockfile=package-lock.json:docs/package-lock.json" in run
+    assert (ROOT / "docs" / "package-lock.json").is_file()
     assert "--config=.github/osv-scanner.toml" in run
     assert (ROOT / ".github" / "osv-scanner.toml").is_file()
+
+
+def test_docs_lock_keeps_the_patched_build_tools():
+    # VitePress 1.6.4 asks for Vite 5, which has no patched release, so
+    # docs/package.json overrides its Vite. A regenerated lock must not
+    # fall back to the vulnerable versions.
+    packages = json.loads((ROOT / "docs" / "package-lock.json").read_text(
+        encoding="utf-8"))["packages"]
+    for name, floor in (("vite", (6, 4, 4)), ("esbuild", (0, 25, 0))):
+        found = [entry["version"] for path, entry in packages.items()
+                 if path.endswith(f"node_modules/{name}")]
+        assert found, name
+        for version in found:
+            assert tuple(map(int, version.split("-")[0].split("."))) >= floor, (
+                name, version)
 
 
 def test_audit_scanner_is_checksum_pinned(audit):
@@ -301,6 +319,8 @@ def test_audit_runs_on_dependency_changes_weekly_and_for_releases(audit):
     for event in ("push", "pull_request"):
         assert "requirements/**" in on[event]["paths"]
         assert "pyproject.toml" in on[event]["paths"]
+        assert "docs/package.json" in on[event]["paths"]
+        assert "docs/package-lock.json" in on[event]["paths"]
     assert on["schedule"]
     assert "workflow_call" in on
     assert audit["permissions"] == {"contents": "read"}
