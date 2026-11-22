@@ -601,29 +601,26 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
         self._concurrent_slider.setValue(
             max(1, min(8, int(cfg.get("gui.max_concurrent_downloads", 2))))
         )
-        self._naming_entry.setText(
-            cfg.get("delivery.naming_template", "{title} - Chapter {chapter}")
-        )
+        delivery = cfg.delivery
+        self._naming_entry.setText(delivery.naming_template)
 
-        self._entry_kindle_email.setText(cfg.get("email.kindle_email", ""))
-        self._entry_sender_email.setText(cfg.get("email.sender_email", ""))
-        self._entry_smtp_server.setText(cfg.get("email.smtp_server", "smtp.gmail.com"))
+        # str(): a hand-edited value of another type is shown so it can
+        # be corrected here, and must not stop the page from opening.
+        self._entry_kindle_email.setText(str(cfg.get("email.kindle_email", "")))
+        self._entry_sender_email.setText(str(cfg.get("email.sender_email", "")))
+        self._entry_smtp_server.setText(str(cfg.get("email.smtp_server", "smtp.gmail.com")))
         self._entry_smtp_port.setText(str(cfg.get("email.smtp_port", 587)))
         self._password_entry.clear()
-        self._delete_after_check.setChecked(cfg.get("delivery.delete_after_send", False))
+        self._delete_after_check.setChecked(delivery.delete_after_send)
 
-        self._cron_check.setChecked(cfg.get("cron.enabled", False))
-        self._cron_time.setText(cfg.get("cron.time", "06:00"))
+        self._cron_check.setChecked(cfg.cron_enabled)
+        # str(): YAML reads an unquoted 7:30 as a number.
+        self._cron_time.setText(str(cfg.get("cron.time", "06:00")))
 
-        self._post_processing_check.setChecked(
-            cfg.get("delivery.post_processing.enabled", False)
-        )
-        self._post_processing_command.setText(
-            cfg.get("delivery.post_processing.command", "")
-        )
+        self._post_processing_check.setChecked(delivery.post_processing.enabled)
+        self._post_processing_command.setText(delivery.post_processing.command)
         self._post_processing_fail_check.setChecked(
-            cfg.get("delivery.post_processing.fail_on_error", False)
-        )
+            delivery.post_processing.fail_on_error)
         self._refresh_post_processing_enabled()
 
         if hasattr(self, "_partial_check"):
@@ -636,7 +633,7 @@ class SettingsPage(GeneralTabMixin, EmailTabMixin, AdvancedTabMixin,
 
         if hasattr(self, "_remove_after_read_check"):
             self._remove_after_read_check.setChecked(
-                cfg.get("reader.remove_after_read", False)
+                cfg.reader_remove_after_read
             )
 
         if hasattr(self, "_network_check"):

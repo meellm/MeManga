@@ -1184,6 +1184,48 @@ class TestSettingsPage:
         assert app_window.config.get("reader.remove_after_read") is False
         assert not page._remove_after_read_check.isChecked()
 
+    def test_malformed_flags_and_time_survive_reload(self, app_window, qapp):
+        # Issue #293: a bad hand edit must not break the page that fixes it.
+        page = app_window._pages["settings"]
+        cfg = app_window.config
+        malformed = {"cron.time": 450, "cron.enabled": "yes",
+                     "reader.remove_after_read": "no"}
+        for key, value in malformed.items():
+            cfg.set(key, value)
+
+        page.reload_from_config()
+
+        assert page._cron_time.text() == "450"
+        assert not page._cron_check.isChecked()
+        assert not page._remove_after_read_check.isChecked()
+        for key, value in malformed.items():
+            assert cfg.get(key) == value
+
+    def test_malformed_flags_and_time_survive_construction(
+            self, qapp, theme, isolated_home):
+        # Issue #293: 7:30 without quotes is the number 450 in YAML.
+        from memanga.config import Config
+        from memanga.gui.app import MeMangaApp
+        Config().config_path.write_text(
+            "cron:\n  enabled: 'yes'\n  time: 7:30\n"
+            "reader:\n  remove_after_read: 'no'\n", encoding="utf-8")
+        window = MeMangaApp()
+        try:
+            page = window._pages["settings"]
+            assert page._cron_time.text() == "450"
+            assert not page._cron_check.isChecked()
+            assert not page._remove_after_read_check.isChecked()
+            assert window.config.get("cron.time") == 450
+            assert window.config.get("cron.enabled") == "yes"
+            assert window.config.get("reader.remove_after_read") == "no"
+            notice = window.config.validation_notice
+            for key in ("cron.time", "cron.enabled",
+                        "reader.remove_after_read"):
+                assert key in notice
+        finally:
+            window.worker.shutdown()
+            window.close()
+
     def test_advanced_tab_section_order(self, app_window, qapp):
         # The remove-after-read toggle lives in the Reader section next to
         # the prefetch toggle, and Reader leads the Advanced tab.

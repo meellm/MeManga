@@ -1416,7 +1416,8 @@ class DetailPage(BasePage):
         from ...email_settings import kindle_delivery_settings
         kindle_cfg = kindle_delivery_settings(self.app.config, self._manga)
 
-        naming_template = self.app.config.get("delivery.naming_template")
+        naming_template = self.app.config.delivery.naming_template
+        # The live section: turning the hook off also stops queued chapters.
         post_processing = self.app.config.get("delivery.post_processing")
 
         self.app.worker.download_chapter(
@@ -1428,7 +1429,7 @@ class DetailPage(BasePage):
             post_processing=post_processing,
             allow_partial=self.app.config.partial_enabled,
             partial_threshold=self.app.config.partial_threshold,
-            delete_after_send=self.app.config.get("delivery.delete_after_send", False),
+            delete_after_send=self.app.config.delivery.delete_after_send,
         )
 
         # Visual feedback: disable the button and relabel until completion
@@ -1470,7 +1471,7 @@ class DetailPage(BasePage):
             button.setText("Sending…")
         self.app.worker.send_pending(
             self._manga, number, self.app.app_state, kindle_cfg,
-            delete_after_send=self.app.config.get("delivery.delete_after_send", False),
+            delete_after_send=self.app.config.delivery.delete_after_send,
         )
         Toast(self, f"Sending Chapter {number} to Kindle", kind="info")
 

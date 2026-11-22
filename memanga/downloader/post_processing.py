@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..config import PostProcessingSettings
 from .errors import DownloaderError
 
 logger = logging.getLogger(__name__)
@@ -47,14 +48,18 @@ def _run_post_processing(
     :class:`DownloaderError`; otherwise a warning is printed and the download
     stays successful.
     """
-    if not post_processing or not post_processing.get("enabled"):
+    # Read here, not when the chapter was queued: turning the hook off
+    # also applies to chapters already waiting. A value of the wrong type
+    # (a quoted "false") never turns the command on (issue #293).
+    settings = PostProcessingSettings.from_mapping(post_processing)
+    if not settings.enabled:
         return
 
-    command = (post_processing.get("command") or "").strip()
+    command = settings.command.strip()
     if not command:
         return
 
-    fail_on_error = bool(post_processing.get("fail_on_error"))
+    fail_on_error = settings.fail_on_error
     is_dir = "1" if output_path.is_dir() else "0"
     output_path_str = str(output_path)
     title = str(title)

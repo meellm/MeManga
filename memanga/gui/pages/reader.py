@@ -314,7 +314,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         # file on demand, so the deletion waits until the reader leaves
         # the chapter (_finish_pending_removal). The read set is already
         # updated, so read progress survives even if the deletion fails.
-        if (self.app.config.get("reader.remove_after_read", False)
+        if (self.app.config.reader_remove_after_read
                 and self._artifact_path is not None):
             self._pending_removal = (title, str(self._chapter),
                                      self._artifact_path)
@@ -338,7 +338,7 @@ class ReaderPage(ReaderInputMixin, ReaderNavigationMixin,
         the chapter stays marked downloaded and a notification is logged
         instead of desyncing state from disk or crashing the reader.
         """
-        if not self.app.config.get("reader.remove_after_read", False):
+        if not self.app.config.reader_remove_after_read:
             return
         if path is None:
             return

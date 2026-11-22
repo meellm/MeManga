@@ -76,7 +76,7 @@ class AdvancedTabMixin:
             "Remove chapters after reading"
         )
         self._remove_after_read_check.setChecked(
-            self.app.config.get("reader.remove_after_read", False)
+            self.app.config.reader_remove_after_read
         )
         f.addWidget(self._remove_after_read_check)
 
@@ -142,14 +142,15 @@ class AdvancedTabMixin:
         cron_row = QHBoxLayout()
 
         self._cron_check = QCheckBox("Enable daily auto-check")
-        self._cron_check.setChecked(self.app.config.get("cron.enabled", False))
+        self._cron_check.setChecked(self.app.config.cron_enabled)
         cron_row.addWidget(self._cron_check)
 
         time_lbl = QLabel("Time:")
         time_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
         cron_row.addWidget(time_lbl)
 
-        self._cron_time = QLineEdit(self.app.config.get("cron.time", "06:00"))
+        # str(): YAML reads an unquoted 7:30 as a number.
+        self._cron_time = QLineEdit(str(self.app.config.get("cron.time", "06:00")))
         self._cron_time.setMinimumWidth(90)
         self._cron_time.setMaximumWidth(120)
         time_lbl.setBuddy(self._cron_time)
@@ -236,10 +237,9 @@ class AdvancedTabMixin:
         # Post-processing
         self._section(f, "Post-Processing")
 
+        post_processing = self.app.config.delivery.post_processing
         self._post_processing_check = QCheckBox("Run a command after each chapter download")
-        self._post_processing_check.setChecked(
-            self.app.config.get("delivery.post_processing.enabled", False)
-        )
+        self._post_processing_check.setChecked(post_processing.enabled)
         self._post_processing_check.toggled.connect(
             self._refresh_post_processing_enabled
         )
@@ -250,9 +250,7 @@ class AdvancedTabMixin:
         command_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
         command_row.addWidget(command_lbl)
 
-        self._post_processing_command = QLineEdit(
-            self.app.config.get("delivery.post_processing.command", "")
-        )
+        self._post_processing_command = QLineEdit(post_processing.command)
         self._post_processing_command.setMinimumHeight(36)
         self._post_processing_command.setMinimumWidth(280)
         command_lbl.setBuddy(self._post_processing_command)
@@ -270,9 +268,7 @@ class AdvancedTabMixin:
         self._post_processing_fail_check = QCheckBox(
             "Mark download failed if the command exits with an error"
         )
-        self._post_processing_fail_check.setChecked(
-            self.app.config.get("delivery.post_processing.fail_on_error", False)
-        )
+        self._post_processing_fail_check.setChecked(post_processing.fail_on_error)
         f.addWidget(self._post_processing_fail_check)
 
         pp_hint = QLabel(

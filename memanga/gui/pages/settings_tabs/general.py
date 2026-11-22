@@ -177,9 +177,7 @@ class GeneralTabMixin:
         naming_lbl.setStyleSheet(f"font-size: {T.FONT_SIZE_SM}pt;")
         naming_row.addWidget(naming_lbl)
 
-        self._naming_entry = QLineEdit(
-            self.app.config.get("delivery.naming_template", "{title} - Chapter {chapter}")
-        )
+        self._naming_entry = QLineEdit(self.app.config.delivery.naming_template)
         self._naming_entry.setMinimumHeight(36)
         self._naming_entry.setMinimumWidth(280)
         naming_lbl.setBuddy(self._naming_entry)

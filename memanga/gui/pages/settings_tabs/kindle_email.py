@@ -20,13 +20,13 @@ class EmailTabMixin:
         self._section(f, "Kindle / SMTP")
 
         self._entry_kindle_email = self._labeled_entry(
-            f, "Kindle Email:", self.app.config.get("email.kindle_email", ""), "your-kindle@kindle.com"
+            f, "Kindle Email:", str(self.app.config.get("email.kindle_email", "")), "your-kindle@kindle.com"
         )
         self._entry_sender_email = self._labeled_entry(
-            f, "Sender Email:", self.app.config.get("email.sender_email", ""), "your-email@gmail.com"
+            f, "Sender Email:", str(self.app.config.get("email.sender_email", "")), "your-email@gmail.com"
         )
         self._entry_smtp_server = self._labeled_entry(
-            f, "SMTP Server:", self.app.config.get("email.smtp_server", "smtp.gmail.com")
+            f, "SMTP Server:", str(self.app.config.get("email.smtp_server", "smtp.gmail.com"))
         )
         self._entry_smtp_port = self._labeled_entry(
             f, "SMTP Port:", str(self.app.config.get("email.smtp_port", 587))
@@ -58,7 +58,7 @@ class EmailTabMixin:
 
         # Delete after send
         self._delete_after_check = QCheckBox("Delete file after sending")
-        self._delete_after_check.setChecked(self.app.config.get("delivery.delete_after_send", False))
+        self._delete_after_check.setChecked(self.app.config.delivery.delete_after_send)
         f.addWidget(self._delete_after_check)
 
         f.addSpacing(T.PAD_SM)

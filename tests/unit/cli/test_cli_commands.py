@@ -1850,6 +1850,8 @@ class TestConfigActions:
          "delivery.post_processing: expected a section"),
         ("delivery: 5\n", "delivery: expected a section"),
         ("email: []\n", "email: expected a section"),
+        # Loads, but an edit that blanks a section is still reported.
+        ("delivery:\n", "delivery: expected a section"),
     ])
     def test_edit_reports_invalid_result(self, run_cli, config_path, capsys,
                                          editor, text, needle):
@@ -1860,6 +1862,29 @@ class TestConfigActions:
         assert "config edit" in err
         # Left in place so the user can run `config edit` again.
         assert config_path.read_text(encoding="utf-8") == text
+
+    def test_invalid_value_warns_and_the_command_runs(self, run_cli,
+                                                      config_path, capsys):
+        # Issue #293.
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        text = "email:\n  smtp_port: bad-port-value\n  app_password: 987654321\n"
+        config_path.write_text(text, encoding="utf-8")
+        assert run_cli("status", "--json") == 0
+        err = capsys.readouterr().err
+        assert "warning:" in err
+        assert "email.smtp_port" in err
+        assert "bad-port-value" not in err
+        assert "987654321" not in err
+        assert config_path.read_text(encoding="utf-8") == text
+
+    def test_section_that_is_not_a_mapping_stops_the_command(
+            self, run_cli, config_path, capsys):
+        # Issue #293.
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("email: oops\n", encoding="utf-8")
+        assert run_cli("status") == 1
+        assert "email: expected a section" in capsys.readouterr().err
+        assert config_path.read_text(encoding="utf-8") == "email: oops\n"
 
     def test_edit_editor_failure(self, run_cli, capsys, editor):
         editor(returncode=3)

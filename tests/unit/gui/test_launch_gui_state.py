@@ -104,6 +104,16 @@ def test_broken_config_shows_error_instead_of_crashing(cfg_dir, fake_qt):
     assert (cfg_dir / "config.yaml").read_text(encoding="utf-8") == "manga: [unclosed\n"
 
 
+def test_invalid_setting_is_shown_and_the_app_starts(cfg_dir, fake_qt):
+    # Issue #293.
+    (cfg_dir / "config.yaml").write_text(
+        "delivery:\n  delete_after_send: 'no'\n", encoding="utf-8")
+    assert _launch() == 0
+    assert len(fake_qt["windows"]) == 1
+    assert fake_qt["critical"] == []
+    assert "delivery.delete_after_send" in fake_qt["warning"][0]
+
+
 def test_unloadable_state_shows_error_and_keeps_file(cfg_dir, fake_qt):
     (cfg_dir / "state.json").mkdir()
     assert _launch() == 1

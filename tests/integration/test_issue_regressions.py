@@ -574,6 +574,34 @@ def test_issue_104_disabled_keeps_chapter(app_window, qapp, sample_manga,
     assert app_window.app_state.is_chapter_read(title, "1")
 
 
+@pytest.mark.parametrize("value", ["no", "false", 1],
+                         ids=["text-no", "text-false", "number"])
+def test_issue_293_malformed_flag_keeps_chapter(app_window, qapp, sample_manga,
+                                                make_cbz, monkeypatch, value):
+    # Truthy text in the file must pass neither cleanup gate.
+    from pathlib import Path
+    moved = []
+    monkeypatch.setattr("memanga.gui.trash.move_to_trash", moved.append)
+    app_window.config.set("reader.remove_after_read", value)
+    reader = _open_reader(app_window, qapp, sample_manga, make_cbz, pages=8)
+    title = sample_manga["title"]
+    artifact = Path(app_window.config.download_dir) / title / \
+        f"{title} - Chapter 1.cbz"
+
+    bar = reader._scroll.verticalScrollBar()
+    bar.setValue(bar.maximum())
+    qapp.processEvents()
+    assert app_window.app_state.is_chapter_read(title, "1")
+    assert reader._pending_removal is None
+
+    reader._remove_after_read(title, "1", artifact)
+
+    assert moved == []
+    assert artifact.exists()
+    assert app_window.app_state.is_chapter_downloaded(title, "1")
+    assert app_window.config.get("reader.remove_after_read") == value
+
+
 @pytest.mark.parametrize("outcome", [False, TypeError("bad binding")],
                          ids=["refused", "raised"])
 def test_issue_104_deletion_failure_keeps_downloaded(app_window, qapp,
