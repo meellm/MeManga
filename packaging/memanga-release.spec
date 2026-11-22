@@ -135,6 +135,9 @@ a = Analysis(
         # Stdlib test suites + the legacy CustomTkinter GUI framework
         # we no longer use.
         "tkinter.test", "unittest", "test", "customtkinter",
+        # Tcl/Tk. The GUI is Qt; only img2pdf's own `--gui` command imports
+        # tkinter, and PyInstaller would bundle all of Tcl/Tk for it.
+        "tkinter", "_tkinter",
         # AGPL EPUB library; EPUB output is written with zipfile now,
         # so keep a stale build venv from bundling it.
         "ebooklib",
@@ -215,10 +218,18 @@ _notices_label = {
     "darwin": "macOS desktop app",
 }.get(sys.platform, "Linux desktop app")
 _notices_path = os.path.join(DISTPATH, _notices.FILENAME)
+# A macOS framework Python brings its own Resources/Info.plist, which stays
+# in the bundle for code signing. The Python section already covers it, so
+# only this exact file is left out of what the notices classify.
+_python_plist = (
+    os.path.realpath(os.path.join(sys.base_prefix, "Resources", "Info.plist"))
+    if sys.platform == "darwin" else None
+)
 try:
     _notices.write_bundle_notices(
         [src for toc in (a.scripts, a.pure, a.binaries, a.datas, a.zipfiles)
-         for _, src, _ in toc],
+         for _, src, _ in toc
+         if not (_python_plist and src and os.path.realpath(src) == _python_plist)],
         _notices_path,
         label=_notices_label,
         project_root=Path(project_root),
@@ -228,6 +239,34 @@ try:
     )
 except _notices.NoticesError as exc:
     raise SystemExit(f"third-party notices: {exc}")
+
+# One-shot recovery of v0.5.0 (see the release workflow). Its tag holds
+# older copies of this file and the workflow, so the notices name the
+# commit that built the download. Tag builds do not set this.
+_recipe_commit = os.environ.get("MEMANGA_RECIPE_COMMIT", "")
+if _recipe_commit:
+    import re as _re
+    import textwrap as _textwrap
+
+    if not _re.fullmatch(r"[0-9a-f]{40}", _recipe_commit):
+        raise SystemExit("MEMANGA_RECIPE_COMMIT is not a full commit id")
+    _anchor = "MeManga's own source code, including the files"
+    _notices_text = Path(_notices_path).read_text(encoding="utf-8")
+    if _notices_text.count(_anchor) != 1:
+        raise SystemExit("third-party notices: no place for the build note")
+    _build_note = "\n".join(_textwrap.wrap(
+        "Build note for this download: .github/workflows/release.yml and "
+        "packaging/memanga-release.spec come from commit "
+        f"{_recipe_commit}, not from the tag: "
+        f"{_notices.PROJECT_HOMEPAGE}/tree/{_recipe_commit} . Use that copy "
+        "of the spec to rebuild it; it leaves out Tcl/Tk, which the app does "
+        "not use. The program source and the other files named below are "
+        "those of the tag.",
+        width=79, break_long_words=False, break_on_hyphens=False))
+    Path(_notices_path).write_text(
+        _notices_text.replace(_anchor, f"{_build_note}\n\n{_anchor}"),
+        encoding="utf-8", newline="\n")
+
 a.datas.append((_notices.FILENAME, _notices_path, "DATA"))
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)

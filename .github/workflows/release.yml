@@ -14,7 +14,8 @@ permissions:
 
 # On a tag push these are that tag and its commit, and RECOVERY_SOURCE is
 # empty, so every checkout keeps its default. A manual run builds the
-# unchanged v0.5.0 tree with this workflow.
+# v0.5.0 tree with this workflow; only its release spec is replaced (see
+# the build job).
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && 'v0.5.0' || github.ref_name }}
   RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && '969798f361ea18fb0c63b8bedde10479477de593' || github.sha }}
@@ -100,10 +101,10 @@ jobs:
   recovery-proof:
     # One-shot recovery of v0.5.0: its tag run passed its checks, then the
     # Windows build stopped before anything was released. A manual run from
-    # main builds the unchanged tag with this workflow. It repeats no test
-    # or audit and no Docker publication. This job requires the green CI of
-    # the exact commit and passes on the sdist and wheel already checked in
-    # the tag run. It runs no repository code.
+    # main builds the tag's source with this workflow and one fixed build
+    # file. It repeats no test or audit and no Docker publication. This job
+    # requires the green CI of the exact commit and passes on the sdist and
+    # wheel already checked in the tag run. It runs no repository code.
     #
     # If a later job fails, re-run the failed jobs: this job keeps its
     # result and nothing is built again unless a build failed. Running all
@@ -238,6 +239,28 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ env.RECOVERY_SOURCE }}
+
+      - name: Use the fixed release spec (v0.5.0 recovery only)
+        # The tag's spec bundles Tcl/Tk, which the notices gate rejects and
+        # the app does not use. Only this build file comes from the commit
+        # of this workflow, at an exact blob; the program source stays the
+        # tag's. The spec names that commit in the notices of the download.
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          TAG_SPEC_BLOB: 06a7ca436acc5af675d34c1f1ca0686a09f12d31
+          FIXED_SPEC_BLOB: 91f944155324a4b549a3a7e4d3511307f1a47e42
+        run: |
+          spec=packaging/memanga-release.spec
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse "HEAD:$spec")" = "$TAG_SPEC_BLOB"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          test "$(git rev-parse "FETCH_HEAD:$spec")" = "$FIXED_SPEC_BLOB"
+          git show "FETCH_HEAD:$spec" > "$spec"
+          test "$(git hash-object --no-filters -- "$spec")" = "$FIXED_SPEC_BLOB"
+          test "$(git status --porcelain)" = " M $spec"
+          git --no-pager diff -- "$spec"
 
       - name: Detect macOS notarization credentials
         # Issue #163: Developer ID signing and notarization need a paid
@@ -401,6 +424,8 @@ jobs:
           MEMANGA_TARGET_ARCH: ${{ matrix.target_arch }}
           MEMANGA_CODESIGN_IDENTITY: ${{ steps.notarization.outputs.macos_notarization == 'enabled' && secrets.MACOS_CODESIGN_IDENTITY || '' }}
           MEMANGA_ENTITLEMENTS_FILE: ${{ runner.os == 'macOS' && 'packaging/macos-entitlements.plist' || '' }}
+          # Recovery only: the commit whose release spec built this download.
+          MEMANGA_RECIPE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && github.sha || '' }}
         run: python build_app.py --no-install
 
       - name: Check third-party notices
@@ -414,6 +439,13 @@ jobs:
           python packaging/third_party_notices.py check release/THIRD_PARTY_NOTICES.txt \
             --require pyside6-essentials --require shiboken6 --require playwright \
             --require pyinstaller --require certifi --require pikepdf --require img2pdf
+
+      - name: Confirm the notices name the recovery recipe
+        # Recovery only: the shipped notices must name the commit whose
+        # workflow and release spec built this download.
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: grep -Fq "$GITHUB_SHA" release/THIRD_PARTY_NOTICES.txt
 
       - name: Verify macOS artifact architecture
         # Guard against the release silently shipping the wrong slice
