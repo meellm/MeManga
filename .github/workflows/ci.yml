@@ -19,6 +19,11 @@ on:
   pull_request:
     branches: [main]
   workflow_call:
+    inputs:
+      upload_dist:
+        description: "Keep the checked sdist and wheel as the python-dist artifact"
+        type: boolean
+        default: false
   workflow_dispatch:
 
 permissions:
@@ -86,6 +91,16 @@ jobs:
           "$env_python" -m pip install --no-deps dist/memanga-*-py3-none-any.whl
           "$env_python" -m pip check
           "$RUNNER_TEMP/wheel-env/bin/memanga" --help
+      - name: Keep the checked sdist and wheel
+        # Issue #218: the release uploads these exact files to PyPI instead
+        # of building them again. Routine runs keep nothing.
+        if: inputs.upload_dist
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
 
   tests:
     # Every test file runs in exactly one shard (checked by

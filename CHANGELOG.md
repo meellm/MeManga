@@ -23,8 +23,14 @@ All notable changes are recorded here. Format loosely follows
 - Part of #285: the GitHub Release text is the version's section of
   this changelog, followed by GitHub's list of merged pull requests. A
   tag whose version has no section here fails within seconds, before
-  the tests and release builds start. Publishing to PyPI and syncing the
-  `cli` branch are not automated yet.
+  the tests and release builds start. Syncing the `cli` branch is not
+  automated yet.
+- #218 After a successful GitHub Release, a stable `vX.Y.Z` tag from
+  `v0.5.0` on whose commit is on `main` uploads the `memanga` sdist and
+  wheel to PyPI. These are the files CI already checked, with no second
+  build. `v0.4.4`, older tags and prereleases stay off PyPI. The default
+  install stays command-line only; the desktop app remains the `gui`
+  extra.
 - Part of #385: the pinned dependencies in `requirements/` are checked
   against known vulnerabilities when they change, weekly and before
   every GitHub Release; a known vulnerability fails the check unless it
