@@ -31,6 +31,8 @@ jobs:
     # passes.
     needs: notes
     uses: ./.github/workflows/ci.yml
+    with:
+      upload_dist: true
     permissions:
       contents: read
 
@@ -596,8 +598,39 @@ jobs:
         shell: bash
         run: security delete-keychain "$RUNNER_TEMP/memanga-signing.keychain-db" || true
 
+  pypi-check:
+    # Issue #218: decides whether this tag goes to PyPI. Older and
+    # prerelease tags are left out and their release continues. A stable
+    # tag from 0.5.0 on must be on main with the matching sdist and wheel;
+    # otherwise this job fails and no GitHub Release is created.
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.gate.outputs.publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # The whole history, to check the tagged commit is on main.
+          fetch-depth: 0
+
+      - name: Download the checked sdist and wheel
+        uses: actions/download-artifact@v8
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Check the tag, its commit and the packages
+        id: gate
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/pypi_release_gate.py "$RELEASE_TAG" "$GITHUB_SHA" dist
+
   release:
-    needs: [build, tests, audit]
+    needs: [build, tests, audit, pypi-check]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -611,9 +644,11 @@ jobs:
         # section fails here, before anything is published.
         run: python3 scripts/release_notes.py "${{ github.ref_name }}" --output "$RUNNER_TEMP/release-notes.md"
 
-      - name: Download all artifacts
+      - name: Download the app artifacts
+        # Only the desktop downloads: the sdist and wheel go to PyPI.
         uses: actions/download-artifact@v8
         with:
+          pattern: MeManga-*
           path: artifacts/
 
       - name: Flatten artifact tree
@@ -628,3 +663,27 @@ jobs:
           body_path: ${{ runner.temp }}/release-notes.md
           generate_release_notes: true
           files: release/*
+
+  publish-pypi:
+    # Issue #218: runs only after the GitHub Release succeeded, on the
+    # files pypi-check read. PyPI's trusted publisher names this workflow
+    # file and the pypi environment, and does not accept a called workflow,
+    # so the job stays here. It runs no repository code.
+    needs: [release, pypi-check]
+    if: needs.pypi-check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/project/memanga/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download the checked sdist and wheel
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3

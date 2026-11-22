@@ -225,7 +225,7 @@ def test_release_publishes_only_after_tests_and_audit(release):
     jobs = release["jobs"]
     assert jobs["tests"]["uses"] == "./.github/workflows/ci.yml"
     assert jobs["audit"]["uses"] == "./.github/workflows/dependency-audit.yml"
-    assert set(jobs["release"]["needs"]) == {"build", "tests", "audit"}
+    assert set(jobs["release"]["needs"]) == {"build", "tests", "audit", "pypi-check"}
     # The builds still start right away, in parallel with the tests.
     assert jobs["build"]["needs"] == "locks"
 
@@ -259,6 +259,9 @@ def test_only_the_release_job_can_write(release):
         permissions = job.get("permissions", {})
         if name == "release":
             assert permissions == {"contents": "write"}
+        elif name == "publish-pypi":
+            # Its PyPI identity, and no access to the repository.
+            assert permissions == {"id-token": "write"}
         else:
             assert "write" not in permissions.values(), name
 
@@ -277,6 +280,82 @@ def test_release_body_is_the_changelog_section(release):
     assert with_["body_path"] == "${{ runner.temp }}/release-notes.md"
     assert with_["generate_release_notes"] is True
     assert str(steps[0].get("uses", "")).startswith("actions/checkout@")
+
+
+# ─── PyPI publishing ────────────────────────────────────────────────────
+
+def _steps_using(job, action):
+    return [s for s in job["steps"]
+            if str(s.get("uses", "")).startswith(f"{action}@")]
+
+
+def test_only_the_release_keeps_the_checked_packages(ci, release):
+    # #218: PyPI gets the files the package job checked, not a second build.
+    upload_dist = _triggers(ci)["workflow_call"]["inputs"]["upload_dist"]
+    assert upload_dist["type"] == "boolean" and upload_dist["default"] is False
+    assert release["jobs"]["tests"]["with"] == {"upload_dist": True}
+    steps = ci["jobs"]["package"]["steps"]
+    (upload,) = _steps_using(ci["jobs"]["package"], "actions/upload-artifact")
+    assert steps[-1] is upload
+    assert upload["if"] == "inputs.upload_dist"
+    assert upload["with"]["name"] == "python-dist"
+    assert upload["with"]["path"] == "dist/"
+    assert upload["with"]["if-no-files-found"] == "error"
+    # Failed jobs can be run again for 30 days.
+    assert upload["with"]["retention-days"] >= 30
+
+
+def test_pypi_gate_reads_the_packages_before_the_github_release(release):
+    job = release["jobs"]["pypi-check"]
+    assert job["needs"] == "tests"
+    assert job["permissions"] == {"contents": "read"}
+    assert job["outputs"] == {"publish": "${{ steps.gate.outputs.publish }}"}
+    (checkout,) = _steps_using(job, "actions/checkout")
+    assert checkout["with"]["fetch-depth"] == 0
+    (download,) = _steps_using(job, "actions/download-artifact")
+    assert download["with"] == {"name": "python-dist", "path": "dist"}
+    (check,) = [s for s in job["steps"] if s.get("id") == "gate"]
+    assert check["env"] == {"RELEASE_TAG": "${{ github.ref_name }}"}
+    assert check["run"].strip() == (
+        'python3 scripts/pypi_release_gate.py "$RELEASE_TAG" "$GITHUB_SHA" dist')
+    assert "pypi-check" in release["jobs"]["release"]["needs"]
+
+
+def test_pypi_upload_follows_the_github_release(release):
+    job = release["jobs"]["publish-pypi"]
+    assert set(job["needs"]) == {"release", "pypi-check"}
+    assert job["if"] == "needs.pypi-check.outputs.publish == 'true'"
+    assert job["environment"]["name"] == "pypi"
+    # Two pinned actions, no repository code.
+    download, publish = job["steps"]
+    assert download["with"] == {"name": "python-dist", "path": "dist"}
+    assert re.fullmatch(r"actions/download-artifact@[0-9a-f]{40}", download["uses"])
+    assert re.fullmatch(r"pypa/gh-action-pypi-publish@[0-9a-f]{40}", publish["uses"])
+    # Trusted publishing with its default attestations.
+    assert "with" not in publish
+
+
+def test_only_the_release_publisher_and_pages_deploy_request_an_identity():
+    # PyPI trusts publish-pypi within release.yml; the Pages deployment
+    # needs its own identity.
+    allowed = {("release.yml", "publish-pypi"), ("docs.yml", "deploy")}
+    found = set()
+    for workflow in sorted(WORKFLOWS.glob("*.yml")):
+        data = _load(workflow.name)
+        assert "id-token" not in (data.get("permissions") or {}), workflow.name
+        for name, job in data["jobs"].items():
+            permissions = job.get("permissions") or {}
+            if "id-token" in permissions:
+                assert permissions["id-token"] == "write", (workflow.name, name)
+                found.add((workflow.name, name))
+    assert found == allowed
+
+
+def test_github_release_assets_leave_out_the_python_packages(release):
+    (download,) = _steps_using(release["jobs"]["release"], "actions/download-artifact")
+    assert download["with"]["pattern"] == "MeManga-*"
+    for cell in release["jobs"]["build"]["strategy"]["matrix"]["include"]:
+        assert cell["asset_name"].startswith("MeManga-"), cell["asset_name"]
 
 
 # ─── Dependency audit ───────────────────────────────────────────────────
