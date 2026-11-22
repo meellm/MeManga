@@ -1,0 +1,54 @@
+# https://editorconfig.org/
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{css,json,mts,ts,yaml,yml}]
+indent_size = 2
+
+# Some multi-line strings contain trailing whitespace.
+[*.py]
+trim_trailing_whitespace = false
+
+# Two trailing spaces are a Markdown hard line break.
+[*.md]
+indent_size = unset
+trim_trailing_whitespace = false
+
+[*.{bat,cmd}]
+end_of_line = crlf
+
+[*.plist]
+indent_style = unset
+indent_size = unset
+
+# Licenses, binaries and captured fixtures stay exactly as they are.
+[{LICENSE,*.gif,*.icns,*.ico,*.png}]
+charset = unset
+end_of_line = unset
+indent_style = unset
+indent_size = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+[packaging/licenses/**]
+charset = unset
+end_of_line = unset
+indent_style = unset
+indent_size = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+
+[tests/**/fixtures/**]
+charset = unset
+end_of_line = unset
+indent_style = unset
+indent_size = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
