@@ -19,6 +19,10 @@ from memanga.scrapers import rawkuma
 from memanga.scrapers.rawkuma import (
     RawkumaScraper, RawkumaSourceError, chapter_parts, series_url)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"RawkumaScraper": ("search", "chapters", "pages")}
+
 BASE = "https://rawkuma.net"
 AJAX = f"{BASE}/wp-admin/admin-ajax.php"
 NONCE_URL = f"{AJAX}?type=search_form&action=get_nonce"

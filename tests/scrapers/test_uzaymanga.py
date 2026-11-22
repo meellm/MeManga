@@ -14,6 +14,10 @@ from PIL import Image
 
 from memanga.scrapers.uzaymanga import UzayMangaScraper, UzayMangaSourceError
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"UzayMangaScraper": ("search", "chapters", "pages")}
+
 BASE = "https://uzaymanga.com"
 CDN = "https://cdn-u.efsaneler2.can.re"
 SLUG = "iskeletleri-canlandirabilirim"

@@ -416,6 +416,31 @@ class SourceInfo:
         }
 
 
+def source_coverage(domain: str,
+                    parser_tests: Optional[Dict[str, Any]] = None,
+                    live_probe: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Offline parser tests and live probe steps recorded for a source.
+
+    Read from the generated coverage_data module (python -m
+    memanga.source_docs), never from the tests themselves. A source that
+    is not listed there has no parser tests (empty lists) and is not in
+    the live probe (None). These describe the test suite, not health.
+    """
+    if parser_tests is None or live_probe is None:
+        from . import coverage_data
+        if parser_tests is None:
+            parser_tests = coverage_data.PARSER_TESTS
+        if live_probe is None:
+            live_probe = coverage_data.LIVE_PROBE
+    entry = parser_tests.get(domain) or {}
+    steps = live_probe.get(domain)
+    return {
+        "parser_tests": {"own": list(entry.get("own", ())),
+                         "shared": list(entry.get("shared", ()))},
+        "live_probe": None if steps is None else list(steps),
+    }
+
+
 def _base(domain: str) -> str:
     return domain[4:] if domain.startswith("www.") else domain
 

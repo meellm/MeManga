@@ -75,8 +75,9 @@ downloaded chapter.
 # Keyboard checklist
 
 A manual pass without touching the mouse, in both the dark and the light
-theme. Start the same way as above. Shortcuts are listed in the README
-under "Keyboard shortcuts" and "Reader".
+theme. Start the same way as above. The app's shortcuts and how focus moves
+are on the [Keyboard](https://meellm.github.io/MeManga/desktop/keyboard) page; the reader's keys are
+under [Keyboard](https://meellm.github.io/MeManga/desktop/reader#keyboard) on the Reader page.
 
 ## Focus ring
 
@@ -99,7 +100,7 @@ under "Keyboard shortcuts" and "Reader".
 - [ ] Detail: every chapter button can be reached; `Alt+←` (`Cmd+[` on
       macOS) returns to Library; the mode drop-down opens with `Space`, and
       arrow keys highlight Auto / Manual and `Enter` picks one.
-- [ ] Reader: every key in the README table works in all three layouts, also
+- [ ] Reader: every key in the reader's key table works in all three layouts, also
       after clicking a toolbar button or the page; `Ctrl/Cmd+0` resets zoom.
 - [ ] Search, Sources, Downloads, Notifications: every control can be
       reached and used; `Ctrl/Cmd+F` puts the cursor in the filter or search

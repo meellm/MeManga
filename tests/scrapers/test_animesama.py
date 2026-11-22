@@ -18,6 +18,10 @@ from memanga.scrapers import animesama as am
 from memanga.scrapers.animesama import (AnimeSamaScraper, AnimeSamaSourceError,
                                         AnimeSamaUnsupportedError)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"AnimeSamaScraper": ("search", "chapters", "pages")}
+
 SITE = "https://anime-sama.to"
 SERIES = f"{SITE}/catalogue/one-piece/"
 PANEL = f"{SERIES}scan_noir-et-blanc/vf/"

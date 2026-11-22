@@ -1,0 +1,38 @@
+# Development setup: builds the image from this source checkout and has
+# the scheduler service, which needs `memanga watch` from the development
+# version.
+#
+# Use it by naming the file on every command:
+#   docker compose -f compose.dev.yaml build
+#   docker compose -f compose.dev.yaml run --rm memanga list
+#   docker compose -f compose.dev.yaml up -d scheduler
+#
+# It uses the same volume names as compose.yaml, so it keeps the data of an
+# earlier `docker compose` setup made from this directory.
+
+x-memanga: &memanga
+  build: .
+  image: memanga:cli
+  volumes:
+    - memanga-config:/home/memanga/.config/memanga
+    - memanga-downloads:/home/memanga/Downloads/MeManga
+
+services:
+  # One-off commands:
+  #   docker compose -f compose.dev.yaml run --rm memanga <command>
+  memanga:
+    <<: *memanga
+    command: ["list"]
+
+  # Scheduled checks:
+  #   docker compose -f compose.dev.yaml up -d scheduler
+  scheduler:
+    <<: *memanga
+    command: ["watch", "--every", "6h", "--jitter", "30m"]
+    restart: unless-stopped
+    # Time for a running check to save its state on docker stop.
+    stop_grace_period: 1m
+
+volumes:
+  memanga-config:
+  memanga-downloads:

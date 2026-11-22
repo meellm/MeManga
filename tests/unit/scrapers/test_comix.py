@@ -15,6 +15,10 @@ import requests
 
 from memanga.scrapers import comix as cx
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"ComixScraper": ("chapters", "pages")}
+
 
 CHAPTER_URL = "https://comix.to/title/45nl-kubera/10700277-chapter-671"
 SERIES_URL = "https://comix.to/title/45nl-kubera"

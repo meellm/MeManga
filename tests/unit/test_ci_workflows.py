@@ -1,8 +1,9 @@
 """Static checks for the routine CI, the dependency audit, the scraper
-health run and how the release workflow depends on them (#255, #317,
-#285, #385)."""
+health run, the documentation site and how the release workflow depends
+on them (#255, #317, #285, #385, #423)."""
 from __future__ import annotations
 
+import os
 import re
 import shlex
 from pathlib import Path
@@ -379,3 +380,48 @@ def test_branch_checks_can_run_by_hand():
     for name in ("ci.yml", "dependency-audit.yml", "dependency-locks.yml",
                  "source-docs.yml", "scraper-health.yml"):
         assert "workflow_dispatch" in _triggers(_load(name)), name
+
+
+# ─── Documentation site ─────────────────────────────────────────────────
+
+# `<<< path` and `<!--@include: path-->` put another file into a page.
+_EMBED = re.compile(r"^<<<\s+(\S+)|<!--\s*@include:\s*(\S+?)\s*-->", re.M)
+
+
+def _site_pages():
+    docs = ROOT / "docs"
+    for folder, subfolders, files in os.walk(docs):
+        # Installed packages and build output are not site pages.
+        subfolders[:] = [d for d in subfolders
+                         if d not in {"node_modules", "dist", "cache"}]
+        for name in files:
+            if name.endswith(".md"):
+                yield Path(folder) / name
+
+
+def _files_shown_from_outside_docs():
+    shown = set()
+    for page in _site_pages():
+        for match in _EMBED.finditer(page.read_text(encoding="utf-8")):
+            # Drop a line range or region: file{1-3}, file#region.
+            target = re.split(r"[{#]", match[1] or match[2])[0]
+            if target.startswith("@/"):
+                path = ROOT / "docs" / target[2:]
+            else:
+                path = page.parent / target
+            relative = path.resolve().relative_to(ROOT).as_posix()
+            if not relative.startswith("docs/"):
+                shown.add(relative)
+    return shown
+
+
+def test_docs_site_is_rebuilt_when_a_file_it_shows_changes():
+    # A page can show a file from outside docs/. Without that file in the
+    # path filter, a change to it would leave the old copy on the site.
+    paths = _triggers(_load("docs.yml"))["push"]["paths"]
+    shown = _files_shown_from_outside_docs()
+    assert {"compose.yaml", "compose.dev.yaml"} <= shown
+    assert "docs/**" in paths
+    for relative in sorted(shown):
+        assert (ROOT / relative).is_file(), relative
+        assert relative in paths, relative

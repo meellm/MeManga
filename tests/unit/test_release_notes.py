@@ -3,6 +3,7 @@ without one fails before anything is published."""
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -10,6 +11,9 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "release_notes.py"
+REPO = "https://github.com/meellm/MeManga"
+# A Markdown link definition, `[name]: url`.
+LINK = re.compile(r"^\[([^\]]+)\]: (\S+)$", re.M)
 
 CHANGELOG = """\
 # Changelog
@@ -125,3 +129,21 @@ def test_repository_changelog_versions_have_notes(notes):
         body, problem = notes.release_notes(f"v{version}", ROOT / "CHANGELOG.md")
         assert problem is None, problem
         assert "\n## " not in body
+        # The link definitions at the end of the file are not notes.
+        assert not LINK.search(body), version
+
+
+def test_repository_changelog_links_every_section(notes):
+    # #276: [Unreleased] compares the latest tag with main, each release
+    # the tag before it, and the oldest links its own release.
+    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    sections = [m.group(1) for line in text.splitlines()
+                if (m := notes.SECTION.match(line)) and m.group(1)]
+    assert sections[0] == "Unreleased"
+    released = sections[1:]
+    expected = {"Unreleased": f"{REPO}/compare/v{released[0]}...main",
+                released[-1]: f"{REPO}/releases/tag/v{released[-1]}"}
+    for newer, older in zip(released, released[1:]):
+        expected[newer] = f"{REPO}/compare/v{older}...v{newer}"
+    links = dict(LINK.findall(text))
+    assert {name: links.get(name) for name in expected} == expected

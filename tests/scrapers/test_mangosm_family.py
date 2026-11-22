@@ -10,6 +10,11 @@ import pytest
 from memanga.scrapers.templates import MangosmScraper
 from memanga.scrapers import get_scraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs. A test site built
+# on the template, so this is shared-parser coverage for its sites.
+PARSER_TESTS = {"MangosmScraper": ("chapters", "pages")}
+
 
 def _make_scraper(**overrides):
     cls = type("TestMangosm", (MangosmScraper,), {

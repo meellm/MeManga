@@ -19,6 +19,10 @@ from memanga.scrapers import mangademon as md
 from memanga.scrapers.mangademon import (MangaDemonScraper, MangaDemonSourceError,
                                          MangaDemonUnsupportedError)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaDemonScraper": ("search", "chapters", "pages")}
+
 SITE = "https://demonicscans.org"
 SERIES = f"{SITE}/manga/Solo-Leveling"
 LINK = f"{SITE}/chaptered.php?manga=6&chapter=200.5"

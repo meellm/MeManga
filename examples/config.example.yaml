@@ -1,61 +1,179 @@
-# MeManga Configuration Example
-# Copy to ~/.config/memanga/config.yaml
+# Example config.yaml for MeManga, with every setting at its default.
+#
+# Written by python -m memanga.config_docs; do not edit it by hand.
+# Each setting is explained at:
+# https://meellm.github.io/MeManga/reference/config
+#
+# MeManga creates config.yaml on first use; memanga config path prints where
+# it is. A setting left out of the file uses its default.
 
-# Layout version of this file, managed by MeManga. Older files are
-# upgraded on the next save; leave it as it is.
+# Layout version of this file. MeManga upgrades an older file when it saves
+# it, and refuses a file from a newer version instead of overwriting it.
+# Leave it as it is.
 schema_version: 1
 
-# Tracked manga list
-manga:
-  # Simple format (single source)
-  - title: "One Piece"
-    source: "tcbonepiecechapters.com"
-    url: "https://tcbonepiecechapters.com/mangas/5/one-piece"
-  
-  # Multi-source format (with backup)
-  # Primary source is checked first. If only backup has a new chapter,
-  # MeManga waits fallback_delay_days before downloading from backup.
-  - title: "Solo Leveling"
-    fallback_delay_days: 2  # Wait 2 days before using backup (default: 2)
-    sources:
-      - url: "https://mangafire.to/manga/solo-leveling.xxx"      # Primary
-      - url: "https://mangadex.org/title/uuid-here"              # Backup
+# Your library: one entry for each series you follow, with its title, its
+# sources and your choices for it. Add and change series with the commands
+# or in the desktop app; there is no need to edit the entries by hand.
+manga: []
 
-# Delivery settings
+# Delivery
 delivery:
-  mode: local  # "local" or "email"
-  download_dir: ~/.config/memanga/downloads
-  delete_after_send: false  # Delete PDF after sending to Kindle (email mode only)
-  output_format: pdf  # "pdf", "epub", "cbz", "zip", "jpg", "png", or "webp"
+  # local keeps downloaded chapters in the download folder. email also
+  # sends them to a Kindle by email.
+  mode: "local"
 
-  # Optional post-processing command, run after each chapter's output
-  # file/folder is created. Disabled by default. Only enable commands you trust.
-  # The command is split into arguments and run directly, without a shell.
-  # Placeholder values are substituted after splitting. Scripts can read the
-  # MEMANGA_* environment variables instead.
-  #
-  # Available placeholders (also passed as MEMANGA_* environment variables):
-  #   {output_path} MEMANGA_OUTPUT_PATH   - final file or folder path
-  #   {title}       MEMANGA_MANGA_TITLE   - manga title
-  #   {chapter}     MEMANGA_CHAPTER       - chapter number
-  #   {source}      MEMANGA_SOURCE        - source the chapter came from
-  #   {format}      MEMANGA_OUTPUT_FORMAT - output format
-  #   {is_dir}      MEMANGA_IS_DIR        - "1" if output is a folder, else "0"
+  # Folder where downloaded chapters are saved. Each series gets a folder
+  # of its own inside it.
+  # Without this line: the Downloads/MeManga folder in your home folder.
+  # download_dir: "/path/to/folder"
+
+  # With email delivery, delete a chapter's file once it has been sent. A
+  # file that cannot be deleted stays on disk.
+  delete_after_send: false
+
+  # File format of downloaded chapters: a pdf or epub document, a cbz or
+  # zip archive, or a folder of jpg, png or webp images. Only PDF and EPUB
+  # files are sent to a Kindle.
+  output_format: "pdf"
+
+  # Name of each chapter file, without the extension. {title}, {chapter}
+  # and {source} are replaced with the series title, the chapter number
+  # and the source. A folder of images is always named Chapter and the
+  # chapter number.
+  naming_template: "{title} - Chapter {chapter}"
+
   post_processing:
+    # Run delivery.post_processing.command after each chapter's file or
+    # folder is saved.
     enabled: false
-    command: ""            # e.g. 'cp -R {output_path} /mnt/archive/'
-    fail_on_error: false   # true = a failed command marks the chapter failed
 
-# Email settings (only needed if delivery.mode = "email")
+    # The command to run. Only use commands you trust. It is split into
+    # arguments and started directly, without a shell. {output_path},
+    # {title}, {chapter}, {source}, {format} and {is_dir} in it are
+    # replaced with the saved file or folder, the series title, the
+    # chapter number, the source, the output format and 1 for a folder
+    # or 0 for a file. The same values are in the environment variables
+    # MEMANGA_OUTPUT_PATH, MEMANGA_MANGA_TITLE, MEMANGA_CHAPTER,
+    # MEMANGA_SOURCE, MEMANGA_OUTPUT_FORMAT and MEMANGA_IS_DIR.
+    command: ""
+
+    # When the command fails: true marks the chapter as failed, false
+    # shows a warning and keeps the chapter as downloaded.
+    fail_on_error: false
+
+# Email and Kindle
 email:
-  kindle_email: ""        # your-kindle@kindle.com
-  sender_email: ""        # your-email@gmail.com
-  smtp_server: smtp.gmail.com
-  smtp_port: 587
-  smtp_tls: auto          # auto (465 = implicit TLS, else STARTTLS), starttls or implicit
-  app_password: ""        # Gmail App Password (NOT your regular password)
+  # Your Kindle's Send to Kindle email address.
+  kindle_email: ""
 
-# Cron settings
+  # The address the emails are sent from. It has to be on the list of
+  # approved senders in your Amazon account.
+  sender_email: ""
+
+  # The mail server that sends the emails.
+  smtp_server: "smtp.gmail.com"
+
+  # The port of the mail server.
+  smtp_port: 587
+
+  # How the connection to the mail server is encrypted. auto uses implicit
+  # TLS on port 465 and STARTTLS on every other port; starttls and
+  # implicit always use that method.
+  smtp_tls: "auto"
+
+  # Seconds to wait for the mail server at each step of sending.
+  smtp_timeout: 60
+
+  # The largest email your mail provider accepts, in MB. A PDF that does
+  # not fit is split into parts that are sent one after another; an EPUB
+  # that does not fit is not sent, and a warning says why.
+  max_email_mb: 25
+
+  # The password for the mail server, usually an app password. Leave it
+  # empty here: MeManga keeps the password in the system keyring and only
+  # writes it into this file, as plain text, when there is no usable
+  # keyring. MEMANGA_SMTP_PASSWORD, or MEMANGA_SMTP_PASSWORD_FILE naming a
+  # file that holds the password, is used instead when set.
+  app_password: ""
+
+  # Which manga are sent: all sends every manga, selected only the manga
+  # whose Kindle toggle is on. A manga that has its own Kindle choice
+  # always follows it.
+  # Not in a new file. While it is missing, every manga without a choice
+  # of its own is sent. Turning email delivery on in the desktop app or
+  # with memanga config asks which to use; memanga config set
+  # delivery.mode email stores selected.
+  # kindle_scope: "all"
+
+# Scheduled checks
 cron:
+  # Whether MeManga has set up a daily check with the system's scheduler.
+  # It records what was set up: changing it here does not add or remove
+  # the scheduled check.
   enabled: false
+
+  # Time of day of the scheduled check, in the computer's local time.
   time: "06:00"
+
+# Desktop app
+gui:
+  # Order of the library in the desktop app.
+  sort_by: "title"
+
+  # When the desktop app starts or comes back online, check for new
+  # chapters if the last check is older than gui.auto_check_interval.
+  auto_check: true
+
+  # Seconds since the last check after which the desktop app checks again
+  # by itself.
+  auto_check_interval: 3600
+
+  # While you read a manga in manual mode, download its next available
+  # chapter in the background.
+  reader_prefetch_next: false
+
+  # Let the desktop app find out whether it is online by opening a
+  # connection to a well-known host. No data is sent over it.
+  network_check: true
+
+  # The hosts for that test, as host:port entries; IPv6 addresses go in
+  # square brackets. An empty list means MeManga's built-in hosts.
+  network_check_hosts: []
+
+  # Look for missing or broken covers on MangaDex. This is skipped while
+  # mangadex.org is turned off on the Sources page.
+  mangadex_cover_fallback: true
+
+  # Show how many chapters each search result has. This loads the chapter
+  # list of every result.
+  search_chapter_counts: true
+
+  # Disk space for saved cover images, in MB. Beyond it, the covers used
+  # longest ago are removed; they are loaded again when needed.
+  cover_cache_max_mb: 200
+
+# Reader
+reader:
+  # Delete a chapter's downloaded file after you have read it in the
+  # built-in reader.
+  remove_after_read: false
+
+# MangaDex
+mangadex:
+  # Download MangaDex chapters as smaller, compressed images.
+  data_saver: false
+
+  # MangaDex scanlation groups whose chapters are skipped, by group ID.
+  # Resetting the settings to their defaults keeps this list.
+  removed_group_ids: []
+
+# Partial chapters
+partial_chapters:
+  # Keep a chapter when some of its pages fail, with only the pages that
+  # worked. When off, one missing page fails the whole chapter.
+  enabled: false
+
+  # The largest share of pages, in percent, that may fail for a chapter to
+  # be kept.
+  threshold_percent: 5

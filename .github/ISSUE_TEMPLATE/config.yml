@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/meellm/MeManga/discussions
+    about: Ask for help or talk through an idea.
+  - name: Troubleshooting guide
+    url: https://meellm.github.io/MeManga/guide/troubleshooting
+    about: Common problems, log files and what to include in a report.
+  - name: Security problem
+    url: https://github.com/meellm/MeManga/security/policy
+    about: Report a vulnerability privately. Do not open a public issue.

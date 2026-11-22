@@ -10,6 +10,10 @@ from PIL import Image
 from memanga.scrapers import get_scraper
 from memanga.scrapers.vymanga import VyMangaScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"VyMangaScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def scraper():

@@ -17,6 +17,10 @@ from memanga.scrapers.mangathemesia_sites import (
     MangaThemesiaUnsupportedError,
 )
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"UchuujinScraper": ("search", "chapters", "pages")}
+
 SITE = "https://uchuujinmangas.com"
 SERIES_URL = f"{SITE}/manga/fragante/"
 TITLE = "La Elegante Flor Florece con Dignidad"

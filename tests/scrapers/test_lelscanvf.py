@@ -17,6 +17,10 @@ from memanga.scrapers import lelscanvf as lv
 from memanga.scrapers.lelscanvf import (LelscanVFScraper, LelscanVFSourceError,
                                         LelscanVFUnsupportedError)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"LelscanVFScraper": ("search", "chapters", "pages")}
+
 SITE = "https://www.lelscanfr.com"
 SERIES = f"{SITE}/manga/one-piece"
 CHAPTER = f"{SERIES}/1199"

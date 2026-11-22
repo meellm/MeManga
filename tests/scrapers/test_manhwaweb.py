@@ -13,6 +13,10 @@ from PIL import Image
 
 from memanga.scrapers.manhwaweb import ManhwaWebScraper, ManhwaWebSourceError
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"ManhwaWebScraper": ("search", "chapters", "pages")}
+
 SITE = "https://manhwaweb.com"
 API = "https://api.manhwaweb.com"
 OWN_ID = "abc123"

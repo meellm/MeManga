@@ -16,6 +16,10 @@ import pytest
 from memanga.scrapers import get_scraper
 from memanga.scrapers.zonatmo import ZonaTMOScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"ZonaTMOScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def zt():

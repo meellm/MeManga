@@ -19,6 +19,10 @@ from memanga.scrapers import mangahome as mh
 from memanga.scrapers.mangahome import (MangaHomeScraper, MangaHomeSourceError,
                                         MangaHomeUnsupportedError, _reader_values)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaHomeScraper": ("search", "chapters", "pages")}
+
 SITE = "https://www.mangahome.com"
 SERIES = f"{SITE}/manga/nightmare_of_solomon"
 CHAPTER = f"{SERIES}/v01/c001"

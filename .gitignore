@@ -59,3 +59,7 @@ dist/
 
 # pytest cache
 .pytest_cache/
+
+# Documentation site (docs/)
+node_modules/
+docs/.vitepress/cache/

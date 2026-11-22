@@ -20,6 +20,10 @@ from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
 from memanga.scrapers import weebcentral as wc
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"WeebCentralScraper": ("search", "chapters", "pages")}
+
 
 BASE = "https://weebcentral.com"
 SERIES_URL = f"{BASE}/series/01J76XYD7E91K8QP6CY0Y53900/Blue-Lock"

@@ -13,6 +13,10 @@ from PIL import Image
 
 from memanga.scrapers.leercapitulo import LeerCapituloScraper, LeerCapituloSourceError
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"LeerCapituloScraper": ("search", "chapters", "pages")}
+
 BASE = "https://www.leercapitulo.co"
 SERIES_ID = "abc123xyz0"
 SLUG = "one-piece"

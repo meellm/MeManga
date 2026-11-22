@@ -21,6 +21,10 @@ from memanga.scrapers import mangarw
 from memanga.scrapers.mangarw import (
     MangaRwScraper, MangaRwSourceError, chapter_ids, series_id)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaRwScraper": ("search", "chapters", "pages")}
+
 BASE = "https://mangarw.com"
 API = "https://api.mangarw.com/api/v1"
 STORAGE = "https://storage.mangabuzz.org"

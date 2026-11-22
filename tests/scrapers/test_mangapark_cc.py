@@ -11,6 +11,10 @@ from memanga.scrapers import mangapark_cc
 from memanga.scrapers.mangapark_cc import (MangaParkCCScraper,
                                            MangaParkCCSourceError)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaParkCCScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def scraper():

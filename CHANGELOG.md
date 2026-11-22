@@ -231,6 +231,19 @@ All notable changes are recorded here. Format loosely follows
   read, On hold, Completed, Dropped) in the right-click menu.
 
 ### Changed
+- #328 `compose.yaml` now runs the published image `meellm/memanga:0.4.4`
+  and needs no copy of the source code. It has the `memanga` service for
+  single commands, starts an init process, and takes two optional
+  settings: `MEMANGA_IMAGE` to run another image and `TZ` for the time
+  zone in the container (#331; UTC unless set). The setup that builds
+  from source, with the `scheduler` service, moved unchanged to
+  `compose.dev.yaml`: add `-f compose.dev.yaml` to `docker compose`, or
+  set `COMPOSE_FILE=compose.dev.yaml`. Both files use the same volume
+  names, so existing data stays where it is. If you built from source
+  before, keep using `compose.dev.yaml`: the published 0.4.4 image is
+  older than the development version and was not tested with data the
+  development version has written. The published image has no
+  `memanga watch`, so `compose.yaml` has no scheduler.
 - #395 Desktop text meets WCAG AA contrast (4.5:1) in both themes: the
   muted text colour of both themes and the light theme's accent,
   warning, danger and lilac colours are darker or lighter as needed,
@@ -1159,7 +1172,7 @@ All notable changes are recorded here. Format loosely follows
   reporting "No new chapters". MangaDex chapter dedup is now stable
   across repeated checks.
 
-## [0.2.0] - 2026-05-28
+## [0.2.0] - 2026-05-30
 
 ### Added
 - PySide6 desktop GUI (Library / Detail / Reader / Downloads / Search /
@@ -1244,5 +1257,20 @@ All notable changes are recorded here. Format loosely follows
 
 ## Earlier versions
 
-Pre-PySide6 versions tracked the CLI-only releases — see the git tag
-history (`v0.0.x` → `v0.1.0`) for details.
+The oldest tagged and published release is v0.2.0, so this changelog
+starts there. Earlier work, including the untagged version 0.1.0, is in
+the git history.
+
+[Unreleased]: https://github.com/meellm/MeManga/compare/v0.4.4...main
+[0.4.4]: https://github.com/meellm/MeManga/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/meellm/MeManga/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/meellm/MeManga/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/meellm/MeManga/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/meellm/MeManga/compare/v0.3.3...v0.4.0
+[0.3.3]: https://github.com/meellm/MeManga/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/meellm/MeManga/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/meellm/MeManga/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/meellm/MeManga/compare/v0.2.2...v0.3.0
+[0.2.2]: https://github.com/meellm/MeManga/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/meellm/MeManga/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/meellm/MeManga/releases/tag/v0.2.0

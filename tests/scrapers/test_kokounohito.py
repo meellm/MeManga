@@ -15,6 +15,10 @@ import pytest
 from memanga.scrapers import get_scraper
 from memanga.scrapers.templates import NuxtSSRScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"kokounohito.com": ("chapters", "pages")}
+
 HOST = "http://kokounohito.com"
 TITLE = "The Climber (Kokou no Hito)"
 

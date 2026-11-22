@@ -46,9 +46,8 @@ CONTAINER_SCHEDULING_TEXT = (
     "cron install does not work inside a container: there is no cron "
     "daemon to run the check, and nothing was changed. Run 'memanga watch' "
     "as a long-running container instead (the 'scheduler' service in "
-    "compose.yaml), or add a cron entry on the host. See "
-    "https://github.com/meellm/MeManga/blob/main/docs/Guide.md"
-    "#scheduling-in-docker"
+    "compose.dev.yaml), or add a cron entry on the host. See "
+    "https://meellm.github.io/MeManga/guide/docker#check-on-a-schedule"
 )
 
 

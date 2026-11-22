@@ -23,6 +23,10 @@ from memanga.scrapers import webtoon as wt
 from memanga.scrapers.webtoon import (WebtoonScraper, WebtoonSourceError,
                                       WebtoonUnsupportedError)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"WebtoonScraper": ("search", "chapters", "pages")}
+
 SITE = "https://www.webtoons.com"
 PANEL = "https://webtoon-phinf.pstatic.net"
 PLACEHOLDER = "https://webtoons-static.pstatic.net/image/bg_transparency.png"

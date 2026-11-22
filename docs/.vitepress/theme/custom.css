@@ -1,0 +1,233 @@
+/*
+ * MeManga colours on top of the default theme. Only theme variables are
+ * set here, so the default layout, navigation and search stay as shipped.
+ * Text and link colours keep a contrast ratio of at least 4.5:1 against
+ * their background in both the light and the dark palette.
+ */
+
+:root {
+  --vp-c-bg: #fbf8f2;
+  --vp-c-bg-alt: #f3eee4;
+  --vp-c-bg-elv: #ffffff;
+  --vp-c-bg-soft: #f3eee4;
+
+  --vp-c-text-1: #211d16;
+  --vp-c-text-2: #554e42;
+  --vp-c-text-3: #6b6356;
+
+  --vp-c-divider: #e2dccf;
+  --vp-c-border: #cfc7b7;
+  --vp-c-gutter: #e2dccf;
+
+  --vp-c-brand-1: #3f6b25;
+  --vp-c-brand-2: #4d7a2e;
+  --vp-c-brand-3: #3f6b25;
+  --vp-c-brand-soft: rgba(77, 122, 46, 0.14);
+
+  --vp-c-yellow-1: #7a4f0b;
+  --vp-c-yellow-2: #8f5f12;
+  --vp-c-yellow-3: #a9701c;
+  --vp-c-yellow-soft: rgba(169, 112, 28, 0.16);
+
+  --vp-c-red-1: #a03a24;
+  --vp-c-red-2: #b3452d;
+  --vp-c-red-3: #c2553c;
+  --vp-c-red-soft: rgba(194, 85, 60, 0.14);
+
+  --vp-button-brand-bg: #3f6b25;
+  --vp-button-brand-hover-bg: #4d7a2e;
+  --vp-button-brand-active-bg: #35591f;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-active-text: #ffffff;
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(110deg, #3f6b25 10%, #a9701c 90%);
+}
+
+.dark {
+  --vp-c-bg: #16130e;
+  --vp-c-bg-alt: #1a1712;
+  --vp-c-bg-elv: #1c1913;
+  --vp-c-bg-soft: #1c1913;
+
+  --vp-c-text-1: #f2ede4;
+  --vp-c-text-2: #c4bcae;
+  --vp-c-text-3: #948b7d;
+
+  --vp-c-divider: #2a261e;
+  --vp-c-border: #3a342b;
+  --vp-c-gutter: #100e0a;
+
+  --vp-c-brand-1: #a2c487;
+  --vp-c-brand-2: #b6d69b;
+  --vp-c-brand-3: #a2c487;
+  --vp-c-brand-soft: rgba(162, 196, 135, 0.16);
+
+  --vp-c-yellow-1: #e8b86b;
+  --vp-c-yellow-2: #d9a758;
+  --vp-c-yellow-3: #c79443;
+  --vp-c-yellow-soft: rgba(232, 184, 107, 0.16);
+
+  --vp-c-red-1: #ef9a86;
+  --vp-c-red-2: #e58670;
+  --vp-c-red-3: #d9705a;
+  --vp-c-red-soft: rgba(239, 154, 134, 0.16);
+
+  --vp-button-brand-bg: #a2c487;
+  --vp-button-brand-hover-bg: #b6d69b;
+  --vp-button-brand-active-bg: #93b578;
+  --vp-button-brand-text: #14200f;
+  --vp-button-brand-hover-text: #14200f;
+  --vp-button-brand-active-text: #14200f;
+
+  --vp-code-block-bg: #12100c;
+
+  --vp-home-hero-name-background: linear-gradient(110deg, #b6d69b 10%, #e8b86b 90%);
+}
+
+/* A visible keyboard focus indicator in the brand colour. */
+:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+
+/* Keep a command or file name in the first column of a table on one line. */
+.vp-doc td:first-child code {
+  white-space: nowrap;
+}
+
+/*
+ * Tabs of a code group are radio buttons that the default theme hides, so
+ * keyboard focus has to be drawn on the label. The selected tab keeps its
+ * underline; the focused tab gets a ring and a tinted background.
+ */
+.vp-code-group .tabs input:focus-visible + label {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: -2px;
+  border-radius: 6px;
+  background-color: var(--vp-c-brand-soft);
+  color: var(--vp-c-text-1);
+}
+
+/*
+ * When only the part after # in the address changes, the browser jumps to
+ * the heading itself and would put it under the sticky bar. These margins
+ * place the heading where the theme's own link handling places it.
+ */
+.vp-doc :is(h1, h3, h4, h5, h6) {
+  scroll-margin-top: 134px;
+}
+
+.vp-doc h2 {
+  scroll-margin-top: 110px;
+}
+
+/*
+ * Previous and next page links at the end of a page. Only their look
+ * changes here; the default theme still decides which pages they link to
+ * and what they say. The selectors use the theme's own class names. If a
+ * later VitePress version renames them, its standard links are shown.
+ */
+.VPDocFooter .prev-next {
+  --memanga-pager-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='currentColor' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' viewBox='0 0 24 24'%3E%3Cpath d='M5 12h14M12 5l7 7-7 7'/%3E%3C/svg%3E");
+  padding-top: 32px;
+  grid-row-gap: 12px;
+}
+
+.VPDocFooter .prev-next .pager-link {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  padding: 16px 20px 18px;
+  background-color: var(--vp-c-bg-soft);
+  text-align: left;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s;
+}
+
+.VPDocFooter .prev-next .pager-link:hover,
+.VPDocFooter .prev-next .pager-link:focus-visible {
+  border-color: var(--vp-c-brand-1);
+  background-color: var(--vp-c-brand-soft);
+}
+
+.VPDocFooter .prev-next .pager-link .desc {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vp-c-text-2);
+}
+
+/* The arrows are drawn without text, so screen readers skip them. */
+.VPDocFooter .prev-next .pager-link.prev .desc::before,
+.VPDocFooter .prev-next .pager-link.next .desc::after {
+  content: '';
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask: var(--memanga-pager-arrow) no-repeat center / 100%;
+  mask: var(--memanga-pager-arrow) no-repeat center / 100%;
+  transition: transform 0.2s;
+}
+
+.VPDocFooter .prev-next .pager-link.prev .desc::before {
+  transform: rotate(180deg);
+}
+
+.VPDocFooter .prev-next .pager-link.prev:hover .desc::before,
+.VPDocFooter .prev-next .pager-link.prev:focus-visible .desc::before {
+  transform: rotate(180deg) translateX(3px);
+}
+
+.VPDocFooter .prev-next .pager-link.next:hover .desc::after,
+.VPDocFooter .prev-next .pager-link.next:focus-visible .desc::after {
+  transform: translateX(3px);
+}
+
+.VPDocFooter .prev-next .pager-link .title {
+  line-height: 24px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.VPDocFooter .prev-next .pager-link:hover .title,
+.VPDocFooter .prev-next .pager-link:focus-visible .title {
+  color: var(--vp-c-brand-1);
+}
+
+/* Side by side, the next link lines up on the right; stacked, both start
+   on the left. */
+@media (min-width: 640px) {
+  .VPDocFooter .prev-next .pager-link.next {
+    align-items: flex-end;
+    text-align: right;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .VPDocFooter .prev-next .pager-link,
+  .VPDocFooter .prev-next .pager-link .desc::before,
+  .VPDocFooter .prev-next .pager-link .desc::after {
+    transition: none;
+  }
+
+  .VPDocFooter .prev-next .pager-link.prev:hover .desc::before,
+  .VPDocFooter .prev-next .pager-link.prev:focus-visible .desc::before {
+    transform: rotate(180deg);
+  }
+
+  .VPDocFooter .prev-next .pager-link.next:hover .desc::after,
+  .VPDocFooter .prev-next .pager-link.next:focus-visible .desc::after {
+    transform: none;
+  }
+}

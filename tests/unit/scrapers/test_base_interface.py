@@ -117,13 +117,15 @@ class TestBaseScraperContract:
 
 def _discover_scraper_modules():
     """Find every scraper module under memanga.scrapers (skipping base/
-    templates) and return (name, module) pairs.
+    templates and the generated coverage_data, which holds only data) and
+    return (name, module) pairs.
     """
     import memanga.scrapers as pkg
     out = []
     for _, name, _ in pkgutil.iter_modules(pkg.__path__):
         if name.startswith("_") or name in ("base", "templates",
-                                              "playwright_base", "catalog"):
+                                              "playwright_base", "catalog",
+                                              "coverage_data"):
             continue
         try:
             m = importlib.import_module(f"memanga.scrapers.{name}")

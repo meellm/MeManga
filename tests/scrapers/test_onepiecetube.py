@@ -19,6 +19,10 @@ from memanga.scrapers import onepiecetube
 from memanga.scrapers.onepiecetube import (
     OnePieceTubeScraper, OnePieceTubeSourceError, chapter_number, page_data)
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"OnePieceTubeScraper": ("search", "chapters", "pages")}
+
 BASE = "https://onepiece.tube"
 LIST_URL = f"{BASE}/manga/kapitel-mangaliste"
 MENU_URL = f"{BASE}/manga/spin-off-mangaliste"

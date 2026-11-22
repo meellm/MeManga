@@ -12,6 +12,10 @@ import pytest
 from memanga.scrapers import get_scraper
 from memanga.scrapers.readblackclover import ReadBlackCloverScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"ReadBlackCloverScraper": ("chapters", "pages")}
+
 ROOT = "https://readblackclover.com/"
 CH383 = "https://readblackclover.com/chapter/black-clover-chapter-383/"
 CH382 = "https://readblackclover.com/chapter/black-clover-chapter-382/"

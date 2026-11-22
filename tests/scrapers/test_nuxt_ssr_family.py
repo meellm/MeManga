@@ -17,6 +17,11 @@ from memanga.scrapers.templates.nuxt_ssr import NuxtSSRSourceError
 from memanga.scrapers import get_scraper
 from memanga.scrapers.base import Chapter, Manga
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs. A test site built
+# on the template, so this is shared-parser coverage for its sites.
+PARSER_TESTS = {"NuxtSSRScraper": ("chapters", "pages")}
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Build a concrete subclass for the template tests

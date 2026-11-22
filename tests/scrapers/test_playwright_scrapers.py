@@ -17,6 +17,13 @@ from memanga.scrapers.mangabuddy import MangaBuddyScraper
 from memanga.scrapers.comix import ComixScraper
 from memanga.scrapers import get_scraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {
+    "MangaBuddyScraper": ("search", "chapters", "pages"),
+    "ComixScraper": ("search", "chapters"),
+}
+
 
 # ──────────────────────────────────────────────────────────────────────
 # MangaBuddy — represents the largest single Playwright scraper.

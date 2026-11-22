@@ -7,6 +7,10 @@ import pytest
 from memanga.scrapers.mangapark import MangaParkScraper, MangaParkSourceError
 from memanga.scrapers.playwright_base import BrowserTimeoutError
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaParkScraper": ("search", "chapters", "pages")}
+
 
 @pytest.fixture
 def scraper():

@@ -94,7 +94,7 @@ build = [
 
 [project.urls]
 Homepage = "https://github.com/meellm/MeManga"
-Documentation = "https://github.com/meellm/MeManga/blob/main/docs/Guide.md"
+Documentation = "https://meellm.github.io/MeManga/"
 Repository = "https://github.com/meellm/MeManga"
 Issues = "https://github.com/meellm/MeManga/issues"
 Changelog = "https://github.com/meellm/MeManga/blob/main/CHANGELOG.md"

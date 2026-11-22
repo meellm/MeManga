@@ -20,6 +20,10 @@ from memanga.scrapers.senmanga import (
     SenMangaScraper, SenMangaSourceError, chapter_ids, series_slug)
 from memanga.search import BROKEN_SEARCH_SOURCES, sweep
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"SenMangaScraper": ("chapters", "pages")}
+
 BASE = "https://raw.senmanga.com"
 SERIES_URL = f"{BASE}/manga/one-piece"
 CDN = "https://cdn.rawkuma.com"
@@ -515,6 +519,8 @@ class TestMetadata:
         assert [d for d in SCRAPERS
                 if d == "senmanga.com" or d.endswith(".senmanga.com")] == ["raw.senmanga.com"]
         assert [d for d, cls in SCRAPERS.items() if cls is SenMangaScraper] == ["raw.senmanga.com"]
+        # Rawkuma is a separate source with its own scraper.
+        assert SCRAPERS["rawkuma.net"] is not SenMangaScraper
 
     def test_catalog_states_direct_url_only(self):
         row = next(r for r in source_catalog() if r.domain == "raw.senmanga.com")

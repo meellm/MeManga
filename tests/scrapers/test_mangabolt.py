@@ -16,6 +16,10 @@ import requests
 from memanga.scrapers import get_scraper
 from memanga.scrapers.mangabolt import MangaBoltScraper, MangaBoltSourceError
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"MangaBoltScraper": ("search", "chapters", "pages")}
+
 SITE = "https://mangabolt.com"
 NARUTO = f"{SITE}/series/AAAAAAAAAAAAAAAAAAAAAAA1/naruto"
 

@@ -22,6 +22,10 @@ import requests
 from memanga.scrapers import onemanga as om
 from memanga.scrapers.onemanga import OneMangaScraper
 
+# What these tests run on saved or canned site responses; read by
+# python -m memanga.source_docs for the sources docs.
+PARSER_TESTS = {"OneMangaScraper": ("chapters", "pages")}
+
 SERIES_URL = "https://1manga.co/manga/yukoku-no-moriarty"
 CHAPTER = "https://1manga.co/chapter/yukoku-no-moriarty/chapter-"
 
@@ -185,8 +189,11 @@ class TestEngine:
         rows = {row.domain: row for row in source_catalog()}
         assert rows["1manga.co"].engine == "browser"
         docs = Path(__file__).resolve().parents[2] / "docs" / "SUPPORTED_SOURCES.md"
-        assert ("| 1manga.co | — | browser | — | No | Included in search | "
-                "MangaHub network |") in docs.read_text(encoding="utf-8").splitlines()
+        # The generated table has coverage columns after the notes.
+        row = ("| 1manga.co | — | browser | — | No | Included in search | "
+               "MangaHub network | ")
+        assert any(line.startswith(row)
+                   for line in docs.read_text(encoding="utf-8").splitlines())
         # Search, chapters and downloads stay on HTTP.
         assert not issubclass(OneMangaScraper, PlaywrightScraper)
 

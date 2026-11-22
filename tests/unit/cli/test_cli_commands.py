@@ -2212,6 +2212,149 @@ class TestSourcesCommand:
         assert health["domain"] == "asurascans.com"
         assert health["error_count"] == 0
 
+    # Issue #266: parser test and live probe facts.
+
+    OLD_KEYS = {"domain", "aliases", "scraper", "engine", "template",
+                "language", "nsfw", "note", "popularity", "default_enabled",
+                "searchable", "search_status", "search_skip",
+                "domain_search_skips", "health"}
+
+    def test_json_adds_coverage_and_keeps_the_contract(self, run_cli, capsys):
+        from memanga.scrapers.catalog import source_coverage
+        assert run_cli("sources", "--json") == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert set(payload) == {"schema_version", "sources"}
+        assert payload["schema_version"] == 1
+        for row in payload["sources"]:
+            assert set(row) == self.OLD_KEYS | {"parser_tests", "live_probe"}
+            tests = row["parser_tests"]
+            assert set(tests) == {"own", "shared"}
+            assert isinstance(tests["own"], list)
+            assert isinstance(tests["shared"], list)
+            assert row["live_probe"] is None or isinstance(row["live_probe"], list)
+            assert {k: row[k] for k in ("parser_tests", "live_probe")} == \
+                source_coverage(row["domain"])
+        rows = {row["domain"]: row for row in payload["sources"]}
+        assert rows["mangadex.org"]["parser_tests"]["own"]
+        assert rows["mangadex.org"]["live_probe"]
+
+    def test_json_for_a_source_without_coverage(self, run_cli, capsys):
+        from memanga.scrapers import coverage_data
+        from memanga.scrapers.catalog import source_catalog
+        bare = next(s.domain for s in source_catalog()
+                    if s.domain not in coverage_data.PARSER_TESTS
+                    and s.domain not in coverage_data.LIVE_PROBE)
+        row = self._json(run_cli, capsys, bare)[bare]
+        assert row["parser_tests"] == {"own": [], "shared": []}
+        assert row["live_probe"] is None
+        assert row["health"] is None
+
+    def test_coverage_flag_does_not_change_json(self, run_cli, capsys):
+        plain = self._json(run_cli, capsys)
+        assert self._json(run_cli, capsys, "--coverage") == plain
+
+    @staticmethod
+    def _blocks(out):
+        """{domain: {label: value}} from `sources --coverage` output."""
+        blocks, current = {}, None
+        for line in out.splitlines():
+            if not line.strip():
+                current = None
+            elif not line.startswith(" ") and current is None and "." in line \
+                    and " " not in line.strip():
+                current = blocks.setdefault(line.strip(), {})
+            elif current is not None and line.startswith("  "):
+                label, _, value = line.strip().partition(":")
+                current[label] = value.strip()
+        return blocks
+
+    def test_coverage_view(self, run_cli, capsys, seeded_health):
+        assert run_cli("sources", "--coverage", "mangadex") == 0
+        out = capsys.readouterr().out
+        block = self._blocks(out)["mangadex.org"]
+        assert block["Search"] == "Included in search"
+        assert block["Health"].startswith("ok, checked ")
+        assert block["Parser tests"].startswith("own ")
+        assert block["Live probe"]
+        assert block["Notes"].startswith("default · ")
+        assert "Engine" not in out
+        assert "not a live test" in out
+        assert "being in it is not a result." in out
+        assert "Showing 1 of" in out
+
+    def test_coverage_view_fits_80_columns_when_plain(self, run_cli, capsys,
+                                                      seeded_health):
+        from memanga.scrapers.catalog import source_catalog, source_coverage
+        from memanga.cli import _live_probe_text, _parser_tests_text
+        assert run_cli("sources", "--coverage") == 0
+        out = capsys.readouterr().out
+        assert max(len(line) for line in out.splitlines()) <= 80
+        blocks = self._blocks(out)
+        assert set(blocks) == {s.domain for s in source_catalog()}
+        for domain, block in blocks.items():
+            facts = source_coverage(domain)
+            assert block["Parser tests"] == _parser_tests_text(facts["parser_tests"])
+            assert block["Live probe"] == _live_probe_text(facts["live_probe"])
+            assert "Health" in block and "Search" in block
+
+    def test_coverage_view_in_an_80_column_terminal(self, run_cli, monkeypatch,
+                                                    seeded_health):
+        from rich.console import Console
+        from memanga import cli
+        buffer = io.StringIO()
+        terminal = Console(file=buffer, width=80, force_terminal=True,
+                           color_system=None, legacy_windows=False)
+        monkeypatch.setattr(cli, "console", terminal)
+        monkeypatch.setattr(cli, "stream_is_plain", lambda *a, **k: False)
+        assert run_cli("sources", "--coverage", "asura") == 0
+        out = buffer.getvalue()
+        assert max(len(line) for line in out.splitlines()) <= 80
+        block = self._blocks(out)["asurascans.com"]
+        # Each fact stays whole on its own labelled line.
+        assert block["Health"].startswith("error, checked ")
+        assert block["Parser tests"] == "own search, chapters, pages"
+        assert block["Live probe"] == "search, chapters, pages, image"
+
+    @pytest.mark.parametrize("note, joiner", [
+        ("Serves [bold]every[/bold] chapter through a reader whose address "
+         "changes, so add a series by its direct URL", " "),
+        ("世界" * 40, ""),
+    ], ids=["words-and-markup", "wide-unbroken"])
+    def test_coverage_block_wraps_a_long_note_under_itself(self, note, joiner):
+        from types import SimpleNamespace
+        from rich.cells import cell_len
+        from rich.text import Text
+        from memanga.cli import _source_coverage_block
+        source = SimpleNamespace(domain="example.test", search_status="x",
+                                 note=note, nsfw=False, default_enabled=False)
+        facts = {"parser_tests": {"own": [], "shared": []}, "live_probe": None}
+        lines = [Text.from_markup(line).plain
+                 for line in _source_coverage_block(source, None, facts)]
+        label = "  Notes:        "
+        notes = lines[5:]
+        assert len(notes) > 1
+        assert notes[0].startswith(label)
+        assert all(line.startswith(" " * len(label)) for line in notes[1:])
+        assert all(cell_len(line) <= 80 for line in notes)
+        # The brackets stay literal and no text is lost.
+        assert joiner.join(line[len(label):] for line in notes) == note
+
+    def test_default_table_points_to_coverage(self, run_cli, capsys):
+        assert run_cli("sources", "mangadex") == 0
+        out = capsys.readouterr().out
+        assert "Engine" in out and "Parser tests" not in out
+        assert "--coverage" in out
+
+    def test_coverage_texts(self):
+        from memanga.cli import _live_probe_text, _parser_tests_text
+        assert _parser_tests_text(
+            {"own": ["search"], "shared": ["chapters", "pages"]}) == \
+            "own search; shared chapters, pages"
+        assert _parser_tests_text({"own": [], "shared": []}) == "none"
+        assert _live_probe_text(["search", "chapters"]) == "search, chapters"
+        assert _live_probe_text([]) == "home page only"
+        assert _live_probe_text(None) == "not in the probe"
+
 
 # ─────────────────────────────────────────────────────────────────────────
 # `export` / `import` — backup + restore
@@ -3469,7 +3612,8 @@ class TestCronInContainer:
         err = " ".join(capsys.readouterr().err.split())
         assert "does not work inside a container" in err
         assert "memanga watch" in err
-        assert "Guide.md#scheduling-in-docker" in err
+        assert "compose.dev.yaml" in err
+        assert "MeManga/guide/docker#check-on-a-schedule" in err
 
     def test_install_refuses_without_touching_crontab(self, run_cli, config,
                                                       capsys):
