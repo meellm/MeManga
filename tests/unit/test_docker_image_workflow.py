@@ -15,6 +15,12 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "docker-image.yml"
 
 SMOKE_TAG = "memanga:smoke"
 
+# The image entrypoint is already ``memanga``; arguments start at ``doctor``.
+BROWSER_SMOKE_COMMAND = (
+    "docker run --rm memanga:smoke "
+    "doctor --check browsers --launch-browsers --json"
+)
+
 
 def _jobs():
     return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
@@ -43,6 +49,10 @@ def _is_smoke_run(step):
     return "docker run --rm memanga:smoke --help" in str(step.get("run", ""))
 
 
+def _is_browser_smoke_run(step):
+    return str(step.get("run", "")).strip() == BROWSER_SMOKE_COMMAND
+
+
 def _publish_build_indices():
     return [
         i
@@ -68,6 +78,22 @@ def test_smoke_run_follows_smoke_build_unconditionally():
     assert build != -1 and run != -1
     assert build < run
     assert "if" not in _steps()[run]
+
+
+def test_browser_smoke_follows_help_smoke_unconditionally():
+    help_run = _index(_is_smoke_run)
+    browser = _index(_is_browser_smoke_run)
+    assert help_run != -1 and browser != -1
+    assert help_run < browser
+    assert "if" not in _steps()[browser]
+
+
+def test_browser_smoke_gate_precedes_every_publish_build():
+    browser = _index(_is_browser_smoke_run)
+    publish = _publish_build_indices()
+    assert browser != -1
+    assert len(publish) == 2
+    assert all(browser < i for i in publish)
 
 
 def test_smoke_gate_precedes_every_publish_build():
