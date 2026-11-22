@@ -22,8 +22,6 @@
 
 <p align="center">
   <img src="docs/public/media/app-library.png" alt="MeManga library with seven tracked series, their reading status and new-chapter counts" width="860">
-  <br>
-  <sub>The library in MeManga v0.4.4. The current development version may look different.</sub>
 </p>
 
 ## What it does
@@ -46,7 +44,7 @@ for new chapters. It knows
   <img src="docs/public/media/app-detail.png" alt="Series page for Blue Lock with its source, status, download options and chapter list" width="49%">
   <img src="docs/public/media/app-reader.png" alt="MeManga reader showing page 1 of Blue Lock chapter 368" width="49%">
   <br>
-  <sub>A series page and the reader in MeManga v0.4.4. Series titles and artwork
+  <sub>Series titles and artwork
   belong to their owners and appear here only to demonstrate the app. See
   <a href="https://meellm.github.io/MeManga/reference/sources#using-sources-responsibly">Using sources responsibly</a>.</sub>
 </p>
@@ -67,8 +65,6 @@ for new chapters. It knows
 
 <p align="center">
   <img src="docs/public/media/cli-demo.gif" alt="Terminal recording: memanga search adds Blue Lock from weebcentral.com, memanga check downloads chapters 368 and 369 as PDF files, and memanga list shows the tracked series" width="760">
-  <br>
-  <sub>The command line in the development version.</sub>
 </p>
 
 Installing with `pip`, `pipx` or `uv` from a package index is
