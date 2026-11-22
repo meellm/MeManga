@@ -126,17 +126,22 @@ resolve-at = "2026-05-25T08:00:00Z"
 # certifi, Pillow and soupsieve releases with fixes for known
 # vulnerabilities (#385), the Linux keyring backend of the Docker image,
 # and the test, build and code-quality tools with their own dependencies.
-# ruff is read at the release the CI lint job installs.
+# ruff is read at the release the CI lint job installs. pre-commit's
+# virtualenv and filelock, with what they require, are read at releases
+# with fixes for known vulnerabilities.
 [tool.lock-dependencies.resolve-package-at]
 ast-serialize = "2026-11-02T00:00:00Z"
 certifi = "2026-11-02T00:00:00Z"
 cffi = "2026-11-02T00:00:00Z"
 coverage = "2026-11-02T00:00:00Z"
 cryptography = "2026-11-02T00:00:00Z"
+distlib = "2026-11-02T00:00:00Z"
+filelock = "2026-11-02T00:00:00Z"
 importlib-metadata = "2026-11-02T00:00:00Z"
 iniconfig = "2026-11-02T00:00:00Z"
 librt = "2026-11-02T00:00:00Z"
 mypy = "2026-11-02T00:00:00Z"
+packaging = "2026-11-02T00:00:00Z"
 pillow = "2026-11-02T00:00:00Z"
 pluggy = "2026-11-02T00:00:00Z"
 pycparser = "2026-11-02T00:00:00Z"
@@ -145,11 +150,13 @@ pyinstaller-hooks-contrib = "2026-11-02T00:00:00Z"
 pytest = "2026-11-02T00:00:00Z"
 pytest-env = "2026-11-02T00:00:00Z"
 pytest-mock = "2026-11-02T00:00:00Z"
+python-discovery = "2026-11-02T00:00:00Z"
 python-dotenv = "2026-11-02T00:00:00Z"
 ruff = "2026-11-06T00:00:00Z"
 setuptools = "2026-11-02T00:00:00Z"
 soupsieve = "2026-11-16T00:00:00Z"
 urllib3 = "2026-11-02T00:00:00Z"
+virtualenv = "2026-11-02T00:00:00Z"
 zipp = "2026-11-02T00:00:00Z"
 
 [tool.setuptools.dynamic]
