@@ -388,7 +388,7 @@ Which sources are turned off. The desktop app writes these keys.
 Sources that are turned off, by domain. Search and the cover look-up skip them.
 
 - **Type:** list of domains
-- **Default:** not in a new config file. Missing until the desktop app first starts. It then turns off every source outside its default selection.
+- **Default:** not in a new config file. Missing until the desktop app first starts. It then saves a list that turns off every source outside its default selection. While the key is missing or has no value, search asks the default selection and the sources in your library. An empty list, `[]`, turns no source off.
 - **Change it:** in the desktop app, the Sources page.
 
 ### sources.first_run_seeded

@@ -706,9 +706,15 @@ class MeMangaApp(QMainWindow):
         Guarded by `sources.first_run_seeded` so we ONLY run once,
         ever. Existing users with their own selection (or veteran
         users who liked the everything-on default) never get their
-        config overwritten by a future re-launch.
+        config overwritten by a future re-launch. A `sources.disabled`
+        list saved before the first launch is a selection too, so it
+        is kept and only the flag is set.
         """
         if self.config.get("sources.first_run_seeded"):
+            return
+        if self.config.get("sources.disabled") is not None:
+            self.config.set("sources.first_run_seeded", True)
+            self.config.save()
             return
         try:
             from ..scrapers import (

@@ -141,9 +141,10 @@ SEARCH_SKIPS: Dict[str, SearchSkip] = {
 # same scraper twice. Re-order or trim when a live probe says a site
 # went stale.
 #
-# The first DEFAULT_ENABLED_COUNT are ticked on the Sources page of a
-# fresh install, so a new user gets results in seconds instead of
-# probing 100+ smaller sources. Everything else stays available.
+# DEFAULT_ENABLED_SOURCES below is the default search selection: the
+# sources ticked on the Sources page of a fresh install, and the ones
+# a search covers until a selection is saved. Everything else stays
+# available.
 # ─────────────────────────────────────────────────────────────────────
 
 
@@ -173,8 +174,17 @@ POPULAR_SOURCES: List[str] = [
     "mangafox.fun",
 ]
 
-DEFAULT_ENABLED_COUNT = 15
-DEFAULT_ENABLED_SOURCES: List[str] = POPULAR_SOURCES[:DEFAULT_ENABLED_COUNT]
+# Kept small on purpose: a sweep takes as long as its slowest source.
+# Picked by measured search time and relevance, not by rank, and listed
+# in POPULAR_SOURCES order. Changing it only affects configs with no
+# saved selection; `sources.disabled` is never rewritten for it.
+DEFAULT_ENABLED_SOURCES: List[str] = [
+    "mangadex.org",
+    "mangapark.cc",
+    "mangafire.to",
+    "mangabuddy.com",
+    "weebcentral.com",
+]
 
 
 # ─────────────────────────────────────────────────────────────────────

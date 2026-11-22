@@ -52,9 +52,11 @@ memanga search "TITLE"
 ```
 
 This asks the sources that are enabled for search and prints a numbered
-table of results. It uses the network and can take a while, because many
-sources are asked. [Sources](../reference/sources) lists which sources
-search includes, and which of them serve adult content.
+table of results. It uses the network and can take a while. Until you save
+a selection, it asks the
+[default selection](../reference/sources#default-selection) and the sources
+in your library. [Sources](../reference/sources) lists which sources search
+can include, and which of them serve adult content.
 
 In a terminal, MeManga then asks **Add which?** Type a result number to add
 that series to your library, or `q` to add nothing.

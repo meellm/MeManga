@@ -55,6 +55,9 @@ How each choice is searched:
 - Either way, a domain switched off on the Sources page
   (`sources.disabled`) or listed in the catalog's search skips is removed
   from the list (`compute_search_sources` in `memanga/search.py`).
+- While `sources.disabled` is missing, the list holds only
+  `DEFAULT_ENABLED_SOURCES` and the sources in the user's library. An empty
+  list turns nothing off.
 
 Prefer a browser only when the content is really missing from the HTML
 and from any API the site calls. A browser is slower and needs the
@@ -200,9 +203,12 @@ to it.
 
 - `SEARCH_SKIPS`: a domain that search leaves out, with a reason, a note
   and the issue number.
-- `POPULAR_SOURCES`: the order in which search asks sources. The first 15
-  (`DEFAULT_ENABLED_COUNT`) are switched on in a new desktop install, so
-  change this list only with live evidence.
+- `POPULAR_SOURCES`: the order in which search asks sources. Change this
+  list only with live evidence.
+- `DEFAULT_ENABLED_SOURCES`: the default search selection, an explicit list
+  in `POPULAR_SOURCES` order. A new desktop install switches these on, and
+  search uses them while `sources.disabled` is missing. Changing the list
+  does not rewrite a saved selection.
 - `SOURCE_NOTES`: the short description in the source list.
 
 **The Supported websites page** is grouped by hand in

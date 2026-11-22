@@ -1,7 +1,7 @@
 # Supported Sources
 
 MeManga registers 291 domains across 226 scrapers. Registration does not mean a site is currently reachable.
-Search status describes the default sweep; direct URLs remain available for registered sources.
+Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
 Parser tests: the parts of the scraper (search, chapters, pages) that offline tests run on saved or canned responses from the site; "shared parser" means the tests ran code this source shares with other sites, on another site's responses; a source that replaces any of that code with its own is not credited with it.

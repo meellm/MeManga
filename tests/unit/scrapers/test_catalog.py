@@ -32,7 +32,10 @@ def test_search_skips_preserve_legacy_set_and_registered_domains():
 def test_popularity_and_defaults_are_registered_and_ordered():
     assert len(POPULAR_SOURCES) == len(set(POPULAR_SOURCES))
     assert set(POPULAR_SOURCES) <= set(SCRAPERS)
-    assert DEFAULT_ENABLED_SOURCES == POPULAR_SOURCES[:15]
+    # The defaults are a chosen subset, kept in popularity order.
+    assert len(DEFAULT_ENABLED_SOURCES) == len(set(DEFAULT_ENABLED_SOURCES))
+    assert DEFAULT_ENABLED_SOURCES == [
+        d for d in POPULAR_SOURCES if d in set(DEFAULT_ENABLED_SOURCES)]
     assert not set(POPULAR_SOURCES) & set(SEARCH_SKIPS)
 
 
@@ -49,6 +52,7 @@ def test_declared_metadata_is_exposed():
     assert rows["mangadex.org"].engine == "api"
     assert rows["nhentai.net"].nsfw
     assert rows["mangadex.org"].default_enabled
+    assert not rows["mangapill.com"].default_enabled
     assert not rows["mangadex.org"].search_skip
     assert (rows["asurascans.com"].to_dict()["domain_search_skips"]
             ["asuracomic.net"]["reason"] == "alias")
