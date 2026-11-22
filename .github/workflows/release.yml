@@ -241,15 +241,16 @@ jobs:
           ref: ${{ env.RECOVERY_SOURCE }}
 
       - name: Use the fixed release spec (v0.5.0 recovery only)
-        # The tag's spec bundles Tcl/Tk, which the notices gate rejects and
-        # the app does not use. Only this build file comes from the commit
-        # of this workflow, at an exact blob; the program source stays the
-        # tag's. The spec names that commit in the notices of the download.
+        # The tag's spec bundles Tcl/Tk and the Windows Universal CRT, which
+        # the notices gate rejects and the app does not need in its bundle.
+        # Only this build file comes from the commit of this workflow, at an
+        # exact blob; the program source stays the tag's. The spec names that
+        # commit in the notices of the download.
         if: github.event_name == 'workflow_dispatch'
         shell: bash
         env:
           TAG_SPEC_BLOB: 06a7ca436acc5af675d34c1f1ca0686a09f12d31
-          FIXED_SPEC_BLOB: 91f944155324a4b549a3a7e4d3511307f1a47e42
+          FIXED_SPEC_BLOB: 4eeb9e54fdb7b36901d24bb2109518dbe6fbd975
         run: |
           spec=packaging/memanga-release.spec
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"

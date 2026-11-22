@@ -211,6 +211,33 @@ _notices_spec.loader.exec_module(_notices)
 a.binaries = [e for e in a.binaries if not _notices.gpl_only(e[0])]
 a.datas = [e for e in a.datas if not _notices.gpl_only(e[0])]
 
+# Windows 10 and later always load the Universal CRT from the system, even
+# when an app carries its own copy, and the api-ms-win names are API sets
+# that the OS loader resolves. The bundled Qt needs Windows 10 1809 or later,
+# so the copies PyInstaller finds on the build machine's PATH are never used.
+# Only these exact top-level names are dropped: the Visual C++ runtime stays,
+# and any other DLL without a license text still stops the build.
+_UCRT_DLLS = {"ucrtbase.dll"} | {f"api-ms-win-{_name}.dll" for _name in (
+    "core-console-l1-1-0", "core-datetime-l1-1-0", "core-debug-l1-1-0",
+    "core-errorhandling-l1-1-0", "core-fibers-l1-1-0", "core-fibers-l1-1-1",
+    "core-file-l1-1-0", "core-file-l1-2-0", "core-file-l2-1-0",
+    "core-handle-l1-1-0", "core-heap-l1-1-0", "core-interlocked-l1-1-0",
+    "core-kernel32-legacy-l1-1-1", "core-libraryloader-l1-1-0",
+    "core-localization-l1-2-0", "core-memory-l1-1-0",
+    "core-namedpipe-l1-1-0", "core-processenvironment-l1-1-0",
+    "core-processthreads-l1-1-0", "core-processthreads-l1-1-1",
+    "core-profile-l1-1-0", "core-rtlsupport-l1-1-0", "core-string-l1-1-0",
+    "core-synch-l1-1-0", "core-synch-l1-2-0", "core-sysinfo-l1-1-0",
+    "core-sysinfo-l1-2-0", "core-timezone-l1-1-0", "core-util-l1-1-0",
+    "crt-conio-l1-1-0", "crt-convert-l1-1-0", "crt-environment-l1-1-0",
+    "crt-filesystem-l1-1-0", "crt-heap-l1-1-0", "crt-locale-l1-1-0",
+    "crt-math-l1-1-0", "crt-process-l1-1-0", "crt-runtime-l1-1-0",
+    "crt-stdio-l1-1-0", "crt-string-l1-1-0", "crt-time-l1-1-0",
+    "crt-utility-l1-1-0",
+)}
+if _IS_WINDOWS:
+    a.binaries = [e for e in a.binaries if e[0].lower() not in _UCRT_DLLS]
+
 from PySide6.QtCore import qVersion as _qt_version
 
 _notices_label = {
@@ -260,8 +287,9 @@ if _recipe_commit:
         f"{_recipe_commit}, not from the tag: "
         f"{_notices.PROJECT_HOMEPAGE}/tree/{_recipe_commit} . Use that copy "
         "of the spec to rebuild it; it leaves out Tcl/Tk, which the app does "
-        "not use. The program source and the other files named below are "
-        "those of the tag.",
+        "not use, and on Windows the Universal CRT, which Windows provides. "
+        "The program source and the other files named below are those of "
+        "the tag.",
         width=79, break_long_words=False, break_on_hyphens=False))
     Path(_notices_path).write_text(
         _notices_text.replace(_anchor, f"{_build_note}\n\n{_anchor}"),
