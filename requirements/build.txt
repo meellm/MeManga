@@ -2,7 +2,7 @@
 # pinned with hashes. Made from pyproject.toml; to change it,
 # edit pyproject.toml and run:
 #    python scripts/lock_dependencies.py
-# input-digest: sha256:a7dd2a87c373f9083a3bcc783c46f62bece0fd007b5683ed78be45f9a83b7e18
+# input-digest: sha256:1bff495418c12d90c490d7efe52cc08f239ccdaac71362341a93a727254fe9ea
 # Do not edit by hand.
 altgraph==0.17.5 \
     --hash=sha256:c87b395dd12fabde9c99573a9749d67da8d29ef9de0125c7f536699b4a9bc9e7 \

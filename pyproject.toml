@@ -80,6 +80,12 @@ dev = [
     "pytest-xdist>=3.5",
     # Coverage report: pytest --cov=memanga --cov-report=html
     "pytest-cov>=4.1",
+    # Lint and format: ruff check, ruff format ([tool.ruff] below).
+    "ruff>=0.17.4",
+    # Type check: mypy ([tool.mypy] below).
+    "mypy>=2.4",
+    # Runs the checks of .pre-commit-config.yaml on a commit.
+    "pre-commit>=4.0",
 ]
 build = [
     "memanga[gui]",
@@ -119,14 +125,18 @@ resolve-at = "2026-05-25T08:00:00Z"
 # Packages read from a later PyPI: the urllib3 security floor, the
 # certifi, Pillow and soupsieve releases with fixes for known
 # vulnerabilities (#385), the Linux keyring backend of the Docker image,
-# and the test and build tools with their own dependencies.
+# and the test, build and code-quality tools with their own dependencies.
+# ruff is read at the release the CI lint job installs.
 [tool.lock-dependencies.resolve-package-at]
+ast-serialize = "2026-11-02T00:00:00Z"
 certifi = "2026-11-02T00:00:00Z"
 cffi = "2026-11-02T00:00:00Z"
 coverage = "2026-11-02T00:00:00Z"
 cryptography = "2026-11-02T00:00:00Z"
 importlib-metadata = "2026-11-02T00:00:00Z"
 iniconfig = "2026-11-02T00:00:00Z"
+librt = "2026-11-02T00:00:00Z"
+mypy = "2026-11-02T00:00:00Z"
 pillow = "2026-11-02T00:00:00Z"
 pluggy = "2026-11-02T00:00:00Z"
 pycparser = "2026-11-02T00:00:00Z"
@@ -136,6 +146,7 @@ pytest = "2026-11-02T00:00:00Z"
 pytest-env = "2026-11-02T00:00:00Z"
 pytest-mock = "2026-11-02T00:00:00Z"
 python-dotenv = "2026-11-02T00:00:00Z"
+ruff = "2026-11-06T00:00:00Z"
 setuptools = "2026-11-02T00:00:00Z"
 soupsieve = "2026-11-16T00:00:00Z"
 urllib3 = "2026-11-02T00:00:00Z"
@@ -151,3 +162,103 @@ include = ["memanga*"]
 # that are not listed here.
 [tool.setuptools.package-data]
 "memanga.gui" = ["assets/icon/*.png"]
+
+# Code quality checks (#289). With the dev install, from the repository
+# root:
+#
+#   ruff check .             lint
+#   ruff format --check .    formatting (`ruff format .` rewrites)
+#   mypy                     types
+#
+# .pre-commit-config.yaml runs the same three, with this configuration and
+# the ruff and mypy of requirements/dev.txt, on every commit.
+[tool.ruff]
+target-version = "py311"
+# Python files only. Ruff also takes Markdown files by default and
+# rewrites their Python code blocks; the README and the documentation are
+# left as they are written.
+extend-exclude = ["*.md"]
+# Excluded paths stay excluded when a file is named on the command line,
+# as the commit hooks do.
+force-exclude = true
+
+[tool.ruff.lint]
+# Only the rules that mean the code cannot run: syntax errors, invalid
+# comparisons and statements, undefined names. The CI lint job selects
+# the same rules.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.ruff.format]
+# Code from before the formatter, not written to its style yet. Every
+# other file, and every new file outside these paths, is formatted. To
+# bring a path in: remove it here and commit what `ruff format <path>`
+# changes on its own, apart from other changes. A directory is listed
+# with `/**`: a pattern is matched against each file, not its folders.
+exclude = [
+    "build.py",
+    "build_app.py",
+    "memanga/api.py",
+    "memanga/backup.py",
+    "memanga/chapter_pipeline.py",
+    "memanga/chapters.py",
+    "memanga/cli.py",
+    "memanga/cli_docs.py",
+    "memanga/completion.py",
+    "memanga/config.py",
+    "memanga/config_docs.py",
+    "memanga/cron.py",
+    "memanga/doctor.py",
+    "memanga/downloader/**",
+    "memanga/email_settings.py",
+    "memanga/emailer.py",
+    "memanga/first_run.py",
+    "memanga/gui/**",
+    "memanga/image_limits.py",
+    "memanga/output.py",
+    "memanga/perf.py",
+    "memanga/persist.py",
+    "memanga/process_lock.py",
+    "memanga/schema.py",
+    "memanga/scrapers/**",
+    "memanga/search.py",
+    "memanga/source_docs.py",
+    "memanga/state.py",
+    "memanga/state_stores/activity.py",
+    "memanga/state_stores/backups.py",
+    "memanga/state_stores/catalogue.py",
+    "memanga/state_stores/failures.py",
+    "memanga/state_stores/library.py",
+    "memanga/state_stores/notifications.py",
+    "memanga/state_stores/reading.py",
+    "memanga/state_stores/source_health.py",
+    "memanga/suspicion.py",
+    "memanga/watch.py",
+    "packaging/**",
+    "scripts/**",
+    "tests/**",
+]
+
+[tool.mypy]
+python_version = "3.11"
+# The modules that are type checked so far: the chapter model, the schema
+# versions and the state stores. They import only the standard library
+# and each other, so they need no stubs. To check more, add the path here
+# and fix what mypy reports in it.
+files = [
+    "memanga/chapters.py",
+    "memanga/schema.py",
+    "memanga/state_stores",
+]
+# In a checked package but not passing yet: full_details() assigns None
+# to a variable first bound to a str.
+exclude = ['^memanga/state_stores/notifications\.py$']
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unused_configs = true
+
+# The rest of memanga is read for its types when a checked module imports
+# it, but its own errors are not reported until it is listed in `files`.
+[[tool.mypy.overrides]]
+module = "memanga.*"
+follow_imports = "silent"

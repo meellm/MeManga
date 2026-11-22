@@ -43,7 +43,7 @@ dependency. The extras in `pyproject.toml`:
 | Extra | Adds | Use it for |
 |---|---|---|
 | `gui` | PySide6 | Running the desktop app (`memanga --gui`, `memanga-gui`) |
-| `dev` | `gui` plus pytest, pytest-qt, pytest-mock, pytest-env, pytest-xdist, pytest-cov, packaging | Running the test suite; the GUI tests need Qt |
+| `dev` | `gui` plus pytest, pytest-qt, pytest-mock, pytest-env, pytest-xdist, pytest-cov, packaging, Ruff, mypy and pre-commit | Tests and local quality checks; the GUI tests need Qt |
 | `build` | `gui` plus PyInstaller, certifi and (on Windows) pywin32-ctypes | Desktop builds |
 
 `pyproject.toml` is the only place dependencies are declared; the
@@ -72,6 +72,22 @@ defaults and markers, and [Write a scraper](https://meellm.github.io/MeManga/dev
 the live probes. Pushes and pull requests to `main` run the CI workflow;
 [What CI runs](https://meellm.github.io/MeManga/developer/contributing#what-ci-runs) lists every
 workflow and when it runs.
+
+## Local quality checks
+
+With the dev environment active, from the repository root:
+
+```sh
+ruff check .
+ruff format --check .
+mypy
+pre-commit install          # once per clone
+pre-commit run --all-files
+```
+
+Keep the dev environment active when committing: the local mypy hook uses
+its Python. Formatting and type checking cover a gradually expanding set
+of files; see [Local quality checks](https://meellm.github.io/MeManga/developer/contributing#local-quality-checks).
 
 ## Adding a scraper
 

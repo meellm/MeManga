@@ -60,6 +60,10 @@ dist/
 # pytest cache
 .pytest_cache/
 
+# Lint and type check caches
+.mypy_cache/
+.ruff_cache/
+
 # Documentation site (docs/)
 node_modules/
 docs/.vitepress/cache/
