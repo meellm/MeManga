@@ -1,17 +1,30 @@
-# MeManga
+<h1 align="center">MeManga</h1>
 
-**Track manga series, download new chapters and read them, in a desktop
-app or from the command line.**
+<p align="center">
+  <strong>Keep up with the manga you follow.</strong><br>
+  Track series, download new chapters and read them in the desktop app, or
+  run the same checks from the command line on a server or in Docker.
+</p>
 
-<p>
+<p align="center">
   <a href="https://github.com/meellm/MeManga/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/meellm/MeManga"></a>
+  <a href="https://github.com/meellm/MeManga/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/meellm/MeManga/total?label=downloads"></a>
+  <a href="https://hub.docker.com/r/meellm/memanga"><img alt="Docker pulls" src="https://img.shields.io/docker/pulls/meellm/memanga?label=docker%20pulls"></a>
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
 
-**[Documentation](https://meellm.github.io/MeManga/)** ·
-**[Download](https://meellm.github.io/MeManga/guide/install)** ·
-**[Discussions](https://github.com/meellm/MeManga/discussions)** ·
-**[Report a bug](https://github.com/meellm/MeManga/issues)**
+<p align="center">
+  <a href="https://meellm.github.io/MeManga/"><strong>Documentation</strong></a> ·
+  <a href="https://meellm.github.io/MeManga/guide/install"><strong>Download</strong></a> ·
+  <a href="https://github.com/meellm/MeManga/discussions"><strong>Discussions</strong></a> ·
+  <a href="https://github.com/meellm/MeManga/issues"><strong>Issues</strong></a>
+</p>
+
+<p align="center">
+  <img src="docs/public/media/app-library.png" alt="MeManga library with seven tracked series, their reading status and new-chapter counts" width="860">
+  <br>
+  <sub>The library in MeManga v0.4.4. The current development version may look different.</sub>
+</p>
 
 ## What it does
 
@@ -19,32 +32,54 @@ MeManga keeps a library of the series you follow and checks their sources
 for new chapters. It knows
 <!-- source-count:start -->226 scrapers / 291 domains<!-- source-count:end -->.
 
-- Search many sources at once, and give a series backup sources for when
-  its main source falls behind or a download from it fails.
-- Download chapters as PDF, EPUB, CBZ, ZIP or image folders.
-- Read them in the desktop app's reader.
-- Send chapters to a Kindle by email.
-- Check for new chapters on a schedule, on a computer, a server or in
-  Docker.
+- **Search across sources.** Find a series on many sites at once, and give
+  it backup sources for when its main source falls behind or a download
+  from it fails.
+- **Download your way.** Save chapters as PDF, EPUB, CBZ, ZIP or image
+  folders.
+- **Read in the app.** The desktop app has its own reader.
+- **Send to Kindle.** Deliver chapters to a Kindle by email.
+- **Check on a schedule.** Look for new chapters on a computer, a server or
+  in Docker.
+
+<p align="center">
+  <img src="docs/public/media/app-detail.png" alt="Series page for Blue Lock with its source, status, download options and chapter list" width="49%">
+  <img src="docs/public/media/app-reader.png" alt="MeManga reader showing page 1 of Blue Lock chapter 368" width="49%">
+  <br>
+  <sub>A series page and the reader in MeManga v0.4.4. Series titles and artwork
+  belong to their owners and appear here only to demonstrate the app. See
+  <a href="https://meellm.github.io/MeManga/reference/sources#using-sources-responsibly">Using sources responsibly</a>.</sub>
+</p>
 
 ## Get started
 
-| You want | Start here |
-|---|---|
-| The desktop app for Windows, macOS or Linux | [Download and install](https://meellm.github.io/MeManga/guide/install#desktop-app), then [First steps](https://meellm.github.io/MeManga/guide/first-steps) |
-| The command line, for example on a server | [Command line from source](https://meellm.github.io/MeManga/guide/install#command-line-from-source) and [Use the command line](https://meellm.github.io/MeManga/guide/cli) |
-| A container | [Run MeManga in Docker](https://meellm.github.io/MeManga/guide/docker) |
-| To work on MeManga | [Set up for development](https://meellm.github.io/MeManga/developer/contributing) and [CONTRIBUTING.md](CONTRIBUTING.md) |
+- **Desktop app** for Windows, macOS or Linux:
+  [Download and install](https://meellm.github.io/MeManga/guide/install#desktop-app),
+  then [First steps](https://meellm.github.io/MeManga/guide/first-steps) and
+  the [desktop manual](https://meellm.github.io/MeManga/desktop/library).
+- **Command line**, for example on a server:
+  [Command line from source](https://meellm.github.io/MeManga/guide/install#command-line-from-source)
+  and [Use the command line](https://meellm.github.io/MeManga/guide/cli).
+- **Docker:** [Run MeManga in Docker](https://meellm.github.io/MeManga/guide/docker).
+- **Working on MeManga:**
+  [Set up for development](https://meellm.github.io/MeManga/developer/contributing)
+  and [CONTRIBUTING.md](CONTRIBUTING.md).
+
+<p align="center">
+  <img src="docs/public/media/cli-demo.gif" alt="Terminal recording: memanga search adds Blue Lock from weebcentral.com, memanga check downloads chapters 368 and 369 as PDF files, and memanga list shows the tracked series" width="760">
+  <br>
+  <sub>The command line in MeManga v0.4.4.</sub>
+</p>
 
 Installing with `pip`, `pipx` or `uv` from a package index is
 [not available yet](https://meellm.github.io/MeManga/guide/install#package-installs).
 If something does not work, see
 [Troubleshooting](https://meellm.github.io/MeManga/guide/troubleshooting).
 
-The documentation follows the development version on the `main` branch.
-Pages mark what is not in the
-[latest release](https://github.com/meellm/MeManga/releases/latest) yet,
-so check those notes before you expect a feature in a download.
+The documentation follows the development version on the `main` branch,
+while the release badge shows the latest download. Pages mark what is not
+in the [latest release](https://github.com/meellm/MeManga/releases/latest)
+yet, so check those notes before you expect a feature in a download.
 
 ## Sources
 
