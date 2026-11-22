@@ -4,10 +4,26 @@ on:
   push:
     tags:
       - "v*"
+  # One-shot recovery of v0.5.0 (see the recovery-proof job). It has no
+  # inputs, so a manual run cannot name another version or commit.
+  workflow_dispatch:
 
 # Only the release job writes to the repository: it creates the release.
 permissions:
   contents: read
+
+# On a tag push these are that tag and its commit, and RECOVERY_SOURCE is
+# empty, so every checkout keeps its default. A manual run builds the
+# unchanged v0.5.0 tree with this workflow.
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && 'v0.5.0' || github.ref_name }}
+  RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && '969798f361ea18fb0c63b8bedde10479477de593' || github.sha }}
+  RECOVERY_SOURCE: ${{ github.event_name == 'workflow_dispatch' && '969798f361ea18fb0c63b8bedde10479477de593' || '' }}
+
+# Manual runs wait for each other, so a second one sees what the first
+# published. A tag push is alone in its group.
+concurrency:
+  group: ${{ github.event_name == 'workflow_dispatch' && 'release-recovery-v0.5.0' || github.run_id }}
 
 jobs:
   notes:
@@ -21,13 +37,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RECOVERY_SOURCE }}
 
       - name: Check the release notes in CHANGELOG.md
-        run: python3 scripts/release_notes.py "${{ github.ref_name }}" > /dev/null
+        run: python3 scripts/release_notes.py "$RELEASE_TAG" > /dev/null
 
       - name: Check the release announcement
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
         run: grep -q '[^[:space:]]' ".github/release-announcements/${RELEASE_TAG}.md"
 
   tests:
@@ -36,6 +52,7 @@ jobs:
     # It runs while the release legs build; nothing is published unless it
     # passes.
     needs: notes
+    if: github.event_name == 'push'
     uses: ./.github/workflows/ci.yml
     with:
       upload_dist: true
@@ -45,6 +62,7 @@ jobs:
   audit:
     # Issue #385: no release with a known vulnerability in its locks.
     needs: notes
+    if: github.event_name == 'push'
     uses: ./.github/workflows/dependency-audit.yml
     permissions:
       contents: read
@@ -64,6 +82,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RECOVERY_SOURCE }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -77,8 +97,104 @@ jobs:
           python -m pip install --require-hashes --only-binary :all: -r "$RUNNER_TEMP/uv.txt"
           python scripts/lock_dependencies.py --check
 
+  recovery-proof:
+    # One-shot recovery of v0.5.0: its tag run passed its checks, then the
+    # Windows build stopped before anything was released. A manual run from
+    # main builds the unchanged tag with this workflow. It repeats no test
+    # or audit and no Docker publication. This job requires the green CI of
+    # the exact commit and passes on the sdist and wheel already checked in
+    # the tag run. It runs no repository code.
+    #
+    # If a later job fails, re-run the failed jobs: this job keeps its
+    # result and nothing is built again unless a build failed. Running all
+    # jobs again, or a new manual run, stops here once the GitHub Release or
+    # the PyPI version is published. A draft release is not visible here;
+    # the release job reuses it.
+    needs: notes
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    env:
+      TAG_OBJECT: 42b3ff8ce3ce011e9eac25f2f12834907e345cc2
+      CI_RUN: "45052487628"
+      SOURCE_RUN: "45059290359"
+      PACKAGE_ARTIFACT: "14769015500"
+      PACKAGE_DIGEST: sha256:f50c0a59930c1591b00ee58ba4bbcec1d5a4f617ec573973dd71f29f1a0b1957
+    steps:
+      - name: Prove the source, its checks and its packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          expect() {
+            if [ "$2" != "$3" ]; then
+              echo "::error::$1: expected '$3', got '$2'"
+              exit 1
+            fi
+          }
+          repo="repos/$GITHUB_REPOSITORY"
+          expect "workflow ref" "$GITHUB_REF" "refs/heads/main"
+
+          # The tag is the same annotated tag, on the same commit.
+          expect "tag" \
+            "$(gh api "$repo/git/ref/tags/$RELEASE_TAG" --jq '[.ref, .object.type, .object.sha] | join(" ")')" \
+            "refs/tags/$RELEASE_TAG tag $TAG_OBJECT"
+          expect "tagged commit" \
+            "$(gh api "$repo/git/tags/$TAG_OBJECT" --jq '[.tag, .object.type, .object.sha] | join(" ")')" \
+            "$RELEASE_TAG commit $RELEASE_SHA"
+
+          # The full CI passed on exactly this commit.
+          expect "CI run" \
+            "$(gh api "$repo/actions/runs/$CI_RUN" --jq '[.path, .event, .head_branch, .head_sha, .status, .conclusion, .head_repository.full_name] | join(" ")')" \
+            ".github/workflows/ci.yml push main $RELEASE_SHA completed success $GITHUB_REPOSITORY"
+
+          # The tag run checked this source and made these packages.
+          expect "tag run" \
+            "$(gh api "$repo/actions/runs/$SOURCE_RUN" --jq '[.path, .event, .head_branch, .head_sha, (.run_attempt | tostring), .head_repository.full_name] | join(" ")')" \
+            ".github/workflows/release.yml push $RELEASE_TAG $RELEASE_SHA 1 $GITHUB_REPOSITORY"
+          jobs="$(gh api "$repo/actions/runs/$SOURCE_RUN/attempts/1/jobs?per_page=100" --jq '.jobs[] | [.name, .status, .conclusion] | @tsv')"
+          for job in "notes" "locks" "audit / osv-scanner" "tests / package" "pypi-check"; do
+            expect "tag run job $job" \
+              "$(grep -cFx -- "$job"$'\t'"completed"$'\t'"success" <<< "$jobs")" 1
+          done
+          expect "package artifact" \
+            "$(gh api "$repo/actions/runs/$SOURCE_RUN/artifacts?name=python-dist" --jq '[.total_count, (.artifacts[] | .id, .name, .expired, .digest, .workflow_run.id, .workflow_run.head_sha)] | map(tostring) | join(" ")')" \
+            "1 $PACKAGE_ARTIFACT python-dist false $PACKAGE_DIGEST $SOURCE_RUN $RELEASE_SHA"
+
+          # Nothing is published yet. Only an exact 404 counts as absent.
+          release_status="$(gh api --include "$repo/releases/tags/$RELEASE_TAG" 2>/dev/null | sed -n '1s/^HTTP[^ ]* \([0-9]*\).*/\1/p' || true)"
+          expect "GitHub Release $RELEASE_TAG" "$release_status" 404
+          pypi_status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "https://pypi.org/pypi/memanga/${RELEASE_TAG#v}/json" || true)"
+          expect "PyPI memanga ${RELEASE_TAG#v}" "$pypi_status" 404
+
+      - name: Download the checked sdist and wheel from the tag run
+        # The action fails if the files do not match the artifact's digest.
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: python-dist
+          path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SOURCE_RUN }}
+
+      - name: Record the package hashes
+        run: sha256sum dist/*
+
+      - name: Keep the same files for this run
+        # pypi-check and publish-pypi read them from this run as usual.
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+
   build:
-    needs: locks
+    needs: [locks, recovery-proof]
+    if: ${{ !cancelled() && needs.locks.result == 'success' && (github.event_name == 'push' || needs.recovery-proof.result == 'success') }}
     strategy:
       matrix:
         include:
@@ -120,6 +236,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RECOVERY_SOURCE }}
 
       - name: Detect macOS notarization credentials
         # Issue #163: Developer ID signing and notarization need a paid
@@ -160,13 +278,34 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Create the isolated build environment
+        # setup-python selects the runner's shared Python, which can hold
+        # tools of its own (pipx and its dependencies on Windows). The build
+        # uses a new environment without access to them, so the check below
+        # can keep requiring exactly the lock. GITHUB_PATH puts its python
+        # first from the next step on.
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/build-env"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cygpath -w "$RUNNER_TEMP/build-env/Scripts" >> "$GITHUB_PATH"
+          else
+            echo "$RUNNER_TEMP/build-env/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Confirm the build Python is isolated
+        # In the default shell of each leg, the one the install step uses,
+        # and before anything is installed.
+        run: |
+          python -c "import os, sys; env = os.path.join(os.environ['RUNNER_TEMP'], 'build-env'); sys.exit(None if os.path.samefile(sys.prefix, env) else f'{sys.prefix} is not the build environment')"
+
       - name: Check release tag matches the project version
         # Issue #381: the notices direct users to tag v<project version>
         # for the source and build files of their download. A tag that
         # differs (a typo, or a version bump that was not tagged) would
         # point them at a different tree, so it fails before any build.
         shell: bash
-        run: python packaging/third_party_notices.py check-tag "${{ github.ref_name }}"
+        run: python packaging/third_party_notices.py check-tag "$RELEASE_TAG"
 
       - name: Install Linux system libraries for Qt/XCB + image plugins
         # The Qt6 XCB platform plugin (libqxcb.so) and the imageformats
@@ -192,8 +331,9 @@ jobs:
         # without a hash; --only-binary installs wheels only, because
         # building an sdist would fetch its build tools unpinned and
         # unchecked; --force-reinstall downloads and hash-checks every row
-        # even when the runner already has that version. pip stays the
-        # runner's own: upgrading it would be an unpinned download.
+        # even when the environment already has that version. pip stays the
+        # one the new environment started with: upgrading it would be an
+        # unpinned download.
         run: |
           python -m pip install --require-hashes --only-binary :all: --force-reinstall -r requirements/build.txt
 
@@ -609,7 +749,8 @@ jobs:
     # prerelease tags are left out and their release continues. A stable
     # tag from 0.5.0 on must be on main with the matching sdist and wheel;
     # otherwise this job fails and no GitHub Release is created.
-    needs: tests
+    needs: [tests, recovery-proof]
+    if: ${{ !cancelled() && ((github.event_name == 'push' && needs.tests.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.recovery-proof.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -620,6 +761,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          ref: ${{ env.RECOVERY_SOURCE }}
           # The whole history, to check the tagged commit is on main.
           fetch-depth: 0
 
@@ -631,18 +773,19 @@ jobs:
 
       - name: Check the tag, its commit and the packages
         id: gate
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: python3 scripts/pypi_release_gate.py "$RELEASE_TAG" "$GITHUB_SHA" dist
+        run: python3 scripts/pypi_release_gate.py "$RELEASE_TAG" "$RELEASE_SHA" dist
 
   release:
     needs: [build, tests, audit, pypi-check]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.pypi-check.result == 'success' && (github.event_name == 'workflow_dispatch' || (needs.tests.result == 'success' && needs.audit.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RECOVERY_SOURCE }}
 
       - name: Download the app artifacts
         # Only the desktop downloads: the sdist and wheel go to PyPI.
@@ -660,7 +803,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          body_path: .github/release-announcements/${{ github.ref_name }}.md
+          # An existing tag is used as it is; the release does not move it.
+          tag_name: ${{ env.RELEASE_TAG }}
+          body_path: .github/release-announcements/${{ env.RELEASE_TAG }}.md
           generate_release_notes: false
           files: release/*
 
@@ -670,7 +815,7 @@ jobs:
     # file and the pypi environment, and does not accept a called workflow,
     # so the job stays here. It runs no repository code.
     needs: [release, pypi-check]
-    if: needs.pypi-check.outputs.publish == 'true'
+    if: ${{ !cancelled() && needs.release.result == 'success' && needs.pypi-check.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

@@ -216,7 +216,8 @@ def test_release_builds_only_after_the_full_lock_check(locks):
     # #316: the tag's locks must be what its pyproject.toml generates, row
     # for row; the recorded input digest alone does not show that.
     workflow = _release_workflow()
-    assert workflow["jobs"]["build"]["needs"] == "locks"
+    assert "locks" in workflow["jobs"]["build"]["needs"]
+    assert "needs.locks.result == 'success'" in workflow["jobs"]["build"]["if"]
     (step,) = [s for s in _release_steps("locks") if "run" in s]
     lines = step["run"].splitlines()
     # uv comes from its hashed wheel, at the release the locks are made with.
@@ -242,6 +243,28 @@ def test_release_workflow_checks_the_build_environment_before_building():
     for later in _release_steps()[check + 1:build + 1]:
         assert "pip install" not in later.get("run", "")
     assert _release_step_running(RELEASE_BUILD)[1]["run"].strip() == RELEASE_BUILD
+
+
+def test_release_builds_in_a_new_environment():
+    # The runner's Python holds tools of its own, which the exact lock check
+    # rejects. GITHUB_PATH reaches only later steps, so a separate step
+    # proves `python` is the new environment before anything is installed.
+    steps = _release_steps()
+    (setup,) = [i for i, step in enumerate(steps)
+                if str(step.get("uses", "")).startswith("actions/setup-python@")]
+    create, step = _release_step_running('python -m venv "$RUNNER_TEMP/build-env"')
+    assert create == setup + 1
+    assert "if" not in step and step["shell"] == "bash"
+    assert "system-site-packages" not in step["run"]
+    assert '>> "$GITHUB_PATH"' in step["run"]
+    for folder in ("Scripts", "bin"):
+        assert f'"$RUNNER_TEMP/build-env/{folder}"' in step["run"]
+    confirm = steps[create + 1]
+    assert "if" not in confirm and "shell" not in confirm
+    assert "os.path.samefile(sys.prefix, env)" in confirm["run"]
+    assert create + 1 < _release_step_running(RELEASE_INSTALL)[0]
+    for earlier in steps[:create]:
+        assert "python" not in earlier.get("run", "")
 
 
 def test_builds_install_the_build_lock():

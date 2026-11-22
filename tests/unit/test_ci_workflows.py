@@ -227,7 +227,7 @@ def test_release_publishes_only_after_tests_and_audit(release):
     assert jobs["audit"]["uses"] == "./.github/workflows/dependency-audit.yml"
     assert set(jobs["release"]["needs"]) == {"build", "tests", "audit", "pypi-check"}
     # The builds still start right away, in parallel with the tests.
-    assert jobs["build"]["needs"] == "locks"
+    assert set(jobs["build"]["needs"]) == {"locks", "recovery-proof"}
 
 
 def test_changelog_section_is_checked_before_anything_else_runs(release):
@@ -239,11 +239,10 @@ def test_changelog_section_is_checked_before_anything_else_runs(release):
     assert notes["permissions"] == {"contents": "read"}
     changelog, announcement = [r.strip() for r in _runs(notes) if r]
     assert changelog == (
-        'python3 scripts/release_notes.py "${{ github.ref_name }}" > /dev/null')
+        'python3 scripts/release_notes.py "$RELEASE_TAG" > /dev/null')
     assert announcement == (
         "grep -q '[^[:space:]]' "
         '".github/release-announcements/${RELEASE_TAG}.md"')
-    assert notes["steps"][-1]["env"] == {"RELEASE_TAG": "${{ github.ref_name }}"}
     for name in ("tests", "audit", "locks"):
         assert jobs[name]["needs"] == "notes", name
     # Every other job waits for it, directly or through another job.
@@ -276,8 +275,10 @@ def test_release_body_is_the_tag_announcement(release):
     (publish,) = [s for s in steps
                   if str(s.get("uses", "")).startswith("softprops/action-gh-release@")]
     with_ = publish["with"]
+    assert with_["tag_name"] == "${{ env.RELEASE_TAG }}"
+    assert "target_commitish" not in with_
     assert with_["body_path"] == (
-        ".github/release-announcements/${{ github.ref_name }}.md")
+        ".github/release-announcements/${{ env.RELEASE_TAG }}.md")
     assert with_["generate_release_notes"] is False
     assert str(steps[0].get("uses", "")).startswith("actions/checkout@")
 
@@ -307,7 +308,7 @@ def test_only_the_release_keeps_the_checked_packages(ci, release):
 
 def test_pypi_gate_reads_the_packages_before_the_github_release(release):
     job = release["jobs"]["pypi-check"]
-    assert job["needs"] == "tests"
+    assert set(job["needs"]) == {"tests", "recovery-proof"}
     assert job["permissions"] == {"contents": "read"}
     assert job["outputs"] == {"publish": "${{ steps.gate.outputs.publish }}"}
     (checkout,) = _steps_using(job, "actions/checkout")
@@ -315,16 +316,17 @@ def test_pypi_gate_reads_the_packages_before_the_github_release(release):
     (download,) = _steps_using(job, "actions/download-artifact")
     assert download["with"] == {"name": "python-dist", "path": "dist"}
     (check,) = [s for s in job["steps"] if s.get("id") == "gate"]
-    assert check["env"] == {"RELEASE_TAG": "${{ github.ref_name }}"}
     assert check["run"].strip() == (
-        'python3 scripts/pypi_release_gate.py "$RELEASE_TAG" "$GITHUB_SHA" dist')
+        'python3 scripts/pypi_release_gate.py "$RELEASE_TAG" "$RELEASE_SHA" dist')
     assert "pypi-check" in release["jobs"]["release"]["needs"]
 
 
 def test_pypi_upload_follows_the_github_release(release):
     job = release["jobs"]["publish-pypi"]
     assert set(job["needs"]) == {"release", "pypi-check"}
-    assert job["if"] == "needs.pypi-check.outputs.publish == 'true'"
+    assert job["if"] == (
+        "${{ !cancelled() && needs.release.result == 'success' "
+        "&& needs.pypi-check.outputs.publish == 'true' }}")
     assert job["environment"]["name"] == "pypi"
     # Two pinned actions, no repository code.
     download, publish = job["steps"]
@@ -333,6 +335,65 @@ def test_pypi_upload_follows_the_github_release(release):
     assert re.fullmatch(r"pypa/gh-action-pypi-publish@[0-9a-f]{40}", publish["uses"])
     # Trusted publishing with its default attestations.
     assert "with" not in publish
+
+
+# ─── One-shot v0.5.0 recovery ───────────────────────────────────────────
+
+RECOVERY_SHA = "969798f361ea18fb0c63b8bedde10479477de593"
+
+
+def test_manual_release_run_can_only_recover_v0_5_0(release):
+    # No inputs: a manual run cannot name another version or commit.
+    triggers = _triggers(release)
+    assert set(triggers) == {"push", "workflow_dispatch"}
+    assert triggers["workflow_dispatch"] is None
+    manual = "${{ github.event_name == 'workflow_dispatch' && "
+    assert release["env"] == {
+        "RELEASE_TAG": manual + "'v0.5.0' || github.ref_name }}",
+        "RELEASE_SHA": manual + f"'{RECOVERY_SHA}' || github.sha }}}}",
+        "RECOVERY_SOURCE": manual + f"'{RECOVERY_SHA}' || '' }}}}",
+    }
+    # Every source checkout: the tag's commit by hand, the default on a push.
+    for name in ("notes", "locks", "build", "pypi-check", "release"):
+        (checkout,) = _steps_using(release["jobs"][name], "actions/checkout")
+        assert checkout["with"]["ref"] == "${{ env.RECOVERY_SOURCE }}", name
+
+
+def test_recovery_proof_runs_no_repository_code(release):
+    job = release["jobs"]["recovery-proof"]
+    assert job["needs"] == "notes"
+    assert job["if"] == "github.event_name == 'workflow_dispatch'"
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    assert not _steps_using(job, "actions/checkout")
+    proof = job["steps"][0]["run"]
+    for required in ('expect "workflow ref" "$GITHUB_REF" "refs/heads/main"',
+                     "$TAG_OBJECT", "$CI_RUN", "$SOURCE_RUN", "$PACKAGE_DIGEST",
+                     '"$release_status" 404', '"$pypi_status" 404'):
+        assert required in proof, required
+    (download,) = _steps_using(job, "actions/download-artifact")
+    assert re.fullmatch(r"actions/download-artifact@[0-9a-f]{40}", download["uses"])
+    assert download["with"]["name"] == "python-dist"
+    assert download["with"]["run-id"] == "${{ env.SOURCE_RUN }}"
+    assert "digest-mismatch" not in download["with"]
+    (upload,) = _steps_using(job, "actions/upload-artifact")
+    assert upload["with"]["name"] == "python-dist"
+    assert upload["with"]["if-no-files-found"] == "error"
+
+
+def test_recovery_skips_only_the_checks_it_reuses(release):
+    jobs = release["jobs"]
+    for name in ("tests", "audit"):
+        assert jobs[name]["if"] == "github.event_name == 'push'", name
+    for name in ("notes", "locks"):
+        assert "if" not in jobs[name], name
+    for needed in ("locks", "recovery-proof"):
+        assert f"needs.{needed}.result == 'success'" in jobs["build"]["if"]
+    assert "needs.recovery-proof.result == 'success'" in jobs["pypi-check"]["if"]
+    # A tag push still needs everything it needed before.
+    assert ("github.event_name == 'push' && needs.tests.result == 'success'"
+            in jobs["pypi-check"]["if"])
+    for needed in ("build", "pypi-check", "tests", "audit"):
+        assert f"needs.{needed}.result == 'success'" in jobs["release"]["if"]
 
 
 def test_only_the_release_publisher_and_pages_deploy_request_an_identity():
