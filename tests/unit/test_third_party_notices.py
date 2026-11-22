@@ -1178,7 +1178,7 @@ def test_workflow_checks_release_tag_before_building():
     assert tag_i < build_i
     assert "if" not in tag, "every leg must check the tag"
     assert tag["run"].strip() == (
-        'python packaging/third_party_notices.py check-tag "${{ github.ref_name }}"')
+        'python packaging/third_party_notices.py check-tag "$RELEASE_TAG"')
 
 
 def test_onefile_rebuild_route_keeps_the_modified_component(tmp_path, project, python):
