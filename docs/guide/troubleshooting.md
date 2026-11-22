@@ -44,13 +44,19 @@ first time. If you downloaded the file from the
 ### macOS says the app cannot be opened
 
 The {{ release.tag }} macOS builds are not signed or notarized, so macOS may
-refuse to open them. Apple describes how to open such an app
+refuse to open them, for example with the message **MeManga is damaged and
+can't be opened**. Apple describes how to open such an app
 ([Apple Support](https://support.apple.com/en-us/102445)):
 
 1. Try to open **MeManga.app** once, and close the message.
 2. Open **System Settings → Privacy & Security**, scroll down and choose
    **Open Anyway**.
 3. Choose **Open** in the message that follows.
+
+If **Privacy & Security** does not offer **Open Anyway**, you can still use
+the [command line from source](./install#command-line-from-source) or, if you
+use Docker, the [Docker image](./docker). Both run the command line, not the
+desktop app. Please [report the problem](#report-a-problem) too.
 
 Do this only for the file from the MeManga release page. Apple warns that
 software that is not signed and notarized can expose your computer to
@@ -72,15 +78,15 @@ On a Raspberry Pi or another 64-bit ARM Linux system, use the
 
 ### MeManga is already running
 
-<Badge type="info" :text="`Not in ${release.tag}`" /> The message **MeManga is
-already running for this library** means another MeManga program is using
+The message **MeManga is already running for this library** <Badge type="info" :text="`Not in ${release.tag}`" />
+means another MeManga program is using
 the config folder: a second window, a check that is running, or a command.
 Close it or let it finish, then start MeManga again.
 
 ### The settings or the library cannot be read
 
-<Badge type="info" :text="`Not in ${release.tag}`" /> MeManga shows a message
-and stops instead of starting with empty settings. The message names the
+MeManga shows a message and stops instead of starting with empty settings <Badge type="info" :text="`Not in ${release.tag}`" />.
+The message names the
 file. [When state.json cannot be read](../reference/state#when-state-json-cannot-be-read)
 explains how to get back to the previous copy.
 
@@ -134,7 +140,7 @@ browser folder listed under
 
 - {{ release.tag }}: the desktop app asks to download them at every start
   until they are there.
-- <Badge type="info" :text="`Not in ${release.tag}`" /> Development version:
+- Development version <Badge type="info" :text="`Not in ${release.tag}`" />:
   if you skipped the download, choose **Settings → Advanced → Install browser
   components**. On the command line, `memanga setup` installs them after you
   agree.
@@ -256,9 +262,8 @@ download folder is set.
 Some records keep the full path a file was saved under, and still point to
 the old place:
 
-- <Badge type="info" :text="`Not in ${release.tag}`" /> **Chapters waiting
-  for Kindle delivery.** `memanga send --pending` and `memanga send "TITLE"
-  CHAPTER` both use the path saved with such a chapter, so they say the
+- **Chapters waiting for Kindle delivery.** <Badge type="info" :text="`Not in ${release.tag}`" /> `memanga send --pending`
+  and `memanga send "TITLE" CHAPTER` both use the path saved with such a chapter, so they say the
   saved file is no longer there. Setting the new download folder does not
   change that path.
 - **Partly downloaded chapters** and the **download history** keep the old

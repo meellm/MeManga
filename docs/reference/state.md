@@ -190,8 +190,8 @@ The command line also checks every entry of the file before it changes
 anything <Badge type="info" :text="newer" />: each series needs a title and
 its fields need the types MeManga writes, and two series must not end up
 sharing a download folder. `memanga import --dry-run FILE` runs these
-checks and shows what would change, without changing anything
-<Badge type="info" :text="newer" />. The desktop app checks only the
+checks and shows what would change, without changing anything <Badge type="info" :text="newer" />.
+The desktop app checks only the
 version, so check a file with `--dry-run` before you import it there.
 
 ### Between versions
@@ -200,7 +200,7 @@ Exports from {{ release.tag }} and from the development version both have `versi
 
 ## Schema version
 
-<Badge type="info" :text="newer" /> `config.yaml` and `state.json` each have a `schema_version`, a whole number
+`config.yaml` and `state.json` each have a `schema_version` <Badge type="info" :text="newer" />, a whole number
 that changes only when the layout of the file changes in a way that needs a
 conversion. For `state.json` it is currently `1`.
 
@@ -305,8 +305,8 @@ Each record in `download_history` has:
 ### Notifications
 
 Each record in `notifications` has `type`, `message`, `timestamp` and
-`read`. A notification with an error message also has `details`
-<Badge type="info" :text="newer" />, the message without private details
+`read`. A notification with an error message also has `details` <Badge type="info" :text="newer" />,
+the message without private details
 such as passwords. A long message is cut there; `details_chars` gives the
 full length and `details_file` names the file in `error-details/` with the
 whole text.

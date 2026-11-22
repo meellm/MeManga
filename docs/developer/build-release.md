@@ -146,8 +146,8 @@ starts it, but it does not wait for the release workflow or its checks:
 it builds the image, runs a smoke test of it and publishes it. It can also be run by
 hand, with or without publishing.
 
-<Badge type="info" text="Not in v0.4.4" /> The one-folder Windows and
-Linux downloads and the notices files came after v0.4.4; see
+The one-folder Windows and Linux downloads and the notices files <Badge type="info" text="Not in v0.4.4" />
+came after v0.4.4; see
 [Download and install](../guide/install#what-changes-after-v0-4-4).
 
 ## macOS signing and notarization

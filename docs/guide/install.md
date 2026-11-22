@@ -200,8 +200,8 @@ MeManga's own code is under the MIT license. The desktop downloads and the
 Docker image also contain third-party software under its own licenses.
 Among them, Qt, PySide6, Shiboken6 and img2pdf are used under the GNU LGPL.
 
-<Badge type="info" :text="`Not in ${release.tag}`" /> Downloads and images
-built from the development version come with a `THIRD_PARTY_NOTICES.txt`
+Downloads and images built from the development version <Badge type="info" :text="`Not in ${release.tag}`" />
+come with a `THIRD_PARTY_NOTICES.txt`
 that reproduces those licenses, links the source code of the LGPL
 components, and explains how to use a modified version of them:
 

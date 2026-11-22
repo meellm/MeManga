@@ -49,8 +49,8 @@ memanga edit "TITLE" --fallback-days 1
 `edit --backup` replaces the first backup and keeps any further ones. All
 options are in the [command reference](../reference/cli#memanga-edit).
 
-<Badge type="info" :text="`In ${release.tag}`" /> The command is called
-`memanga update` and takes only `--backup`, so on the command line the
+The command is called `memanga update` <Badge type="info" :text="`In ${release.tag}`" />
+and takes only `--backup`, so on the command line the
 delay is set when the series is added. `memanga add --backup` and
 `--fallback-days` work as above, and the desktop app's **Edit** form changes
 the delay in both versions.
