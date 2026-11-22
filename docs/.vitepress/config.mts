@@ -29,6 +29,24 @@ export default defineConfig({
     'reference/supported-websites-list.md'
   ],
 
+  markdown: {
+    config(md) {
+      // VitePress labels each heading's permalink from the heading's source,
+      // which still has any {#id} and inline markup. Give it the plain text.
+      md.core.ruler.before('anchor', 'plain_heading_label', (state) => {
+        state.tokens.forEach((token, index) => {
+          if (token.type !== 'heading_open') return
+          const inline = state.tokens[index + 1]
+          inline.content = (inline.children ?? [])
+            .filter(({ type }) => ['text', 'code_inline', 'emoji'].includes(type))
+            .map(({ content }) => content)
+            .join('')
+            .trim()
+        })
+      })
+    }
+  },
+
   themeConfig: {
     nav: [
       { text: 'Docs', link: '/guide/', activeMatch: '^/guide/$' },
