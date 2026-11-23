@@ -8,7 +8,7 @@ for development first, see [Set up for development](./contributing).
 
 | What | Built by | Where it ends up |
 |---|---|---|
-| The Python package (sdist and wheel) | The `package` job of CI, on every push and pull request to `main` | Nowhere yet: CI only checks it builds and starts. Installing from a package index is [not available yet](../guide/install#package-installs). |
+| The Python package (sdist and wheel) | The `package` job of CI, on every push and pull request to `main`, and on a version tag | CI checks that it builds and starts. On a stable tag from `v0.5.0` on, the release uploads the checked files to [PyPI](https://pypi.org/project/memanga/). |
 | The desktop app | `build.py` and `build_app.py`, with PyInstaller | A local file or folder; on a version tag, the release downloads |
 | The Docker image | The Docker Image workflow | GHCR and Docker Hub, on a version tag |
 
@@ -101,10 +101,10 @@ the Build & Release workflow (`.github/workflows/release.yml`).
 
 1. Set the version in `memanga/__init__.py` (`__version__`).
    `pyproject.toml` reads it from there.
-2. Give the version its own section in `CHANGELOG.md`, `## [1.2.3]`. The
-   section becomes the text of the GitHub release. In the links at the end
-   of the file, below `## Earlier versions` so that they stay out of the
-   release text, add the new version and move `[Unreleased]` to its tag:
+2. Give the version its own section in `CHANGELOG.md`, `## [1.2.3]`. In the
+   links at the end of the file, below `## Earlier versions` so that they
+   stay out of that section, add the new version and move `[Unreleased]` to
+   its tag:
 
    ```md
    [Unreleased]: https://github.com/meellm/MeManga/compare/v1.2.3...main
@@ -113,12 +113,16 @@ the Build & Release workflow (`.github/workflows/release.yml`).
 
    `tests/unit/test_release_notes.py` checks these links against the
    section headings.
-3. Push the tag `v` plus that version, for example `v1.2.3`.
+3. Add a short announcement in `.github/release-announcements/v1.2.3.md`.
+   It becomes the text of the GitHub release.
+4. Push the tag `v` plus that version, for example `v1.2.3`.
 
-The workflow then runs, and publishes nothing unless every step passes:
+The workflow then runs. Each publishing step needs the steps before it to
+pass:
 
 - **Release notes:** `scripts/release_notes.py` fails when the tag is not
   `v<version>` or `CHANGELOG.md` has no section, or an empty one, for it.
+  The announcement file must exist and not be blank.
 - **Checks of the tagged tree:** the CI workflow, the dependency audit, and
   the full lock check.
 - **Builds:** Windows, macOS on Apple silicon and on Intel, and Linux. Each
@@ -135,20 +139,30 @@ The workflow then runs, and publishes nothing unless every step passes:
   - packs the download: a `.zip` folder on Windows, a `.tar.gz` folder on
     Linux, a zipped `MeManga.app` on macOS, each with its
     `<download>-THIRD_PARTY_NOTICES.txt`.
-- **Publish:** a GitHub release for the tag, with the `CHANGELOG.md`
-  section followed by GitHub's list of changes, and all downloads.
+- **PyPI check:** `scripts/pypi_release_gate.py` decides whether the tag
+  goes to PyPI. Older and prerelease tags are left out, and their release
+  continues. A stable tag from `v0.5.0` on must be on `main` and have the
+  matching sdist and wheel from CI; otherwise no release is created.
+- **Publish:** a GitHub release for the tag, with the announcement as its
+  text, and all downloads.
+- **PyPI:** after the GitHub release, a tag that passed the PyPI check
+  uploads the sdist and wheel CI checked, through trusted publishing in the
+  `pypi` environment. There is no second build.
 
-After a release, update `docs/.vitepress/release.ts`, so this site names
-the new release and its downloads.
+After a release, update together, so this site names the new release and its
+downloads:
+
+- `docs/.vitepress/release.ts`;
+- `RELEASE_TAG` and `RELEASE_KEYS` in `memanga/config_docs.py`, then run
+  `python -m memanga.config_docs`;
+- the image in `compose.yaml` and the tags in the
+  [Docker guide](../guide/docker).
 
 **The Docker image** has its own Docker Image workflow. The same tag
-starts it, but it does not wait for the release workflow or its checks:
-it builds the image, runs a smoke test of it and publishes it. It can also be run by
+starts it, but it does not wait for the release workflow or its checks. It
+runs its own dependency audit, builds the image, runs smoke tests of the
+command line and of the browsers, and publishes it. It can also be run by
 hand, with or without publishing.
-
-The one-folder Windows and Linux downloads and the notices files <Badge type="info" text="Not in v0.4.4" />
-came after v0.4.4; see
-[Download and install](../guide/install#what-changes-after-v0-4-4).
 
 ## macOS signing and notarization
 

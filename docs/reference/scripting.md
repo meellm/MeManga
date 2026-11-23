@@ -1,9 +1,5 @@
 # Use MeManga in scripts
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 This page is for people who call `memanga` from a script, a scheduled job
 or another program. It describes how the command line behaves today: how a
 series is picked, what the exit codes mean, when a command asks a question,
@@ -15,8 +11,6 @@ To read a library from Python instead, see the [Python API](./python-api).
 
 ::: info What this page covers
 - It describes the **development version** as it behaves now.
-  {{ release.tag }} is older: of the JSON output described here it has only
-  `search --json`.
 - Apart from the [deprecation policy](#deprecation-policy), the page
   describes behaviour; it is not a promise that every detail stays the
   same.
@@ -336,9 +330,8 @@ In practice:
 
 ### Deprecated today: `memanga set`
 
-`memanga set "TITLE" STATUS` still changes the status of a series. In the
-development version it prints a warning on standard error each time and
-names the replacement:
+`memanga set "TITLE" STATUS` still changes the status of a series. It prints
+a warning on standard error each time and names the replacement:
 
 ```sh
 memanga edit "TITLE" --status STATUS
@@ -346,11 +339,9 @@ memanga edit "TITLE" --status STATUS
 
 Where this stands:
 
-- {{ release.tag }} has `set` without a warning, and has no `edit` command.
-  The warning has not been part of a tagged release yet.
-- The warning text says `set` will be removed "in the next release". Under
-  the policy above, `set` stays at least in the first tagged release that
-  prints the warning.
+- v0.5.0 is the first tagged release that prints the warning.
+- The warning text says `set` will be removed "in the next release". The
+  policy above allows that, because v0.5.0 carries the warning.
 
 No other command or option is deprecated today.
 

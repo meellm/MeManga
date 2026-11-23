@@ -1,9 +1,5 @@
 # First steps
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 This page takes you from a fresh install to a working setup, without
 downloading any chapters. If MeManga is not installed yet, start with
 [Download and install](./install).
@@ -32,15 +28,10 @@ The desktop app is described in three pages:
 [Library and downloads](../desktop/library), [Reader](../desktop/reader) and
 [Settings](../desktop/settings).
 
-These areas are the same in {{ release.tag }} and in the development version.
-
 ## Command line
 
-<Badge type="warning" text="Development version" />
-
-The commands in this section are for an
-[install from source](./install#command-line-from-source). Several of them do
-not exist in {{ release.tag }}.
+The commands in this section need the `memanga` command.
+[Download and install](./install) covers the ways to get it.
 
 ### Check the installation
 

@@ -1,18 +1,13 @@
 # Check on a schedule
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 MeManga can check for new chapters without you: once a day at a time you
 choose, started by your computer's scheduler, or on a fixed interval by a
 command that keeps running. Both run the same command,
 `memanga check --auto --quiet`.
 
 ::: info How to read this page
-- This page describes the **development version** of the command line.
-  [In release {{ release.tag }}](#in-release-v0-4-4) explains what is
-  different there.
+- [Moving from v0.4.4](#in-release-v0-4-4) covers a schedule set up with
+  that version.
 - In a Docker container, follow
   [Check on a schedule](./docker#check-on-a-schedule) on the Docker page
   instead.
@@ -226,19 +221,9 @@ recorded as soon as it is saved, so the next check carries on from there.
   `NAME=value` above MeManga's line.
 - `memanga failed` lists chapters that failed.
 
-## Differences in release v0.4.4 {#in-release-v0-4-4}
+## Moving from v0.4.4 {#in-release-v0-4-4}
 
-- **`memanga cron install` and `remove` in {{ release.tag }} delete every
-  crontab line that contains the word `memanga`**, including lines you wrote
-  yourself. Keep a copy of your crontab first, with `crontab -l`.
-- Its log file `memanga.log` is in the folder the program is installed in,
-  not in the config folder.
-- {{ release.tag }} has no `memanga watch`.
-- In the {{ release.tag }} desktop app you download, **Scheduled Checks**
-  creates a task that starts the app instead of running a check. Do not use
-  it there.
-- After moving from {{ release.tag }} to the development version, the line
-  {{ release.tag }} wrote is not marked as MeManga's. `cron status` lists it,
-  but `install` and `remove` leave it alone. Delete it with `crontab -e`, then
-  run `memanga cron install`. On Windows the task has the same name and is
-  replaced.
+The crontab line v0.4.4 wrote is not marked as MeManga's. `cron status` lists
+it, but `install` and `remove` leave it alone. Delete it with `crontab -e`,
+then run `memanga cron install`. On Windows the task has the same name and is
+replaced.

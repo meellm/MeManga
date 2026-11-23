@@ -35,8 +35,8 @@ prepares MeManga from a script.
 ## Setup — pip install
 
 [Command line from source](https://meellm.github.io/MeManga/guide/install#command-line-from-source).
-Installing from a package index is
-[not available yet](https://meellm.github.io/MeManga/guide/install#package-installs).
+To install from PyPI, see
+[Package installs](https://meellm.github.io/MeManga/guide/install#package-installs).
 
 - <a name="desktop-app-from-pip"></a>Desktop app from pip:
   [Desktop app from source](https://meellm.github.io/MeManga/guide/install#desktop-app-from-source)

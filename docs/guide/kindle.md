@@ -1,15 +1,8 @@
 # Send chapters to a Kindle
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 MeManga can email each downloaded chapter to a Kindle through Amazon's Send
 to Kindle service. This page covers the setup, what is sent and when, and
 what to check when a chapter does not arrive.
-
-Sections that apply only to the development version say so. Everything else
-is the same in {{ release.tag }}.
 
 ## What you need
 
@@ -22,8 +15,7 @@ is the same in {{ release.tag }}.
 
 MeManga does not use your Amazon password and does not sign in to Amazon.
 
-The development version checks the format and does not send anything else.
-{{ release.tag }} does not check it, so choose PDF or EPUB yourself.
+MeManga checks the format and does not send anything else.
 
 ### Gmail app passwords
 
@@ -81,7 +73,7 @@ Kindle".
 
 Run `memanga config` and answer the questions about delivery and email.
 
-In the development version you can also set values one at a time:
+You can also set values one at a time:
 
 ```sh
 memanga config set delivery.mode email
@@ -97,7 +89,7 @@ settings with the password masked.
 
 ## Step 3: test it
 
-In the development version there are two tests. Both use the network.
+There are two tests. Both use the network.
 
 **Sign-in only.** Signs in to the mail server and sends nothing. In the
 desktop app choose **Check Login**. On the command line:
@@ -119,8 +111,6 @@ prove that it reached your Kindle: Amazon delivers it only when the sender is
 approved. Check your Kindle library for the test document. If it does not
 appear, see [When a chapter does not arrive](#when-a-chapter-does-not-arrive).
 
-{{ release.tag }} has one button, **Test Connection**, which signs in only.
-
 ## What is sent, and when
 
 When delivery mode is Email, a chapter is sent right after it is downloaded.
@@ -130,8 +120,8 @@ There is nothing to do by hand.
 
 Each series has a **Send to Kindle after download** switch on its page.
 
-In the development version, **Settings → General → Send to Kindle** also
-decides what happens to series you have not set either way:
+**Settings → General → Send to Kindle** also decides what happens to series
+you have not set either way:
 
 | Choice | Effect |
 |---|---|
@@ -172,11 +162,9 @@ under a safe size.
 - **EPUB:** an EPUB cannot be split. One that is too large is not sent, and
   MeManga tells you to use PDF instead.
 
-In {{ release.tag }} the limit is fixed: a file may be at most 18 MB before
-encoding. In the development version it follows the setting
-`email.max_email_mb`, the size limit of your email provider in megabytes,
-from 10 to 50, with 25 as the default. A file may use 72% of it, which is 18
-MB at the default.
+The limit follows the setting `email.max_email_mb`, the size limit of your
+email provider in megabytes, from 10 to 50, with 25 as the default. A file
+may use 72% of it, which is 18 MB at the default.
 
 Amazon's own limit for one email to a Send to Kindle address is 50 MB in
 total, according to its help page linked above.
@@ -189,8 +177,7 @@ To stop sending chapters and only save them to your download folder:
   **Delivery Mode** to **Local (save to disk)** and choose
   **Save settings**.
 - **On the command line:** run `memanga config`, answer `1` (local) to the
-  delivery mode question and confirm the download folder.
-  <Badge type="info" :text="`Not in ${release.tag}`" /> You can also run:
+  delivery mode question and confirm the download folder. You can also run:
 
   ```sh
   memanga config set delivery.mode local
@@ -207,7 +194,7 @@ Switching does not delete anything:
 - Each series keeps its **Send to Kindle after download** switch, and the
   Send to Kindle choice stays too. They apply again when you choose **Email
   (send to Kindle)** later.
-- In the development version, chapters that were not sent stay listed.
+- Chapters that were not sent stay listed.
   While delivery is local they are not sent again: trying to send one with
   `memanga send --pending`, `memanga send "TITLE" CHAPTER` or the desktop
   app's **Send** button stops with a message, and nothing is emailed.
@@ -223,12 +210,10 @@ MeManga stores the password in your system's keyring when one is available,
 for example the macOS Keychain or the Windows Credential Locker. Whether a
 keyring is available depends on your system and how it is set up.
 If no keyring can be used, the password is saved as plain text in
-`config.yaml`. Keep that file private. The development version tells you
-when this happens; {{ release.tag }} does not.
+`config.yaml`. Keep that file private. MeManga tells you when this happens.
 
-In the development version you can supply the password from outside instead,
-which suits servers and containers. Set one of these environment variables,
-not both:
+You can supply the password from outside instead, which suits servers and
+containers. Set one of these environment variables, not both:
 
 - `MEMANGA_SMTP_PASSWORD`: the password itself.
 - `MEMANGA_SMTP_PASSWORD_FILE`: the path of a file that contains only the
@@ -242,11 +227,7 @@ written to disk by MeManga.
 The default settings are for Gmail. For another provider, enter its SMTP
 server and port.
 
-In {{ release.tag }} the connection always starts unencrypted and is
-upgraded with STARTTLS. There is no setting for this.
-
-In the development version, `email.smtp_tls` chooses how the connection is
-secured:
+`email.smtp_tls` chooses how the connection is secured:
 
 | Value | Meaning |
 |---|---|
@@ -277,8 +258,7 @@ Work through these in order.
    among the requirements, and says Amazon keeps trying to deliver a
    document for up to 60 days.
 
-In the development version, a chapter that was downloaded but could not be
-emailed is remembered:
+A chapter that was downloaded but could not be emailed is remembered:
 
 - In the desktop app, its row says **Not sent to Kindle** and has a **Send**
   button. The reason is in **Notifications**.

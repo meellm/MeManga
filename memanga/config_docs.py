@@ -32,21 +32,28 @@ HEADER = (
 # The latest published release and the keys its code reads. A published
 # release does not change; update both when a new release is published,
 # together with docs/.vitepress/release.ts.
-RELEASE_TAG = "v0.4.4"
+RELEASE_TAG = "v0.5.0"
 RELEASE_KEYS = frozenset({
+    "schema_version",
     "manga",
     "delivery.mode", "delivery.download_dir", "delivery.delete_after_send",
     "delivery.output_format", "delivery.naming_template",
     "delivery.post_processing.enabled", "delivery.post_processing.command",
     "delivery.post_processing.fail_on_error",
     "email.kindle_email", "email.sender_email", "email.smtp_server",
-    "email.smtp_port", "email.app_password",
+    "email.smtp_port", "email.smtp_tls", "email.smtp_timeout",
+    "email.max_email_mb", "email.kindle_scope", "email.app_password",
     "cron.enabled", "cron.time",
     "gui.sort_by", "gui.auto_check", "gui.auto_check_interval",
     "gui.reader_prefetch_next", "gui.max_concurrent_downloads",
     "gui.view_mode", "gui.reader_view_mode", "gui.reader_dual_page",
+    "gui.network_check", "gui.network_check_hosts",
+    "gui.mangadex_cover_fallback", "gui.search_chapter_counts",
+    "gui.cover_cache_max_mb", "gui.browser_install_skipped",
+    "gui.download_dir_confirmed",
     "reader.remove_after_read",
     "partial_chapters.enabled", "partial_chapters.threshold_percent",
+    "mangadex.data_saver", "mangadex.removed_group_ids",
     "sources.disabled", "sources.first_run_seeded",
     "sources.recurated_asura",
 })
@@ -150,9 +157,10 @@ KEYS: Dict[str, KeyDoc] = {
         desktop="Settings → General",
         commands=("memanga config",)),
     "delivery.naming_template": KeyDoc(
-        "Name of each chapter file, without the extension. `{title}`, "
-        "`{chapter}` and `{source}` are replaced with the series title, the "
-        "chapter number and the source. A folder of images is always named "
+        "Name of each chapter file the desktop app saves, without the "
+        "extension. `{title}`, `{chapter}` and `{source}` are replaced with "
+        "the series title, the chapter number and the source. Command-line "
+        "downloads use the default name. A folder of images is always named "
         "`Chapter` and the chapter number.",
         desktop="Settings → General"),
     "delivery.post_processing.enabled": KeyDoc(

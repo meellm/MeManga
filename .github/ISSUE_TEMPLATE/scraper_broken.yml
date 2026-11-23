@@ -64,9 +64,9 @@ body:
     attributes:
       label: MeManga version
       description: >-
-        The desktop app shows it in the window title. On a development
-        install, run `memanga --version`. With Docker, give the image tag.
-      placeholder: "0.4.4"
+        The desktop app shows it in the window title. On the command line,
+        run `memanga --version`. With Docker, give the image tag.
+      placeholder: "0.5.0"
     validations:
       required: true
   - type: input
@@ -83,6 +83,7 @@ body:
       options:
         - Desktop download from the releases page
         - Docker
+        - PyPI package (pip, pipx or uv)
         - Command line from source
         - Desktop app from source
         - Other

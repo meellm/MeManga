@@ -62,13 +62,15 @@ class TestPublishedImageFile:
         assert re.fullmatch(r"\d+\.\d+\.\d+", tag), tag
 
     def test_every_service_gets_an_init_process(self, published):
-        # The 0.4.4 image starts memanga directly as PID 1.
+        # An older image set with MEMANGA_IMAGE starts memanga directly as
+        # PID 1.
         for name, service in published["services"].items():
             assert service.get("init") is True, name
 
     def test_no_service_needs_a_command_the_release_lacks(self, published):
-        # `memanga watch` is not in the pinned release, so nothing may run
-        # it or be set up as a long-running service.
+        # This file also runs an older MEMANGA_IMAGE, which may not have
+        # `memanga watch`, so nothing may run it or be set up as a
+        # long-running service.
         for name, service in published["services"].items():
             assert "watch" not in service.get("command", []), name
             assert "restart" not in service, name

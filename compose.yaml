@@ -15,9 +15,9 @@
 services:
   # One-off commands: docker compose run --rm memanga <command>
   memanga:
-    image: ${MEMANGA_IMAGE:-meellm/memanga:0.4.4}
-    # The 0.4.4 image has no init process of its own. This one cleans up
-    # the helper processes that the browsers leave behind.
+    image: ${MEMANGA_IMAGE:-meellm/memanga:0.5.0}
+    # Cleans up the helper processes that the browsers leave behind. The
+    # image has this built in from 0.5.0; an older MEMANGA_IMAGE needs it.
     init: true
     environment:
       TZ: ${TZ:-UTC}

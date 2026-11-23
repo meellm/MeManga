@@ -1,19 +1,12 @@
 # Architecture
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 How MeManga is put together, for people who work on its code: the path a
 chapter takes from the config file to the download folder, where each
 decision is made, which threads do the work, and what happens when
 something fails or is cancelled.
 
 ::: info Which code this page describes
-The page follows the `main` branch. {{ release.tag }} predates much of this
-structure: the chapter pipeline, the config folder lock, the state stores,
-the source catalog, `memanga watch` and `memanga.api` are not in it, and its
-downloader is a single module.
+The page follows the `main` branch.
 :::
 
 ## The path of a chapter

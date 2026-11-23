@@ -1,10 +1,5 @@
 # Data files and backups
 
-<script setup>
-import { release } from '../.vitepress/release'
-const newer = `Not in ${release.tag}`
-</script>
-
 MeManga keeps two files in its config folder:
 
 - `config.yaml` holds your settings and your library, the list of series you
@@ -20,7 +15,6 @@ says where the config folder is; `state.json` is next to `config.yaml`.
 
 ::: info How to read this page
 - This page describes the **development version**.
-- Files, fields and options marked <Badge type="info" :text="newer" /> are not used by {{ release.tag }}.
 - `state.json` is MeManga's working file, not an interface for other
   programs, and its layout can change in a new version. To read your data
   from a script, use the commands' JSON output (see
@@ -34,19 +28,19 @@ says where the config folder is; `state.json` is next to `config.yaml`.
 | File | What it holds |
 |---|---|
 | `config.yaml` | Your settings and your library. |
-| `config.yaml.bak` <Badge type="info" :text="newer" /> | The previous `config.yaml`, from before the last save. |
+| `config.yaml.bak` | The previous `config.yaml`, from before the last save. |
 | `state.json` | Downloads, reading, history and source state; see [the fields](#fields-of-state-json). |
-| `state.json.bak` <Badge type="info" :text="newer" /> | The previous `state.json`, from before the last save. |
-| `state.json.corrupt-…` <Badge type="info" :text="newer" /> | A copy of a `state.json` that could not be read. MeManga never deletes it. |
-| `error-details/` <Badge type="info" :text="newer" /> | The full text of long error messages in the desktop app's notifications, for the newest 20 of them. |
-| `diagnostics.log` <Badge type="info" :text="newer" /> | Diagnostic messages, only when you start MeManga with `--log-file`. |
-| `memanga.lock` <Badge type="info" :text="newer" /> | Shows that a MeManga process is working with these files. |
+| `state.json.bak` | The previous `state.json`, from before the last save. |
+| `state.json.corrupt-…` | A copy of a `state.json` that could not be read. MeManga never deletes it. |
+| `error-details/` | The full text of long error messages in the desktop app's notifications, for the newest 20 of them. |
+| `diagnostics.log` | Diagnostic messages, only when you start MeManga with `--log-file`. |
+| `memanga.lock` | Shows that a MeManga process is working with these files. |
 
 ## Safety copies and export files
 
 MeManga has two kinds of copies, and they do different jobs.
 
-| | Safety copy (`.bak`) <Badge type="info" :text="newer" /> | Export file |
+| | Safety copy (`.bak`) | Export file |
 |---|---|---|
 | Made | automatically, at every save | when you export |
 | Contains | the whole previous file | your library and the state of each series |
@@ -56,8 +50,6 @@ MeManga has two kinds of copies, and they do different jobs.
 
 An export file can contain the paths of files on your computer, such as
 where a partial chapter was saved. Keep that in mind before you share one.
-
-{{ release.tag }} keeps no safety copies. If its `state.json` cannot be read, it starts with empty state and replaces the file at its next save. Export your library regularly when you use {{ release.tag }}.
 
 ### Go back to the previous copy
 
@@ -73,7 +65,7 @@ in it.
 
 ### When state.json cannot be read
 
-<Badge type="info" :text="newer" /> When `state.json` is damaged, for example cut off by a crash or full disk:
+When `state.json` is damaged, for example cut off by a crash or full disk:
 
 1. MeManga keeps a copy of it as `state.json.corrupt-` followed by the time
    and a random part.
@@ -103,7 +95,7 @@ still run. Fix the file, or go back to `config.yaml.bak` as described above.
 - **Desktop app:** Settings → Advanced → Import / Export → **Export**.
 - **Command line:** `memanga export FILE`. Without a file name it writes
   `memanga_export.json` in the current folder. `memanga export -` writes
-  to standard output instead <Badge type="info" :text="newer" />.
+  to standard output instead.
 
 The export file is JSON:
 
@@ -145,7 +137,7 @@ A shortened example with one series:
 
 - **Desktop app:** **Import (Merge)**.
 - **Command line:** `memanga import FILE`, or `memanga import -` to read
-  standard input <Badge type="info" :text="newer" />.
+  standard input.
 
 **Your library:** a series from the file is added unless your library has a
 series with the same title, compared without regard to upper and lower
@@ -161,7 +153,7 @@ on both sides:
 | `downloaded`, `read_chapters`, `external_chapters` | Every chapter from both sides, in chapter order. |
 | `available_chapters` | Both lists; a chapter with the same number, address, source and backup flag only once. |
 | `failed_chapters`, `partial_chapters`, `pending_backup`, `saved_chapter_groups` | Records of both sides, by chapter. When both have a record for the same chapter, the one here is kept. |
-| `undelivered_chapters`, `resolved_deliveries` <Badge type="info" :text="newer" /> | A Kindle delivery that was sent or dismissed on either side stays done. A failed delivery stays queued only when it provably failed after that; when the order cannot be told, it is dropped rather than risk sending the chapter twice. |
+| `undelivered_chapters`, `resolved_deliveries` | A Kindle delivery that was sent or dismissed on either side stays done. A failed delivery stays queued only when it provably failed after that; when the order cannot be told, it is dropped rather than risk sending the chapter twice. |
 | `reading_progress` | The side with the later `last_read`. |
 | `new_chapters_available` | The higher number. |
 | `last_chapter` | The higher chapter. |
@@ -174,7 +166,7 @@ on both sides:
 - **Desktop app:** **Import (Replace)**. It replaces right away, without
   asking again: export your current library first.
 - **Command line:** `memanga import --replace FILE`. It asks before it
-  replaces anything; `--yes` answers for you <Badge type="info" :text="newer" />.
+  replaces anything; `--yes` answers for you.
 
 Replace sets your library to the file's series list and the state of each
 series to the file's. A series of yours that is not in the file loses its
@@ -187,24 +179,24 @@ Both ways refuse a file without a `version`, or with a version newer than
 this MeManga knows, and change nothing.
 
 The command line also checks every entry of the file before it changes
-anything <Badge type="info" :text="newer" />: each series needs a title and
+anything: each series needs a title and
 its fields need the types MeManga writes, and two series must not end up
 sharing a download folder. `memanga import --dry-run FILE` runs these
-checks and shows what would change, without changing anything <Badge type="info" :text="newer" />.
+checks and shows what would change, without changing anything.
 The desktop app checks only the
 version, so check a file with `--dry-run` before you import it there.
 
 ### Between versions
 
-Exports from {{ release.tag }} and from the development version both have `version` 1, and each imports the other's files. {{ release.tag }} may not be compatible with data that the development version has written, including its export files.
+Exports from v0.4.4 and from later versions both have `version` 1, and each imports the other's files. v0.4.4 may not be compatible with data that a later version has written, including its export files.
 
 ## Schema version
 
-`config.yaml` and `state.json` each have a `schema_version` <Badge type="info" :text="newer" />, a whole number
+`config.yaml` and `state.json` each have a `schema_version`, a whole number
 that changes only when the layout of the file changes in a way that needs a
 conversion. For `state.json` it is currently `1`.
 
-- A file without it, such as one from {{ release.tag }}, counts as version 0. MeManga converts it when it loads it and writes the new layout at the next save; the file before the conversion becomes the `.bak` copy.
+- A file without it, such as one from v0.4.4, counts as version 0. MeManga converts it when it loads it and writes the new layout at the next save; the file before the conversion becomes the `.bak` copy.
 - A file with a higher version than this MeManga knows is refused and left
   as it is. Update MeManga to use it.
 - New fields can appear without a new version. MeManga leaves fields it
@@ -228,7 +220,7 @@ conversion. For `state.json` it is currently `1`.
 
 | Field | Type | What it holds |
 |---|---|---|
-| `schema_version` <Badge type="info" :text="newer" /> | number | The layout version; see [Schema version](#schema-version). |
+| `schema_version` | number | The layout version; see [Schema version](#schema-version). |
 | `manga` | object | The state of each series, by title; see [Each series](#each-series). |
 | `last_check` | time or `null` | When the last check for new chapters ran. |
 | `check_history` | list | One record per check: `timestamp`, `new_chapters` (found) and `downloaded`. The newest 50 are kept. |
@@ -257,13 +249,13 @@ history, so adding it again later continues where it was. `memanga remove
 | `last_chapter` | chapter or `null` | The chapter saved last. |
 | `last_updated` | time or `null` | When the downloads of this series last changed. |
 | `created` | time | When the entry was made. |
-| `saved_chapter_groups` <Badge type="info" :text="newer" /> | object | By chapter: the scanlation groups a saved chapter came from, as `source`, `group_ids` and `group_names`, where the source names them. |
+| `saved_chapter_groups` | object | By chapter: the scanlation groups a saved chapter came from, as `source`, `group_ids` and `group_names`, where the source names them. |
 
 **Reading**
 
 | Field | Type | What it holds |
 |---|---|---|
-| `read_chapters` | list of chapters | Chapters marked as read, in the reader, in the chapter list or with `memanga read` and `memanga unread` <Badge type="info" :text="newer" />. |
+| `read_chapters` | list of chapters | Chapters marked as read, in the reader, in the chapter list or with `memanga read` and `memanga unread`. |
 | `reading_progress` | object | `last_chapter`, the chapter last opened in the reader, and `last_read`, when. The desktop app's Continue reading uses it. |
 | `reader_positions` | object | By chapter: where reading stopped inside it, as `mode` (the reader layout), `updated_at` and `page_index` or `scroll_ratio` (0 to 1). Removed when the chapter is finished or marked read. |
 | `external_chapters` | list of chapters | Chapters you marked as read somewhere else. They are not downloaded. |
@@ -285,8 +277,7 @@ history, so adding it again later continues where it was. `memanga remove
 | `pending_backup` | object | By chapter: a chapter so far found only on the backup source, with `first_seen`, `backup_source` and `backup_url`. MeManga waits for the primary source as long as the series' fallback delay says. |
 | `suspicious_batch` | object | A batch of new chapters held back because it looks wrong, with `detected_at`, `chapters`, `count`, `last_chapter`, `highest`, `score`, `reasons` and `backup_status`. |
 
-**Kindle delivery** <Badge type="info" :text="newer" />
-
+**Kindle delivery**
 | Field | Type | What it holds |
 |---|---|---|
 | `undelivered_chapters` | object | By chapter: a saved chapter whose email to the Kindle failed, with `failed_at`, `path`, `error`, `attempts` and, for a PDF sent in parts, `parts`. `memanga send --pending` sends them again. |
@@ -300,12 +291,12 @@ Each record in `download_history` has:
 - `path`, where it was saved, and `size_mb`;
 - `kindle_sent`: whether it was sent to the Kindle;
 - `timestamp`: when it was saved;
-- `source`, `from_backup`, `partial` and `deleted_after_send` <Badge type="info" :text="newer" />: where it came from, whether that was the backup source, whether it is a partial chapter, and whether the file was deleted after sending.
+- `source`, `from_backup`, `partial` and `deleted_after_send`: where it came from, whether that was the backup source, whether it is a partial chapter, and whether the file was deleted after sending.
 
 ### Notifications
 
 Each record in `notifications` has `type`, `message`, `timestamp` and
-`read`. A notification with an error message also has `details` <Badge type="info" :text="newer" />,
+`read`. A notification with an error message also has `details`,
 the message without private details
 such as passwords. A long message is cut there; `details_chars` gives the
 full length and `details_file` names the file in `error-details/` with the

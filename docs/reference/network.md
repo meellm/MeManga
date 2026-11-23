@@ -1,9 +1,5 @@
 # Network connections
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 The connections MeManga makes, when it makes them, what they carry, and
 how to turn off the ones that are optional. Your library, history,
 settings and logs are kept in the [config folder](./state#files-in-the-config-folder);
@@ -12,10 +8,7 @@ the email password is kept as described under
 
 The settings named below are in **Settings → Advanced → Network & Privacy**
 in the desktop app, and are also keys of the
-[settings reference](./config). <Badge type="info" :text="`Not in ${release.tag}`" />
-{{ release.tag }} has none of these settings: there, the connection check,
-the MangaDex cover search and the chapter counts in desktop search are
-always on.
+[settings reference](./config).
 
 ## Sources and their image servers
 
@@ -35,8 +28,6 @@ components.
   including [backup sources](../guide/backup-sources).
 
 ### MangaDex image reports
-
-<Badge type="info" :text="`Not in ${release.tag}`" />
 
 **When:** while chapter images are downloaded from MangaDex, including
 chapters the reader downloads ahead of time, for images that come from a
@@ -152,9 +143,6 @@ Playwright's servers.
   small test document to your Kindle address.
 - `memanga doctor --smtp`: signs in to the mail server and sends nothing,
   when a sender address and password are set.
-
-In {{ release.tag }}, **Settings** has one **Test Connection** button, which
-signs in only.
 
 **Control:** the delivery mode and the per-series Kindle switch. See
 [Send chapters to a Kindle](../guide/kindle).

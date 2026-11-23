@@ -1,9 +1,5 @@
 # Sources
 
-<script setup>
-import { release } from '../.vitepress/release'
-</script>
-
 A source is a website MeManga can read. Each source has its own scraper,
 the part of MeManga that searches the site, reads its chapter lists and
 downloads the pages. Some sources answer on more than one domain; those
@@ -12,7 +8,7 @@ the same sites grouped by what they publish, see
 [Supported websites](./supported-websites).
 
 ::: info How to read this page
-- The list is generated from the **development version**. {{ release.tag }} has its own list, and its `memanga sources` shows only a few sources and the total.
+- The list is generated from the **development version**.
 - Being listed means MeManga has a scraper for the site. Sites change or
   go offline without notice, so a listed source can stop working at any
   time.
@@ -73,8 +69,6 @@ rights of the people who make the manga.
   the check is not a result: open the latest run to see how a source did.
 
 ## MangaDex scanlation groups
-
-<Badge type="info" :text="`Not in ${release.tag}`" />
 
 MeManga can leave out the MangaDex chapters of scanlation groups whose
 active leaders asked for it; none are built in yet. Group leaders can ask

@@ -15,11 +15,8 @@ themselves see [Use the command line](./cli).
 - The **published image** is built from release {{ release.tag }}. It is
   what `docker pull` gives you.
 - An image you **build from the source code** has the development version.
-  It can do more: it has `memanga watch` for scheduled checks,
-  `memanga config set`, and passwords from environment variables.
 
-Each section says which image it is about. A command from the development
-version does not work in the published image.
+Each section says when it is about only one of them.
 :::
 
 ## The published image
@@ -31,23 +28,22 @@ The same image is published in two places:
 
 | Tag | What it is |
 |---|---|
-| `0.4.4` | Release {{ release.tag }}. Does not change. |
-| `0.4` | The newest 0.4 release. Today the same as `0.4.4`. |
-| `latest` | The newest release. Today the same as `0.4.4`. |
+| `0.5.0` | Release {{ release.tag }}. Does not change. |
+| `0.5` | The newest 0.5 release. Today the same as `0.5.0`. |
+| `latest` | The newest release. Today the same as `0.5.0`. |
 
-For a setup that runs unattended, use a full version such as `0.4.4`, so
+For a setup that runs unattended, use a full version such as `0.5.0`, so
 that an update happens when you decide.
 
 ```sh
-docker pull meellm/memanga:0.4.4
+docker pull meellm/memanga:0.5.0
 ```
 
 **Systems:** Linux on `amd64` (most PCs and servers) and `arm64` (for
 example a 64-bit Raspberry Pi). There is no image for 32-bit ARM.
 
-**Size:** the download for `0.4.4` is about 750 MB, compressed. Unpacked
-on disk the image takes more space. To see its size on your machine after
-the pull:
+**Size:** the download is large, and unpacked on disk the image takes more
+space. To see its size on your machine after the pull:
 
 ```sh
 docker image ls meellm/memanga
@@ -77,7 +73,7 @@ first use and keeps them until you remove them:
 docker run --rm --init \
   -v memanga-config:/home/memanga/.config/memanga \
   -v memanga-downloads:/home/memanga/Downloads/MeManga \
-  meellm/memanga:0.4.4 list
+  meellm/memanga:0.5.0 list
 ```
 
 Everything on this page uses this command. Only the last part changes:
@@ -130,7 +126,7 @@ folder or your home folder.
    docker run --rm --init \
      -v "CONFIG-DIR:/home/memanga/.config/memanga" \
      -v "DOWNLOADS-DIR:/home/memanga/Downloads/MeManga" \
-     meellm/memanga:0.4.4 list
+     meellm/memanga:0.5.0 list
    ```
 
 Things to know:
@@ -158,7 +154,7 @@ terminal, which Docker only provides with `-it`:
 docker run --rm --init -it \
   -v memanga-config:/home/memanga/.config/memanga \
   -v memanga-downloads:/home/memanga/Downloads/MeManga \
-  meellm/memanga:0.4.4 config
+  meellm/memanga:0.5.0 config
 ```
 
 Without `-it` such a command cannot ask and does not do its work.
@@ -178,8 +174,7 @@ same volumes as above:
 Replace `TITLE` and `SERIES-URL` with your own values. `check` contacts the
 sources; `check --auto` downloads.
 
-**In an image built from source** you can also change single settings
-without questions, for example
+You can also change single settings without questions, for example
 `config set delivery.output_format epub`. The rules for running without a
 terminal are in
 [Use MeManga in scripts](../reference/scripting#questions-and-running-without-a-terminal).
@@ -203,7 +198,7 @@ you do not need the source code.
 
 What the file does:
 
-- It runs the published image `meellm/memanga:0.4.4` and starts it with an
+- It runs the published image `meellm/memanga:0.5.0` and starts it with an
   init process, so `--init` is not needed here.
 - `docker compose run` connects the command to your terminal, so commands
   that ask questions work without `-it`.
@@ -211,8 +206,7 @@ What the file does:
   folder in front of the volume names, so the data belongs to that folder:
   always run the commands from there. These are **not** the volumes of the
   `docker run` examples above.
-- It has no service that keeps running, because the published image has no
-  `memanga watch`. For a schedule, see
+- It has no service that keeps running. For a schedule, see
   [Check on a schedule](#check-on-a-schedule).
 
 Two settings are optional. Put them in a file named `.env` in the same
@@ -226,21 +220,21 @@ MEMANGA_IMAGE=meellm/memanga:NEW-VERSION
 - `TZ` sets the [time zone](#time-zone) in the container. Without it the
   file uses UTC.
 - `MEMANGA_IMAGE` runs another image, for example a newer release. Without
-  it the file uses `0.4.4`.
+  it the file uses `0.5.0`.
 
 ## Send to a Kindle
 
 Email delivery works in a container as it does elsewhere:
 [Send chapters to a Kindle](./kindle) explains the settings.
 
-**Published image:** enter the email settings with the `config` command
-above. The published image has no usable system keyring, so the password is
-saved as plain text in `config.yaml`, in the config volume. Anyone who can read that
-volume can read the password.
+Enter the email settings with the `config` command above. The image has no
+usable system keyring, so the password is saved as plain text in
+`config.yaml`, in the config volume. Anyone who can read that volume can read
+the password.
 
-**Image built from source:** you can keep the password out of the config
-volume and pass it in from outside. Put it in a file on your machine that
-only you can read, in this form:
+You can keep the password out of the config volume and pass it in from
+outside. Put it in a file on your machine that only you can read, in this
+form:
 
 ```sh
 MEMANGA_SMTP_PASSWORD=YOUR-APP-PASSWORD
@@ -253,9 +247,8 @@ Set only one of the two variables: when both are set, MeManga uses neither.
 
 ### A password file with Compose
 
-This works with an image built from source, as described under
-[Image built from source](#image-built-from-source-memanga-watch). The
-0.4.4 image does not read `MEMANGA_SMTP_PASSWORD_FILE`.
+These steps add the password file to `compose.dev.yaml`, described under
+[Image built from source](#image-built-from-source-memanga-watch).
 
 1. Save the app password in a new file of its own, outside the source folder
    so that it is never committed. These commands stop if the file, or a link
@@ -335,12 +328,11 @@ container:** no scheduler runs there, so nothing would ever start.
 
 ### Published image: let your machine start it
 
-The published image has no command that keeps running. Let the scheduler of
-your machine start a container when it is time. With cron on Linux, a line
-like this checks every day at 06:00:
+Let the scheduler of your machine start a container when it is time. With
+cron on Linux, a line like this checks every day at 06:00:
 
 ```sh
-0 6 * * * docker run --rm --init -v memanga-config:/home/memanga/.config/memanga -v memanga-downloads:/home/memanga/Downloads/MeManga meellm/memanga:0.4.4 check --auto --quiet
+0 6 * * * docker run --rm --init -v memanga-config:/home/memanga/.config/memanga -v memanga-downloads:/home/memanga/Downloads/MeManga meellm/memanga:0.5.0 check --auto --quiet
 ```
 
 The time is the time of your machine, because your machine starts the run.
@@ -355,13 +347,14 @@ that there is no terminal:
 
 ### Image built from source: `memanga watch`
 
-The development version has `memanga watch`. It stays running, checks
-once at the start and then again after each interval: every 6 hours unless
-you say otherwise, and not more often than every 15 minutes.
+`memanga watch` stays running, checks once at the start and then again after
+each interval: every 6 hours unless you say otherwise, and not more often
+than every 15 minutes. The published image has it too, as the last part of
+the `docker run` command.
 
-For this you **build the image from the source code** with a second
-Compose file, `compose.dev.yaml`. You need Git and Docker; Python is not
-needed.
+The ready-made `scheduler` service is in a second Compose file,
+`compose.dev.yaml`, which **builds the image from the source code**. You need
+Git and Docker; Python is not needed.
 
 1. Get a copy of the source code:
 
@@ -415,9 +408,8 @@ builds from the source code and uses the same volumes as
 - Use `-f compose.dev.yaml` from now on, as shown above. Your settings,
   library and downloads stay as they are.
 - A `compose.yaml` that runs the published image opens the same volumes
-  with the `0.4.4` image when you leave out `-f compose.dev.yaml`. That
-  image is older than the development version and may not be compatible
-  with data the development version has written. Keep using
+  with that image when you leave out `-f compose.dev.yaml`. An older image
+  may not be compatible with data a newer version has written. Keep using
   `-f compose.dev.yaml` for that data, and do not mix the two on one set of
   data.
 - If the scheduler is running, it keeps running. Manage it with
@@ -429,17 +421,15 @@ builds from the source code and uses the same volumes as
 When a container is stopped, Docker first asks the program to end and
 ends it by force after a waiting time, 10 seconds unless you set another.
 
-- With the published image, let a run finish instead of stopping it.
-- In the development version, a check that is stopped keeps the chapters
-  it had already finished, and `memanga watch` lets a running check save
-  its results first. The Compose file gives it one minute for that. With
-  plain Docker, use `docker stop -t 60 CONTAINER`.
+A check that is stopped keeps the chapters it had already finished, and
+`memanga watch` lets a running check save its results first.
+`compose.dev.yaml` gives it one minute for that. With plain Docker, use
+`docker stop -t 60 CONTAINER`.
 
 **`--init`:** the browsers start helper processes. Something has to clean
-up after them when they end. The published image has nothing built in for
-that, so the commands on this page pass `--init`, which makes Docker add a
-small helper. An image built from source has this built in; `--init` is not
-needed there and does no harm.
+up after them when they end. The image has this built in, so `--init` is not
+needed and does no harm. The commands on this page keep it because images
+before `0.5.0` need it.
 
 ## Update the image {#update}
 
@@ -472,7 +462,7 @@ start the container. Replace `Europe/Berlin` with your zone:
 docker run --rm --init -e TZ=Europe/Berlin \
   -v memanga-config:/home/memanga/.config/memanga \
   -v memanga-downloads:/home/memanga/Downloads/MeManga \
-  meellm/memanga:0.4.4 status
+  meellm/memanga:0.5.0 status
 ```
 
 What this does and does not change:
@@ -498,10 +488,9 @@ setting.
   [Run commands](#run-commands).
 - **My library is empty after a restart.** The run did not use the same
   volumes or folders as before. Check both `-v` parts of the command.
-- **A command or an option is not recognised.** It probably belongs
-  to the development version and the published image is
-  {{ release.tag }}. `memanga --help` in the container shows what it has:
-  put `--help` as the last part of the command.
+- **A command or an option is not recognised.** It may be newer than the
+  image you run. `memanga --help` in the container shows what it has: put
+  `--help` as the last part of the command.
 - **`--gui` is refused.** The image has no desktop app.
 - **A source fails only in the container.** Sources change and block
   automated visits from time to time; this is not specific to Docker. Try
