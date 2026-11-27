@@ -3,7 +3,7 @@
 This guide has moved to the
 [MeManga documentation site](https://meellm.github.io/MeManga/). The
 sections below keep their old links and point to where each topic is now.
-MeManga knows <!-- source-count:start -->229 scrapers / 294 domains<!-- source-count:end -->;
+MeManga knows <!-- source-count:start -->230 scrapers / 295 domains<!-- source-count:end -->;
 the [list of sources](https://meellm.github.io/MeManga/reference/sources)
 shows them.
 

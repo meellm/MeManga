@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 294 domains across 229 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 295 domains across 230 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -57,6 +57,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | bluelockmanga.net | — | http | — | No | Included in search | Blue Lock | — | Chapters |
 | bluelockread.com | ww2.bluelockread.com (Included in search) | http | — | No | Included in search | Blue Lock | — | — |
 | bluelockread.online | — | http | — | No | Included in search | Blue Lock | — | Pages; shared parser: chapters |
+| bluesolo.org | — | api | fr | Yes | Included in search | Unofficial French scanlations from several teams | — | — |
 | bocchitherockmanga.com | w5.bocchitherockmanga.com (Included in search) | http | — | No | Included in search | Bocchi the Rock! | — | Chapters; shared parser: pages |
 | bokugents.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | case-closed.online | — | http | — | No | Not searched (template) | Case Closed (Detective Conan) | — | Shared parser: chapters, pages |

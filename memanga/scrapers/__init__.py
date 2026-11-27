@@ -192,6 +192,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # FMTEAM - French scanlation team (public JSON)
     "fmteam.fr": "fmteam:FMTeamScraper",
 
+    # Blue Solo - French scanlations from several teams (public JSON)
+    "bluesolo.org": "bluesolo:BlueSoloScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

@@ -262,6 +262,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "dynasty-scans.com": "Unofficial English yuri scanlations; explicit titles refused",
     "lelscanfr.com": "Unofficial French manga scans; long chapter lists read from page 1 only",
     "fmteam.fr": "Unofficial French scanlation team",
+    "bluesolo.org": "Unofficial French scanlations from several teams",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",
