@@ -207,6 +207,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Punk Records - manga scans in several languages (public JSON)
     "punkrecordz.com": "punkrecords:PunkRecordsScraper",
 
+    # Furyo Society - French furyo and street manga scans (HTML)
+    "furyosociety.com": "furyosociety:FuryoSocietyScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

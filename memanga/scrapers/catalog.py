@@ -267,6 +267,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "fmteam.fr": "Unofficial French scanlation team",
     "bluesolo.org": "Unofficial French scanlations from several teams",
     "punkrecordz.com": "Unofficial manga scans; series language not labelled",
+    "furyosociety.com": "Unofficial French scans of furyo and street manga",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",

@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 299 domains across 234 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 300 domains across 235 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -84,6 +84,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | fmteam.fr | — | api | fr | No | Included in search | Unofficial French scanlation team | — | — |
 | frieren-manga.com | — | http | — | No | Not searched (template) | Frieren: Beyond Journey's End | — | Shared parser: chapters, pages |
 | full-metal-alchemist.online | w9.full-metal-alchemist.online (Not searched (template)) | http | — | No | Not searched (template) | Fullmetal Alchemist | — | Shared parser: chapters, pages |
+| furyosociety.com | — | http | fr | Yes | Included in search | Unofficial French scans of furyo and street manga | — | — |
 | gachiakutayo.com | — | http | — | No | Not searched (template) | Gachiakuta | — | Shared parser: chapters, pages |
 | gantzmangafree.com | — | http | — | No | Not searched (template) | Gantz | — | Shared parser: chapters, pages |
 | goblin-slayer-manga.online | — | http | — | No | Not searched (template) | Goblin Slayer | — | Shared parser: chapters, pages |
