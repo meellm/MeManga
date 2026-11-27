@@ -171,6 +171,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Yuri-Online - Spanish yuri manga scans (Madara); adult titles refused
     "yuri-online.com": "yurionline:YuriOnlineScraper",
 
+    # InManga - Spanish manga library (JSON chapter list); adult-flagged chapters refused
+    "inmanga.com": "inmanga:InMangaScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 
