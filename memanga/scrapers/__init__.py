@@ -165,6 +165,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Rakuen Translations - Spanish manga scans (MangaThemesia); adult titles refused
     "rakuentranslations.com": "rakuentranslations:RakuenTranslationsScraper",
 
+    # Nora no Fansub - Spanish manga scans (FoOlSlide reader under /lector); adult titles refused
+    "noranofansub.com": "noranofansub:NoraNoFansubScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 

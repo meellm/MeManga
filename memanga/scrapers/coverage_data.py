@@ -118,6 +118,7 @@ PARSER_TESTS = {
     'monstermanga.org': {'own': ('chapters',), 'shared': ('pages',)},
     'mushoku-tensei-manga.online': {'own': (), 'shared': ('chapters', 'pages')},
     'nanamanga.online': {'own': (), 'shared': ('chapters', 'pages')},
+    'noranofansub.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'olympusxyz.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'onepiece-manga-online.net': {'own': (), 'shared': ('chapters', 'pages')},
     'onepiece.tube': {'own': ('search', 'chapters', 'pages'), 'shared': ()},

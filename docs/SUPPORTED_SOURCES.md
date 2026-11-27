@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 298 domains across 233 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 299 domains across 234 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -162,6 +162,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | mushoku-tensei-manga.online | — | http | — | No | Not searched (template) | Mushoku Tensei: Isekai Ittara Honki Dasu | — | Shared parser: chapters, pages |
 | nanamanga.online | w2.nanamanga.online (Not searched (template)) | http | — | No | Not searched (template) | Nana | — | Shared parser: chapters, pages |
 | nhentai.net | — | http | — | Yes | Included in search | Doujinshi | — | — |
+| noranofansub.com | — | http | es | Yes | Included in search | Spanish manga scans; adult titles refused | — | Search, chapters, pages |
 | olympusxyz.com | — | http | es | No | Included in search | Spanish manhwa scans (Olympus Scanlation) | Search, chapters, pages, image | Search, chapters, pages |
 | omegascans.org | — | browser | — | No | Included in search | Manhwa translations | — | — |
 | one-punch.online | read.one-punch.online (Included in search) | http | — | No | Included in search | One Punch Man | — | — |
