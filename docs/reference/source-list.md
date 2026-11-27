@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 226 |
-| Domains, with other domains of the same source | 291 |
-| Included in search | 129 |
+| Sources (one scraper each) | 227 |
+| Domains, with other domains of the same source | 292 |
+| Included in search | 130 |
 | In the default selection | 5 |
 | Adult content | 17 |
 | With parser tests of their own | 80 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-129 sources that a search can ask, in search order.
+130 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -115,6 +115,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | kenganashura.com | — | http | — | — | Included in search | — | — | Kengan Ashura / Omega |
 | lector-mangas.lat | lectormangass.net (not searched: alias, [issue 186](https://github.com/meellm/MeManga/issues/186)) | http | es | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Spanish manga/manhwa reader |
 | leercapitulo.co | — | http | es | — | Included in search | Search, chapters, pages | — | Spanish manga/manhwa/manhua reader |
+| legionscans.com | — | http | es | — | Included in search | — | — | Spanish manga, manhwa and manhua scans |
 | lelmanga.com | — | http | fr | — | Included in search | Search, chapters, pages | — | French manga and manhwa scans |
 | lelscanfr.com | — | http | fr | Yes | Included in search | Search, chapters, pages | — | Unofficial French manga scans; long chapter lists read from page 1 only |
 | mangaball.net | — | http | — | — | Included in search | Search, chapters, pages | — | Multi-language |

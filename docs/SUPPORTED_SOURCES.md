@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 291 domains across 226 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 292 domains across 227 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -115,6 +115,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | kunmanga.com | — | browser | — | No | Not searched (needs-js) | — | — | — |
 | lector-mangas.lat | lectormangass.net (Not searched (alias)) | http | es | No | Included in search | Spanish manga/manhwa reader | Search, chapters, pages, image | Search, chapters, pages |
 | leercapitulo.co | — | http | es | No | Included in search | Spanish manga/manhwa/manhua reader | — | Search, chapters, pages |
+| legionscans.com | — | http | es | No | Included in search | Spanish manga, manhwa and manhua scans | — | — |
 | lelmanga.com | — | http | fr | No | Included in search | French manga and manhwa scans | — | Search, chapters, pages |
 | lelscanfr.com | — | http | fr | Yes | Included in search | Unofficial French manga scans; long chapter lists read from page 1 only | — | Search, chapters, pages |
 | madeabyss.com | — | http | — | No | Not searched (template) | Made in Abyss | — | Chapters, pages |

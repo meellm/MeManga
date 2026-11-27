@@ -153,6 +153,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Uchuujin - Spanish manga and manhwa reader (MangaThemesia)
     "uchuujinmangas.com": "uchuujin:UchuujinScraper",
 
+    # Legion Scans - Spanish manga, manhwa and manhua scans (MangaThemesia under /wp)
+    "legionscans.com": "legionscans:LegionScansScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 

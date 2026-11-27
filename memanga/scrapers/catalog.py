@@ -249,6 +249,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "mangavault.lat": "Spanish manhwa, manga and manhua library",
     "heavenmanga.com": "Spanish manhwa, manga and manhua library",
     "uchuujinmangas.com": "Spanish manga and manhwa reader",
+    "legionscans.com": "Spanish manga, manhwa and manhua scans",
     "onepiece.tube": "German One Piece main chapter list; available entries only",
     "mangarw.com": "Raw manga (One Piece verified Japanese)",
     "demonicscans.org": "Unofficial English manga and manhwa scans",

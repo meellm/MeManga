@@ -222,6 +222,7 @@
 | `leercapitulo.co` | — | Spanish | In search |
 | `heavenmanga.com` | — | Spanish | In search |
 | `uchuujinmangas.com` | — | Spanish | In search |
+| `legionscans.com` | — | Spanish | In search |
 | `dragontranslation.org` | — | — | Added series only |
 | `apollcomics.es` | — | — | Added series only |
 | `vermanhwa.com` | — | — | Added series only |
