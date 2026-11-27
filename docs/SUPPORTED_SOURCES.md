@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 300 domains across 235 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 301 domains across 236 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -242,5 +242,6 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | witch-watch.com | — | http | — | No | Not searched (template) | Witch Watch | — | Shared parser: chapters, pages |
 | wurmz.net | — | http | id | No | Included in search | Indonesian manga/manhwa/manhua reader | Search, chapters, pages, image | Search, chapters, pages |
 | yakshascans.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
+| yuri-online.com | — | http | es | Yes | Included in search | Spanish yuri manga scans; adult titles refused | — | Search, chapters, pages |
 | zazamanga.com | deathnotemanga.com (Included in search), death-note-online.com (Included in search), fairytail100yearsquest.com (Included in search), gintama.site (Included in search), initialdmanga.com (Included in search), inuyasha.net (Included in search), onepunchmanmanga.org (Included in search), readhellsing.com (Included in search), readoverlord.com (Included in search) | browser | — | No | Included in search | Also serves several redirected series sites | — | — |
 | zonatmo.org | — | browser | es | No | Included in search | Spanish manga/manhwa library | Search, chapters, pages, image | Search, chapters, pages |

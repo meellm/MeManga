@@ -181,6 +181,7 @@ PARSER_TESTS = {
     'witch-watch.com': {'own': (), 'shared': ('chapters', 'pages')},
     'wurmz.net': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'yakshascans.com': {'own': (), 'shared': ('search', 'chapters', 'pages')},
+    'yuri-online.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'zonatmo.org': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
 }
 

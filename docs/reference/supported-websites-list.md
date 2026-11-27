@@ -284,10 +284,10 @@
 ## Adult sources
 
 ::: warning Adult content
-23 sources serve adult content. They are all in this section. MeManga does not hide or filter them.
+24 sources serve adult content. They are all in this section. MeManga does not hide or filter them.
 
 - **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.
-- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `bluesolo.org`, `dynasty-scans.com`, `e-hentai.org`, `furyosociety.com`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `inventariooculto.com`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `noranofansub.com`, `punkrecordz.com`, `rakuentranslations.com`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
+- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `bluesolo.org`, `dynasty-scans.com`, `e-hentai.org`, `furyosociety.com`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `inventariooculto.com`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `noranofansub.com`, `punkrecordz.com`, `rakuentranslations.com`, `rawkuma.net`, `rawuwu.net`, `yuri-online.com`. Use `memanga search --source DOMAIN` to ask one source only.
 :::
 
 ### Hentai and doujinshi
@@ -327,3 +327,4 @@
 | `rakuentranslations.com` | — | Spanish | In search |
 | `noranofansub.com` | — | Spanish | In search |
 | `furyosociety.com` | — | French | In search |
+| `yuri-online.com` | — | Spanish | In search |
