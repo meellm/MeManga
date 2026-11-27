@@ -284,10 +284,10 @@
 ## Adult sources
 
 ::: warning Adult content
-19 sources serve adult content. They are all in this section. MeManga does not hide or filter them.
+20 sources serve adult content. They are all in this section. MeManga does not hide or filter them.
 
 - **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.
-- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `bluesolo.org`, `dynasty-scans.com`, `e-hentai.org`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `inventariooculto.com`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
+- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `bluesolo.org`, `dynasty-scans.com`, `e-hentai.org`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `inventariooculto.com`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `punkrecordz.com`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
 :::
 
 ### Hentai and doujinshi
@@ -323,3 +323,4 @@
 | `mangavault.lat` | — | Spanish | In search |
 | `bluesolo.org` | — | French | In search |
 | `inventariooculto.com` | — | — | In search |
+| `punkrecordz.com` | — | — | In search |

@@ -198,6 +198,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Blue Solo - French scanlations from several teams (public JSON)
     "bluesolo.org": "bluesolo:BlueSoloScraper",
 
+    # Punk Records - manga scans in several languages (public JSON)
+    "punkrecordz.com": "punkrecords:PunkRecordsScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
