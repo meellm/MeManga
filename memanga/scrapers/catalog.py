@@ -260,6 +260,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "mangaraw.ink": "Raw manga (One Piece verified Japanese)",
     "dynasty-scans.com": "Unofficial English yuri scanlations; explicit titles refused",
     "lelscanfr.com": "Unofficial French manga scans; long chapter lists read from page 1 only",
+    "fmteam.fr": "Unofficial French scanlation team",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",

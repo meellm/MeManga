@@ -186,6 +186,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Lelscan VF - French manga scans (first chapter-list page only)
     "lelscanfr.com": "lelscanvf:LelscanVFScraper",
 
+    # FMTEAM - French scanlation team (public JSON)
+    "fmteam.fr": "fmteam:FMTeamScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

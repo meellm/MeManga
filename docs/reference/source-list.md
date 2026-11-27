@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 227 |
-| Domains, with other domains of the same source | 292 |
-| Included in search | 130 |
+| Sources (one scraper each) | 228 |
+| Domains, with other domains of the same source | 293 |
+| Included in search | 131 |
 | In the default selection | 5 |
 | Adult content | 17 |
 | With parser tests of their own | 80 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-130 sources that a search can ask, in search order.
+131 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -101,6 +101,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | en-thunderscans.com | — | http | en | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | English manhwa scans |
 | fairytailmangafree.com | — | http | — | — | Included in search | Pages | — | Fairy Tail: 100 Years Quest |
 | fireforcemanga.org | w1.fireforcemanga.org | http | — | — | Included in search | Pages | — | Fire Force |
+| fmteam.fr | — | api | fr | — | Included in search | — | — | Unofficial French scanlation team |
 | hajime-no-ippo-manga.online | — | http | — | — | Included in search | Shared parser: chapters, pages | — | Hajime no Ippo |
 | hajime-noippo.com | w22.hajime-noippo.com | http | — | — | Included in search | Shared parser: chapters, pages | — | Hajime no Ippo |
 | hajimnoippo.com | — | http | — | — | Included in search | Chapters, pages | — | Hajime no Ippo |

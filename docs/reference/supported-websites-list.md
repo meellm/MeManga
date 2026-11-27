@@ -235,6 +235,7 @@
 | `sushiscan.net` | — | French | In search |
 | `mangas-origines.fr` | — | French | In search |
 | `lelmanga.com` | — | French | In search |
+| `fmteam.fr` | — | French | In search |
 
 ### Turkish
 

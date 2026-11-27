@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 292 domains across 227 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 293 domains across 228 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -80,6 +80,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | fairytailmangafree.com | — | http | — | No | Included in search | Fairy Tail: 100 Years Quest | — | Pages |
 | fireforcemanga.org | w1.fireforcemanga.org (Included in search) | http | — | No | Included in search | Fire Force | — | Pages |
 | flamecomics.xyz | — | browser | — | No | Not searched (needs-js) | Manhwa translations | — | — |
+| fmteam.fr | — | api | fr | No | Included in search | Unofficial French scanlation team | — | — |
 | frieren-manga.com | — | http | — | No | Not searched (template) | Frieren: Beyond Journey's End | — | Shared parser: chapters, pages |
 | full-metal-alchemist.online | w9.full-metal-alchemist.online (Not searched (template)) | http | — | No | Not searched (template) | Fullmetal Alchemist | — | Shared parser: chapters, pages |
 | gachiakutayo.com | — | http | — | No | Not searched (template) | Gachiakuta | — | Shared parser: chapters, pages |
