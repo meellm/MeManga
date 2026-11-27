@@ -159,6 +159,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Ragnarok Scanlation - manga scans (Madara)
     "ragnarokscanlation.org": "ragnarokscanlation:RagnarokScanlationScraper",
 
+    # Inventario Oculto - manga scans (Madara); adult titles refused
+    "inventariooculto.com": "inventariooculto:InventarioOcultoScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 

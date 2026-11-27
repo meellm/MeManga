@@ -67,6 +67,7 @@ PARSER_TESTS = {
     'homunculusmanga.com': {'own': ('chapters',), 'shared': ()},
     'hxhmanga.com': {'own': (), 'shared': ('chapters', 'pages')},
     'hyoukamanga.com': {'own': (), 'shared': ('chapters', 'pages')},
+    'inventariooculto.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'jjkaisen.com': {'own': (), 'shared': ('chapters', 'pages')},
     'jojolandsmanga.com': {'own': (), 'shared': ('chapters', 'pages')},
     'jujutsukaisenmodulo.org': {'own': (), 'shared': ('chapters', 'pages')},

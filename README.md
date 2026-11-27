@@ -28,7 +28,7 @@
 
 MeManga keeps a library of the series you follow and checks their sources
 for new chapters. It knows
-<!-- source-count:start -->230 scrapers / 295 domains<!-- source-count:end -->.
+<!-- source-count:start -->231 scrapers / 296 domains<!-- source-count:end -->.
 
 - **Search across sources.** Find a series on many sites at once, and give
   it backup sources for when its main source falls behind or a download

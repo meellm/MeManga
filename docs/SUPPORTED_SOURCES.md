@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 295 domains across 230 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 296 domains across 231 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -102,6 +102,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | hxhmanga.com | — | http | — | No | Not searched (template) | Hunter x Hunter | Chapters, pages, image | Shared parser: chapters, pages |
 | hyoukamanga.com | — | http | — | No | Not searched (template) | Hyouka | — | Shared parser: chapters, pages |
 | imhentai.xxx | — | http | — | Yes | Included in search | Doujinshi | — | — |
+| inventariooculto.com | — | http | — | Yes | Included in search | Manga scans; adult titles refused | — | Search, chapters, pages |
 | jjkaisen.com | — | http | — | No | Not searched (template) | Jujutsu Kaisen | — | Shared parser: chapters, pages |
 | jojolandsmanga.com | w9.jojolandsmanga.com (Not searched (template)) | http | — | No | Not searched (template) | JoJo's Bizarre Adventure Part 9: The JOJOLands | — | Shared parser: chapters, pages |
 | jojolionmanga.com | — | http | — | No | Included in search | JoJo Part 8: JoJolion | — | — |
