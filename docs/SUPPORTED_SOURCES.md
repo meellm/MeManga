@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 301 domains across 236 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 302 domains across 237 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -62,6 +62,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | bokugents.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | case-closed.online | — | http | — | No | Not searched (template) | Case Closed (Detective Conan) | — | Shared parser: chapters, pages |
 | chainsawdevil.com | — | http | — | No | Not searched (template) | Chainsaw Man | — | Shared parser: chapters, pages |
+| chaostrad.fr | — | http | fr | No | Included in search | French fan translation; only the Shadow the Hedgehog manga is read | — | Search, chapters, pages |
 | comic-walker.com | — | http | ja | No | Included in search | Official KADOKAWA Japanese manga; public page-listed active episodes | — | Search, chapters, pages |
 | d-grayman.online | — | http | — | No | Not searched (template) | D.Gray-man | — | Shared parser: chapters, pages |
 | dandadanmanga.net | ww2.dandadanmanga.net (Not searched (template)), w2.dandadanmanga.net (Not searched (template)) | http | — | No | Not searched (template) | Dandadan | — | Shared parser: search, chapters, pages |

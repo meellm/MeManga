@@ -34,6 +34,7 @@ PARSER_TESTS = {
     'bokugents.com': {'own': (), 'shared': ('search', 'chapters', 'pages')},
     'case-closed.online': {'own': (), 'shared': ('chapters', 'pages')},
     'chainsawdevil.com': {'own': (), 'shared': ('chapters', 'pages')},
+    'chaostrad.fr': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'comic-walker.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'comick.io': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'comix.to': {'own': ('search', 'chapters', 'pages'), 'shared': ()},

@@ -237,6 +237,7 @@
 | `mangas-origines.fr` | — | French | In search |
 | `lelmanga.com` | — | French | In search |
 | `fmteam.fr` | — | French | In search |
+| `chaostrad.fr` | — | French | In search |
 
 ### Turkish
 

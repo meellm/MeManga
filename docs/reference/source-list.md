@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 236 |
-| Domains, with other domains of the same source | 301 |
-| Included in search | 139 |
+| Sources (one scraper each) | 237 |
+| Domains, with other domains of the same source | 302 |
+| Included in search | 140 |
 | In the default selection | 5 |
 | Adult content | 24 |
-| With parser tests of their own | 85 |
+| With parser tests of their own | 86 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-139 sources that a search can ask, in search order.
+140 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -92,6 +92,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | bluelockread.online | — | http | — | — | Included in search | Pages; shared parser: chapters | — | Blue Lock |
 | bluesolo.org | — | api | fr | Yes | Included in search | — | — | Unofficial French scanlations from several teams |
 | bocchitherockmanga.com | w5.bocchitherockmanga.com | http | — | — | Included in search | Chapters; shared parser: pages | — | Bocchi the Rock! |
+| chaostrad.fr | — | http | fr | — | Included in search | Search, chapters, pages | — | French fan translation; only the Shadow the Hedgehog manga is read |
 | comic-walker.com | — | http | ja | — | Included in search | Search, chapters, pages | — | Official KADOKAWA Japanese manga; public page-listed active episodes |
 | death-note-manga.com | w13.death-note-manga.com | http | — | — | Included in search | Pages | — | Death Note |
 | demonicscans.org | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manga and manhwa scans |

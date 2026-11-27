@@ -269,6 +269,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "bluesolo.org": "Unofficial French scanlations from several teams",
     "punkrecordz.com": "Unofficial manga scans; series language not labelled",
     "furyosociety.com": "Unofficial French scans of furyo and street manga",
+    "chaostrad.fr": "French fan translation; only the Shadow the Hedgehog manga is read",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",
