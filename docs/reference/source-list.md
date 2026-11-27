@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 228 |
-| Domains, with other domains of the same source | 293 |
-| Included in search | 131 |
+| Sources (one scraper each) | 229 |
+| Domains, with other domains of the same source | 294 |
+| Included in search | 132 |
 | In the default selection | 5 |
 | Adult content | 17 |
-| With parser tests of their own | 80 |
+| With parser tests of their own | 81 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-131 sources that a search can ask, in search order.
+132 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -146,6 +146,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | onepunchmanmangaa.com | — | http | — | — | Included in search | — | — | One Punch Man |
 | onepunchmanread.com | — | http | — | — | Included in search | — | — | One Punch Man |
 | patimanga.com | — | http | tr | — | Included in search | Search, chapters, pages | — | Turkish manhwa and webtoon library |
+| ragnarokscanlation.org | — | http | — | — | Included in search | Search, chapters, pages | — | Manga scans |
 | rawkuma.net | — | http | — | Yes | Included in search | Search, chapters, pages | — | Raw manga (One Piece verified Japanese) |
 | rawuwu.net | — | api | — | Yes | Included in search | Search, chapters, pages | — | Raw manga (One Piece verified Japanese) |
 | read-berserk-manga.com | — | http | — | — | Included in search | — | — | Berserk |

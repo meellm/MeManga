@@ -125,6 +125,7 @@ PARSER_TESTS = {
     'overlord-manga.online': {'own': (), 'shared': ('chapters', 'pages')},
     'patimanga.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'punpunmanga.com': {'own': (), 'shared': ('chapters', 'pages')},
+    'ragnarokscanlation.org': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'raw.senmanga.com': {'own': ('chapters', 'pages'), 'shared': ()},
     'rawjx.net': {'own': (), 'shared': ('search', 'chapters', 'pages')},
     'rawkuma.net': {'own': ('search', 'chapters', 'pages'), 'shared': ()},

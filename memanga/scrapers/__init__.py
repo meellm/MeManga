@@ -156,6 +156,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Legion Scans - Spanish manga, manhwa and manhua scans (MangaThemesia under /wp)
     "legionscans.com": "legionscans:LegionScansScraper",
 
+    # Ragnarok Scanlation - manga scans (Madara)
+    "ragnarokscanlation.org": "ragnarokscanlation:RagnarokScanlationScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 

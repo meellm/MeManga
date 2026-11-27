@@ -81,6 +81,7 @@
 | `omegascans.org` | — | — | In search |
 | `en-thunderscans.com` | — | English | In search |
 | `demonicscans.org` | — | English | In search |
+| `ragnarokscanlation.org` | — | — | In search |
 | `hivetoons.org` | `hivetoon.com` | — | Left out of search |
 | `yakshascans.com` | — | — | Added series only |
 | `bokugents.com` | — | — | Added series only |
