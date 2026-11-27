@@ -252,6 +252,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "legionscans.com": "Spanish manga, manhwa and manhua scans",
     "ragnarokscanlation.org": "Manga scans",
     "inventariooculto.com": "Manga scans; adult titles refused",
+    "rakuentranslations.com": "Spanish manga scans; adult titles refused",
     "onepiece.tube": "German One Piece main chapter list; available entries only",
     "mangarw.com": "Raw manga (One Piece verified Japanese)",
     "demonicscans.org": "Unofficial English manga and manhwa scans",

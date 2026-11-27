@@ -162,6 +162,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Inventario Oculto - manga scans (Madara); adult titles refused
     "inventariooculto.com": "inventariooculto:InventarioOcultoScraper",
 
+    # Rakuen Translations - Spanish manga scans (MangaThemesia); adult titles refused
+    "rakuentranslations.com": "rakuentranslations:RakuenTranslationsScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 

@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 297 domains across 232 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 298 domains across 233 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -177,6 +177,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | punkrecordz.com | — | api | — | Yes | Included in search | Unofficial manga scans; series language not labelled | — | — |
 | punpunmanga.com | — | http | — | No | Not searched (template) | Goodnight Punpun (Oyasumi Punpun) | — | Shared parser: chapters, pages |
 | ragnarokscanlation.org | — | http | — | No | Included in search | Manga scans | — | Search, chapters, pages |
+| rakuentranslations.com | — | http | es | Yes | Included in search | Spanish manga scans; adult titles refused | — | Search, chapters, pages |
 | raw.senmanga.com | — | api | — | Yes | Not searched (unreliable) | Raw manga by direct series URL; not searched (One Piece verified Japanese) | — | Chapters, pages |
 | rawjx.net | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | rawkuma.net | — | http | — | Yes | Included in search | Raw manga (One Piece verified Japanese) | — | Search, chapters, pages |
