@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 304 domains across 239 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 305 domains across 240 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -126,6 +126,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | lelmanga.com | — | http | fr | No | Included in search | French manga and manhwa scans | — | Search, chapters, pages |
 | lelscanfr.com | — | http | fr | Yes | Included in search | Unofficial French manga scans; long chapter lists read from page 1 only | — | Search, chapters, pages |
 | madeabyss.com | — | http | — | No | Not searched (template) | Made in Abyss | — | Chapters, pages |
+| mahoushoujobu.com | — | api | en | Yes | Included in search | Unofficial English manga translations (Magical Translators); English series only | — | Search, chapters, pages |
 | manga18fx.com | — | http | — | Yes | Not searched (template) | Adult manga | — | Shared parser: search, chapters, pages |
 | mangaball.net | — | http | — | No | Included in search | Multi-language | — | Search, chapters, pages |
 | mangabolt.com | — | http | — | No | Not searched (needs-js) | — | — | Search, chapters, pages |

@@ -222,6 +222,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # LanorTrad - French manga translations; series marked readable only (data files)
     "lanortrad.com": "lanortrad:LanorTradScraper",
 
+    # Magical Translators - English manga translations, guya API; adult label as a precaution
+    "mahoushoujobu.com": "magicaltranslators:MagicalTranslatorsScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 
