@@ -273,6 +273,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "chaostrad.fr": "French fan translation; only the Shadow the Hedgehog manga is read",
     "lanortrad.com": "Unofficial French manga translations; only series the site marks readable",
     "mahoushoujobu.com": "Unofficial English manga translations (Magical Translators); English series only",
+    "manga-corporation.com": "Unofficial French manga translations (Manga-Corporation); numbered chapters only",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",

@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 240 |
-| Domains, with other domains of the same source | 305 |
-| Included in search | 143 |
+| Sources (one scraper each) | 241 |
+| Domains, with other domains of the same source | 306 |
+| Included in search | 144 |
 | In the default selection | 5 |
 | Adult content | 26 |
-| With parser tests of their own | 89 |
+| With parser tests of their own | 90 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-143 sources that a search can ask, in search order.
+144 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -126,6 +126,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | lelmanga.com | — | http | fr | — | Included in search | Search, chapters, pages | — | French manga and manhwa scans |
 | lelscanfr.com | — | http | fr | Yes | Included in search | Search, chapters, pages | — | Unofficial French manga scans; long chapter lists read from page 1 only |
 | mahoushoujobu.com | — | api | en | Yes | Included in search | Search, chapters, pages | — | Unofficial English manga translations (Magical Translators); English series only |
+| manga-corporation.com | — | api | fr | — | Included in search | Search, chapters, pages | — | Unofficial French manga translations (Manga-Corporation); numbered chapters only |
 | mangaball.net | — | http | — | — | Included in search | Search, chapters, pages | — | Multi-language |
 | mangadenizi.net | — | http | tr | — | Included in search | Search, chapters, pages | — | Turkish manga/manhwa/webtoon reader |
 | mangadna.com | — | http | — | — | Included in search | — | — | — |

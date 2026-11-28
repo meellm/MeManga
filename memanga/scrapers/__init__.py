@@ -225,6 +225,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Magical Translators - English manga translations, guya API; adult label as a precaution
     "mahoushoujobu.com": "magicaltranslators:MagicalTranslatorsScraper",
 
+    # Manga-Corporation - French manga translations (PizzaReader JSON API)
+    "manga-corporation.com": "mangacorporation:MangaCorporationScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

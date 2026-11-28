@@ -239,6 +239,7 @@
 | `fmteam.fr` | — | French | In search |
 | `chaostrad.fr` | — | French | In search |
 | `lanortrad.com` | — | French | In search |
+| `manga-corporation.com` | — | French | In search |
 
 ### Turkish
 

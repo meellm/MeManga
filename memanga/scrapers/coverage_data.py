@@ -86,6 +86,7 @@ PARSER_TESTS = {
     'lelscanfr.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'madeabyss.com': {'own': ('chapters', 'pages'), 'shared': ()},
     'mahoushoujobu.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
+    'manga-corporation.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'manga18fx.com': {'own': (), 'shared': ('search', 'chapters', 'pages')},
     'mangaball.net': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'mangabolt.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
