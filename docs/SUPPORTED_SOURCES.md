@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 310 domains across 245 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 311 domains across 246 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -249,6 +249,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | webtoons.com | — | http | — | No | Included in search | Official WEBTOON Originals in English, Spanish, French and German | — | Search, chapters, pages |
 | witch-hat-atelier.online | — | http | — | No | Not searched (template) | Witch Hat Atelier (Tongari Boushi no Atelier) | — | Shared parser: chapters, pages |
 | witch-watch.com | — | http | — | No | Not searched (template) | Witch Watch | — | Shared parser: chapters, pages |
+| writerscans.com | — | http | en | No | Included in search | Unofficial English manhwa, manhua and manga translations; small catalogue | — | Search, chapters, pages |
 | wurmz.net | — | http | id | No | Included in search | Indonesian manga/manhwa/manhua reader | Search, chapters, pages, image | Search, chapters, pages |
 | yakshascans.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | yuri-online.com | — | http | es | Yes | Included in search | Spanish yuri manga scans; adult titles refused | — | Search, chapters, pages |

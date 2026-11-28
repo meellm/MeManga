@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 245 |
-| Domains, with other domains of the same source | 310 |
-| Included in search | 148 |
+| Sources (one scraper each) | 246 |
+| Domains, with other domains of the same source | 311 |
+| Included in search | 149 |
 | In the default selection | 5 |
 | Adult content | 26 |
-| With parser tests of their own | 94 |
+| With parser tests of their own | 95 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-148 sources that a search can ask, in search order.
+149 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -199,6 +199,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | uzaymanga.com | — | api | tr | — | Included in search | Search, chapters, pages | — | Turkish manga/manhwa/manhua reader |
 | vagabondmanga.org | — | http | — | — | Included in search | Chapters | — | Vagabond |
 | webtoons.com | — | http | — | — | Included in search | Search, chapters, pages | — | Official WEBTOON Originals in English, Spanish, French and German |
+| writerscans.com | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manhwa, manhua and manga translations; small catalogue |
 | wurmz.net | — | http | id | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Indonesian manga/manhwa/manhua reader |
 | yuri-online.com | — | http | es | Yes | Included in search | Search, chapters, pages | — | Spanish yuri manga scans; adult titles refused |
 | zazamanga.com | deathnotemanga.com, death-note-online.com, fairytail100yearsquest.com, gintama.site, initialdmanga.com, inuyasha.net, onepunchmanmanga.org, readhellsing.com, readoverlord.com | browser | — | — | Included in search | — | — | Also serves several redirected series sites |

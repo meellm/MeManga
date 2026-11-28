@@ -240,6 +240,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Nyanu Kafe - English manga translations
     "nyanukafe.com": "nyanukafe:NyanuKafeScraper",
 
+    # Writer Scans - English manhwa and manhua translations
+    "writerscans.com": "writerscans:WriterScansScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

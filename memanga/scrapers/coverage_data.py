@@ -188,6 +188,7 @@ PARSER_TESTS = {
     'weebcentral.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'witch-hat-atelier.online': {'own': (), 'shared': ('chapters', 'pages')},
     'witch-watch.com': {'own': (), 'shared': ('chapters', 'pages')},
+    'writerscans.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'wurmz.net': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'yakshascans.com': {'own': (), 'shared': ('search', 'chapters', 'pages')},
     'yuri-online.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
