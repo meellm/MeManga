@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 291 domains across 226 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 311 domains across 246 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -57,10 +57,12 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | bluelockmanga.net | — | http | — | No | Included in search | Blue Lock | — | Chapters |
 | bluelockread.com | ww2.bluelockread.com (Included in search) | http | — | No | Included in search | Blue Lock | — | — |
 | bluelockread.online | — | http | — | No | Included in search | Blue Lock | — | Pages; shared parser: chapters |
+| bluesolo.org | — | api | fr | Yes | Included in search | Unofficial French scanlations from several teams | — | — |
 | bocchitherockmanga.com | w5.bocchitherockmanga.com (Included in search) | http | — | No | Included in search | Bocchi the Rock! | — | Chapters; shared parser: pages |
 | bokugents.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | case-closed.online | — | http | — | No | Not searched (template) | Case Closed (Detective Conan) | — | Shared parser: chapters, pages |
 | chainsawdevil.com | — | http | — | No | Not searched (template) | Chainsaw Man | — | Shared parser: chapters, pages |
+| chaostrad.fr | — | http | fr | No | Included in search | French fan translation; only the Shadow the Hedgehog manga is read | — | Search, chapters, pages |
 | comic-walker.com | — | http | ja | No | Included in search | Official KADOKAWA Japanese manga; public page-listed active episodes | — | Search, chapters, pages |
 | d-grayman.online | — | http | — | No | Not searched (template) | D.Gray-man | — | Shared parser: chapters, pages |
 | dandadanmanga.net | ww2.dandadanmanga.net (Not searched (template)), w2.dandadanmanga.net (Not searched (template)) | http | — | No | Not searched (template) | Dandadan | — | Shared parser: search, chapters, pages |
@@ -80,8 +82,10 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | fairytailmangafree.com | — | http | — | No | Included in search | Fairy Tail: 100 Years Quest | — | Pages |
 | fireforcemanga.org | w1.fireforcemanga.org (Included in search) | http | — | No | Included in search | Fire Force | — | Pages |
 | flamecomics.xyz | — | browser | — | No | Not searched (needs-js) | Manhwa translations | — | — |
+| fmteam.fr | — | api | fr | No | Included in search | Unofficial French scanlation team | — | — |
 | frieren-manga.com | — | http | — | No | Not searched (template) | Frieren: Beyond Journey's End | — | Shared parser: chapters, pages |
 | full-metal-alchemist.online | w9.full-metal-alchemist.online (Not searched (template)) | http | — | No | Not searched (template) | Fullmetal Alchemist | — | Shared parser: chapters, pages |
+| furyosociety.com | — | http | fr | Yes | Included in search | Unofficial French scans of furyo and street manga | — | — |
 | gachiakutayo.com | — | http | — | No | Not searched (template) | Gachiakuta | — | Shared parser: chapters, pages |
 | gantzmangafree.com | — | http | — | No | Not searched (template) | Gantz | — | Shared parser: chapters, pages |
 | goblin-slayer-manga.online | — | http | — | No | Not searched (template) | Goblin Slayer | — | Shared parser: chapters, pages |
@@ -100,6 +104,8 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | hxhmanga.com | — | http | — | No | Not searched (template) | Hunter x Hunter | Chapters, pages, image | Shared parser: chapters, pages |
 | hyoukamanga.com | — | http | — | No | Not searched (template) | Hyouka | — | Shared parser: chapters, pages |
 | imhentai.xxx | — | http | — | Yes | Included in search | Doujinshi | — | — |
+| inmanga.com | — | http | es | Yes | Included in search | Spanish manga library; adult-flagged chapters refused | — | Search, chapters, pages |
+| inventariooculto.com | — | http | — | Yes | Included in search | Manga scans; adult titles refused | — | Search, chapters, pages |
 | jjkaisen.com | — | http | — | No | Not searched (template) | Jujutsu Kaisen | — | Shared parser: chapters, pages |
 | jojolandsmanga.com | w9.jojolandsmanga.com (Not searched (template)) | http | — | No | Not searched (template) | JoJo's Bizarre Adventure Part 9: The JOJOLands | — | Shared parser: chapters, pages |
 | jojolionmanga.com | — | http | — | No | Included in search | JoJo Part 8: JoJolion | — | — |
@@ -113,11 +119,16 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | kimetsu-yaiba.online | — | http | — | No | Not searched (template) | Demon Slayer: Kimetsu no Yaiba | — | Shared parser: chapters, pages |
 | kokounohito.com | — | http | — | No | Not searched (template) | The Climber (Kokou no Hito) | — | Chapters, pages |
 | kunmanga.com | — | browser | — | No | Not searched (needs-js) | — | — | — |
+| lagoonscans.com | — | http | en | No | Included in search | Unofficial English manhwa and manhua scans; only the chapters a series page lists | — | Search, chapters, pages |
+| lanortrad.com | — | http | fr | No | Included in search | Unofficial French manga translations; only series the site marks readable | — | Search, chapters, pages |
 | lector-mangas.lat | lectormangass.net (Not searched (alias)) | http | es | No | Included in search | Spanish manga/manhwa reader | Search, chapters, pages, image | Search, chapters, pages |
 | leercapitulo.co | — | http | es | No | Included in search | Spanish manga/manhwa/manhua reader | — | Search, chapters, pages |
+| legionscans.com | — | http | es | No | Included in search | Spanish manga, manhwa and manhua scans | — | — |
 | lelmanga.com | — | http | fr | No | Included in search | French manga and manhwa scans | — | Search, chapters, pages |
 | lelscanfr.com | — | http | fr | Yes | Included in search | Unofficial French manga scans; long chapter lists read from page 1 only | — | Search, chapters, pages |
 | madeabyss.com | — | http | — | No | Not searched (template) | Made in Abyss | — | Chapters, pages |
+| mahoushoujobu.com | — | api | en | Yes | Included in search | Unofficial English manga translations (Magical Translators); English series only | — | Search, chapters, pages |
+| manga-corporation.com | — | api | fr | No | Included in search | Unofficial French manga translations (Manga-Corporation); numbered chapters only | — | Search, chapters, pages |
 | manga18fx.com | — | http | — | Yes | Not searched (template) | Adult manga | — | Shared parser: search, chapters, pages |
 | mangaball.net | — | http | — | No | Included in search | Multi-language | — | Search, chapters, pages |
 | mangabolt.com | — | http | — | No | Not searched (needs-js) | — | — | Search, chapters, pages |
@@ -138,6 +149,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | mangarw.com | — | api | — | Yes | Included in search | Raw manga (One Piece verified Japanese) | — | Search, chapters, pages |
 | mangas-origines.fr | — | http | fr | No | Included in search | Unofficial French manga, manhwa and manhua scans | — | Search, chapters, pages |
 | mangatown.com | — | http | — | No | Not searched (unreliable) | — | — | — |
+| mangatrend.org | — | http | en | No | Included in search | Unofficial English manga reader; only the chapters a series page lists | — | Search, chapters, pages |
 | mangavault.lat | — | http | es | Yes | Included in search | Spanish manhwa, manga and manhua library | — | Search, chapters, pages |
 | mangavyvy.net | vymanga.net (Included in search), vyvymanga.net (Included in search) | http | — | No | Included in search | — | — | Search, chapters, pages |
 | mangawow.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
@@ -158,6 +170,8 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | mushoku-tensei-manga.online | — | http | — | No | Not searched (template) | Mushoku Tensei: Isekai Ittara Honki Dasu | — | Shared parser: chapters, pages |
 | nanamanga.online | w2.nanamanga.online (Not searched (template)) | http | — | No | Not searched (template) | Nana | — | Shared parser: chapters, pages |
 | nhentai.net | — | http | — | Yes | Included in search | Doujinshi | — | — |
+| noranofansub.com | — | http | es | Yes | Included in search | Spanish manga scans; adult titles refused | — | Search, chapters, pages |
+| nyanukafe.com | — | http | en | No | Included in search | Unofficial English manga translations; small catalogue | — | Search, chapters, pages |
 | olympusxyz.com | — | http | es | No | Included in search | Spanish manhwa scans (Olympus Scanlation) | Search, chapters, pages, image | Search, chapters, pages |
 | omegascans.org | — | browser | — | No | Included in search | Manhwa translations | — | — |
 | one-punch.online | read.one-punch.online (Included in search) | http | — | No | Included in search | One Punch Man | — | — |
@@ -170,7 +184,10 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | oshinokoyo.com | — | http | — | No | Not searched (template) | Oshi no Ko | — | Shared parser: chapters, pages |
 | overlord-manga.online | — | http | — | No | Not searched (template) | Overlord | Chapters, pages, image | Shared parser: chapters, pages |
 | patimanga.com | — | http | tr | No | Included in search | Turkish manhwa and webtoon library | — | Search, chapters, pages |
+| punkrecordz.com | — | api | — | Yes | Included in search | Unofficial manga scans; series language not labelled | — | — |
 | punpunmanga.com | — | http | — | No | Not searched (template) | Goodnight Punpun (Oyasumi Punpun) | — | Shared parser: chapters, pages |
+| ragnarokscanlation.org | — | http | — | No | Included in search | Manga scans | — | Search, chapters, pages |
+| rakuentranslations.com | — | http | es | Yes | Included in search | Spanish manga scans; adult titles refused | — | Search, chapters, pages |
 | raw.senmanga.com | — | api | — | Yes | Not searched (unreliable) | Raw manga by direct series URL; not searched (One Piece verified Japanese) | — | Chapters, pages |
 | rawjx.net | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | rawkuma.net | — | http | — | Yes | Included in search | Raw manga (One Piece verified Japanese) | — | Search, chapters, pages |
@@ -222,6 +239,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | toonily.me | — | browser | — | No | Included in search | Manhwa focused | — | — |
 | tortugaceviri.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | trigunmanga.com | — | http | — | No | Not searched (template) | Trigun | — | Shared parser: chapters, pages |
+| tritinia.org | — | http | en | No | Included in search | Unofficial English manga scans; only the chapters a series page lists | — | Search, chapters, pages |
 | truemanga.com | mangamonk.com (Not searched (needs-js)) | http | — | No | Not searched (needs-js) | — | — | — |
 | uchuujinmangas.com | — | http | es | No | Included in search | Spanish manga and manhwa reader | — | Search, chapters, pages |
 | unopiece.com | — | http | — | No | Not searched (template) | One Piece | — | Shared parser: chapters, pages |
@@ -231,7 +249,9 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | webtoons.com | — | http | — | No | Included in search | Official WEBTOON Originals in English, Spanish, French and German | — | Search, chapters, pages |
 | witch-hat-atelier.online | — | http | — | No | Not searched (template) | Witch Hat Atelier (Tongari Boushi no Atelier) | — | Shared parser: chapters, pages |
 | witch-watch.com | — | http | — | No | Not searched (template) | Witch Watch | — | Shared parser: chapters, pages |
+| writerscans.com | — | http | en | No | Included in search | Unofficial English manhwa, manhua and manga translations; small catalogue | — | Search, chapters, pages |
 | wurmz.net | — | http | id | No | Included in search | Indonesian manga/manhwa/manhua reader | Search, chapters, pages, image | Search, chapters, pages |
 | yakshascans.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
+| yuri-online.com | — | http | es | Yes | Included in search | Spanish yuri manga scans; adult titles refused | — | Search, chapters, pages |
 | zazamanga.com | deathnotemanga.com (Included in search), death-note-online.com (Included in search), fairytail100yearsquest.com (Included in search), gintama.site (Included in search), initialdmanga.com (Included in search), inuyasha.net (Included in search), onepunchmanmanga.org (Included in search), readhellsing.com (Included in search), readoverlord.com (Included in search) | browser | — | No | Included in search | Also serves several redirected series sites | — | — |
 | zonatmo.org | — | browser | es | No | Included in search | Spanish manga/manhwa library | Search, chapters, pages, image | Search, chapters, pages |

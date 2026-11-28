@@ -153,6 +153,27 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Uchuujin - Spanish manga and manhwa reader (MangaThemesia)
     "uchuujinmangas.com": "uchuujin:UchuujinScraper",
 
+    # Legion Scans - Spanish manga, manhwa and manhua scans (MangaThemesia under /wp)
+    "legionscans.com": "legionscans:LegionScansScraper",
+
+    # Ragnarok Scanlation - manga scans (Madara)
+    "ragnarokscanlation.org": "ragnarokscanlation:RagnarokScanlationScraper",
+
+    # Inventario Oculto - manga scans (Madara); adult titles refused
+    "inventariooculto.com": "inventariooculto:InventarioOcultoScraper",
+
+    # Rakuen Translations - Spanish manga scans (MangaThemesia); adult titles refused
+    "rakuentranslations.com": "rakuentranslations:RakuenTranslationsScraper",
+
+    # Nora no Fansub - Spanish manga scans (FoOlSlide reader under /lector); adult titles refused
+    "noranofansub.com": "noranofansub:NoraNoFansubScraper",
+
+    # Yuri-Online - Spanish yuri manga scans (Madara); adult titles refused
+    "yuri-online.com": "yurionline:YuriOnlineScraper",
+
+    # InManga - Spanish manga library (JSON chapter list); adult-flagged chapters refused
+    "inmanga.com": "inmanga:InMangaScraper",
+
     # OnePiece-Tube - German One Piece main chapter list
     "onepiece.tube": "onepiecetube:OnePieceTubeScraper",
 
@@ -182,6 +203,45 @@ _SCRAPER_PATHS: Dict[str, str] = {
 
     # Lelscan VF - French manga scans (first chapter-list page only)
     "lelscanfr.com": "lelscanvf:LelscanVFScraper",
+
+    # FMTEAM - French scanlation team (public JSON)
+    "fmteam.fr": "fmteam:FMTeamScraper",
+
+    # Blue Solo - French scanlations from several teams (public JSON)
+    "bluesolo.org": "bluesolo:BlueSoloScraper",
+
+    # Punk Records - manga scans in several languages (public JSON)
+    "punkrecordz.com": "punkrecords:PunkRecordsScraper",
+
+    # Furyo Society - French furyo and street manga scans (HTML)
+    "furyosociety.com": "furyosociety:FuryoSocietyScraper",
+
+    # ChaosTrad - French Sonic fan translations; only the Shadow the Hedgehog manga (HTML)
+    "chaostrad.fr": "chaostrad:ChaosTradScraper",
+
+    # LanorTrad - French manga translations; series marked readable only (data files)
+    "lanortrad.com": "lanortrad:LanorTradScraper",
+
+    # Magical Translators - English manga translations, guya API; adult label as a precaution
+    "mahoushoujobu.com": "magicaltranslators:MagicalTranslatorsScraper",
+
+    # Manga-Corporation - French manga translations (PizzaReader JSON API)
+    "manga-corporation.com": "mangacorporation:MangaCorporationScraper",
+
+    # Lagoon Scans - English manhwa and manhua scans (MangaThemesia)
+    "lagoonscans.com": "lagoonscans:LagoonScansScraper",
+
+    # Manga Trend - English manga reader (MangaThemesia, wp.com image hosts)
+    "mangatrend.org": "mangatrend:MangaTrendScraper",
+
+    # Tritinia Scans - English manga scans (Madara)
+    "tritinia.org": "tritinia:TritiniaScraper",
+
+    # Nyanu Kafe - English manga translations
+    "nyanukafe.com": "nyanukafe:NyanuKafeScraper",
+
+    # Writer Scans - English manhwa and manhua translations
+    "writerscans.com": "writerscans:WriterScansScraper",
 
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",

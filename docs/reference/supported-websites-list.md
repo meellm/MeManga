@@ -81,9 +81,15 @@
 | `omegascans.org` | — | — | In search |
 | `en-thunderscans.com` | — | English | In search |
 | `demonicscans.org` | — | English | In search |
+| `ragnarokscanlation.org` | — | — | In search |
 | `hivetoons.org` | `hivetoon.com` | — | Left out of search |
 | `yakshascans.com` | — | — | Added series only |
 | `bokugents.com` | — | — | Added series only |
+| `lagoonscans.com` | — | English | In search |
+| `mangatrend.org` | — | English | In search |
+| `tritinia.org` | — | English | In search |
+| `nyanukafe.com` | — | English | In search |
+| `writerscans.com` | — | English | In search |
 
 ## Single-series sites
 
@@ -222,6 +228,7 @@
 | `leercapitulo.co` | — | Spanish | In search |
 | `heavenmanga.com` | — | Spanish | In search |
 | `uchuujinmangas.com` | — | Spanish | In search |
+| `legionscans.com` | — | Spanish | In search |
 | `dragontranslation.org` | — | — | Added series only |
 | `apollcomics.es` | — | — | Added series only |
 | `vermanhwa.com` | — | — | Added series only |
@@ -234,6 +241,10 @@
 | `sushiscan.net` | — | French | In search |
 | `mangas-origines.fr` | — | French | In search |
 | `lelmanga.com` | — | French | In search |
+| `fmteam.fr` | — | French | In search |
+| `chaostrad.fr` | — | French | In search |
+| `lanortrad.com` | — | French | In search |
+| `manga-corporation.com` | — | French | In search |
 
 ### Turkish
 
@@ -281,10 +292,10 @@
 ## Adult sources
 
 ::: warning Adult content
-17 sources serve adult content. They are all in this section. MeManga does not hide or filter them.
+26 sources serve adult content. They are all in this section. MeManga does not hide or filter them.
 
 - **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.
-- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `dynasty-scans.com`, `e-hentai.org`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
+- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `bluesolo.org`, `dynasty-scans.com`, `e-hentai.org`, `furyosociety.com`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `inmanga.com`, `inventariooculto.com`, `lelscanfr.com`, `mahoushoujobu.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `noranofansub.com`, `punkrecordz.com`, `rakuentranslations.com`, `rawkuma.net`, `rawuwu.net`, `yuri-online.com`. Use `memanga search --source DOMAIN` to ask one source only.
 :::
 
 ### Hentai and doujinshi
@@ -318,3 +329,12 @@
 | `raw.senmanga.com` | — | — | Left out of search |
 | `lelscanfr.com` | — | French | In search |
 | `mangavault.lat` | — | Spanish | In search |
+| `bluesolo.org` | — | French | In search |
+| `inventariooculto.com` | — | — | In search |
+| `punkrecordz.com` | — | — | In search |
+| `rakuentranslations.com` | — | Spanish | In search |
+| `noranofansub.com` | — | Spanish | In search |
+| `furyosociety.com` | — | French | In search |
+| `yuri-online.com` | — | Spanish | In search |
+| `inmanga.com` | — | Spanish | In search |
+| `mahoushoujobu.com` | — | English | In search |

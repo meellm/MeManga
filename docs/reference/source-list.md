@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 226 |
-| Domains, with other domains of the same source | 291 |
-| Included in search | 129 |
+| Sources (one scraper each) | 246 |
+| Domains, with other domains of the same source | 311 |
+| Included in search | 149 |
 | In the default selection | 5 |
-| Adult content | 17 |
-| With parser tests of their own | 80 |
+| Adult content | 26 |
+| With parser tests of their own | 95 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -17,10 +17,10 @@
 ## Adult sources
 
 ::: warning Adult content
-17 sources serve adult content. They are marked **Yes** in the **Adult** column below. MeManga does not hide or filter them.
+26 sources serve adult content. They are marked **Yes** in the **Adult** column below. MeManga does not hide or filter them.
 
 - **Desktop app:** the default selection includes none of them. The **Sources** page does not mark adult sources, so check this list before you turn a source on.
-- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `dynasty-scans.com`, `e-hentai.org`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `lelscanfr.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `rawkuma.net`, `rawuwu.net`. Use `memanga search --source DOMAIN` to ask one source only.
+- **Command line:** while [`sources.disabled`](./config#sources-disabled) is missing, `memanga search` asks the default selection and the sources in your library. A saved list turns off only the sources on it, so an empty list asks every source that is included in search, and that includes `bluesolo.org`, `dynasty-scans.com`, `e-hentai.org`, `furyosociety.com`, `hentai20.io`, `hentaifox.com`, `hentairead.com`, `imhentai.xxx`, `inmanga.com`, `inventariooculto.com`, `lelscanfr.com`, `mahoushoujobu.com`, `mangahome.com`, `mangarw.com`, `mangavault.lat`, `manytoon.com`, `nhentai.net`, `noranofansub.com`, `punkrecordz.com`, `rakuentranslations.com`, `rawkuma.net`, `rawuwu.net`, `yuri-online.com`. Use `memanga search --source DOMAIN` to ask one source only.
 :::
 
 ## Default selection
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-129 sources that a search can ask, in search order.
+149 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -90,7 +90,9 @@ These 5 sources are the default search selection. The first time the desktop app
 | bluelockmanga.net | — | http | — | — | Included in search | Chapters | — | Blue Lock |
 | bluelockread.com | ww2.bluelockread.com | http | — | — | Included in search | — | — | Blue Lock |
 | bluelockread.online | — | http | — | — | Included in search | Pages; shared parser: chapters | — | Blue Lock |
+| bluesolo.org | — | api | fr | Yes | Included in search | — | — | Unofficial French scanlations from several teams |
 | bocchitherockmanga.com | w5.bocchitherockmanga.com | http | — | — | Included in search | Chapters; shared parser: pages | — | Bocchi the Rock! |
+| chaostrad.fr | — | http | fr | — | Included in search | Search, chapters, pages | — | French fan translation; only the Shadow the Hedgehog manga is read |
 | comic-walker.com | — | http | ja | — | Included in search | Search, chapters, pages | — | Official KADOKAWA Japanese manga; public page-listed active episodes |
 | death-note-manga.com | w13.death-note-manga.com | http | — | — | Included in search | Pages | — | Death Note |
 | demonicscans.org | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manga and manhwa scans |
@@ -101,6 +103,8 @@ These 5 sources are the default search selection. The first time the desktop app
 | en-thunderscans.com | — | http | en | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | English manhwa scans |
 | fairytailmangafree.com | — | http | — | — | Included in search | Pages | — | Fairy Tail: 100 Years Quest |
 | fireforcemanga.org | w1.fireforcemanga.org | http | — | — | Included in search | Pages | — | Fire Force |
+| fmteam.fr | — | api | fr | — | Included in search | — | — | Unofficial French scanlation team |
+| furyosociety.com | — | http | fr | Yes | Included in search | — | — | Unofficial French scans of furyo and street manga |
 | hajime-no-ippo-manga.online | — | http | — | — | Included in search | Shared parser: chapters, pages | — | Hajime no Ippo |
 | hajime-noippo.com | w22.hajime-noippo.com | http | — | — | Included in search | Shared parser: chapters, pages | — | Hajime no Ippo |
 | hajimnoippo.com | — | http | — | — | Included in search | Chapters, pages | — | Hajime no Ippo |
@@ -110,13 +114,20 @@ These 5 sources are the default search selection. The first time the desktop app
 | hentairead.com | — | browser | — | Yes | Included in search | — | — | Doujinshi |
 | homunculusmanga.com | — | http | — | — | Included in search | Chapters | — | Homunculus |
 | imhentai.xxx | — | http | — | Yes | Included in search | — | — | Doujinshi |
+| inmanga.com | — | http | es | Yes | Included in search | Search, chapters, pages | — | Spanish manga library; adult-flagged chapters refused |
+| inventariooculto.com | — | http | — | Yes | Included in search | Search, chapters, pages | — | Manga scans; adult titles refused |
 | jojolionmanga.com | — | http | — | — | Included in search | — | — | JoJo Part 8: JoJolion |
 | kaijuno8-manga.com | — | http | — | — | Included in search | Pages | — | Kaiju No. 8 |
 | kenganashura.com | — | http | — | — | Included in search | — | — | Kengan Ashura / Omega |
+| lagoonscans.com | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manhwa and manhua scans; only the chapters a series page lists |
+| lanortrad.com | — | http | fr | — | Included in search | Search, chapters, pages | — | Unofficial French manga translations; only series the site marks readable |
 | lector-mangas.lat | lectormangass.net (not searched: alias, [issue 186](https://github.com/meellm/MeManga/issues/186)) | http | es | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Spanish manga/manhwa reader |
 | leercapitulo.co | — | http | es | — | Included in search | Search, chapters, pages | — | Spanish manga/manhwa/manhua reader |
+| legionscans.com | — | http | es | — | Included in search | — | — | Spanish manga, manhwa and manhua scans |
 | lelmanga.com | — | http | fr | — | Included in search | Search, chapters, pages | — | French manga and manhwa scans |
 | lelscanfr.com | — | http | fr | Yes | Included in search | Search, chapters, pages | — | Unofficial French manga scans; long chapter lists read from page 1 only |
+| mahoushoujobu.com | — | api | en | Yes | Included in search | Search, chapters, pages | — | Unofficial English manga translations (Magical Translators); English series only |
+| manga-corporation.com | — | api | fr | — | Included in search | Search, chapters, pages | — | Unofficial French manga translations (Manga-Corporation); numbered chapters only |
 | mangaball.net | — | http | — | — | Included in search | Search, chapters, pages | — | Multi-language |
 | mangadenizi.net | — | http | tr | — | Included in search | Search, chapters, pages | — | Turkish manga/manhwa/webtoon reader |
 | mangadna.com | — | http | — | — | Included in search | — | — | — |
@@ -125,6 +136,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | mangaraw.ink | — | http | — | — | Included in search | Search, chapters, pages | — | Raw manga (One Piece verified Japanese) |
 | mangarw.com | — | api | — | Yes | Included in search | Search, chapters, pages | — | Raw manga (One Piece verified Japanese) |
 | mangas-origines.fr | — | http | fr | — | Included in search | Search, chapters, pages | — | Unofficial French manga, manhwa and manhua scans |
+| mangatrend.org | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manga reader; only the chapters a series page lists |
 | mangavault.lat | — | http | es | Yes | Included in search | Search, chapters, pages | — | Spanish manhwa, manga and manhua library |
 | mangavyvy.net | vymanga.net, vyvymanga.net | http | — | — | Included in search | Search, chapters, pages | — | — |
 | mangoasis.com | — | http | — | — | Included in search | — | — | — |
@@ -136,6 +148,8 @@ These 5 sources are the default search selection. The first time the desktop app
 | monster-manga.online | — | http | — | — | Included in search | — | — | — |
 | monstermanga.org | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Monster |
 | nhentai.net | — | http | — | Yes | Included in search | — | — | Doujinshi |
+| noranofansub.com | — | http | es | Yes | Included in search | Search, chapters, pages | — | Spanish manga scans; adult titles refused |
+| nyanukafe.com | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manga translations; small catalogue |
 | olympusxyz.com | — | http | es | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Spanish manhwa scans (Olympus Scanlation) |
 | omegascans.org | — | browser | — | — | Included in search | — | — | Manhwa translations |
 | one-punch.online | read.one-punch.online | http | — | — | Included in search | — | — | One Punch Man |
@@ -144,6 +158,9 @@ These 5 sources are the default search selection. The first time the desktop app
 | onepunchmanmangaa.com | — | http | — | — | Included in search | — | — | One Punch Man |
 | onepunchmanread.com | — | http | — | — | Included in search | — | — | One Punch Man |
 | patimanga.com | — | http | tr | — | Included in search | Search, chapters, pages | — | Turkish manhwa and webtoon library |
+| punkrecordz.com | — | api | — | Yes | Included in search | — | — | Unofficial manga scans; series language not labelled |
+| ragnarokscanlation.org | — | http | — | — | Included in search | Search, chapters, pages | — | Manga scans |
+| rakuentranslations.com | — | http | es | Yes | Included in search | Search, chapters, pages | — | Spanish manga scans; adult titles refused |
 | rawkuma.net | — | http | — | Yes | Included in search | Search, chapters, pages | — | Raw manga (One Piece verified Japanese) |
 | rawuwu.net | — | api | — | Yes | Included in search | Search, chapters, pages | — | Raw manga (One Piece verified Japanese) |
 | read-berserk-manga.com | — | http | — | — | Included in search | — | — | Berserk |
@@ -177,11 +194,14 @@ These 5 sources are the default search selection. The first time the desktop app
 | thedragonballsuper.online | — | http | — | — | Included in search | Chapters | — | Dragon Ball Super |
 | tokyoghoul.club | — | http | — | — | Included in search | — | — | Tokyo Ghoul |
 | toonily.me | — | browser | — | — | Included in search | — | — | Manhwa focused |
+| tritinia.org | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manga scans; only the chapters a series page lists |
 | uchuujinmangas.com | — | http | es | — | Included in search | Search, chapters, pages | — | Spanish manga and manhwa reader |
 | uzaymanga.com | — | api | tr | — | Included in search | Search, chapters, pages | — | Turkish manga/manhwa/manhua reader |
 | vagabondmanga.org | — | http | — | — | Included in search | Chapters | — | Vagabond |
 | webtoons.com | — | http | — | — | Included in search | Search, chapters, pages | — | Official WEBTOON Originals in English, Spanish, French and German |
+| writerscans.com | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manhwa, manhua and manga translations; small catalogue |
 | wurmz.net | — | http | id | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Indonesian manga/manhwa/manhua reader |
+| yuri-online.com | — | http | es | Yes | Included in search | Search, chapters, pages | — | Spanish yuri manga scans; adult titles refused |
 | zazamanga.com | deathnotemanga.com, death-note-online.com, fairytail100yearsquest.com, gintama.site, initialdmanga.com, inuyasha.net, onepunchmanmanga.org, readhellsing.com, readoverlord.com | browser | — | — | Included in search | — | — | Also serves several redirected series sites |
 | zonatmo.org | — | browser | es | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Spanish manga/manhwa library |
 

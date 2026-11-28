@@ -28,11 +28,13 @@
 
 MeManga keeps a library of the series you follow and checks their sources
 for new chapters. It knows
-<!-- source-count:start -->226 scrapers / 291 domains<!-- source-count:end -->.
+<!-- source-count:start -->246 scrapers / 311 domains<!-- source-count:end -->.
 
 - **Search across sources.** Find a series on many sites at once, and give
   it backup sources for when its main source falls behind or a download
   from it fails.
+- **Manga beyond English.** Sources include sites that publish in Spanish,
+  French, Turkish, Japanese, Indonesian and German.
 - **Download your way.** Save chapters as PDF, EPUB, CBZ, ZIP or image
   folders.
 - **Read in the app.** The desktop app has its own reader.
