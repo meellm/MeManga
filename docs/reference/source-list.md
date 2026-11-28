@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 243 |
-| Domains, with other domains of the same source | 308 |
-| Included in search | 146 |
+| Sources (one scraper each) | 244 |
+| Domains, with other domains of the same source | 309 |
+| Included in search | 147 |
 | In the default selection | 5 |
 | Adult content | 26 |
-| With parser tests of their own | 92 |
+| With parser tests of their own | 93 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-146 sources that a search can ask, in search order.
+147 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -193,6 +193,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | thedragonballsuper.online | — | http | — | — | Included in search | Chapters | — | Dragon Ball Super |
 | tokyoghoul.club | — | http | — | — | Included in search | — | — | Tokyo Ghoul |
 | toonily.me | — | browser | — | — | Included in search | — | — | Manhwa focused |
+| tritinia.org | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manga scans; only the chapters a series page lists |
 | uchuujinmangas.com | — | http | es | — | Included in search | Search, chapters, pages | — | Spanish manga and manhwa reader |
 | uzaymanga.com | — | api | tr | — | Included in search | Search, chapters, pages | — | Turkish manga/manhwa/manhua reader |
 | vagabondmanga.org | — | http | — | — | Included in search | Chapters | — | Vagabond |

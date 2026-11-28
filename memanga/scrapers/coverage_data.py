@@ -177,6 +177,7 @@ PARSER_TESTS = {
     'tomie-manga.com': {'own': (), 'shared': ('chapters', 'pages')},
     'tortugaceviri.com': {'own': (), 'shared': ('search', 'chapters', 'pages')},
     'trigunmanga.com': {'own': (), 'shared': ('chapters', 'pages')},
+    'tritinia.org': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'uchuujinmangas.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'unopiece.com': {'own': (), 'shared': ('chapters', 'pages')},
     'uzaymanga.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},

@@ -87,6 +87,7 @@
 | `bokugents.com` | — | — | Added series only |
 | `lagoonscans.com` | — | English | In search |
 | `mangatrend.org` | — | English | In search |
+| `tritinia.org` | — | English | In search |
 
 ## Single-series sites
 

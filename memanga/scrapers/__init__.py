@@ -234,6 +234,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Manga Trend - English manga reader (MangaThemesia, wp.com image hosts)
     "mangatrend.org": "mangatrend:MangaTrendScraper",
 
+    # Tritinia Scans - English manga scans (Madara)
+    "tritinia.org": "tritinia:TritiniaScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

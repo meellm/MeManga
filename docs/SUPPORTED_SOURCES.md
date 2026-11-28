@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 308 domains across 243 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 309 domains across 244 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -238,6 +238,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | toonily.me | — | browser | — | No | Included in search | Manhwa focused | — | — |
 | tortugaceviri.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |
 | trigunmanga.com | — | http | — | No | Not searched (template) | Trigun | — | Shared parser: chapters, pages |
+| tritinia.org | — | http | en | No | Included in search | Unofficial English manga scans; only the chapters a series page lists | — | Search, chapters, pages |
 | truemanga.com | mangamonk.com (Not searched (needs-js)) | http | — | No | Not searched (needs-js) | — | — | — |
 | uchuujinmangas.com | — | http | es | No | Included in search | Spanish manga and manhwa reader | — | Search, chapters, pages |
 | unopiece.com | — | http | — | No | Not searched (template) | One Piece | — | Shared parser: chapters, pages |
