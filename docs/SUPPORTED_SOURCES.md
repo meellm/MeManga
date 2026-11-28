@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 307 domains across 242 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 308 domains across 243 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -149,6 +149,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | mangarw.com | — | api | — | Yes | Included in search | Raw manga (One Piece verified Japanese) | — | Search, chapters, pages |
 | mangas-origines.fr | — | http | fr | No | Included in search | Unofficial French manga, manhwa and manhua scans | — | Search, chapters, pages |
 | mangatown.com | — | http | — | No | Not searched (unreliable) | — | — | — |
+| mangatrend.org | — | http | en | No | Included in search | Unofficial English manga reader; only the chapters a series page lists | — | Search, chapters, pages |
 | mangavault.lat | — | http | es | Yes | Included in search | Spanish manhwa, manga and manhua library | — | Search, chapters, pages |
 | mangavyvy.net | vymanga.net (Included in search), vyvymanga.net (Included in search) | http | — | No | Included in search | — | — | Search, chapters, pages |
 | mangawow.com | — | http | — | No | Not searched (template) | — | — | Shared parser: search, chapters, pages |

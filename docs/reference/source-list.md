@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 242 |
-| Domains, with other domains of the same source | 307 |
-| Included in search | 145 |
+| Sources (one scraper each) | 243 |
+| Domains, with other domains of the same source | 308 |
+| Included in search | 146 |
 | In the default selection | 5 |
 | Adult content | 26 |
-| With parser tests of their own | 91 |
+| With parser tests of their own | 92 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-145 sources that a search can ask, in search order.
+146 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -136,6 +136,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | mangaraw.ink | — | http | — | — | Included in search | Search, chapters, pages | — | Raw manga (One Piece verified Japanese) |
 | mangarw.com | — | api | — | Yes | Included in search | Search, chapters, pages | — | Raw manga (One Piece verified Japanese) |
 | mangas-origines.fr | — | http | fr | — | Included in search | Search, chapters, pages | — | Unofficial French manga, manhwa and manhua scans |
+| mangatrend.org | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manga reader; only the chapters a series page lists |
 | mangavault.lat | — | http | es | Yes | Included in search | Search, chapters, pages | — | Spanish manhwa, manga and manhua library |
 | mangavyvy.net | vymanga.net, vyvymanga.net | http | — | — | Included in search | Search, chapters, pages | — | — |
 | mangoasis.com | — | http | — | — | Included in search | — | — | — |

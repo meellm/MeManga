@@ -231,6 +231,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Lagoon Scans - English manhwa and manhua scans (MangaThemesia)
     "lagoonscans.com": "lagoonscans:LagoonScansScraper",
 
+    # Manga Trend - English manga reader (MangaThemesia, wp.com image hosts)
+    "mangatrend.org": "mangatrend:MangaTrendScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

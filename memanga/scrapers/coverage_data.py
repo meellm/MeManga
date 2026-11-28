@@ -113,6 +113,7 @@ PARSER_TESTS = {
     'mangarw.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'mangas-origines.fr': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'mangataro.org': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
+    'mangatrend.org': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'mangavault.lat': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'mangavyvy.net': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'mangawow.com': {'own': (), 'shared': ('search', 'chapters', 'pages')},

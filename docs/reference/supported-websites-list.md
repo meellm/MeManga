@@ -86,6 +86,7 @@
 | `yakshascans.com` | — | — | Added series only |
 | `bokugents.com` | — | — | Added series only |
 | `lagoonscans.com` | — | English | In search |
+| `mangatrend.org` | — | English | In search |
 
 ## Single-series sites
 
