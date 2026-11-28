@@ -47,7 +47,7 @@ rights of the people who make the manga.
 | Source | The main domain. Use it with `memanga search --source DOMAIN`. |
 | Other domains | Further domains of the same source. A domain that search treats differently from the main one says so. |
 | Engine | How MeManga talks to the site: `http` reads its pages, `api` uses its data interface, and `browser` drives a headless browser, which needs the [browser components](../guide/install#first-start-browser-components). |
-| Language | The language of the translations, when the source has only one. |
+| Language | The language of the translations, when the source has only one. A dash means the source has several, or none is recorded. |
 | Adult | **Yes** when the source serves adult content. |
 | Search | Whether a search across sources can ask this one; see [why a source is not searched](#why-a-source-is-not-searched). Your selection decides which of these it asks; see the [default selection](#default-selection). A series from any listed source can be added with the address of its page. |
 | Parser tests | The parts of this source's scraper that offline tests run on saved or made-up copies of the site's pages or API replies: `search`, `chapters` (reading the chapter list) and `pages` (reading a chapter's page list). **Shared parser** means the tests ran code this source shares with other sites, a site template or a common base, on another site's pages; the source uses that code with its own settings. A source that replaces any of that code with its own is not credited with it. A dash means no such tests. |

@@ -195,7 +195,7 @@ to it.
 | Attribute | Values |
 |---|---|
 | `engine` | `"http"` (the default), `"api"` or `"browser"`. `PlaywrightScraper` sets `"browser"`. |
-| `content_language` | The language of every title, as a BCP 47 tag such as `"en"`, or `None` when it varies |
+| `content_language` | The language of every title, as a BCP 47 tag such as `"en"`, or `None` when it varies or the site does not state it |
 | `reading_direction` | `"rtl"` when every title reads right to left, else `None` |
 | `nsfw` | `True` when the source serves adult content |
 

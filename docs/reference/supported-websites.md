@@ -11,14 +11,15 @@ judgement, not a traffic measurement.
 :::
 
 The [technical source catalog](./sources) has the engine, tests and live
-checks of every source.
+checks of every source. The **Language** column shows a source's language
+when it has only one; a dash means it has several, or none is recorded.
 
 ## What the Search column means
 
 | Search | What it means |
 |---|---|
 | In search, on by default | In the [default selection](./sources#default-selection): search asks this site unless you turn it off. |
-| In search | Search can ask this site, but it is not in the default selection. Turn it on under **Sources**. With no saved [`sources.disabled`](./config#sources-disabled), the command line asks it only if you follow a series from it. |
+| In search | Search can ask this site, but it is not in the default selection. Turn it on under **Sources**. A saved [`sources.disabled`](./config#sources-disabled) turns off only the sites on it, so a site added in a later version is on there until you turn it off. With no saved selection, the command line asks it only if you follow a series from it. |
 | Added series only | Search asks this site only when you follow a series from it. Most of these sites carry one series. |
 | Left out of search | Search does not ask this site. The catalog gives [the reason](./sources#why-a-source-is-not-searched). |
 

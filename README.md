@@ -33,6 +33,8 @@ for new chapters. It knows
 - **Search across sources.** Find a series on many sites at once, and give
   it backup sources for when its main source falls behind or a download
   from it fails.
+- **Manga beyond English.** Sources include sites that publish in Spanish,
+  French, Turkish, Japanese, Indonesian and German.
 - **Download your way.** Save chapters as PDF, EPUB, CBZ, ZIP or image
   folders.
 - **Read in the app.** The desktop app has its own reader.
