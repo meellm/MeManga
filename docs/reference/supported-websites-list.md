@@ -238,6 +238,7 @@
 | `lelmanga.com` | — | French | In search |
 | `fmteam.fr` | — | French | In search |
 | `chaostrad.fr` | — | French | In search |
+| `lanortrad.com` | — | French | In search |
 
 ### Turkish
 

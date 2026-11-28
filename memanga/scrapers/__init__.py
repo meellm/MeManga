@@ -219,6 +219,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # ChaosTrad - French Sonic fan translations; only the Shadow the Hedgehog manga (HTML)
     "chaostrad.fr": "chaostrad:ChaosTradScraper",
 
+    # LanorTrad - French manga translations; series marked readable only (data files)
+    "lanortrad.com": "lanortrad:LanorTradScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

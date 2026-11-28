@@ -1,6 +1,6 @@
 # Supported Sources
 
-MeManga registers 303 domains across 238 scrapers. Registration does not mean a site is currently reachable.
+MeManga registers 304 domains across 239 scrapers. Registration does not mean a site is currently reachable.
 Search status says whether a search can ask a source, not whether it is in the default selection; direct URLs remain available for registered sources.
 Use `memanga sources --json` for per-domain skip reasons and issue numbers; open those numbers in the repository issue tracker.
 Live probe: the steps the weekly [scraper health check](https://github.com/meellm/MeManga/actions/workflows/scraper-health.yml) runs against this source after opening its home page, out of search, chapters (the chapter list), pages (the page list of one chapter) and image (downloading one page). Being in the probe does not mean the last run passed.
@@ -119,6 +119,7 @@ The [documentation site](https://meellm.github.io/MeManga/reference/sources) exp
 | kimetsu-yaiba.online | — | http | — | No | Not searched (template) | Demon Slayer: Kimetsu no Yaiba | — | Shared parser: chapters, pages |
 | kokounohito.com | — | http | — | No | Not searched (template) | The Climber (Kokou no Hito) | — | Chapters, pages |
 | kunmanga.com | — | browser | — | No | Not searched (needs-js) | — | — | — |
+| lanortrad.com | — | http | fr | No | Included in search | Unofficial French manga translations; only series the site marks readable | — | Search, chapters, pages |
 | lector-mangas.lat | lectormangass.net (Not searched (alias)) | http | es | No | Included in search | Spanish manga/manhwa reader | Search, chapters, pages, image | Search, chapters, pages |
 | leercapitulo.co | — | http | es | No | Included in search | Spanish manga/manhwa/manhua reader | — | Search, chapters, pages |
 | legionscans.com | — | http | es | No | Included in search | Spanish manga, manhwa and manhua scans | — | — |
