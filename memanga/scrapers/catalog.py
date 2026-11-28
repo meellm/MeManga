@@ -274,6 +274,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "lanortrad.com": "Unofficial French manga translations; only series the site marks readable",
     "mahoushoujobu.com": "Unofficial English manga translations (Magical Translators); English series only",
     "manga-corporation.com": "Unofficial French manga translations (Manga-Corporation); numbered chapters only",
+    "lagoonscans.com": "Unofficial English manhwa and manhua scans; only the chapters a series page lists",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",

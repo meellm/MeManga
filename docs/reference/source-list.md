@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 241 |
-| Domains, with other domains of the same source | 306 |
-| Included in search | 144 |
+| Sources (one scraper each) | 242 |
+| Domains, with other domains of the same source | 307 |
+| Included in search | 145 |
 | In the default selection | 5 |
 | Adult content | 26 |
-| With parser tests of their own | 90 |
+| With parser tests of their own | 91 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-144 sources that a search can ask, in search order.
+145 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -119,6 +119,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | jojolionmanga.com | — | http | — | — | Included in search | — | — | JoJo Part 8: JoJolion |
 | kaijuno8-manga.com | — | http | — | — | Included in search | Pages | — | Kaiju No. 8 |
 | kenganashura.com | — | http | — | — | Included in search | — | — | Kengan Ashura / Omega |
+| lagoonscans.com | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manhwa and manhua scans; only the chapters a series page lists |
 | lanortrad.com | — | http | fr | — | Included in search | Search, chapters, pages | — | Unofficial French manga translations; only series the site marks readable |
 | lector-mangas.lat | lectormangass.net (not searched: alias, [issue 186](https://github.com/meellm/MeManga/issues/186)) | http | es | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Spanish manga/manhwa reader |
 | leercapitulo.co | — | http | es | — | Included in search | Search, chapters, pages | — | Spanish manga/manhwa/manhua reader |

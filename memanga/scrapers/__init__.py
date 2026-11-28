@@ -228,6 +228,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Manga-Corporation - French manga translations (PizzaReader JSON API)
     "manga-corporation.com": "mangacorporation:MangaCorporationScraper",
 
+    # Lagoon Scans - English manhwa and manhua scans (MangaThemesia)
+    "lagoonscans.com": "lagoonscans:LagoonScansScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

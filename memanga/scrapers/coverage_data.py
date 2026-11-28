@@ -79,6 +79,7 @@ PARSER_TESTS = {
     'kaijuno8-manga.com': {'own': ('pages',), 'shared': ()},
     'kimetsu-yaiba.online': {'own': (), 'shared': ('chapters', 'pages')},
     'kokounohito.com': {'own': ('chapters', 'pages'), 'shared': ()},
+    'lagoonscans.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'lanortrad.com': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'lector-mangas.lat': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
     'leercapitulo.co': {'own': ('search', 'chapters', 'pages'), 'shared': ()},
