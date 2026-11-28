@@ -277,6 +277,7 @@ SOURCE_NOTES: Dict[str, str] = {
     "lagoonscans.com": "Unofficial English manhwa and manhua scans; only the chapters a series page lists",
     "mangatrend.org": "Unofficial English manga reader; only the chapters a series page lists",
     "tritinia.org": "Unofficial English manga scans; only the chapters a series page lists",
+    "nyanukafe.com": "Unofficial English manga translations; small catalogue",
     # Focus
     "manytoon.com": "Adult manhwa",
     "toonily.me": "Manhwa focused",

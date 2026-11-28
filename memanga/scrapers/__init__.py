@@ -237,6 +237,9 @@ _SCRAPER_PATHS: Dict[str, str] = {
     # Tritinia Scans - English manga scans (Madara)
     "tritinia.org": "tritinia:TritiniaScraper",
 
+    # Nyanu Kafe - English manga translations
+    "nyanukafe.com": "nyanukafe:NyanuKafeScraper",
+
     # FlameComics
     "flamecomics.xyz": "flamecomics:FlameComicsScraper",
 

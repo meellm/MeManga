@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Sources (one scraper each) | 244 |
-| Domains, with other domains of the same source | 309 |
-| Included in search | 147 |
+| Sources (one scraper each) | 245 |
+| Domains, with other domains of the same source | 310 |
+| Included in search | 148 |
 | In the default selection | 5 |
 | Adult content | 26 |
-| With parser tests of their own | 93 |
+| With parser tests of their own | 94 |
 | With tests of a shared parser only | 90 |
 | In the weekly live probe | 26 |
 | Live probe through to an image download | 24 |
@@ -51,7 +51,7 @@ These 5 sources are the default search selection. The first time the desktop app
 
 ## Sources included in search
 
-147 sources that a search can ask, in search order.
+148 sources that a search can ask, in search order.
 
 | Source | Other domains | Engine | Language | Adult | Search | Parser tests | Live probe | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -149,6 +149,7 @@ These 5 sources are the default search selection. The first time the desktop app
 | monstermanga.org | — | http | — | — | Included in search | Chapters; shared parser: pages | — | Monster |
 | nhentai.net | — | http | — | Yes | Included in search | — | — | Doujinshi |
 | noranofansub.com | — | http | es | Yes | Included in search | Search, chapters, pages | — | Spanish manga scans; adult titles refused |
+| nyanukafe.com | — | http | en | — | Included in search | Search, chapters, pages | — | Unofficial English manga translations; small catalogue |
 | olympusxyz.com | — | http | es | — | Included in search | Search, chapters, pages | Search, chapters, pages, image | Spanish manhwa scans (Olympus Scanlation) |
 | omegascans.org | — | browser | — | — | Included in search | — | — | Manhwa translations |
 | one-punch.online | read.one-punch.online | http | — | — | Included in search | — | — | One Punch Man |

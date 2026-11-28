@@ -88,6 +88,7 @@
 | `lagoonscans.com` | — | English | In search |
 | `mangatrend.org` | — | English | In search |
 | `tritinia.org` | — | English | In search |
+| `nyanukafe.com` | — | English | In search |
 
 ## Single-series sites
 
